@@ -23,10 +23,13 @@ class WenxiangApi {
     return Uri.parse('$root$path').replace(queryParameters: query);
   }
 
-  Map<String, String> get _headers => {
+  Map<String, String> get headers => {
         'Content-Type': 'application/json',
         'X-Wenxiang-Key': apiKey,
+        'ngrok-skip-browser-warning': 'true',
       };
+
+  Map<String, String> get _headers => headers;
 
   Future<Map<String, dynamic>> _json(
     http.Response res, {
@@ -44,7 +47,7 @@ class WenxiangApi {
   }
 
   Future<void> ping() async {
-    final res = await http.get(_uri('/health')).timeout(const Duration(seconds: 8));
+    final res = await http.get(_uri('/health'), headers: _headers).timeout(const Duration(seconds: 8));
     if (res.statusCode != 200) {
       throw ApiException('无法连接问象服务（HTTP ${res.statusCode}）');
     }
