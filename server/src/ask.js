@@ -28,9 +28,9 @@ export function detectCursorEngine() {
   return null;
 }
 
-function runCommand(file, args, { timeoutMs = 120_000 } = {}) {
+function runCommand(file, args, { timeoutMs = 120_000, cwd } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(file, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(file, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     const timer = setTimeout(() => {
@@ -66,9 +66,10 @@ export function buildCursorPrompt({ question, history, context }) {
   return [
     "You are 问象, a local repo progress assistant running on the user's computer.",
     "Answer in Simplified Chinese unless the user writes in another language.",
-    "Use ONLY the GitHub facts below. If something is missing, say so. Do not invent commits, PRs, or dates.",
+    "Use ONLY the GitHub facts and local checkout facts below. If something is missing, say so.",
+    "Do not invent commits, PRs, files, or dates. Prefer the local checkout when it disagrees with stale memory.",
     "",
-    "=== GitHub context ===",
+    "=== GitHub + local checkout context ===",
     context,
     "",
     historyText ? `=== Recent chat ===\n${historyText}\n` : "",
@@ -78,7 +79,7 @@ export function buildCursorPrompt({ question, history, context }) {
     .join("\n");
 }
 
-export function synthesizeLocalAnswer({ question, progress, context }) {
+export function synthesizeLocalAnswer({ question, progress, context, local }) {
   const q = (question || "").toLowerCase();
   const wantPr = /pr|pull|合并|拉取/.test(q);
   const wantIssue = /issue|问题|缺陷|bug/.test(q);
@@ -122,33 +123,62 @@ export function synthesizeLocalAnswer({ question, progress, context }) {
     }
   }
 
-  if (!progress.commits.length && !progress.pulls.length && !progress.issues.length) {
+  if (local?.present) {
+    const wantCode = /readme|文件|代码|怎么|启动|目录|checkout|本地/.test(q);
+    sections.push(`本机检出：${local.path}（${local.branch || "?"} @ ${local.head || "?"}）`);
+    if (local.log && ((!wantPr && !wantIssue) || wantCode)) {
+      sections.push("本地 git log：");
+      sections.push(
+        local.log
+          .split("\n")
+          .slice(0, 8)
+          .map((line) => `· ${line}`)
+          .join("\n"),
+      );
+    }
+    if (wantCode && local.files?.length) {
+      sections.push("检出内文件（节选）：");
+      sections.push(local.files.slice(0, 16).map((f) => `· ${f}`).join("\n"));
+    }
+    if (wantCode && local.readme) {
+      sections.push("README 摘录：");
+      sections.push(local.readme.slice(0, 800));
+    }
+  }
+
+  if (!progress.commits.length && !progress.pulls.length && !progress.issues.length && !local?.present) {
     sections.push("GitHub 没有返回可见的提交、PR 或 Issue。请确认 token 对这个仓库有读权限。");
   }
 
-  sections.push("以上内容全部来自本机调用的 GitHub API，不是编造的演示数据。");
+  sections.push(
+    local?.present
+      ? "以上内容来自本机 GitHub API 与 ~/问象 检出，不是编造的演示数据。"
+      : "以上内容全部来自本机调用的 GitHub API，不是编造的演示数据。",
+  );
   return sections.join("\n\n");
 }
 
-export async function answerQuestion({ question, history, progress, context }) {
+export async function answerQuestion({ question, history, progress, context, local }) {
   const engine = detectCursorEngine();
   const prompt = buildCursorPrompt({ question, history, context });
   if (engine) {
     try {
-      const text = await runCommand(engine.path, engine.argsFor(prompt));
+      const text = await runCommand(engine.path, engine.argsFor(prompt), {
+        cwd: local?.present ? local.path : undefined,
+      });
       if (text) {
         return { engine: engine.id, answer: text };
       }
     } catch (err) {
-      const fallback = synthesizeLocalAnswer({ question, progress, context });
+      const fallback = synthesizeLocalAnswer({ question, progress, context, local });
       return {
         engine: "local-progress",
-        answer: `${fallback}\n\n（本机探测到 ${engine.id}，但调用失败：${err.message}。已回退到 GitHub 进度适配器。）`,
+        answer: `${fallback}\n\n（本机探测到 ${engine.id}，但调用失败：${err.message}。已回退到本地进度适配器。）`,
       };
     }
   }
   return {
     engine: "local-progress",
-    answer: synthesizeLocalAnswer({ question, progress, context }),
+    answer: synthesizeLocalAnswer({ question, progress, context, local }),
   };
 }

@@ -23,6 +23,7 @@ class _ReposPageState extends State<ReposPage> {
   final _query = TextEditingController();
   List<RepoItem> _repos = [];
   String _error = '';
+  String _progress = '';
   bool _busy = true;
 
   @override
@@ -43,6 +44,29 @@ class _ReposPageState extends State<ReposPage> {
       setState(() => _error = err.toString());
     } finally {
       if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _open(RepoItem repo) async {
+    setState(() {
+      _busy = true;
+      _error = '';
+      _progress = '正在把 ${repo.fullName} 克隆到本机问象目录…';
+    });
+    try {
+      final checkout = await widget.api.checkout(repo.owner, repo.name);
+      if (!mounted) return;
+      setState(() => _progress = '已检出 ${checkout.path}');
+      widget.onOpen(repo);
+    } catch (err) {
+      setState(() => _error = err.toString());
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _progress = '';
+        });
+      }
     }
   }
 
@@ -80,6 +104,11 @@ class _ReposPageState extends State<ReposPage> {
             ),
           ),
           if (_busy) const LinearProgressIndicator(minHeight: 2),
+          if (_progress.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: Text(_progress),
+            ),
           if (_error.isNotEmpty)
             Padding(
               padding: const EdgeInsets.all(16),
@@ -101,7 +130,7 @@ class _ReposPageState extends State<ReposPage> {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  onTap: () => widget.onOpen(repo),
+                  onTap: _busy ? null : () => _open(repo),
                 );
               },
             ),

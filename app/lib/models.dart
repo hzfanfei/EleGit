@@ -2,6 +2,8 @@ class ServerStatus {
   ServerStatus({
     required this.githubConnected,
     required this.githubLogin,
+    required this.oauthReady,
+    required this.callbackUrls,
     required this.deviceFlowReady,
     required this.cursorAvailable,
     required this.cursorEngine,
@@ -9,10 +11,13 @@ class ServerStatus {
     required this.tunnelRunning,
     required this.tunnelError,
     required this.lanUrls,
+    required this.workspaceRoot,
   });
 
   final bool githubConnected;
   final String githubLogin;
+  final bool oauthReady;
+  final List<String> callbackUrls;
   final bool deviceFlowReady;
   final bool cursorAvailable;
   final String cursorEngine;
@@ -20,15 +25,20 @@ class ServerStatus {
   final bool tunnelRunning;
   final String tunnelError;
   final List<String> lanUrls;
+  final String workspaceRoot;
 
   factory ServerStatus.fromJson(Map<String, dynamic> json) {
     final github = json['github'] as Map<String, dynamic>? ?? {};
     final user = github['user'] as Map<String, dynamic>?;
     final cursor = json['cursor'] as Map<String, dynamic>? ?? {};
     final tunnel = json['tunnel'] as Map<String, dynamic>? ?? {};
+    final workspace = json['workspace'] as Map<String, dynamic>? ?? {};
     return ServerStatus(
       githubConnected: github['connected'] == true,
       githubLogin: (user?['login'] ?? '').toString(),
+      oauthReady: github['oauthReady'] == true,
+      callbackUrls:
+          ((github['callbackUrls'] as List?) ?? []).map((e) => e.toString()).toList(),
       deviceFlowReady: github['deviceFlowReady'] == true,
       cursorAvailable: cursor['available'] == true,
       cursorEngine: (cursor['engine'] ?? cursor['fallback'] ?? 'local-progress')
@@ -37,6 +47,7 @@ class ServerStatus {
       tunnelRunning: tunnel['running'] == true,
       tunnelError: (tunnel['error'] ?? '').toString(),
       lanUrls: ((json['lanUrls'] as List?) ?? []).map((e) => e.toString()).toList(),
+      workspaceRoot: (workspace['root'] ?? '').toString(),
     );
   }
 }
@@ -93,4 +104,24 @@ class DeviceStart {
   final String userCode;
   final String verificationUri;
   final int interval;
+}
+
+class OAuthStart {
+  OAuthStart({
+    required this.state,
+    required this.authorizeUrl,
+    required this.redirectUri,
+  });
+
+  final String state;
+  final String authorizeUrl;
+  final String redirectUri;
+}
+
+class CheckoutResult {
+  CheckoutResult({required this.path, required this.branch, required this.head});
+
+  final String path;
+  final String branch;
+  final String head;
 }

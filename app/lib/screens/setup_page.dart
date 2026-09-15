@@ -187,7 +187,11 @@ class _StatusCard extends StatelessWidget {
           children: [
             Text(status.githubConnected
                 ? 'GitHub：已登录 ${status.githubLogin}'
-                : 'GitHub：未连接'),
+                : status.oauthReady
+                    ? 'GitHub：未连接（可用浏览器登录）'
+                    : 'GitHub：未连接（本机尚未配置 OAuth App）'),
+            if (status.workspaceRoot.isNotEmpty)
+              Text('工作区：${status.workspaceRoot}'),
             Text(
               status.cursorAvailable
                   ? '问答引擎：Cursor（${status.cursorEngine}）'

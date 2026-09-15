@@ -100,8 +100,8 @@ class _ChatPageState extends State<ChatPage> {
                     children: [
                       for (final q in const [
                         '这个仓库最近在做什么？',
+                        '本机检出里 README 怎么写的？',
                         '有哪些开放的 PR？',
-                        '现在进度卡在哪？',
                       ])
                         ActionChip(label: Text(q), onPressed: () => _send(q)),
                     ],

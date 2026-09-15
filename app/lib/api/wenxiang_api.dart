@@ -58,6 +58,46 @@ class WenxiangApi {
     return ServerStatus.fromJson(body);
   }
 
+  Future<OAuthStart> startOAuth() async {
+    final res = await http
+        .post(
+          _uri('/v1/github/oauth/start'),
+          headers: _headers,
+          body: jsonEncode({'publicBaseUrl': baseUrl}),
+        )
+        .timeout(const Duration(seconds: 20));
+    final body = await _json(res, fallback: '无法开始浏览器登录');
+    return OAuthStart(
+      state: (body['state'] ?? '').toString(),
+      authorizeUrl: (body['authorizeUrl'] ?? '').toString(),
+      redirectUri: (body['redirectUri'] ?? '').toString(),
+    );
+  }
+
+  Future<bool> pollOAuth(String state) async {
+    final res = await http
+        .get(_uri('/v1/github/oauth/status', {'state': state}), headers: _headers)
+        .timeout(const Duration(seconds: 15));
+    final body = await _json(res, fallback: '登录尚未完成');
+    if ((body['status'] ?? '') == 'error') {
+      throw ApiException((body['error'] ?? 'GitHub 登录失败').toString());
+    }
+    return body['connected'] == true;
+  }
+
+  Future<CheckoutResult> checkout(String owner, String repo) async {
+    final res = await http
+        .post(_uri('/v1/repos/$owner/$repo/checkout'), headers: _headers)
+        .timeout(const Duration(minutes: 3));
+    final body = await _json(res, fallback: '克隆仓库失败');
+    final local = body['local'] as Map<String, dynamic>? ?? {};
+    return CheckoutResult(
+      path: (body['path'] ?? local['path'] ?? '').toString(),
+      branch: (local['branch'] ?? '').toString(),
+      head: (local['head'] ?? '').toString(),
+    );
+  }
+
   Future<ServerStatus> savePat(String token) async {
     final res = await http
         .post(
@@ -133,7 +173,7 @@ class WenxiangApi {
                 .toList(),
           }),
         )
-        .timeout(const Duration(seconds: 130));
+        .timeout(const Duration(minutes: 3));
     final body = await _json(res, fallback: '问答失败');
     return (
       answer: (body['answer'] ?? '').toString(),

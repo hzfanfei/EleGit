@@ -32,6 +32,25 @@ describe("synthesizeLocalAnswer", () => {
     assert.match(text, /GitHub API/);
   });
 
+  it("mentions the local checkout path when present", () => {
+    const text = synthesizeLocalAnswer({
+      question: "README 里怎么启动？",
+      progress: sampleProgress,
+      local: {
+        present: true,
+        path: "/home/fei/问象/acme/widget",
+        branch: "main",
+        head: "abc1234",
+        log: "abc1234 2026-09-14 ada Fix login timeout",
+        files: ["README.md", "src/app.js"],
+        readme: "# widget\nnpm start",
+      },
+    });
+    assert.match(text, /问象\/acme\/widget/);
+    assert.match(text, /npm start/);
+    assert.match(text, /检出/);
+  });
+
   it("says when there are no open PRs", () => {
     const text = synthesizeLocalAnswer({
       question: "有哪些 PR？",

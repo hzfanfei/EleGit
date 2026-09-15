@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { defaultWorkspaceRoot } from "./workspace.js";
 
 export function defaultHomeDir() {
   return process.env.WENXIANG_HOME || path.join(os.homedir(), ".wenxiang");
@@ -14,6 +15,7 @@ function defaultConfig() {
     githubUser: null,
     githubClientId: process.env.GITHUB_CLIENT_ID || "",
     githubClientSecret: process.env.GITHUB_CLIENT_SECRET || "",
+    workspaceRoot: defaultWorkspaceRoot(),
     tunnel: {
       provider: "cloudflare",
       bin: process.env.WENXIANG_TUNNEL_BIN || "cloudflared",
@@ -34,6 +36,18 @@ export async function loadStore(homeDir = defaultHomeDir()) {
       ...parsed,
       tunnel: { ...config.tunnel, ...(parsed.tunnel || {}) },
     };
+    if (process.env.GITHUB_CLIENT_ID) {
+      config.githubClientId = process.env.GITHUB_CLIENT_ID;
+    }
+    if (process.env.GITHUB_CLIENT_SECRET) {
+      config.githubClientSecret = process.env.GITHUB_CLIENT_SECRET;
+    }
+    if (process.env.WENXIANG_WORKSPACE) {
+      config.workspaceRoot = process.env.WENXIANG_WORKSPACE;
+    }
+    if (!config.workspaceRoot) {
+      config.workspaceRoot = defaultWorkspaceRoot();
+    }
     if (!config.apiKey) {
       config.apiKey = defaultConfig().apiKey;
     }

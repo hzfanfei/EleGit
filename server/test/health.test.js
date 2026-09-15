@@ -54,6 +54,9 @@ describe("companion HTTP", () => {
       assert.equal(ok.status, 200);
       const status = await ok.json();
       assert.equal(status.github.connected, false);
+      assert.equal(status.github.oauthReady, false);
+      assert.ok(Array.isArray(status.github.callbackUrls));
+      assert.ok(String(status.workspace.root).length > 0);
       assert.ok(Array.isArray(status.lanUrls));
     } finally {
       child.kill("SIGTERM");

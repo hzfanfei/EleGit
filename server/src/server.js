@@ -10,13 +10,21 @@ import {
   verifyToken,
 } from "./github.js";
 import { lanUrls } from "./network.js";
+import {
+  callbackHtml,
+  createOAuthSessions,
+  exchangeCode,
+  suggestedCallbackUrls,
+} from "./oauth.js";
 import { loadStore } from "./store.js";
 import { createTunnelManager } from "./tunnel.js";
+import { ensureCheckout, formatLocalContext } from "./workspace.js";
 
 const PORT = Number(process.env.WENXIANG_PORT || 8787);
 const BIND = process.env.WENXIANG_BIND || "0.0.0.0";
 
 const store = await loadStore();
+const oauth = createOAuthSessions();
 const tunnel = createTunnelManager({
   port: PORT,
   getConfig: () => store.config,
@@ -34,8 +42,51 @@ function sendError(res, err) {
   });
 }
 
+function oauthReady() {
+  return Boolean(store.config.githubClientId && store.config.githubClientSecret);
+}
+
 app.get("/health", (_req, res) => {
   res.json({ ok: true, name: "问象", service: "wenxiang" });
+});
+
+app.get("/oauth/github/callback", async (req, res) => {
+  const state = String(req.query.state || "");
+  const code = String(req.query.code || "");
+  const ghError = String(req.query.error_description || req.query.error || "");
+  const session = oauth.peek(state);
+  if (!session) {
+    res
+      .status(400)
+      .type("html")
+      .send(callbackHtml({ ok: false, message: "登录会话无效或已过期。" }));
+    return;
+  }
+  if (ghError || !code) {
+    oauth.fail(state, ghError || "GitHub 未返回授权码");
+    res
+      .status(400)
+      .type("html")
+      .send(callbackHtml({ ok: false, message: ghError || "GitHub 未返回授权码。" }));
+    return;
+  }
+  try {
+    const token = await exchangeCode({
+      clientId: store.config.githubClientId,
+      clientSecret: store.config.githubClientSecret,
+      code,
+      redirectUri: session.redirectUri,
+    });
+    const user = await verifyToken(token);
+    store.config.githubToken = token;
+    store.config.githubUser = user;
+    await store.save();
+    oauth.complete(state);
+    res.type("html").send(callbackHtml({ ok: true, message: `已登录 ${user.login}。` }));
+  } catch (err) {
+    oauth.fail(state, err.message);
+    res.status(400).type("html").send(callbackHtml({ ok: false, message: err.message }));
+  }
 });
 
 app.use("/v1", (req, res, next) => {
@@ -49,7 +100,7 @@ app.use("/v1", (req, res, next) => {
 
 function requireGithub(req, res, next) {
   if (!store.config.githubToken) {
-    res.status(401).json({ error: "GitHub is not connected. Save a PAT first." });
+    res.status(401).json({ error: "GitHub is not connected. Sign in from the phone browser." });
     return;
   }
   next();
@@ -57,21 +108,67 @@ function requireGithub(req, res, next) {
 
 app.get("/v1/status", (_req, res) => {
   const cursor = detectCursorEngine();
+  const lans = lanUrls(PORT);
+  const tunnelStatus = tunnel.status();
   res.json({
     name: "问象",
     github: {
       connected: Boolean(store.config.githubToken),
       user: store.config.githubUser,
+      oauthReady: oauthReady(),
+      callbackPath: "/oauth/github/callback",
+      callbackUrls: suggestedCallbackUrls({
+        lanUrls: lans,
+        tunnelUrl: tunnelStatus.publicUrl,
+      }),
       deviceFlowReady: Boolean(store.config.githubClientId),
+    },
+    workspace: {
+      root: store.config.workspaceRoot,
     },
     cursor: {
       available: Boolean(cursor),
       engine: cursor?.id || null,
       fallback: "local-progress",
     },
-    tunnel: tunnel.status(),
-    lanUrls: lanUrls(PORT),
+    tunnel: tunnelStatus,
+    lanUrls: lans,
     port: PORT,
+  });
+});
+
+app.post("/v1/github/oauth/start", (req, res) => {
+  try {
+    if (!oauthReady()) {
+      res.status(400).json({
+        error:
+          "Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET, then register {baseUrl}/oauth/github/callback on the GitHub OAuth App.",
+      });
+      return;
+    }
+    const publicBaseUrl = req.body?.publicBaseUrl || `http://127.0.0.1:${PORT}`;
+    const started = oauth.start({
+      clientId: store.config.githubClientId,
+      publicBaseUrl,
+    });
+    res.json(started);
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.get("/v1/github/oauth/status", (req, res) => {
+  const state = String(req.query.state || "");
+  const session = oauth.peek(state);
+  if (!session) {
+    res.status(404).json({ error: "Unknown or expired OAuth state" });
+    return;
+  }
+  res.json({
+    status: session.status,
+    error: session.error || undefined,
+    connected: session.status === "connected" && Boolean(store.config.githubToken),
+    user: session.status === "connected" ? store.config.githubUser : null,
   });
 });
 
@@ -142,14 +239,39 @@ app.get("/v1/repos", requireGithub, async (req, res) => {
   }
 });
 
-app.get("/v1/repos/:owner/:repo/progress", requireGithub, async (req, res) => {
+async function checkoutRepo(owner, repo) {
+  const progress = await repoProgress(store.config.githubToken, owner, repo);
+  const result = await ensureCheckout({
+    workspaceRoot: store.config.workspaceRoot,
+    owner,
+    repo,
+    token: store.config.githubToken,
+    defaultBranch: progress.repo.defaultBranch,
+  });
+  return { progress, ...result };
+}
+
+app.post("/v1/repos/:owner/:repo/checkout", requireGithub, async (req, res) => {
   try {
-    const progress = await repoProgress(
-      store.config.githubToken,
+    const { progress, dest, existed, local } = await checkoutRepo(
       req.params.owner,
       req.params.repo,
     );
-    res.json(progress);
+    res.json({
+      path: dest,
+      existed,
+      local,
+      repo: progress.repo,
+    });
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.get("/v1/repos/:owner/:repo/progress", requireGithub, async (req, res) => {
+  try {
+    const { progress, dest, local } = await checkoutRepo(req.params.owner, req.params.repo);
+    res.json({ ...progress, checkout: { path: dest, ...local } });
   } catch (err) {
     sendError(res, err);
   }
@@ -165,18 +287,20 @@ app.post("/v1/chat", requireGithub, async (req, res) => {
       res.status(400).json({ error: "owner, repo, and message are required" });
       return;
     }
-    const progress = await repoProgress(store.config.githubToken, owner, repo);
-    const context = formatProgressContext(progress);
+    const { progress, dest, local } = await checkoutRepo(owner, repo);
+    const context = `${formatProgressContext(progress)}\n\n${formatLocalContext(local)}`;
     const result = await answerQuestion({
       question: message,
       history,
       progress,
       context,
+      local,
     });
     res.json({
       engine: result.engine,
       answer: result.answer,
       repo: progress.repo.fullName,
+      checkout: dest,
     });
   } catch (err) {
     sendError(res, err);
@@ -201,16 +325,26 @@ app.post("/v1/tunnel/stop", (_req, res) => {
 
 app.listen(PORT, BIND, () => {
   const lans = lanUrls(PORT);
+  const callbacks = suggestedCallbackUrls({
+    lanUrls: lans,
+    tunnelUrl: tunnel.status().publicUrl,
+  });
   console.log(`问象 companion listening on http://${BIND}:${PORT}`);
   console.log(`API key: ${store.config.apiKey}`);
   console.log(`Config: ${store.file}`);
+  console.log(`Workspace: ${store.config.workspaceRoot}`);
   if (lans.length) {
     console.log(`LAN: ${lans.join(", ")}`);
   }
+  console.log(
+    oauthReady()
+      ? `GitHub OAuth ready. Register callback(s):\n  ${callbacks.join("\n  ")}`
+      : "GitHub OAuth not configured — set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET",
+  );
   const cursor = detectCursorEngine();
   console.log(
     cursor
       ? `Cursor engine: ${cursor.id} (${cursor.path})`
-      : "Cursor engine: not found — chat will use local GitHub progress adapter",
+      : "Cursor engine: not found — chat will use local checkout + GitHub adapter",
   );
 });
