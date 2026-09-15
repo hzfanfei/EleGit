@@ -8,6 +8,7 @@ class FakeWenxiangApi extends WenxiangApi {
     this.reposResult,
     this.reposThrows,
     this.checkoutPath = '/home/fei/问象/octo/demo',
+    this.checkoutDelay = Duration.zero,
     this.checkoutThrows,
     this.streamEvents,
     this.streamThrows,
@@ -18,6 +19,7 @@ class FakeWenxiangApi extends WenxiangApi {
   List<RepoItem>? reposResult;
   Object? reposThrows;
   String checkoutPath;
+  Duration checkoutDelay;
   Object? checkoutThrows;
   List<ChatStreamEvent>? streamEvents;
   Object? streamThrows;
@@ -60,6 +62,9 @@ class FakeWenxiangApi extends WenxiangApi {
   @override
   Future<CheckoutResult> checkout(String owner, String repo) async {
     checkoutCalls += 1;
+    if (checkoutDelay > Duration.zero) {
+      await Future<void>.delayed(checkoutDelay);
+    }
     if (checkoutThrows != null) throw checkoutThrows!;
     return CheckoutResult(path: checkoutPath, branch: 'main', head: 'abc');
   }

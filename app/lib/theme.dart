@@ -15,12 +15,14 @@ class Wx {
   static const danger = Color(0xFFD27A6C);
   static const ok = Color(0xFF8A9A7B);
 
-  static const fontFamily = 'Noto Sans SC';
+  /// System UI + CJK. Do not name an unregistered webfont — CanvasKit will
+  /// double-paint Latin glyphs if the family is not in Flutter's font registry.
   static const fontFallback = [
     'PingFang SC',
     'Hiragino Sans GB',
     'Microsoft YaHei',
     'Noto Sans CJK SC',
+    'Noto Sans SC',
     'Source Han Sans SC',
     'sans-serif',
   ];
@@ -89,7 +91,6 @@ ThemeData wenxiangTheme() {
   final base = ThemeData(
     useMaterial3: true,
     brightness: Brightness.dark,
-    fontFamily: Wx.fontFamily,
     fontFamilyFallback: Wx.fontFallback,
     textTheme: textTheme,
     primaryTextTheme: textTheme,
@@ -118,7 +119,6 @@ ThemeData wenxiangTheme() {
       centerTitle: false,
       titleSpacing: 8,
       titleTextStyle: TextStyle(
-        fontFamily: Wx.fontFamily,
         fontFamilyFallback: Wx.fontFallback,
         fontSize: 17,
         fontWeight: FontWeight.w600,
@@ -160,7 +160,6 @@ ThemeData wenxiangTheme() {
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         textStyle: const TextStyle(
-          fontFamily: Wx.fontFamily,
           fontFamilyFallback: Wx.fontFallback,
           fontSize: 15,
           fontWeight: FontWeight.w600,
@@ -172,7 +171,6 @@ ThemeData wenxiangTheme() {
         foregroundColor: Wx.accent,
         minimumSize: const Size(64, 44),
         textStyle: const TextStyle(
-          fontFamily: Wx.fontFamily,
           fontFamilyFallback: Wx.fontFallback,
           fontSize: 15,
           fontWeight: FontWeight.w600,

@@ -56,7 +56,7 @@ class _MarkPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
-class WxErrorPanel extends StatelessWidget {
+class WxErrorPanel extends StatefulWidget {
   const WxErrorPanel({
     super.key,
     required this.error,
@@ -69,8 +69,15 @@ class WxErrorPanel extends StatelessWidget {
   final String retryLabel;
 
   @override
+  State<WxErrorPanel> createState() => _WxErrorPanelState();
+}
+
+class _WxErrorPanelState extends State<WxErrorPanel> {
+  bool _open = false;
+
+  @override
   Widget build(BuildContext context) {
-    final detail = errorDetail(error);
+    final detail = errorDetail(widget.error);
     return DecoratedBox(
       decoration: BoxDecoration(
         color: Wx.surface,
@@ -83,37 +90,28 @@ class WxErrorPanel extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              humanizeError(error),
+              humanizeError(widget.error),
               style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: Wx.text),
             ),
             if (detail != null) ...[
-              const SizedBox(height: 8),
-              Theme(
-                data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-                child: ExpansionTile(
-                  tilePadding: EdgeInsets.zero,
-                  childrenPadding: EdgeInsets.zero,
-                  title: Text('详情', style: Theme.of(context).textTheme.bodyMedium),
-                  dense: true,
-                  children: [
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: SelectableText(
-                        detail,
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                              color: Wx.muted,
-                              fontSize: 12,
-                              height: 1.45,
-                            ),
-                      ),
-                    ),
-                  ],
-                ),
+              const SizedBox(height: 6),
+              TextButton(
+                onPressed: () => setState(() => _open = !_open),
+                child: Text(_open ? '收起详情' : '详情'),
               ),
+              if (_open)
+                SelectableText(
+                  detail,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: Wx.muted,
+                        fontSize: 12,
+                        height: 1.45,
+                      ),
+                ),
             ],
-            if (onRetry != null) ...[
-              const SizedBox(height: 8),
-              TextButton(onPressed: onRetry, child: Text(retryLabel)),
+            if (widget.onRetry != null) ...[
+              const SizedBox(height: 4),
+              TextButton(onPressed: widget.onRetry, child: Text(widget.retryLabel)),
             ],
           ],
         ),

@@ -96,7 +96,6 @@ Widget _prose(String text, Color color, bool selectable) {
     color: color,
     fontSize: 16,
     height: 1.55,
-    fontFamily: Wx.fontFamily,
     fontFamilyFallback: Wx.fontFallback,
   );
   final rich = TextSpan(style: style, children: spans);

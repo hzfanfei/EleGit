@@ -377,7 +377,6 @@ class _LiveTurn extends StatelessWidget {
                     color: Wx.text,
                     fontSize: 16,
                     height: 1.55,
-                    fontFamily: Wx.fontFamily,
                     fontFamilyFallback: Wx.fontFallback,
                   ),
                   children: [

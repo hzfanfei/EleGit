@@ -115,102 +115,99 @@ class _LoginPageState extends State<LoginPage> {
     final waiting = _phase == _LoginPhase.waiting;
     return Scaffold(
       body: SafeArea(
-        child: Center(
+        child: Align(
+          alignment: Alignment.topCenter,
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 440),
-            child: Padding(
+            child: ListView(
               padding: Wx.pagePadding,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const SizedBox(height: 28),
-                  const WxMark(size: 40),
-                  const SizedBox(height: 22),
-                  Text('问象', style: Theme.of(context).textTheme.displaySmall),
-                  const SizedBox(height: 10),
-                  Text(
-                    '打开即用本机仓库问进度。接下来会在浏览器登录 GitHub。',
-                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                          color: Wx.muted,
-                          height: 1.55,
-                        ),
-                  ),
-                  const SizedBox(height: 32),
-                  DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: Wx.surface,
-                      borderRadius: BorderRadius.circular(Wx.radius),
-                      border: Border.all(color: Wx.hairline),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _StepLine(
-                            index: '1',
-                            label: _phase == _LoginPhase.opening ? '正在打开浏览器' : '已打开浏览器',
-                            active: _phase == _LoginPhase.opening,
-                            done: waiting || _phase == _LoginPhase.error,
-                          ),
-                          const SizedBox(height: 14),
-                          _StepLine(
-                            index: '2',
-                            label: waiting ? '等待授权' : '在浏览器完成授权',
-                            active: waiting,
-                            done: false,
-                          ),
-                          const SizedBox(height: 16),
-                          if (waiting)
-                            const ClipRRect(
-                              child: LinearProgressIndicator(minHeight: 2),
-                            )
-                          else if (_phase == _LoginPhase.opening)
-                            const ClipRRect(
-                              child: LinearProgressIndicator(minHeight: 2),
-                            ),
-                          const SizedBox(height: 14),
-                          Text(
-                            waiting
-                                ? '请在浏览器完成 GitHub 授权，然后回到这里。'
-                                : _phase == _LoginPhase.opening
-                                    ? '正在打开 GitHub…'
-                                    : '授权没有完成。可以重新打开 GitHub。',
-                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                  color: Wx.text,
-                                  height: 1.5,
-                                ),
-                          ),
-                          if (_stale && waiting) ...[
-                            const SizedBox(height: 10),
-                            Text(
-                              '还在等授权。若浏览器已关掉，点下面重新打开。',
-                              style: Theme.of(context).textTheme.bodyMedium,
-                            ),
-                          ],
-                        ],
+              children: [
+                const SizedBox(height: 20),
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: WxMark(size: 40),
+                ),
+                const SizedBox(height: 22),
+                Text('问象', style: Theme.of(context).textTheme.displaySmall),
+                const SizedBox(height: 10),
+                Text(
+                  '打开即用本机仓库问进度。接下来会在浏览器登录 GitHub。',
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        color: Wx.muted,
+                        height: 1.55,
                       ),
+                ),
+                const SizedBox(height: 28),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Wx.surface,
+                    borderRadius: BorderRadius.circular(Wx.radius),
+                    border: Border.all(color: Wx.hairline),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _StepLine(
+                          index: '1',
+                          label: _phase == _LoginPhase.opening ? '正在打开浏览器' : '已打开浏览器',
+                          active: _phase == _LoginPhase.opening,
+                          done: waiting || _phase == _LoginPhase.error,
+                        ),
+                        const SizedBox(height: 14),
+                        _StepLine(
+                          index: '2',
+                          label: waiting ? '等待授权' : '在浏览器完成授权',
+                          active: waiting,
+                          done: false,
+                        ),
+                        const SizedBox(height: 16),
+                        if (waiting || _phase == _LoginPhase.opening)
+                          const ClipRRect(
+                            child: LinearProgressIndicator(minHeight: 2),
+                          ),
+                        const SizedBox(height: 14),
+                        Text(
+                          waiting
+                              ? '请在浏览器完成 GitHub 授权，然后回到这里。'
+                              : _phase == _LoginPhase.opening
+                                  ? '正在打开 GitHub…'
+                                  : '授权没有完成。可以重新打开 GitHub。',
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: Wx.text,
+                                height: 1.5,
+                              ),
+                        ),
+                        if (_stale && waiting) ...[
+                          const SizedBox(height: 10),
+                          Text(
+                            '还在等授权。若浏览器已关掉，点下面重新打开。',
+                            style: Theme.of(context).textTheme.bodyMedium,
+                          ),
+                        ],
+                      ],
                     ),
                   ),
-                  if (_error != null) ...[
-                    const SizedBox(height: 16),
-                    WxErrorPanel(error: _error!, onRetry: _start, retryLabel: '重试连接'),
-                  ],
-                  const Spacer(),
-                  SizedBox(
-                    width: double.infinity,
-                    child: _phase == _LoginPhase.error
-                        ? FilledButton(
-                            onPressed: _start,
-                            child: const Text('重新打开 GitHub'),
-                          )
-                        : TextButton(
-                            onPressed: _started ? _start : null,
-                            child: const Text('重新打开 GitHub'),
-                          ),
-                  ),
+                ),
+                if (_error != null) ...[
+                  const SizedBox(height: 16),
+                  WxErrorPanel(error: _error!, onRetry: _start, retryLabel: '重试连接'),
                 ],
-              ),
+                const SizedBox(height: 28),
+                SizedBox(
+                  width: double.infinity,
+                  child: _phase == _LoginPhase.error
+                      ? FilledButton(
+                          onPressed: _start,
+                          child: const Text('重新打开 GitHub'),
+                        )
+                      : TextButton(
+                          onPressed: _started ? _start : null,
+                          child: const Text('重新打开 GitHub'),
+                        ),
+                ),
+              ],
             ),
           ),
         ),
