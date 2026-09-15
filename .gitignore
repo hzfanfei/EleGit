@@ -17,10 +17,15 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# Environment
+# Environment and local secrets — never commit these
 .env
 .env.*
+**/.env
+**/.env.local
 !.env.example
+!**/.env.example
+.wenxiang/
+**/问象/
 
 # Editor / OS
 .DS_Store
@@ -38,3 +43,14 @@ coverage/
 .cache/
 .turbo/
 .eslintcache
+
+# Flutter
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+**/*.iml
+app/android/local.properties
+app/android/.gradle/
+app/lib/generated/env.g.dart
+app/dart_defines.json

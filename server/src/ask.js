@@ -1,0 +1,237 @@
+import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+
+const CURSOR_CANDIDATES = [
+  { bin: "cursor-agent", args: (prompt) => ["-p", prompt, "--output-format", "text"] },
+  { bin: "agent", args: (prompt) => ["-p", prompt] },
+  { bin: "cursor", args: (prompt) => ["agent", "-p", prompt] },
+];
+
+export function whichSync(bin) {
+  if (bin.includes("/") && existsSync(bin)) return bin;
+  const pathVar = process.env.PATH || "";
+  for (const dir of pathVar.split(":")) {
+    if (!dir) continue;
+    const candidate = `${dir}/${bin}`;
+    if (existsSync(candidate)) return candidate;
+  }
+  return "";
+}
+
+export function detectCursorEngine() {
+  for (const candidate of CURSOR_CANDIDATES) {
+    const resolved = whichSync(candidate.bin);
+    if (resolved) {
+      return { id: candidate.bin, path: resolved, argsFor: candidate.args };
+    }
+  }
+  return null;
+}
+
+function runCommand(file, args, { timeoutMs = 120_000, cwd, onChunk } = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(file, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(() => {
+      child.kill("SIGTERM");
+      reject(new Error(`Cursor CLI timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    child.stdout.on("data", (chunk) => {
+      const text = chunk.toString();
+      stdout += text;
+      onChunk?.(text);
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (code !== 0) {
+        reject(new Error(stderr.trim() || stdout.trim() || `${file} exited ${code}`));
+        return;
+      }
+      resolve((stdout || stderr).trim());
+    });
+  });
+}
+
+export async function* streamText(text, { chunkSize = 2, delayMs = 10 } = {}) {
+  const chars = [...String(text || "")];
+  for (let i = 0; i < chars.length; i += chunkSize) {
+    yield chars.slice(i, i + chunkSize).join("");
+    if (delayMs) await new Promise((r) => setTimeout(r, delayMs));
+  }
+}
+
+export function buildCursorPrompt({ question, history, context }) {
+  const historyText = (history || [])
+    .slice(-8)
+    .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
+    .join("\n");
+  return [
+    "You are 问象, a local repo progress assistant running on the user's computer.",
+    "Answer in Simplified Chinese unless the user writes in another language.",
+    "Use ONLY the GitHub facts and local checkout facts below. If something is missing, say so.",
+    "Do not invent commits, PRs, files, or dates. Prefer the local checkout when it disagrees with stale memory.",
+    "",
+    "=== GitHub + local checkout context ===",
+    context,
+    "",
+    historyText ? `=== Recent chat ===\n${historyText}\n` : "",
+    `=== Question ===\n${question}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+export function synthesizeLocalAnswer({ question, progress, context, local }) {
+  const q = (question || "").toLowerCase();
+  const wantPr = /pr|pull|合并|拉取/.test(q);
+  const wantIssue = /issue|问题|缺陷|bug/.test(q);
+  const sections = [];
+
+  sections.push(
+    `【${progress.repo.fullName}】最近推送 ${progress.repo.pushedAt || "未知"}，默认分支 ${progress.repo.defaultBranch}。`,
+  );
+
+  if (!wantIssue && progress.commits.length) {
+    const shown = progress.commits.slice(0, wantPr ? 5 : 8);
+    sections.push("最近提交：");
+    sections.push(
+      shown.map((c) => `· ${c.date.slice(0, 10)} ${c.author}：${c.message}`).join("\n"),
+    );
+  }
+
+  if ((wantPr || !wantIssue) && progress.pulls.length) {
+    sections.push(`开放 PR（${progress.pulls.length}）：`);
+    sections.push(
+      progress.pulls
+        .slice(0, 8)
+        .map((p) => `· #${p.number} ${p.draft ? "[草稿] " : ""}${p.title}（${p.user}）`)
+        .join("\n"),
+    );
+  } else if (wantPr) {
+    sections.push("当前没有开放的 Pull Request。");
+  }
+
+  if (wantIssue || (!wantPr && progress.issues.length)) {
+    if (progress.issues.length) {
+      sections.push(`开放 Issue（${progress.issues.length}）：`);
+      sections.push(
+        progress.issues
+          .slice(0, 8)
+          .map((i) => `· #${i.number} ${i.title}`)
+          .join("\n"),
+      );
+    } else if (wantIssue) {
+      sections.push("当前没有开放的 Issue。");
+    }
+  }
+
+  if (local?.present) {
+    const wantCode = /readme|文件|代码|怎么|启动|目录|checkout|本地/.test(q);
+    sections.push(`本机检出：${local.path}（${local.branch || "?"} @ ${local.head || "?"}）`);
+    if (local.log && ((!wantPr && !wantIssue) || wantCode)) {
+      sections.push("本地 git log：");
+      sections.push(
+        local.log
+          .split("\n")
+          .slice(0, 8)
+          .map((line) => `· ${line}`)
+          .join("\n"),
+      );
+    }
+    if (wantCode && local.files?.length) {
+      sections.push("检出内文件（节选）：");
+      sections.push(local.files.slice(0, 16).map((f) => `· ${f}`).join("\n"));
+    }
+    if (wantCode && local.readme) {
+      sections.push("README 摘录：");
+      sections.push(local.readme.slice(0, 800));
+    }
+  }
+
+  if (!progress.commits.length && !progress.pulls.length && !progress.issues.length && !local?.present) {
+    sections.push("GitHub 没有返回可见的提交、PR 或 Issue。请确认 token 对这个仓库有读权限。");
+  }
+
+  sections.push(
+    local?.present
+      ? "以上内容来自本机 GitHub API 与 ~/问象 检出，不是编造的演示数据。"
+      : "以上内容全部来自本机调用的 GitHub API，不是编造的演示数据。",
+  );
+  return sections.join("\n\n");
+}
+
+export async function* streamAnswer({ question, history, progress, context, local }) {
+  const engine = detectCursorEngine();
+  const prompt = buildCursorPrompt({ question, history, context });
+  if (engine) {
+    yield { type: "start", engine: engine.id };
+    const queue = [];
+    let notify;
+    let finished = false;
+    let fail = null;
+    let full = "";
+    runCommand(engine.path, engine.argsFor(prompt), {
+      cwd: local?.present ? local.path : undefined,
+      onChunk: (chunk) => {
+        full += chunk;
+        queue.push({ type: "delta", text: chunk });
+        notify?.();
+      },
+    })
+      .then((text) => {
+        full = text || full;
+        finished = true;
+        notify?.();
+      })
+      .catch((err) => {
+        fail = err;
+        finished = true;
+        notify?.();
+      });
+    while (!finished || queue.length) {
+      if (!queue.length) {
+        await new Promise((resolve) => {
+          notify = resolve;
+        });
+        notify = undefined;
+        continue;
+      }
+      yield queue.shift();
+    }
+    if (!fail && full) {
+      yield { type: "done", engine: engine.id, answer: full };
+      return;
+    }
+    const fallback = `${synthesizeLocalAnswer({ question, progress, context, local })}\n\n（本机探测到 ${engine.id}，但调用失败：${fail?.message || "empty output"}。已回退到本地进度适配器。）`;
+    yield { type: "start", engine: "local-progress" };
+    yield* prefixDeltas(fallback);
+    yield { type: "done", engine: "local-progress", answer: fallback };
+    return;
+  }
+  const answer = synthesizeLocalAnswer({ question, progress, context, local });
+  yield { type: "start", engine: "local-progress" };
+  yield* prefixDeltas(answer);
+  yield { type: "done", engine: "local-progress", answer };
+}
+
+async function* prefixDeltas(text) {
+  for await (const piece of streamText(text)) {
+    yield { type: "delta", text: piece };
+  }
+}
+
+export async function answerQuestion({ question, history, progress, context, local }) {
+  let last = { engine: "local-progress", answer: "" };
+  for await (const event of streamAnswer({ question, history, progress, context, local })) {
+    if (event.type === "done") last = { engine: event.engine, answer: event.answer };
+  }
+  return last;
+}
