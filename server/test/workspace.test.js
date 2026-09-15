@@ -8,6 +8,9 @@ import {
   checkoutPath,
   ensureCheckout,
   formatLocalContext,
+  gitAuthConfigArgs,
+  gitFailure,
+  GITHUB_GIT_FORBIDDEN_ZH,
   safeSegment,
   snapshotCheckout,
 } from "../src/workspace.js";
@@ -18,6 +21,58 @@ function git(args, cwd) {
     throw new Error(result.stderr || result.stdout || "git failed");
   }
 }
+
+const FAKE_OAUTH_TOKEN = "gho_test_placeholder_token";
+
+describe("git auth header", () => {
+  it("sends Basic x-access-token via http.extraHeader, not Bearer", () => {
+    const args = gitAuthConfigArgs(FAKE_OAUTH_TOKEN);
+    assert.equal(args[0], "-c");
+    assert.match(args[1], /^http\.extraHeader=Authorization: Basic [A-Za-z0-9+/=]+$/);
+    assert.doesNotMatch(args.join(" "), /Bearer/);
+    const encoded = args[1].slice("http.extraHeader=Authorization: Basic ".length);
+    assert.equal(Buffer.from(encoded, "base64").toString("utf8"), `x-access-token:${FAKE_OAUTH_TOKEN}`);
+    assert.ok(!args[1].includes(FAKE_OAUTH_TOKEN), "token must not appear in plaintext in git argv");
+  });
+
+  it("omits extraHeader when there is no token", () => {
+    assert.deepEqual(gitAuthConfigArgs(""), []);
+    assert.deepEqual(gitAuthConfigArgs(undefined), []);
+  });
+
+  it("keeps the public HTTPS remote and does not embed the token in the URL", () => {
+    const remote = "https://github.com/acme/widget.git";
+    const argv = [...gitAuthConfigArgs(FAKE_OAUTH_TOKEN), "clone", remote, "/tmp/widget"];
+    assert.ok(argv.includes(remote));
+    assert.ok(!argv.some((part) => /x-access-token:/i.test(part)));
+    assert.ok(!argv.some((part) => /^https:\/\/.*@github\.com/.test(part)));
+  });
+
+  it("maps GitHub 403 clone failures to a Chinese permission hint", () => {
+    const err = gitFailure(
+      "remote: Write access to repository not granted.\nfatal: unable to access 'https://github.com/acme/secret.git/': The requested URL returned error: 403",
+    );
+    assert.equal(err.status, 403);
+    assert.equal(err.message, GITHUB_GIT_FORBIDDEN_ZH);
+    assert.match(err.message, /私有|repo|SSO/);
+    assert.ok(!err.message.includes(FAKE_OAUTH_TOKEN));
+  });
+
+  it("maps Authentication failed / SSO denials the same way", () => {
+    const auth = gitFailure("fatal: Authentication failed for 'https://github.com/acme/secret.git/'");
+    assert.equal(auth.status, 403);
+    assert.equal(auth.message, GITHUB_GIT_FORBIDDEN_ZH);
+    const sso = gitFailure("remote: Resource protected by organization SAML SSO enforcement.");
+    assert.equal(sso.status, 403);
+    assert.equal(sso.message, GITHUB_GIT_FORBIDDEN_ZH);
+  });
+
+  it("leaves unrelated git errors unchanged", () => {
+    const err = gitFailure("fatal: not a git repository");
+    assert.equal(err.message, "fatal: not a git repository");
+    assert.notEqual(err.status, 403);
+  });
+});
 
 describe("checkout paths", () => {
   it("joins under the 问象 workspace and rejects traversal", () => {
@@ -46,6 +101,7 @@ describe("ensureCheckout", () => {
       owner: "acme",
       repo: "widget",
       cloneUrl: tmp,
+      token: FAKE_OAUTH_TOKEN,
       defaultBranch: "main",
     });
     assert.equal(result.existed, false);
@@ -60,9 +116,23 @@ describe("ensureCheckout", () => {
       owner: "acme",
       repo: "widget",
       cloneUrl: tmp,
+      token: FAKE_OAUTH_TOKEN,
       defaultBranch: "main",
     });
     assert.equal(again.existed, true);
+    const origin = spawnSync("git", ["remote", "get-url", "origin"], {
+      cwd: result.dest,
+      encoding: "utf8",
+    });
+    assert.equal(origin.status, 0);
+    assert.equal(origin.stdout.trim(), tmp);
+    assert.ok(!origin.stdout.includes(FAKE_OAUTH_TOKEN));
+    const gitConfig = spawnSync("git", ["config", "--local", "--list"], {
+      cwd: result.dest,
+      encoding: "utf8",
+    });
+    assert.ok(!gitConfig.stdout.includes(FAKE_OAUTH_TOKEN));
+    assert.doesNotMatch(gitConfig.stdout, /extraHeader|x-access-token|Authorization/i);
     const snap = await snapshotCheckout(result.dest);
     assert.match(formatLocalContext(snap), /Local checkout/);
     assert.match(formatLocalContext(snap), /Initial widget/);

@@ -15,6 +15,36 @@ const SKIP_DIR = new Set([
   "__pycache__",
 ]);
 
+export const GITHUB_GIT_FORBIDDEN_ZH =
+  "无法访问该仓库：GitHub 返回 403。常见原因：仓库为私有且当前登录无权克隆、OAuth 未授予 repo 权限，或组织启用了 SSO 但尚未授权问象。请在 GitHub 授权中勾选 repo，并完成组织 SSO 授权后重试。";
+
+export function gitAuthConfigArgs(token) {
+  const value = String(token || "");
+  if (!value) return [];
+  const basic = Buffer.from(`x-access-token:${value}`, "utf8").toString("base64");
+  return ["-c", `http.extraHeader=Authorization: Basic ${basic}`];
+}
+
+export function gitFailure(output, code = 1) {
+  const text = String(output || "").trim();
+  if (isGithubGitPermissionDenied(text)) {
+    const err = new Error(GITHUB_GIT_FORBIDDEN_ZH);
+    err.status = 403;
+    err.code = "github_git_forbidden";
+    err.detail = text;
+    return err;
+  }
+  return new Error(text || `git exited ${code}`);
+}
+
+function isGithubGitPermissionDenied(text) {
+  if (/\b403\b/.test(text)) return true;
+  if (/Authentication failed/i.test(text)) return true;
+  if (/Write access to repository not granted/i.test(text)) return true;
+  if (/SAML|SSO enforcement/i.test(text)) return true;
+  return false;
+}
+
 export function defaultWorkspaceRoot() {
   return process.env.WENXIANG_WORKSPACE || path.join(os.homedir(), "问象");
 }
@@ -40,8 +70,7 @@ export function checkoutPath(workspaceRoot, owner, repo) {
 function runGit(args, { cwd, token, timeoutMs = 180_000 } = {}) {
   return new Promise((resolve, reject) => {
     const env = { ...process.env, GIT_TERMINAL_PROMPT: "0" };
-    const extra = [];
-    if (token) extra.push("-c", `http.extraHeader=Authorization: Bearer ${token}`);
+    const extra = gitAuthConfigArgs(token);
     const child = spawn("git", [...extra, ...args], {
       cwd,
       env,
@@ -66,7 +95,7 @@ function runGit(args, { cwd, token, timeoutMs = 180_000 } = {}) {
     child.on("close", (code) => {
       clearTimeout(timer);
       if (code !== 0) {
-        reject(new Error((stderr || stdout).trim() || `git exited ${code}`));
+        reject(gitFailure(stderr || stdout, code));
         return;
       }
       resolve(stdout.trim());
