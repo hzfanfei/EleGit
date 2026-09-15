@@ -50,7 +50,7 @@ export function createOAuthSessions() {
   function start({ clientId, publicBaseUrl }) {
     if (!clientId) {
       const err = new Error(
-        "Browser login needs a GitHub OAuth App. Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET, and register the callback URL.",
+        "Browser login needs a GitHub OAuth App. Copy server/.env.example to server/.env and set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET, then register the callback URL.",
       );
       err.status = 400;
       throw err;

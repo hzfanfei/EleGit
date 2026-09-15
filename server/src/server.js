@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import { loadLocalEnv } from "./env.js";
 import { answerQuestion, detectCursorEngine } from "./ask.js";
 import {
   formatProgressContext,
@@ -19,6 +20,8 @@ import {
 import { loadStore } from "./store.js";
 import { createTunnelManager } from "./tunnel.js";
 import { ensureCheckout, formatLocalContext } from "./workspace.js";
+
+loadLocalEnv();
 
 const PORT = Number(process.env.WENXIANG_PORT || 8787);
 const BIND = process.env.WENXIANG_BIND || "0.0.0.0";
@@ -142,7 +145,7 @@ app.post("/v1/github/oauth/start", (req, res) => {
     if (!oauthReady()) {
       res.status(400).json({
         error:
-          "Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET, then register {baseUrl}/oauth/github/callback on the GitHub OAuth App.",
+          "Copy server/.env.example to server/.env and set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET, then register {baseUrl}/oauth/github/callback on the GitHub OAuth App.",
       });
       return;
     }
@@ -339,7 +342,7 @@ app.listen(PORT, BIND, () => {
   console.log(
     oauthReady()
       ? `GitHub OAuth ready. Register callback(s):\n  ${callbacks.join("\n  ")}`
-      : "GitHub OAuth not configured — set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET",
+      : "GitHub OAuth not configured — copy server/.env.example to server/.env and fill GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET",
   );
   const cursor = detectCursorEngine();
   console.log(

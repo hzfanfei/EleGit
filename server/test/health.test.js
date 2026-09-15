@@ -26,13 +26,17 @@ describe("companion HTTP", () => {
   it("serves health and protects /v1", async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), "wenxiang-"));
     const port = 18787;
+    const env = { ...process.env };
+    delete env.GITHUB_CLIENT_ID;
+    delete env.GITHUB_CLIENT_SECRET;
     const child = spawn(process.execPath, ["src/server.js"], {
       cwd: root,
       env: {
-        ...process.env,
+        ...env,
         WENXIANG_HOME: home,
         WENXIANG_PORT: String(port),
         WENXIANG_BIND: "127.0.0.1",
+        WENXIANG_ENV_FILE: path.join(home, "missing.env"),
       },
       stdio: ["ignore", "pipe", "pipe"],
     });

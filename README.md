@@ -35,12 +35,7 @@ flutter run
 
 On a physical phone, do not use `localhost` — that is the phone itself. Use the PC LAN IP or the tunnel URL.
 
-GitHub login is **browser OAuth**. Create an OAuth App and set the Authorization callback URL to `{phone-base-url}/oauth/github/callback` (add LAN, `127.0.0.1`, and tunnel host as needed). Then:
-
-```bash
-export GITHUB_CLIENT_ID=...
-export GITHUB_CLIENT_SECRET=...
-```
+GitHub login is **browser OAuth**. Create an OAuth App and set the Authorization callback URL to `{phone-base-url}/oauth/github/callback` (add LAN, `127.0.0.1`, and tunnel host as needed). Then copy `server/.env.example` to `server/.env` on that computer and fill `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`. Do not commit `.env`. Process env wins over `.env`, which wins over `~/.wenxiang/config.json`.
 
 Selected repos are cloned to `~/问象/<owner>/<repo>`. PAT remains a fallback only.
 

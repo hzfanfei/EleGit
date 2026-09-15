@@ -36,6 +36,7 @@ export async function loadStore(homeDir = defaultHomeDir()) {
       ...parsed,
       tunnel: { ...config.tunnel, ...(parsed.tunnel || {}) },
     };
+    // Process env (including values loaded from server/.env) wins over config.json.
     if (process.env.GITHUB_CLIENT_ID) {
       config.githubClientId = process.env.GITHUB_CLIENT_ID;
     }

@@ -17,10 +17,15 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# Environment
+# Environment and local secrets — never commit these
 .env
 .env.*
+**/.env
+**/.env.local
 !.env.example
+!**/.env.example
+.wenxiang/
+**/问象/
 
 # Editor / OS
 .DS_Store
