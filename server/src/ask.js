@@ -1,64 +1,8 @@
-import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { detectCursorEngine } from "./acp.js";
 
-const CURSOR_CANDIDATES = [
-  { bin: "cursor-agent", args: (prompt) => ["-p", prompt, "--output-format", "text"] },
-  { bin: "agent", args: (prompt) => ["-p", prompt] },
-  { bin: "cursor", args: (prompt) => ["agent", "-p", prompt] },
-];
-
-export function whichSync(bin) {
-  if (bin.includes("/") && existsSync(bin)) return bin;
-  const pathVar = process.env.PATH || "";
-  for (const dir of pathVar.split(":")) {
-    if (!dir) continue;
-    const candidate = `${dir}/${bin}`;
-    if (existsSync(candidate)) return candidate;
-  }
-  return "";
-}
-
-export function detectCursorEngine() {
-  for (const candidate of CURSOR_CANDIDATES) {
-    const resolved = whichSync(candidate.bin);
-    if (resolved) {
-      return { id: candidate.bin, path: resolved, argsFor: candidate.args };
-    }
-  }
-  return null;
-}
-
-function runCommand(file, args, { timeoutMs = 120_000, cwd, onChunk } = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(file, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
-    let stdout = "";
-    let stderr = "";
-    const timer = setTimeout(() => {
-      child.kill("SIGTERM");
-      reject(new Error(`Cursor CLI timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
-    child.stdout.on("data", (chunk) => {
-      const text = chunk.toString();
-      stdout += text;
-      onChunk?.(text);
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-    child.on("error", (err) => {
-      clearTimeout(timer);
-      reject(err);
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      if (code !== 0) {
-        reject(new Error(stderr.trim() || stdout.trim() || `${file} exited ${code}`));
-        return;
-      }
-      resolve((stdout || stderr).trim());
-    });
-  });
-}
+export { detectCursorEngine } from "./acp.js";
+export { whichSync } from "./which.js";
+export { buildAcpPrompt } from "./acp.js";
 
 export async function* streamText(text, { chunkSize = 2, delayMs = 10 } = {}) {
   const chars = [...String(text || "")];
@@ -168,26 +112,37 @@ export function synthesizeLocalAnswer({ question, progress, context, local }) {
   return sections.join("\n\n");
 }
 
-export async function* streamAnswer({ question, history, progress, context, local }) {
+export async function* streamAnswer({
+  question,
+  history,
+  progress,
+  context,
+  local,
+  session,
+  sessions,
+  githubContext,
+}) {
   const engine = detectCursorEngine();
-  const prompt = buildCursorPrompt({ question, history, context });
-  if (engine) {
-    yield { type: "start", engine: engine.id };
+  if (engine && sessions && session) {
+    yield { type: "start", engine: "acp" };
     const queue = [];
     let notify;
     let finished = false;
     let fail = null;
     let full = "";
-    runCommand(engine.path, engine.argsFor(prompt), {
-      cwd: local?.present ? local.path : undefined,
-      onChunk: (chunk) => {
-        full += chunk;
-        queue.push({ type: "delta", text: chunk });
-        notify?.();
-      },
-    })
-      .then((text) => {
-        full = text || full;
+    sessions
+      .prompt(session, {
+        question,
+        history,
+        githubContext: githubContext || context,
+        cwd: local?.present ? local.path : undefined,
+        onDelta: (chunk) => {
+          full += chunk;
+          queue.push({ type: "delta", text: chunk });
+          notify?.();
+        },
+      })
+      .then(() => {
         finished = true;
         notify?.();
       })
@@ -207,19 +162,19 @@ export async function* streamAnswer({ question, history, progress, context, loca
       yield queue.shift();
     }
     if (!fail && full) {
-      yield { type: "done", engine: engine.id, answer: full };
+      yield { type: "done", engine: "acp", answer: full, sessionId: session.id };
       return;
     }
-    const fallback = `${synthesizeLocalAnswer({ question, progress, context, local })}\n\n（本机探测到 ${engine.id}，但调用失败：${fail?.message || "empty output"}。已回退到本地进度适配器。）`;
+    const fallback = `${synthesizeLocalAnswer({ question, progress, context, local })}\n\n（本机探测到 Cursor ACP，但调用失败：${fail?.message || "empty output"}。已回退到本地进度适配器。）`;
     yield { type: "start", engine: "local-progress" };
     yield* prefixDeltas(fallback);
-    yield { type: "done", engine: "local-progress", answer: fallback };
+    yield { type: "done", engine: "local-progress", answer: fallback, sessionId: session.id };
     return;
   }
   const answer = synthesizeLocalAnswer({ question, progress, context, local });
   yield { type: "start", engine: "local-progress" };
   yield* prefixDeltas(answer);
-  yield { type: "done", engine: "local-progress", answer };
+  yield { type: "done", engine: "local-progress", answer, sessionId: session?.id };
 }
 
 async function* prefixDeltas(text) {
@@ -228,10 +183,10 @@ async function* prefixDeltas(text) {
   }
 }
 
-export async function answerQuestion({ question, history, progress, context, local }) {
+export async function answerQuestion(opts) {
   let last = { engine: "local-progress", answer: "" };
-  for await (const event of streamAnswer({ question, history, progress, context, local })) {
-    if (event.type === "done") last = { engine: event.engine, answer: event.answer };
+  for await (const event of streamAnswer(opts)) {
+    if (event.type === "done") last = { engine: event.engine, answer: event.answer, sessionId: event.sessionId };
   }
   return last;
 }

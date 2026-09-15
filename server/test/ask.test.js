@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildCursorPrompt, streamText, synthesizeLocalAnswer } from "../src/ask.js";
+import { buildCursorPrompt, detectCursorEngine, streamText, synthesizeLocalAnswer } from "../src/ask.js";
 
 const sampleProgress = {
   repo: {
@@ -68,6 +68,19 @@ describe("streamText", () => {
     }
     assert.equal(parts.join(""), "进度如何");
     assert.ok(parts.length >= 2);
+  });
+});
+
+describe("detectCursorEngine", () => {
+  it("reports acp when a CLI exists, otherwise null", () => {
+    const engine = detectCursorEngine();
+    if (engine) {
+      assert.equal(engine.id, "acp");
+      assert.equal(engine.mode, "ask");
+      assert.equal(engine.transport, "stdio");
+    } else {
+      assert.equal(engine, null);
+    }
   });
 });
 

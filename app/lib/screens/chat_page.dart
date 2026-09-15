@@ -22,12 +22,80 @@ class ChatPage extends StatefulWidget {
 class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin {
   final _input = TextEditingController();
   final _scroll = ScrollController();
-  final List<ChatMessage> _messages = [];
+  final Map<String, List<ChatMessage>> _transcripts = {};
+  final List<ChatSession> _sessions = [];
+  String? _sessionId;
   bool _busy = false;
   late final AnimationController _caret = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 420),
   )..repeat(reverse: true);
+
+  List<ChatMessage> get _messages =>
+      _transcripts.putIfAbsent(_sessionId ?? '', () => <ChatMessage>[]);
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSessions();
+  }
+
+  Future<void> _loadSessions() async {
+    try {
+      var list = await widget.api.listSessions(widget.repo.owner, widget.repo.name);
+      if (list.isEmpty) {
+        final created = await widget.api.createSession(widget.repo.owner, widget.repo.name);
+        list = [created];
+      }
+      if (!mounted) return;
+      setState(() {
+        _sessions
+          ..clear()
+          ..addAll(list);
+        _sessionId = list.firstWhere((s) => s.active, orElse: () => list.first).id;
+      });
+    } catch (_) {
+      // Chat can still send without a sessionId; the server will open an implicit one.
+    }
+  }
+
+  Future<void> _newSession() async {
+    if (_busy) return;
+    try {
+      final created = await widget.api.createSession(widget.repo.owner, widget.repo.name);
+      if (!mounted) return;
+      setState(() {
+        _sessions.insert(0, created);
+        _sessionId = created.id;
+        _transcripts[created.id] = [];
+      });
+    } catch (err) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.toString())));
+    }
+  }
+
+  Future<void> _switchSession(ChatSession session) async {
+    setState(() => _sessionId = session.id);
+  }
+
+  Future<void> _closeSession(ChatSession session) async {
+    try {
+      await widget.api.closeSession(widget.repo.owner, widget.repo.name, session.id);
+      if (!mounted) return;
+      setState(() {
+        _sessions.removeWhere((s) => s.id == session.id);
+        _transcripts.remove(session.id);
+        if (_sessionId == session.id) {
+          _sessionId = _sessions.isEmpty ? null : _sessions.first.id;
+        }
+      });
+      if (_sessions.isEmpty) await _newSession();
+    } catch (err) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.toString())));
+    }
+  }
 
   Future<void> _send([String? preset]) async {
     final text = (preset ?? _input.text).trim();
@@ -45,11 +113,15 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         owner: widget.repo.owner,
         repo: widget.repo.name,
         message: text,
+        sessionId: _sessionId,
         history: _messages
             .where((m) => m.role != 'error' && !(m.role == 'assistant' && m.streaming))
             .toList(),
       )) {
         if (!mounted) return;
+        if (event.sessionId != null && event.sessionId!.isNotEmpty) {
+          _sessionId = event.sessionId;
+        }
         if (event.type == 'delta' && event.text.isNotEmpty) {
           setState(() => assistant.content += event.text);
           _jump();
@@ -99,6 +171,43 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     });
   }
 
+  Future<void> _openSessions() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        return SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              const ListTile(title: Text('历史会话')),
+              if (_sessions.isEmpty)
+                const ListTile(title: Text('还没有会话')),
+              for (final session in _sessions)
+                ListTile(
+                  selected: session.id == _sessionId,
+                  title: Text(session.title),
+                  subtitle: Text(session.id),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _switchSession(session);
+                  },
+                  trailing: IconButton(
+                    tooltip: '关闭会话',
+                    icon: const Icon(Icons.close),
+                    onPressed: () async {
+                      Navigator.pop(context);
+                      await _closeSession(session);
+                    },
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   @override
   void dispose() {
     _input.dispose();
@@ -109,13 +218,29 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
 
   @override
   Widget build(BuildContext context) {
+    final title = _sessions.cast<ChatSession?>().firstWhere(
+          (s) => s?.id == _sessionId,
+          orElse: () => null,
+        )?.title;
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.repo.fullName),
+        title: Text(title == null || title == '新会话' ? widget.repo.fullName : title),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: widget.onBack,
         ),
+        actions: [
+          IconButton(
+            tooltip: '新建会话',
+            onPressed: _busy ? null : _newSession,
+            icon: const Icon(Icons.add_comment_outlined),
+          ),
+          IconButton(
+            tooltip: '历史会话',
+            onPressed: _openSessions,
+            icon: const Icon(Icons.history),
+          ),
+        ],
       ),
       body: Column(
         children: [
