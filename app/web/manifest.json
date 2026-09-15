@@ -3,9 +3,9 @@
     "short_name": "问象",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "Ask a local server about GitHub repo progress.",
+    "background_color": "#0C0D0F",
+    "theme_color": "#0C0D0F",
+    "description": "对着本机仓库问进度。",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../api/wenxiang_api.dart';
+import '../copy/errors.dart';
 import '../models.dart';
+import '../theme.dart';
+import '../widgets/wx_chrome.dart';
+import '../widgets/wx_rich_text.dart';
 
 class ChatPage extends StatefulWidget {
   const ChatPage({
@@ -19,82 +24,114 @@ class ChatPage extends StatefulWidget {
   State<ChatPage> createState() => _ChatPageState();
 }
 
-class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin {
+class _ChatPageState extends State<ChatPage> {
+  static const _suggestions = [
+    '这个仓库最近在做什么？',
+    '本机检出里 README 怎么写的？',
+    '有哪些开放的 PR？',
+  ];
+
   final _input = TextEditingController();
+  final _focus = FocusNode();
   final _scroll = ScrollController();
   final List<ChatMessage> _messages = [];
+  final ValueNotifier<String> _liveText = ValueNotifier('');
+  final ValueNotifier<String?> _liveEngine = ValueNotifier(null);
+  bool _live = false;
   bool _busy = false;
-  late final AnimationController _caret = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 420),
-  )..repeat(reverse: true);
+  String? _lastUser;
 
   Future<void> _send([String? preset]) async {
     final text = (preset ?? _input.text).trim();
     if (text.isEmpty || _busy) return;
     _input.clear();
-    final assistant = ChatMessage(role: 'assistant', content: '', streaming: true);
+    _lastUser = text;
+    HapticFeedback.selectionClick();
+    _liveText.value = '';
+    _liveEngine.value = null;
     setState(() {
       _messages.add(ChatMessage(role: 'user', content: text));
-      _messages.add(assistant);
+      _live = true;
       _busy = true;
     });
-    _jump();
+    _jump(force: true);
+
+    final history = _messages
+        .where((m) => m.role != 'error')
+        .toList();
+
     try {
       await for (final event in widget.api.chatStream(
         owner: widget.repo.owner,
         repo: widget.repo.name,
         message: text,
-        history: _messages
-            .where((m) => m.role != 'error' && !(m.role == 'assistant' && m.streaming))
-            .toList(),
+        history: history,
       )) {
         if (!mounted) return;
         if (event.type == 'delta' && event.text.isNotEmpty) {
-          setState(() => assistant.content += event.text);
+          _liveText.value += event.text;
           _jump();
         } else if (event.type == 'start' && event.engine != null) {
-          setState(() => assistant.engine = event.engine);
+          _liveEngine.value = event.engine;
         } else if (event.type == 'done') {
-          setState(() {
-            assistant.streaming = false;
-            assistant.engine = event.engine ?? assistant.engine;
-            if (event.text.isNotEmpty && assistant.content.isEmpty) {
-              assistant.content = event.text;
-            }
-          });
+          _liveEngine.value = event.engine ?? _liveEngine.value;
+          if (event.text.isNotEmpty && _liveText.value.isEmpty) {
+            _liveText.value = event.text;
+          }
         } else if (event.type == 'error') {
           throw ApiException(event.error ?? '问答失败');
         }
       }
-    } catch (err) {
       if (!mounted) return;
       setState(() {
-        assistant.streaming = false;
-        if (assistant.content.isEmpty) {
-          assistant.content = err.toString();
+        _messages.add(ChatMessage(
+          role: 'assistant',
+          content: _liveText.value,
+          engine: _liveEngine.value,
+        ));
+        _live = false;
+      });
+    } catch (err) {
+      if (!mounted) return;
+      final shown = humanizeError(err);
+      setState(() {
+        if (_liveText.value.isEmpty) {
+          _messages.add(ChatMessage(role: 'error', content: shown));
         } else {
-          _messages.add(ChatMessage(role: 'error', content: err.toString()));
+          _messages.add(ChatMessage(
+            role: 'assistant',
+            content: _liveText.value,
+            engine: _liveEngine.value,
+          ));
+          _messages.add(ChatMessage(role: 'error', content: shown));
         }
+        _live = false;
       });
     } finally {
       if (mounted) {
         setState(() {
-          assistant.streaming = false;
           _busy = false;
+          _live = false;
         });
       }
       _jump();
     }
   }
 
-  void _jump() {
+  bool get _nearBottom {
+    if (!_scroll.hasClients) return true;
+    final pos = _scroll.position;
+    return pos.pixels >= pos.maxScrollExtent - 96;
+  }
+
+  void _jump({bool force = false}) {
+    if (!force && !_nearBottom) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scroll.hasClients) return;
       _scroll.animateTo(
-        _scroll.position.maxScrollExtent + 120,
-        duration: const Duration(milliseconds: 90),
-        curve: Curves.linear,
+        _scroll.position.maxScrollExtent + 80,
+        duration: const Duration(milliseconds: 140),
+        curve: Curves.easeOutCubic,
       );
     });
   }
@@ -102,70 +139,84 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   @override
   void dispose() {
     _input.dispose();
+    _focus.dispose();
     _scroll.dispose();
-    _caret.dispose();
+    _liveText.dispose();
+    _liveEngine.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final itemCount = _messages.length + (_live ? 1 : 0);
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.repo.fullName),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: widget.onBack,
-        ),
-      ),
       body: Column(
         children: [
-          Expanded(
-            child: ListView(
-              controller: _scroll,
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-              children: [
-                if (_messages.isEmpty)
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      for (final q in const [
-                        '这个仓库最近在做什么？',
-                        '本机检出里 README 怎么写的？',
-                        '有哪些开放的 PR？',
-                      ])
-                        ActionChip(label: Text(q), onPressed: () => _send(q)),
-                    ],
-                  ),
-                for (final message in _messages)
-                  _Bubble(message: message, caret: _caret),
-              ],
-            ),
-          ),
           SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            bottom: false,
+            child: SizedBox(
+              height: 56,
               child: Row(
                 children: [
+                  IconButton(
+                    tooltip: '返回仓库',
+                    onPressed: widget.onBack,
+                    icon: const Icon(Icons.arrow_back),
+                  ),
                   Expanded(
-                    child: TextField(
-                      controller: _input,
-                      minLines: 1,
-                      maxLines: 4,
-                      onSubmitted: (_) => _send(),
-                      decoration: const InputDecoration(
-                        hintText: '问进度，像在 Cursor 里一样',
-                      ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          widget.repo.fullName,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        Text('问象', style: Theme.of(context).textTheme.labelSmall),
+                      ],
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  IconButton.filled(
-                    onPressed: _busy ? null : _send,
-                    icon: const Icon(Icons.arrow_upward),
-                  ),
+                  const SizedBox(width: 12),
                 ],
               ),
             ),
+          ),
+          const WxHairline(),
+          Expanded(
+            child: itemCount == 0
+                ? _EmptyChat(
+                    repo: widget.repo.fullName,
+                    onPick: _busy ? null : _send,
+                  )
+                : ListView.builder(
+                    controller: _scroll,
+                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+                    itemCount: itemCount,
+                    itemBuilder: (context, index) {
+                      if (index < _messages.length) {
+                        final message = _messages[index];
+                        return _FinishedTurn(
+                          key: ValueKey('m-$index-${message.role}'),
+                          message: message,
+                          onRetry: message.role == 'error' && _lastUser != null && !_busy
+                              ? () => _send(_lastUser)
+                              : null,
+                        );
+                      }
+                      return _LiveTurn(
+                        text: _liveText,
+                        engine: _liveEngine,
+                      );
+                    },
+                  ),
+          ),
+          const WxHairline(),
+          _Composer(
+            controller: _input,
+            focus: _focus,
+            busy: _busy,
+            onSend: _send,
           ),
         ],
       ),
@@ -173,66 +224,288 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   }
 }
 
-class _Bubble extends StatelessWidget {
-  const _Bubble({required this.message, required this.caret});
-  final ChatMessage message;
-  final Animation<double> caret;
+class _EmptyChat extends StatelessWidget {
+  const _EmptyChat({required this.repo, required this.onPick});
+  final String repo;
+  final void Function(String text)? onPick;
 
   @override
   Widget build(BuildContext context) {
-    final mine = message.role == 'user';
-    return Align(
-      alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 6),
-        padding: const EdgeInsets.all(12),
-        constraints: const BoxConstraints(maxWidth: 520),
-        decoration: BoxDecoration(
-          color: mine ? const Color(0xFFE4B15A) : const Color(0xFF1A2128),
-          borderRadius: BorderRadius.circular(14),
-          boxShadow: message.streaming
-              ? const [BoxShadow(color: Color(0x33E4B15A), blurRadius: 16)]
-              : null,
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(24, 36, 24, 16),
+      children: [
+        Text(repo, style: Theme.of(context).textTheme.labelSmall),
+        const SizedBox(height: 8),
+        Text('对着这份检出提问。', style: Theme.of(context).textTheme.headlineMedium),
+        const SizedBox(height: 8),
+        Text(
+          '回答来自本机仓库与 GitHub 进度。',
+          style: Theme.of(context).textTheme.bodyMedium,
         ),
+        const SizedBox(height: 28),
+        for (final q in _ChatPageState._suggestions)
+          _SuggestRow(label: q, onTap: onPick == null ? null : () => onPick!(q)),
+      ],
+    );
+  }
+}
+
+class _SuggestRow extends StatelessWidget {
+  const _SuggestRow({required this.label, required this.onTap});
+  final String label;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: Wx.surface,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(14),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 48),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(label, style: Theme.of(context).textTheme.bodyLarge),
+                  ),
+                  const Icon(Icons.north_east, size: 16, color: Wx.faint),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FinishedTurn extends StatelessWidget {
+  const _FinishedTurn({super.key, required this.message, this.onRetry});
+  final ChatMessage message;
+  final VoidCallback? onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    if (message.role == 'user') {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 22),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            FadeTransition(
-              opacity: message.streaming ? caret : const AlwaysStoppedAnimation(1),
-              child: SelectableText.rich(
-                TextSpan(
+            Text('你问', style: Theme.of(context).textTheme.labelSmall),
+            const SizedBox(height: 6),
+            SelectableText(
+              message.content,
+              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                    color: Wx.muted,
+                    height: 1.5,
+                  ),
+            ),
+          ],
+        ),
+      );
+    }
+    if (message.role == 'error') {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 22),
+        child: WxErrorPanel(
+          error: message.content,
+          onRetry: onRetry,
+          retryLabel: '重试上一问',
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 28),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('问象', style: Theme.of(context).textTheme.labelSmall),
+          const SizedBox(height: 8),
+          WxReadableText(message.content),
+          if (message.engine != null && message.engine!.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text(
+              message.engine == 'local-progress' ? '来自本地进度适配器' : '来自 ${message.engine}',
+              style: Theme.of(context).textTheme.labelSmall,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _LiveTurn extends StatelessWidget {
+  const _LiveTurn({required this.text, required this.engine});
+  final ValueNotifier<String> text;
+  final ValueNotifier<String?> engine;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 28),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('问象', style: Theme.of(context).textTheme.labelSmall),
+          const SizedBox(height: 8),
+          ValueListenableBuilder<String>(
+            valueListenable: text,
+            builder: (context, value, _) {
+              if (value.isEmpty) {
+                return const Row(
                   children: [
-                    TextSpan(
-                      text: message.content.isEmpty && message.streaming ? '▍' : message.content,
-                      style: TextStyle(
-                        color: mine ? const Color(0xFF1A1408) : const Color(0xFFD7DEE6),
-                        height: 1.45,
-                        fontSize: 16,
+                    Text(
+                      '正在写…',
+                      style: TextStyle(color: Wx.muted, fontSize: 16, height: 1.55),
+                    ),
+                    SizedBox(width: 8),
+                    _Caret(),
+                  ],
+                );
+              }
+              return SelectableText.rich(
+                TextSpan(
+                  style: const TextStyle(
+                    color: Wx.text,
+                    fontSize: 16,
+                    height: 1.55,
+                    fontFamily: Wx.fontFamily,
+                    fontFamilyFallback: Wx.fontFallback,
+                  ),
+                  children: [
+                    TextSpan(text: value),
+                    const WidgetSpan(
+                      alignment: PlaceholderAlignment.middle,
+                      child: Padding(
+                        padding: EdgeInsets.only(left: 2),
+                        child: _Caret(),
                       ),
                     ),
-                    if (message.streaming && message.content.isNotEmpty)
-                      const TextSpan(
-                        text: '▍',
-                        style: TextStyle(color: Color(0xFFE4B15A), fontSize: 16),
-                      ),
                   ],
                 ),
-              ),
-            ),
-            if (!message.streaming && message.engine != null && message.engine!.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
+              );
+            },
+          ),
+          ValueListenableBuilder<String?>(
+            valueListenable: engine,
+            builder: (context, value, _) {
+              if (value == null || value.isEmpty) return const SizedBox.shrink();
+              return Padding(
+                padding: const EdgeInsets.only(top: 10),
                 child: Text(
-                  message.engine == 'local-progress'
-                      ? '引擎：本地进度适配器'
-                      : '引擎：${message.engine}',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: mine ? const Color(0xFF3D2E10) : const Color(0xFF8BA4B8),
+                  value == 'local-progress' ? '来自本地进度适配器' : '来自 $value',
+                  style: Theme.of(context).textTheme.labelSmall,
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Caret extends StatefulWidget {
+  const _Caret();
+
+  @override
+  State<_Caret> createState() => _CaretState();
+}
+
+class _CaretState extends State<_Caret> with SingleTickerProviderStateMixin {
+  late final AnimationController _anim = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 520),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _anim.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _anim,
+      child: Container(
+        width: 2,
+        height: 15,
+        margin: const EdgeInsets.only(bottom: 2),
+        decoration: BoxDecoration(
+          color: Wx.accent,
+          borderRadius: BorderRadius.circular(1),
+        ),
+      ),
+    );
+  }
+}
+
+class _Composer extends StatelessWidget {
+  const _Composer({
+    required this.controller,
+    required this.focus,
+    required this.busy,
+    required this.onSend,
+  });
+
+  final TextEditingController controller;
+  final FocusNode focus;
+  final bool busy;
+  final Future<void> Function() onSend;
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: Wx.bg,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 12, 10),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: controller,
+                  focusNode: focus,
+                  minLines: 1,
+                  maxLines: 6,
+                  enabled: !busy,
+                  textInputAction: TextInputAction.send,
+                  onSubmitted: (_) => onSend(),
+                  decoration: InputDecoration(
+                    hintText: busy ? '生成中…' : '问进度，像在 Cursor 里一样',
+                    filled: true,
+                    fillColor: Wx.surface,
                   ),
                 ),
               ),
-          ],
+              const SizedBox(width: 8),
+              SizedBox(
+                width: Wx.tap,
+                height: Wx.tap,
+                child: busy
+                    ? const Padding(
+                        padding: EdgeInsets.all(12),
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : IconButton.filled(
+                        tooltip: '发送',
+                        onPressed: onSend,
+                        icon: const Icon(Icons.arrow_upward, size: 20),
+                      ),
+              ),
+            ],
+          ),
         ),
       ),
     );
