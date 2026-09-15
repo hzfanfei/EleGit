@@ -38,3 +38,12 @@ coverage/
 .cache/
 .turbo/
 .eslintcache
+
+# Flutter
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+**/*.iml
+app/android/local.properties
+app/android/.gradle/

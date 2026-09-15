@@ -1,0 +1,18 @@
+{
+  "name": "wenxiang-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local companion API for the 问象 (Wenxiang) mobile app",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2"
+  }
+}

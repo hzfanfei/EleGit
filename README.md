@@ -1,7 +1,42 @@
-# EleGit
+# EleGit · 问象
 
-A local workspace for EleGit.
+问象 is a Flutter phone app plus a local companion server. Ask about GitHub repo progress from your phone; this computer answers using GitHub data and the local Cursor environment.
 
-## Getting started
+The product plan lives in the Project store, not in this repo:
 
-This repository is newly initialized. More details will be added as the project takes shape.
+`/cursor/stores/bc-d0755f26-a3ad-4de8-b86a-7c66b6eb5ff3/docs/wenxiang-plan.md`
+
+## Run the companion server
+
+```bash
+cd server
+npm install
+npm start
+```
+
+Listens on `0.0.0.0:8787`. The first start prints an API key and LAN URLs. Config (including the GitHub token) is stored in `~/.wenxiang/config.json`.
+
+Optional env vars: see `server/.env.example`.
+
+## Reach the phone
+
+- Same Wi-Fi: in 问象, set the server URL to a printed LAN address (`http://<pc-ip>:8787`) and paste the API key.
+- Off-LAN: install [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/), then start a tunnel (`POST /v1/tunnel/start` or the in-app button) and paste the `https://*.trycloudflare.com` URL. A custom frp/ngrok command can be set in `~/.wenxiang/config.json` under `tunnel.customCommand` (`{port}` is replaced).
+
+The phone talks only to this API.
+
+## Run the Flutter app
+
+```bash
+cd app
+flutter pub get
+flutter run
+```
+
+On a physical phone, do not use `localhost` — that is the phone itself. Use the PC LAN IP or the tunnel URL. GitHub auth is a PAT with `repo` read access (device-code login is available when `GITHUB_CLIENT_ID` is configured).
+
+## Tests
+
+```bash
+cd server && npm test
+```
