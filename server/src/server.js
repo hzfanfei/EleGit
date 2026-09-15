@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import { corsOptions } from "./cors.js";
 import { loadLocalEnv } from "./env.js";
 import { streamAnswer, detectCursorEngine } from "./ask.js";
 import {
@@ -34,7 +35,8 @@ const tunnel = createTunnelManager({
 });
 
 const app = express();
-app.use(cors());
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 app.use(express.json({ limit: "1mb" }));
 
 function sendError(res, err) {
@@ -93,6 +95,10 @@ app.get("/oauth/github/callback", async (req, res) => {
 });
 
 app.use("/v1", (req, res, next) => {
+  if (req.method === "OPTIONS") {
+    next();
+    return;
+  }
   const key = req.get("X-Wenxiang-Key") || "";
   if (!store.config.apiKey || key !== store.config.apiKey) {
     res.status(401).json({ error: "Missing or invalid X-Wenxiang-Key" });
