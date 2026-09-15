@@ -154,31 +154,53 @@ class WenxiangApi {
         .toList();
   }
 
-  Future<({String answer, String engine})> chat({
+  Stream<ChatStreamEvent> chatStream({
     required String owner,
     required String repo,
     required String message,
     required List<ChatMessage> history,
-  }) async {
-    final res = await http
-        .post(
-          _uri('/v1/chat'),
-          headers: _headers,
-          body: jsonEncode({
-            'owner': owner,
-            'repo': repo,
-            'message': message,
-            'history': history
-                .map((m) => {'role': m.role, 'content': m.content})
-                .toList(),
-          }),
-        )
-        .timeout(const Duration(minutes: 3));
-    final body = await _json(res, fallback: '问答失败');
-    return (
-      answer: (body['answer'] ?? '').toString(),
-      engine: (body['engine'] ?? '').toString(),
-    );
+  }) async* {
+    final client = http.Client();
+    try {
+      final request = http.Request('POST', _uri('/v1/chat'))
+        ..headers.addAll({
+          ..._headers,
+          'Accept': 'text/event-stream',
+        })
+        ..body = jsonEncode({
+          'owner': owner,
+          'repo': repo,
+          'message': message,
+          'history': history
+              .map((m) => {'role': m.role, 'content': m.content})
+              .toList(),
+        });
+      final res = await client.send(request).timeout(const Duration(minutes: 4));
+      if (res.statusCode >= 400) {
+        final raw = await res.stream.bytesToString();
+        String error = '问答失败';
+        try {
+          error = (jsonDecode(raw)['error'] ?? error).toString();
+        } catch (_) {}
+        throw ApiException(error);
+      }
+      var buffer = '';
+      await for (final chunk in res.stream.transform(utf8.decoder)) {
+        buffer += chunk;
+        final parts = buffer.split('\n\n');
+        buffer = parts.removeLast();
+        for (final part in parts) {
+          final event = ChatStreamEvent.fromSse(part);
+          if (event != null) yield event;
+        }
+      }
+      if (buffer.trim().isNotEmpty) {
+        final event = ChatStreamEvent.fromSse(buffer);
+        if (event != null) yield event;
+      }
+    } finally {
+      client.close();
+    }
   }
 
   Future<Map<String, dynamic>> startTunnel() async {

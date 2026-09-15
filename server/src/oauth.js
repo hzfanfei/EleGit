@@ -35,7 +35,7 @@ export function callbackUrl(publicBaseUrl) {
 export function suggestedCallbackUrls({ lanUrls = [], tunnelUrl = "" } = {}) {
   const bases = new Set(["http://127.0.0.1:8787", ...lanUrls]);
   if (tunnelUrl) bases.add(String(tunnelUrl).replace(/\/+$/, ""));
-  return [...bases].map((base) => `${base}/oauth/github/callback`);
+  return [...bases].map((base) => `${base.replace(/\/+$/, "")}/oauth/github/callback`);
 }
 
 export function createOAuthSessions() {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildCursorPrompt, synthesizeLocalAnswer } from "../src/ask.js";
+import { buildCursorPrompt, streamText, synthesizeLocalAnswer } from "../src/ask.js";
 
 const sampleProgress = {
   repo: {
@@ -57,6 +57,17 @@ describe("synthesizeLocalAnswer", () => {
       progress: { ...sampleProgress, pulls: [] },
     });
     assert.match(text, /没有开放的 Pull Request/);
+  });
+});
+
+describe("streamText", () => {
+  it("yields small chunks covering the full answer", async () => {
+    const parts = [];
+    for await (const piece of streamText("进度如何", { chunkSize: 2, delayMs: 0 })) {
+      parts.push(piece);
+    }
+    assert.equal(parts.join(""), "进度如何");
+    assert.ok(parts.length >= 2);
   });
 });
 

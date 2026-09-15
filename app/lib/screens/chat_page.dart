@@ -19,41 +19,71 @@ class ChatPage extends StatefulWidget {
   State<ChatPage> createState() => _ChatPageState();
 }
 
-class _ChatPageState extends State<ChatPage> {
+class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin {
   final _input = TextEditingController();
   final _scroll = ScrollController();
   final List<ChatMessage> _messages = [];
   bool _busy = false;
+  late final AnimationController _caret = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 420),
+  )..repeat(reverse: true);
 
   Future<void> _send([String? preset]) async {
     final text = (preset ?? _input.text).trim();
     if (text.isEmpty || _busy) return;
     _input.clear();
+    final assistant = ChatMessage(role: 'assistant', content: '', streaming: true);
     setState(() {
       _messages.add(ChatMessage(role: 'user', content: text));
+      _messages.add(assistant);
       _busy = true;
     });
     _jump();
     try {
-      final result = await widget.api.chat(
+      await for (final event in widget.api.chatStream(
         owner: widget.repo.owner,
         repo: widget.repo.name,
         message: text,
-        history: _messages.where((m) => m.role != 'error').toList(),
-      );
-      setState(() {
-        _messages.add(ChatMessage(
-          role: 'assistant',
-          content: result.answer,
-          engine: result.engine,
-        ));
-      });
+        history: _messages
+            .where((m) => m.role != 'error' && !(m.role == 'assistant' && m.streaming))
+            .toList(),
+      )) {
+        if (!mounted) return;
+        if (event.type == 'delta' && event.text.isNotEmpty) {
+          setState(() => assistant.content += event.text);
+          _jump();
+        } else if (event.type == 'start' && event.engine != null) {
+          setState(() => assistant.engine = event.engine);
+        } else if (event.type == 'done') {
+          setState(() {
+            assistant.streaming = false;
+            assistant.engine = event.engine ?? assistant.engine;
+            if (event.text.isNotEmpty && assistant.content.isEmpty) {
+              assistant.content = event.text;
+            }
+          });
+        } else if (event.type == 'error') {
+          throw ApiException(event.error ?? '问答失败');
+        }
+      }
     } catch (err) {
+      if (!mounted) return;
       setState(() {
-        _messages.add(ChatMessage(role: 'error', content: err.toString()));
+        assistant.streaming = false;
+        if (assistant.content.isEmpty) {
+          assistant.content = err.toString();
+        } else {
+          _messages.add(ChatMessage(role: 'error', content: err.toString()));
+        }
       });
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() {
+          assistant.streaming = false;
+          _busy = false;
+        });
+      }
       _jump();
     }
   }
@@ -62,9 +92,9 @@ class _ChatPageState extends State<ChatPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scroll.hasClients) return;
       _scroll.animateTo(
-        _scroll.position.maxScrollExtent + 80,
-        duration: const Duration(milliseconds: 240),
-        curve: Curves.easeOut,
+        _scroll.position.maxScrollExtent + 120,
+        duration: const Duration(milliseconds: 90),
+        curve: Curves.linear,
       );
     });
   }
@@ -73,6 +103,7 @@ class _ChatPageState extends State<ChatPage> {
   void dispose() {
     _input.dispose();
     _scroll.dispose();
+    _caret.dispose();
     super.dispose();
   }
 
@@ -106,12 +137,8 @@ class _ChatPageState extends State<ChatPage> {
                         ActionChip(label: Text(q), onPressed: () => _send(q)),
                     ],
                   ),
-                for (final message in _messages) _Bubble(message: message),
-                if (_busy)
-                  const Padding(
-                    padding: EdgeInsets.only(top: 8),
-                    child: Text('本机正在根据 GitHub 上下文作答…'),
-                  ),
+                for (final message in _messages)
+                  _Bubble(message: message, caret: _caret),
               ],
             ),
           ),
@@ -147,8 +174,9 @@ class _ChatPageState extends State<ChatPage> {
 }
 
 class _Bubble extends StatelessWidget {
-  const _Bubble({required this.message});
+  const _Bubble({required this.message, required this.caret});
   final ChatMessage message;
+  final Animation<double> caret;
 
   @override
   Widget build(BuildContext context) {
@@ -162,23 +190,41 @@ class _Bubble extends StatelessWidget {
         decoration: BoxDecoration(
           color: mine ? const Color(0xFFE4B15A) : const Color(0xFF1A2128),
           borderRadius: BorderRadius.circular(14),
+          boxShadow: message.streaming
+              ? const [BoxShadow(color: Color(0x33E4B15A), blurRadius: 16)]
+              : null,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SelectableText(
-              message.content,
-              style: TextStyle(
-                color: mine ? const Color(0xFF1A1408) : const Color(0xFFD7DEE6),
-                height: 1.4,
+            FadeTransition(
+              opacity: message.streaming ? caret : const AlwaysStoppedAnimation(1),
+              child: SelectableText.rich(
+                TextSpan(
+                  children: [
+                    TextSpan(
+                      text: message.content.isEmpty && message.streaming ? '▍' : message.content,
+                      style: TextStyle(
+                        color: mine ? const Color(0xFF1A1408) : const Color(0xFFD7DEE6),
+                        height: 1.45,
+                        fontSize: 16,
+                      ),
+                    ),
+                    if (message.streaming && message.content.isNotEmpty)
+                      const TextSpan(
+                        text: '▍',
+                        style: TextStyle(color: Color(0xFFE4B15A), fontSize: 16),
+                      ),
+                  ],
+                ),
               ),
             ),
-            if (message.engine != null && message.engine!.isNotEmpty)
+            if (!message.streaming && message.engine != null && message.engine!.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 6),
                 child: Text(
                   message.engine == 'local-progress'
-                      ? '引擎：本地 GitHub 进度适配器'
+                      ? '引擎：本地进度适配器'
                       : '引擎：${message.engine}',
                   style: TextStyle(
                     fontSize: 11,

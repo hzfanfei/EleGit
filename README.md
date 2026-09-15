@@ -1,46 +1,45 @@
 # EleGit · 问象
 
-问象 is a Flutter phone app plus a local companion server. Ask about GitHub repo progress from your phone; this computer answers using GitHub data and the local Cursor environment.
+手机 App「问象」+ 本机配套服务。打开即浏览器登录 GitHub，选仓库后克隆到 `~/问象`，流式问答。
 
-The product plan lives in the Project store, not in this repo:
+配置说明（中文）：[配置说明.md](./配置说明.md)
 
-`/cursor/stores/bc-d0755f26-a3ad-4de8-b86a-7c66b6eb5ff3/docs/wenxiang-plan.md`
+用户计划 / PRD 在 Project store：
 
-## Run the companion server
+- `/cursor/stores/bc-d0755f26-a3ad-4de8-b86a-7c66b6eb5ff3/docs/wenxiang-plan.md`
+- `/cursor/stores/bc-d0755f26-a3ad-4de8-b86a-7c66b6eb5ff3/docs/wenxiang-prd.md`
 
-```bash
+## 配置
+
+```bat
+copy .env.example .env
+notepad .env
+```
+
+只填这一份根目录 `.env`。不要提交。不要把 Client Secret 写进仓库。
+
+## 启动服务
+
+```bat
 cd server
 npm install
 npm start
 ```
 
-Listens on `0.0.0.0:8787`. The first start prints an API key and LAN URLs. Config (including the GitHub token) is stored in `~/.wenxiang/config.json`.
+## 启动 App
 
-Optional env vars: see `server/.env.example`.
-
-## Reach the phone
-
-- Same Wi-Fi: in 问象, set the server URL to a printed LAN address (`http://<pc-ip>:8787`) and paste the API key.
-- Off-LAN: install [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/), then start a tunnel (`POST /v1/tunnel/start` or the in-app button) and paste the `https://*.trycloudflare.com` URL. A custom frp/ngrok command can be set in `~/.wenxiang/config.json` under `tunnel.customCommand` (`{port}` is replaced).
-
-The phone talks only to this API.
-
-## Run the Flutter app
-
-```bash
+```bat
+node scripts/sync-app-env.js
 cd app
 flutter pub get
-flutter run
+flutter run --dart-define-from-file=../.env
 ```
 
-On a physical phone, do not use `localhost` — that is the phone itself. Use the PC LAN IP or the tunnel URL.
+手机不用填地址或 Key。
 
-GitHub login is **browser OAuth**. Create an OAuth App and set the Authorization callback URL to `{phone-base-url}/oauth/github/callback` (add LAN, `127.0.0.1`, and tunnel host as needed). Then copy `server/.env.example` to `server/.env` on that computer and fill `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`. Do not commit `.env`. Process env wins over `.env`, which wins over `~/.wenxiang/config.json`.
+## 测试
 
-Selected repos are cloned to `~/问象/<owner>/<repo>`. PAT remains a fallback only.
-
-## Tests
-
-```bash
+```bat
 cd server && npm test
+cd app && flutter test
 ```

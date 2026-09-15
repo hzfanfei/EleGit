@@ -52,3 +52,5 @@ coverage/
 **/*.iml
 app/android/local.properties
 app/android/.gradle/
+app/lib/generated/env.g.dart
+app/dart_defines.json

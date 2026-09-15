@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 class ServerStatus {
   ServerStatus({
     required this.githubConnected,
@@ -85,11 +87,47 @@ class RepoItem {
 }
 
 class ChatMessage {
-  ChatMessage({required this.role, required this.content, this.engine});
+  ChatMessage({
+    required this.role,
+    required this.content,
+    this.engine,
+    this.streaming = false,
+  });
 
   final String role;
-  final String content;
+  String content;
+  String? engine;
+  bool streaming;
+}
+
+class ChatStreamEvent {
+  ChatStreamEvent({required this.type, this.text = '', this.engine, this.error});
+
+  final String type;
+  final String text;
   final String? engine;
+  final String? error;
+
+  static ChatStreamEvent? fromSse(String raw) {
+    final lines = raw.split('\n');
+    final data = lines
+        .where((line) => line.startsWith('data:'))
+        .map((line) => line.substring(5).trim())
+        .join();
+    if (data.isEmpty) return null;
+    try {
+      final json = jsonDecode(data);
+      if (json is! Map) return null;
+      return ChatStreamEvent(
+        type: (json['type'] ?? '').toString(),
+        text: (json['text'] ?? json['answer'] ?? '').toString(),
+        engine: json['engine']?.toString(),
+        error: json['error']?.toString(),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
 }
 
 class DeviceStart {

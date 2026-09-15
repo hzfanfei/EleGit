@@ -28,7 +28,7 @@ export function detectCursorEngine() {
   return null;
 }
 
-function runCommand(file, args, { timeoutMs = 120_000, cwd } = {}) {
+function runCommand(file, args, { timeoutMs = 120_000, cwd, onChunk } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(file, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
@@ -38,7 +38,9 @@ function runCommand(file, args, { timeoutMs = 120_000, cwd } = {}) {
       reject(new Error(`Cursor CLI timed out after ${timeoutMs}ms`));
     }, timeoutMs);
     child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
+      const text = chunk.toString();
+      stdout += text;
+      onChunk?.(text);
     });
     child.stderr.on("data", (chunk) => {
       stderr += chunk.toString();
@@ -56,6 +58,14 @@ function runCommand(file, args, { timeoutMs = 120_000, cwd } = {}) {
       resolve((stdout || stderr).trim());
     });
   });
+}
+
+export async function* streamText(text, { chunkSize = 2, delayMs = 10 } = {}) {
+  const chars = [...String(text || "")];
+  for (let i = 0; i < chars.length; i += chunkSize) {
+    yield chars.slice(i, i + chunkSize).join("");
+    if (delayMs) await new Promise((r) => setTimeout(r, delayMs));
+  }
 }
 
 export function buildCursorPrompt({ question, history, context }) {
@@ -158,27 +168,70 @@ export function synthesizeLocalAnswer({ question, progress, context, local }) {
   return sections.join("\n\n");
 }
 
-export async function answerQuestion({ question, history, progress, context, local }) {
+export async function* streamAnswer({ question, history, progress, context, local }) {
   const engine = detectCursorEngine();
   const prompt = buildCursorPrompt({ question, history, context });
   if (engine) {
-    try {
-      const text = await runCommand(engine.path, engine.argsFor(prompt), {
-        cwd: local?.present ? local.path : undefined,
+    yield { type: "start", engine: engine.id };
+    const queue = [];
+    let notify;
+    let finished = false;
+    let fail = null;
+    let full = "";
+    runCommand(engine.path, engine.argsFor(prompt), {
+      cwd: local?.present ? local.path : undefined,
+      onChunk: (chunk) => {
+        full += chunk;
+        queue.push({ type: "delta", text: chunk });
+        notify?.();
+      },
+    })
+      .then((text) => {
+        full = text || full;
+        finished = true;
+        notify?.();
+      })
+      .catch((err) => {
+        fail = err;
+        finished = true;
+        notify?.();
       });
-      if (text) {
-        return { engine: engine.id, answer: text };
+    while (!finished || queue.length) {
+      if (!queue.length) {
+        await new Promise((resolve) => {
+          notify = resolve;
+        });
+        notify = undefined;
+        continue;
       }
-    } catch (err) {
-      const fallback = synthesizeLocalAnswer({ question, progress, context, local });
-      return {
-        engine: "local-progress",
-        answer: `${fallback}\n\n（本机探测到 ${engine.id}，但调用失败：${err.message}。已回退到本地进度适配器。）`,
-      };
+      yield queue.shift();
     }
+    if (!fail && full) {
+      yield { type: "done", engine: engine.id, answer: full };
+      return;
+    }
+    const fallback = `${synthesizeLocalAnswer({ question, progress, context, local })}\n\n（本机探测到 ${engine.id}，但调用失败：${fail?.message || "empty output"}。已回退到本地进度适配器。）`;
+    yield { type: "start", engine: "local-progress" };
+    yield* prefixDeltas(fallback);
+    yield { type: "done", engine: "local-progress", answer: fallback };
+    return;
   }
-  return {
-    engine: "local-progress",
-    answer: synthesizeLocalAnswer({ question, progress, context, local }),
-  };
+  const answer = synthesizeLocalAnswer({ question, progress, context, local });
+  yield { type: "start", engine: "local-progress" };
+  yield* prefixDeltas(answer);
+  yield { type: "done", engine: "local-progress", answer };
+}
+
+async function* prefixDeltas(text) {
+  for await (const piece of streamText(text)) {
+    yield { type: "delta", text: piece };
+  }
+}
+
+export async function answerQuestion({ question, history, progress, context, local }) {
+  let last = { engine: "local-progress", answer: "" };
+  for await (const event of streamAnswer({ question, history, progress, context, local })) {
+    if (event.type === "done") last = { engine: event.engine, answer: event.answer };
+  }
+  return last;
 }

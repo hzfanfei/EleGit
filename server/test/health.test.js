@@ -29,6 +29,8 @@ describe("companion HTTP", () => {
     const env = { ...process.env };
     delete env.GITHUB_CLIENT_ID;
     delete env.GITHUB_CLIENT_SECRET;
+    delete env.WENXIANG_API_KEY;
+    delete env.WENXIANG_PUBLIC_URL;
     const child = spawn(process.execPath, ["src/server.js"], {
       cwd: root,
       env: {
@@ -61,6 +63,7 @@ describe("companion HTTP", () => {
       assert.equal(status.github.oauthReady, false);
       assert.ok(Array.isArray(status.github.callbackUrls));
       assert.ok(String(status.workspace.root).length > 0);
+      assert.ok(String(status.github.publicUrl).startsWith('http'));
       assert.ok(Array.isArray(status.lanUrls));
     } finally {
       child.kill("SIGTERM");

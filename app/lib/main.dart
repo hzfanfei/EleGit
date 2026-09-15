@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api/wenxiang_api.dart';
+import 'config.dart';
 import 'models.dart';
 import 'screens/chat_page.dart';
-import 'screens/connect_page.dart';
+import 'screens/login_page.dart';
 import 'screens/repos_page.dart';
-import 'screens/setup_page.dart';
 import 'theme.dart';
 
 void main() {
@@ -28,7 +27,7 @@ class WenxiangApp extends StatelessWidget {
   }
 }
 
-enum AppStep { setup, github, repos, chat }
+enum AppStep { boot, login, repos, chat }
 
 class ShellPage extends StatefulWidget {
   const ShellPage({super.key});
@@ -38,66 +37,77 @@ class ShellPage extends StatefulWidget {
 }
 
 class _ShellPageState extends State<ShellPage> {
-  AppStep _step = AppStep.setup;
-  WenxiangApi? _api;
-  ServerStatus? _status;
+  AppStep _step = AppStep.boot;
+  late final WenxiangApi _api = WenxiangApi(
+    baseUrl: AppEnv.publicUrl,
+    apiKey: AppEnv.apiKey,
+  );
   RepoItem? _repo;
+  String _bootError = '';
 
-  Future<bool> _hydrate() async {
-    final prefs = await SharedPreferences.getInstance();
-    final url = (prefs.getString('baseUrl') ?? '').trim();
-    final key = (prefs.getString('apiKey') ?? '').trim();
-    if (url.isEmpty || key.isEmpty) return false;
-    final api = WenxiangApi(baseUrl: url, apiKey: key);
+  @override
+  void initState() {
+    super.initState();
+    _boot();
+  }
+
+  Future<void> _boot() async {
     try {
-      await api.ping();
-      final status = await api.status();
+      await _api.ping();
+      final status = await _api.status();
+      if (!mounted) return;
       setState(() {
-        _api = api;
-        _status = status;
+        _step = status.githubConnected ? AppStep.repos : AppStep.login;
       });
-      return true;
-    } catch (_) {
-      return false;
+    } catch (err) {
+      if (!mounted) return;
+      setState(() {
+        _bootError = err.toString();
+        _step = AppStep.login;
+      });
     }
   }
 
-  Future<void> _afterSetup() async {
-    final ok = await _hydrate();
-    if (ok) setState(() => _step = AppStep.github);
-  }
-
-  Future<void> _refreshStatus() async {
-    if (_api == null) return;
-    final status = await _api!.status();
-    setState(() => _status = status);
+  Future<void> _afterLogin() async {
+    await _api.status();
+    if (!mounted) return;
+    setState(() => _step = AppStep.repos);
   }
 
   @override
   Widget build(BuildContext context) {
     switch (_step) {
-      case AppStep.setup:
-        return SetupPage(onReady: _afterSetup);
-      case AppStep.github:
-        return ConnectPage(
-          api: _api!,
-          status: _status!,
-          onChanged: _refreshStatus,
-          onContinue: () => setState(() => _step = AppStep.repos),
-          onBack: () => setState(() => _step = AppStep.setup),
+      case AppStep.boot:
+        return const Scaffold(
+          body: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('问象', style: TextStyle(fontSize: 32, fontWeight: FontWeight.w700)),
+                SizedBox(height: 20),
+                CircularProgressIndicator(),
+              ],
+            ),
+          ),
+        );
+      case AppStep.login:
+        return LoginPage(
+          api: _api,
+          onReady: _afterLogin,
+          error: _bootError,
         );
       case AppStep.repos:
         return ReposPage(
-          api: _api!,
+          api: _api,
           onOpen: (repo) => setState(() {
             _repo = repo;
             _step = AppStep.chat;
           }),
-          onBack: () => setState(() => _step = AppStep.github),
+          onBack: () => setState(() => _step = AppStep.login),
         );
       case AppStep.chat:
         return ChatPage(
-          api: _api!,
+          api: _api,
           repo: _repo!,
           onBack: () => setState(() => _step = AppStep.repos),
         );

@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import { loadLocalEnv } from "./env.js";
-import { answerQuestion, detectCursorEngine } from "./ask.js";
+import { streamAnswer, detectCursorEngine } from "./ask.js";
 import {
   formatProgressContext,
   listRepos,
@@ -120,9 +120,10 @@ app.get("/v1/status", (_req, res) => {
       user: store.config.githubUser,
       oauthReady: oauthReady(),
       callbackPath: "/oauth/github/callback",
+      publicUrl: store.config.publicUrl,
       callbackUrls: suggestedCallbackUrls({
         lanUrls: lans,
-        tunnelUrl: tunnelStatus.publicUrl,
+        tunnelUrl: store.config.publicUrl || tunnelStatus.publicUrl,
       }),
       deviceFlowReady: Boolean(store.config.githubClientId),
     },
@@ -145,11 +146,11 @@ app.post("/v1/github/oauth/start", (req, res) => {
     if (!oauthReady()) {
       res.status(400).json({
         error:
-          "Copy server/.env.example to server/.env and set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET, then register {baseUrl}/oauth/github/callback on the GitHub OAuth App.",
+          "Copy the repo-root .env.example to .env and set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET. Register {WENXIANG_PUBLIC_URL}/oauth/github/callback.",
       });
       return;
     }
-    const publicBaseUrl = req.body?.publicBaseUrl || `http://127.0.0.1:${PORT}`;
+    const publicBaseUrl = store.config.publicUrl;
     const started = oauth.start({
       clientId: store.config.githubClientId,
       publicBaseUrl,
@@ -280,6 +281,10 @@ app.get("/v1/repos/:owner/:repo/progress", requireGithub, async (req, res) => {
   }
 });
 
+function writeSse(res, event) {
+  res.write(`data: ${JSON.stringify(event)}\n\n`);
+}
+
 app.post("/v1/chat", requireGithub, async (req, res) => {
   try {
     const owner = String(req.body?.owner || "").trim();
@@ -292,20 +297,56 @@ app.post("/v1/chat", requireGithub, async (req, res) => {
     }
     const { progress, dest, local } = await checkoutRepo(owner, repo);
     const context = `${formatProgressContext(progress)}\n\n${formatLocalContext(local)}`;
-    const result = await answerQuestion({
+    res.status(200);
+    res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders?.();
+    writeSse(res, {
+      type: "meta",
+      repo: progress.repo.fullName,
+      checkout: dest,
+    });
+    let finalEngine = "local-progress";
+    let finalAnswer = "";
+    for await (const event of streamAnswer({
       question: message,
       history,
       progress,
       context,
       local,
-    });
-    res.json({
-      engine: result.engine,
-      answer: result.answer,
-      repo: progress.repo.fullName,
-      checkout: dest,
-    });
+    })) {
+      if (event.type === "done") {
+        finalEngine = event.engine;
+        finalAnswer = event.answer;
+        writeSse(res, {
+          type: "done",
+          engine: event.engine,
+          answer: event.answer,
+          repo: progress.repo.fullName,
+          checkout: dest,
+        });
+      } else {
+        writeSse(res, event);
+      }
+    }
+    if (!finalAnswer) {
+      writeSse(res, {
+        type: "done",
+        engine: finalEngine,
+        answer: "",
+        repo: progress.repo.fullName,
+        checkout: dest,
+      });
+    }
+    res.end();
   } catch (err) {
+    if (res.headersSent) {
+      writeSse(res, { type: "error", error: err.message });
+      res.end();
+      return;
+    }
     sendError(res, err);
   }
 });
@@ -330,9 +371,10 @@ app.listen(PORT, BIND, () => {
   const lans = lanUrls(PORT);
   const callbacks = suggestedCallbackUrls({
     lanUrls: lans,
-    tunnelUrl: tunnel.status().publicUrl,
+    tunnelUrl: store.config.publicUrl || tunnel.status().publicUrl,
   });
   console.log(`问象 companion listening on http://${BIND}:${PORT}`);
+  console.log(`Public URL: ${store.config.publicUrl}`);
   console.log(`API key: ${store.config.apiKey}`);
   console.log(`Config: ${store.file}`);
   console.log(`Workspace: ${store.config.workspaceRoot}`);
@@ -342,7 +384,7 @@ app.listen(PORT, BIND, () => {
   console.log(
     oauthReady()
       ? `GitHub OAuth ready. Register callback(s):\n  ${callbacks.join("\n  ")}`
-      : "GitHub OAuth not configured — copy server/.env.example to server/.env and fill GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET",
+      : "GitHub OAuth not configured — copy .env.example to .env at the repo root and fill GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET",
   );
   const cursor = detectCursorEngine();
   console.log(
