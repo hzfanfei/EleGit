@@ -110,24 +110,14 @@ class _ReposPageState extends State<ReposPage> {
             onBack: widget.onBack,
             backEnabled: !blocked,
             backTooltip: '重新登录',
-            title: '选择仓库',
+            showMark: true,
+            title: '仓库',
             subtitle: widget.githubLogin.isEmpty
                 ? '点进一个，问进度'
                 : widget.githubLogin,
-            trailing: widget.githubLogin.isEmpty
-                ? null
-                : [
-                    Padding(
-                      padding: const EdgeInsets.only(right: 12),
-                      child: Text(
-                        '已登录',
-                        style: Theme.of(context).textTheme.labelSmall,
-                      ),
-                    ),
-                  ],
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+            padding: const EdgeInsets.fromLTRB(Wx.inset, 4, Wx.inset, 12),
             child: TextField(
               controller: _query,
               textInputAction: TextInputAction.search,
@@ -154,7 +144,7 @@ class _ReposPageState extends State<ReposPage> {
           const WxHairline(),
           if (_error != null && _cloning == null)
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+              padding: const EdgeInsets.fromLTRB(Wx.inset, 16, Wx.inset, 0),
               child: WxErrorPanel(error: _error!, onRetry: _search),
             ),
           Expanded(
@@ -192,9 +182,9 @@ class _ReposPageState extends State<ReposPage> {
       );
     }
     return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
+      padding: const EdgeInsets.fromLTRB(Wx.inset, 8, Wx.inset, 24),
       itemCount: _repos.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 4),
+      separatorBuilder: (_, __) => const SizedBox(height: 2),
       itemBuilder: (context, index) {
         final repo = _repos[index];
         return _RepoTile(
@@ -220,7 +210,7 @@ class _RepoTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final initial = repo.owner.isNotEmpty ? repo.owner.substring(0, 1).toUpperCase() : '?';
+    final initial = repo.name.isNotEmpty ? repo.name.substring(0, 1).toUpperCase() : '?';
     final time = formatRelativeTime(repo.pushedAt);
     final meta = [
       repo.owner,
@@ -235,7 +225,7 @@ class _RepoTile extends StatelessWidget {
         child: ConstrainedBox(
           constraints: const BoxConstraints(minHeight: 64),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 12, 8, 12),
+            padding: const EdgeInsets.fromLTRB(4, 12, 0, 12),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
@@ -289,15 +279,6 @@ class _RepoTile extends StatelessWidget {
                         const SizedBox(height: 3),
                         Text(meta, style: Theme.of(context).textTheme.labelSmall),
                       ],
-                      if (repo.description.isNotEmpty) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          repo.description,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Wx.muted),
-                        ),
-                      ],
                     ],
                   ),
                 ),
@@ -330,9 +311,22 @@ class _CloneScrim extends StatefulWidget {
 }
 
 class _CloneScrimState extends State<_CloneScrim> {
-  static const _stages = ['正在准备检出', '正在克隆到本机', '即将打开'];
+  static const _stages = ['准备', '正在克隆', '即将打开'];
   int _stage = 0;
   Timer? _timer;
+
+  String get _path => '~/问象/${widget.repo.owner}/${widget.repo.name}';
+
+  String get _stageDetail {
+    switch (_stage) {
+      case 0:
+        return '先确认 ${widget.repo.fullName}，再落到本机。';
+      case 1:
+        return '正在克隆到 $_path';
+      default:
+        return '马上打开这份仓库。';
+    }
+  }
 
   @override
   void initState() {
@@ -380,19 +374,17 @@ class _CloneScrimState extends State<_CloneScrim> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    failed ? '检出没有完成' : _stages[_stage],
+                    failed ? '没有落到本机' : _stages[_stage],
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    failed
-                        ? '${widget.repo.fullName} 还没有落到本机问象目录。'
-                        : '正在把 ${widget.repo.fullName} 克隆到本机问象目录…',
+                    failed ? '${widget.repo.fullName} 还没有写到本机。' : _stageDetail,
                     style: Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.5),
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    '~/问象/${widget.repo.owner}/${widget.repo.name}',
+                    _path,
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                   if (!failed) ...[

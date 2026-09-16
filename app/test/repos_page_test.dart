@@ -16,6 +16,7 @@ void main() {
         theme: wenxiangTheme(),
         home: ReposPage(
           api: api,
+          githubLogin: 'octo',
           onOpen: (repo) => opened = repo,
           onBack: () {},
         ),
@@ -24,16 +25,19 @@ void main() {
     await tester.pump();
     await tester.pumpAndSettle();
 
-    expect(find.text('选择仓库'), findsOneWidget);
+    expect(find.text('仓库'), findsOneWidget);
     expect(find.byType(AppBar), findsNothing);
     expect(find.text('demo'), findsOneWidget);
     expect(find.textContaining('octo'), findsWidgets);
+    expect(find.text('已登录'), findsNothing);
     expect(find.text('私有'), findsOneWidget);
     expect(find.text('测试连接'), findsNothing);
+    expect(find.textContaining('检出'), findsNothing);
 
     await tester.tap(find.text('demo'));
     await tester.pump();
-    expect(find.textContaining('正在把 octo/demo'), findsWidgets);
+    expect(find.textContaining('~/问象/octo/demo'), findsWidgets);
+    expect(find.text('准备'), findsOneWidget);
     await tester.pump(const Duration(milliseconds: 50));
     await tester.pumpAndSettle();
     expect(api.checkoutCalls, 1);
@@ -83,11 +87,12 @@ void main() {
 
     await tester.tap(find.text('demo'));
     await tester.pump();
-    expect(find.textContaining('正在把 octo/demo'), findsWidgets);
+    expect(find.textContaining('~/问象/octo/demo'), findsWidgets);
     await tester.pump(const Duration(milliseconds: 30));
     await tester.pump();
-    expect(find.text('检出没有完成'), findsOneWidget);
+    expect(find.text('没有落到本机'), findsOneWidget);
     expect(find.text('关闭'), findsOneWidget);
     expect(find.textContaining('克隆'), findsWidgets);
+    expect(find.textContaining('检出'), findsNothing);
   });
 }

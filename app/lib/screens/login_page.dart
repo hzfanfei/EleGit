@@ -169,7 +169,7 @@ class _LoginPageState extends State<LoginPage> {
                   decoration: BoxDecoration(
                     color: Wx.surface,
                     borderRadius: BorderRadius.circular(Wx.radius),
-                    border: Border.all(color: Wx.hairline),
+                    border: Border.all(color: ready ? Wx.ok : Wx.hairline),
                   ),
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),

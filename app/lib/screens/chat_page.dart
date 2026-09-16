@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../api/wenxiang_api.dart';
 import '../copy/errors.dart';
+import '../copy/time.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../widgets/wx_chrome.dart';
@@ -27,7 +28,7 @@ class ChatPage extends StatefulWidget {
 class _ChatPageState extends State<ChatPage> {
   static const _suggestions = [
     '这个仓库最近在做什么？',
-    '本机检出里 README 怎么写的？',
+    'README 里怎么写的？',
     '有哪些开放的 PR？',
   ];
 
@@ -258,22 +259,36 @@ class _ChatPageState extends State<ChatPage> {
     await showModalBottomSheet<void>(
       context: context,
       backgroundColor: Wx.surface,
-      showDragHandle: true,
+      showDragHandle: false,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setSheet) {
             return SafeArea(
               child: ListView(
                 shrinkWrap: true,
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 20),
+                padding: const EdgeInsets.fromLTRB(Wx.inset, 8, Wx.inset, 20),
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 4, 12, 14),
-                    child: Text('历史会话', style: Theme.of(context).textTheme.titleMedium),
+                  Center(
+                    child: Container(
+                      width: 36,
+                      height: 3,
+                      margin: const EdgeInsets.only(bottom: 16),
+                      decoration: BoxDecoration(
+                        color: Wx.hairline,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
                   ),
+                  Text('历史会话', style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 12),
+                  const WxHairline(),
+                  const SizedBox(height: 8),
                   if (_sessions.isEmpty)
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
+                      padding: const EdgeInsets.fromLTRB(0, 8, 0, 16),
                       child: Text('还没有会话', style: Theme.of(context).textTheme.bodyMedium),
                     ),
                   for (final session in _sessions)
@@ -314,7 +329,7 @@ class _ChatPageState extends State<ChatPage> {
   Widget build(BuildContext context) {
     final session = _currentSession;
     final subtitle = session == null || session.title.isEmpty || session.title == '新会话'
-        ? '问象'
+        ? ''
         : session.title;
     final itemCount = _messages.length + (_live ? 1 : 0);
     return Scaffold(
@@ -346,7 +361,7 @@ class _ChatPageState extends State<ChatPage> {
                   )
                 : ListView.builder(
                     controller: _scroll,
-                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+                    padding: const EdgeInsets.fromLTRB(Wx.inset, 20, Wx.inset, 16),
                     itemCount: itemCount,
                     itemBuilder: (context, index) {
                       if (index < _messages.length) {
@@ -386,7 +401,7 @@ class _EmptyChat extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView(
-      padding: const EdgeInsets.fromLTRB(24, 36, 24, 16),
+      padding: const EdgeInsets.fromLTRB(Wx.inset, 36, Wx.inset, 16),
       children: [
         Text('从进度问起。', style: Theme.of(context).textTheme.headlineMedium),
         const SizedBox(height: 8),
@@ -418,6 +433,7 @@ class _SessionRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final title = session.title.isEmpty ? '新会话' : session.title;
+    final when = formatRelativeTime(session.updatedAt.isNotEmpty ? session.updatedAt : session.createdAt);
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
       child: Material(
@@ -427,17 +443,26 @@ class _SessionRow extends StatelessWidget {
           onTap: onOpen,
           borderRadius: BorderRadius.circular(12),
           child: ConstrainedBox(
-            constraints: const BoxConstraints(minHeight: 48),
+            constraints: const BoxConstraints(minHeight: 52),
             child: Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
               child: Row(
                 children: [
                   Expanded(
-                    child: Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodyLarge,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodyLarge,
+                        ),
+                        if (when.isNotEmpty) ...[
+                          const SizedBox(height: 2),
+                          Text(when, style: Theme.of(context).textTheme.labelSmall),
+                        ],
+                      ],
                     ),
                   ),
                   IconButton(
@@ -505,7 +530,7 @@ class _FinishedTurn extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const ColoredBox(
-                color: Wx.hairline,
+                color: Wx.accent,
                 child: SizedBox(width: 2),
               ),
               const SizedBox(width: 12),
@@ -513,7 +538,10 @@ class _FinishedTurn extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('你', style: Theme.of(context).textTheme.labelSmall),
+                    Text(
+                      '你',
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.accent),
+                    ),
                     const SizedBox(height: 6),
                     SelectableText(
                       message.content,
@@ -545,7 +573,10 @@ class _FinishedTurn extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('问象', style: Theme.of(context).textTheme.labelSmall),
+          Text(
+            '问象',
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.muted),
+          ),
           const SizedBox(height: 8),
           WxReadableText(message.content),
           if (message.engine != null && message.engine!.isNotEmpty) ...[
@@ -573,7 +604,10 @@ class _LiveTurn extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('问象', style: Theme.of(context).textTheme.labelSmall),
+          Text(
+            '问象',
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.muted),
+          ),
           const SizedBox(height: 8),
           ValueListenableBuilder<String>(
             valueListenable: text,
@@ -675,7 +709,7 @@ class _Composer extends StatelessWidget {
       child: SafeArea(
         top: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 12, 10),
+          padding: const EdgeInsets.fromLTRB(Wx.inset, 10, 12, 10),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [

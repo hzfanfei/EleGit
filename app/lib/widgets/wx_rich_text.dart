@@ -24,7 +24,17 @@ List<RichBlock> splitRichBlocks(String src) {
     cursor = match.end;
   }
   if (cursor < src.length) {
-    parts.add(RichBlock(RichKind.prose, src.substring(cursor)));
+    final rest = src.substring(cursor);
+    final open = RegExp(r'```[^\n]*\n');
+    final opened = open.firstMatch(rest);
+    if (opened != null) {
+      if (opened.start > 0) {
+        parts.add(RichBlock(RichKind.prose, rest.substring(0, opened.start)));
+      }
+      parts.add(RichBlock(RichKind.code, rest.substring(opened.end)));
+    } else {
+      parts.add(RichBlock(RichKind.prose, rest));
+    }
   }
   return parts.where((p) => p.text.trim().isNotEmpty).toList();
 }
@@ -76,14 +86,22 @@ bool _hasStructure(String text) {
 Widget _prose(String text, Color color, bool selectable) {
   if (_hasStructure(text)) {
     final lines = text.split('\n');
+    final children = <Widget>[];
+    var gap = false;
+    for (final line in lines) {
+      if (line.trim().isEmpty) {
+        gap = children.isNotEmpty;
+        continue;
+      }
+      if (children.isNotEmpty) {
+        children.add(SizedBox(height: gap ? 10 : 6));
+      }
+      children.add(_structuredLine(line, color, selectable));
+      gap = false;
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        for (var i = 0; i < lines.length; i++) ...[
-          if (i > 0) const SizedBox(height: 6),
-          _structuredLine(lines[i], color, selectable),
-        ],
-      ],
+      children: children,
     );
   }
   return _inline(text, color, selectable);
