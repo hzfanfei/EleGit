@@ -66,6 +66,10 @@ describe("createVoiceSession", () => {
     assert.equal(sent.some((m) => m.type === "state" && m.state === "speaking"), true);
 
     session.onPcm(loudPcm());
+    await new Promise((r) => setTimeout(r, 40));
+    assert.equal(sent.some((m) => m.type === "state" && m.state === "barge"), false);
+
+    session.onTranscript("先停一下", { final: false });
     await new Promise((r) => setTimeout(r, 120));
 
     assert.equal(sent.some((m) => m.type === "state" && m.state === "barge"), true);

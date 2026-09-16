@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../api/wenxiang_api.dart';
+import '../copy/engine.dart';
 import '../copy/errors.dart';
 import '../copy/time.dart';
 import '../models.dart';
@@ -531,7 +532,7 @@ class _EmptyChat extends StatelessWidget {
         Text('从进度问起。', style: Theme.of(context).textTheme.headlineMedium),
         const SizedBox(height: 8),
         Text(
-          '回答来自本机仓库和 GitHub，不编造。',
+          '有本机 Agent 就直接问；没有则用本地进度。不编造。',
           style: Theme.of(context).textTheme.bodyMedium,
         ),
         const SizedBox(height: 28),
@@ -679,12 +680,12 @@ class _FinishedTurn extends StatelessWidget {
       railColor: Wx.hairline,
       railWidth: 2,
       bottom: 32,
-      footer: message.engine != null && message.engine!.isNotEmpty
-          ? Text(
-              message.engine == 'local-progress' ? '来自本地进度适配器' : '来自 ${message.engine}',
+      footer: engineFootnote(message.engine).isEmpty
+          ? null
+          : Text(
+              engineFootnote(message.engine),
               style: Theme.of(context).textTheme.labelSmall,
-            )
-          : null,
+            ),
       child: WxReadableText(message.content),
     );
   }
@@ -706,9 +707,10 @@ class _LiveTurn extends StatelessWidget {
       footer: ValueListenableBuilder<String?>(
         valueListenable: engine,
         builder: (context, value, _) {
-          if (value == null || value.isEmpty) return const SizedBox.shrink();
+          final label = engineFootnote(value);
+          if (label.isEmpty) return const SizedBox.shrink();
           return Text(
-            value == 'local-progress' ? '来自本地进度适配器' : '来自 $value',
+            label,
             style: Theme.of(context).textTheme.labelSmall,
           );
         },

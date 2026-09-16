@@ -27,11 +27,19 @@ class DeviceVoiceMedia implements VoiceMedia {
     final controller = StreamController<Uint8List>();
     () async {
       try {
+        await _prepareCallAudio();
         final stream = await _recorder.startStream(
           const RecordConfig(
             encoder: AudioEncoder.pcm16bits,
             sampleRate: 16000,
             numChannels: 1,
+            echoCancel: true,
+            noiseSuppress: true,
+            androidConfig: AndroidRecordConfig(
+              audioSource: AndroidAudioSource.voiceCommunication,
+              speakerphone: true,
+              audioManagerMode: AudioManagerMode.modeInCommunication,
+            ),
           ),
         );
         _micSub = stream.listen(controller.add, onError: controller.addError, onDone: controller.close);
@@ -49,6 +57,32 @@ class DeviceVoiceMedia implements VoiceMedia {
     _micSub = null;
     if (await _recorder.isRecording()) {
       await _recorder.stop();
+    }
+  }
+
+  Future<void> _prepareCallAudio() async {
+    try {
+      await AudioPlayer.global.setAudioContext(
+        AudioContext(
+          android: AudioContextAndroid(
+            isSpeakerphoneOn: true,
+            stayAwake: true,
+            contentType: AndroidContentType.speech,
+            usageType: AndroidUsageType.voiceCommunication,
+            audioFocus: AndroidAudioFocus.gain,
+          ),
+          iOS: AudioContextIOS(
+            category: AVAudioSessionCategory.playAndRecord,
+            options: {
+              AVAudioSessionOptions.defaultToSpeaker,
+              AVAudioSessionOptions.allowBluetooth,
+              AVAudioSessionOptions.mixWithOthers,
+            },
+          ),
+        ),
+      );
+    } catch (_) {
+      // Desktop tests and missing platform views still record.
     }
   }
 

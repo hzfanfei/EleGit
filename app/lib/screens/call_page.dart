@@ -47,6 +47,8 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
     duration: const Duration(milliseconds: 1400),
   );
 
+  static const _bargeHold = Duration(milliseconds: 480);
+
   String _phase = 'idle';
   String? _error;
   bool _live = false;
@@ -57,6 +59,7 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
   String _userLive = '';
   String _assistantLive = '';
   bool _disposing = false;
+  Timer? _bargeFlash;
 
   bool get isLive => _live;
 
@@ -90,6 +93,7 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
   }
 
   String get statusLabel {
+    if (_checking && !_live) return '';
     if (_error != null && !_live) return _error!;
     switch (_phase) {
       case 'connecting':
@@ -104,6 +108,14 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
         return _voiceReady ? '' : (_error ?? '还没配语音密钥');
     }
   }
+
+  String get mainActionLabel {
+    if (_live) return '挂断';
+    if (_error != null || !_voiceReady) return '重试';
+    return '开始通话';
+  }
+
+  bool get canBarge => _live && _phase == 'speaking';
 
   Future<void> startCall() async {
     if (_live) return;
@@ -134,9 +146,7 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
       });
       client.hello(owner: widget.repo.owner, repo: widget.repo.name, sessionId: widget.sessionId);
       _micSub = _media.startMic().listen(client.sendPcm, onError: (_) {
-        setState(() {
-          _error = '需要麦克风才能通话';
-        });
+        _fail('需要麦克风才能通话');
       });
     } catch (_) {
       _drop(hint: '通话断了');
@@ -149,24 +159,11 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
       final hint = event.hint?.isNotEmpty == true
           ? event.hint!
           : (event.code == 'unconfigured' ? '还没配语音密钥' : '通话断了');
-      setState(() {
-        _error = hint;
-        if (event.code == 'unconfigured' || event.code == 'mic') {
-          _live = false;
-          _phase = 'idle';
-        }
-      });
-      if (event.code == 'unconfigured') hangup(pop: false);
+      _fail(hint);
       return;
     }
     if (event.type == 'state' && event.state != null) {
-      setState(() {
-        _phase = _mapState(event.state!);
-        if (_phase == 'listening') _assistantLive = '';
-      });
-      if (_phase == 'barge') {
-        unawaited(_media.stopPlayback());
-      }
+      _applyState(_mapState(event.state!));
       return;
     }
     if (event.type == 'caption' && event.text.isNotEmpty) {
@@ -187,9 +184,38 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
       });
       return;
     }
-    if (event.type == 'pcm' && event.pcm != null) {
+    if (event.type == 'pcm' && event.pcm != null && _phase == 'speaking') {
       unawaited(_media.playPcm(event.pcm!, sampleRate: event.outputRate));
     }
+  }
+
+  void _applyState(String next) {
+    if (next == 'listening' && _phase == 'barge') {
+      _bargeFlash?.cancel();
+      _bargeFlash = Timer(_bargeHold, () {
+        if (!mounted || _disposing || _phase != 'barge') return;
+        setState(() {
+          _phase = 'listening';
+          _assistantLive = '';
+        });
+      });
+      return;
+    }
+    _bargeFlash?.cancel();
+    _bargeFlash = null;
+    setState(() {
+      _phase = next;
+      if (next == 'listening') _assistantLive = '';
+    });
+    if (next == 'barge') {
+      unawaited(_media.stopPlayback());
+    }
+  }
+
+  void _fail(String hint) {
+    hangup(pop: false);
+    if (!mounted || _disposing) return;
+    setState(() => _error = hint);
   }
 
   String _mapState(String raw) {
@@ -214,6 +240,8 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
   }
 
   void hangup({bool pop = false}) {
+    _bargeFlash?.cancel();
+    _bargeFlash = null;
     _sub?.cancel();
     _sub = null;
     _micSub?.cancel();
@@ -234,11 +262,11 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
   }
 
   void barge() {
-    if (_phase != 'speaking') return;
+    if (!canBarge) return;
     HapticFeedback.selectionClick();
     _client?.barge();
     unawaited(_media.stopPlayback());
-    setState(() => _phase = 'barge');
+    _applyState('barge');
   }
 
   Future<void> retry() async {
@@ -273,14 +301,16 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
           ),
           const WxHairline(),
           Expanded(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(Wx.inset, 12, Wx.inset, 8),
-              child: Column(
-                children: [
-                  const Spacer(),
-                  GestureDetector(
-                    onTap: speaking ? barge : null,
-                    child: AnimatedBuilder(
+            child: GestureDetector(
+              key: const Key('wx-call-stage'),
+              behavior: HitTestBehavior.opaque,
+              onTap: canBarge ? barge : null,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(Wx.inset, 12, Wx.inset, 8),
+                child: Column(
+                  children: [
+                    const Spacer(),
+                    AnimatedBuilder(
                       animation: _orb,
                       builder: (context, _) {
                         final pulse = speaking
@@ -303,27 +333,27 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
                         );
                       },
                     ),
-                  ),
-                  const SizedBox(height: 28),
-                  Text(
-                    _checking ? '连接中' : statusLabel,
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.headlineMedium,
-                  ),
-                  const Spacer(),
-                  SizedBox(
-                    height: 92,
-                    child: ListView(
-                      reverse: true,
-                      children: [
-                        if (_assistantLive.isNotEmpty) _caption('问象', _assistantLive),
-                        if (_userLive.isNotEmpty) _caption('你', _userLive),
-                        for (final item in _captions.reversed.take(2))
-                          _caption(item.role == 'user' ? '你' : '问象', item.content),
-                      ],
+                    const SizedBox(height: 28),
+                    Text(
+                      statusLabel,
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.headlineMedium,
                     ),
-                  ),
-                ],
+                    const Spacer(),
+                    SizedBox(
+                      height: 92,
+                      child: ListView(
+                        reverse: true,
+                        children: [
+                          if (_assistantLive.isNotEmpty) _caption('问象', _assistantLive),
+                          if (_userLive.isNotEmpty) _caption('你', _userLive),
+                          for (final item in _captions.reversed.take(2))
+                            _caption(item.role == 'user' ? '你' : '问象', item.content),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -334,16 +364,13 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
               padding: const EdgeInsets.fromLTRB(Wx.inset, 12, Wx.inset, 16),
               child: Column(
                 children: [
-                  if (_error != null && !_live)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: WxErrorPanel(error: _error!, onRetry: retry),
-                    ),
                   SizedBox(
                     width: double.infinity,
                     child: FilledButton(
-                      onPressed: _live ? () => hangup(pop: true) : (_checking ? null : startCall),
-                      child: Text(_live ? '挂断' : '开始通话'),
+                      onPressed: _live
+                          ? () => hangup(pop: true)
+                          : (_checking ? null : (_error != null || !_voiceReady ? retry : startCall)),
+                      child: Text(mainActionLabel),
                     ),
                   ),
                 ],
