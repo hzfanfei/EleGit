@@ -14,6 +14,15 @@ void main() {
     expect(parts[2].kind, RichKind.prose);
   });
 
+  test('keeps an unclosed fence as a code block', () {
+    const src = '说明：\n```\nvoid main() {';
+    final parts = splitRichBlocks(src);
+    expect(parts, hasLength(2));
+    expect(parts[0].kind, RichKind.prose);
+    expect(parts[1].kind, RichKind.code);
+    expect(parts[1].text, contains('void main()'));
+  });
+
   testWidgets('renders headings and lists without raw markers', (tester) async {
     await tester.pumpWidget(
       MaterialApp(

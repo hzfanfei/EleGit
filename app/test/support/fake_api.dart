@@ -12,6 +12,7 @@ class FakeWenxiangApi extends WenxiangApi {
     this.checkoutThrows,
     this.streamEvents,
     this.streamThrows,
+    this.streamDelay = Duration.zero,
   }) : super(baseUrl: 'http://127.0.0.1:8787', apiKey: 'test-key');
 
   Object? oauthThrows;
@@ -23,6 +24,7 @@ class FakeWenxiangApi extends WenxiangApi {
   Object? checkoutThrows;
   List<ChatStreamEvent>? streamEvents;
   Object? streamThrows;
+  Duration streamDelay;
   int startOAuthCalls = 0;
   int checkoutCalls = 0;
   String? lastSessionId;
@@ -132,6 +134,9 @@ class FakeWenxiangApi extends WenxiangApi {
   }) async* {
     lastSessionId = sessionId;
     if (streamThrows != null) throw streamThrows!;
+    if (streamDelay > Duration.zero) {
+      await Future<void>.delayed(streamDelay);
+    }
     for (final event in streamEvents ??
         [
           ChatStreamEvent(type: 'start', engine: 'local-progress'),

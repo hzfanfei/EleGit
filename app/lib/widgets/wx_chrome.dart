@@ -62,6 +62,7 @@ class WxPageHeader extends StatelessWidget {
     this.onBack,
     this.backEnabled = true,
     this.backTooltip = '返回',
+    this.showMark = false,
     required this.title,
     this.subtitle,
     this.trailing,
@@ -70,6 +71,7 @@ class WxPageHeader extends StatelessWidget {
   final VoidCallback? onBack;
   final bool backEnabled;
   final String backTooltip;
+  final bool showMark;
   final String title;
   final String? subtitle;
   final List<Widget>? trailing;
@@ -91,8 +93,13 @@ class WxPageHeader extends StatelessWidget {
                   onPressed: backEnabled ? onBack : null,
                   icon: const Icon(Icons.arrow_back),
                 )
-              else
-                const SizedBox(width: 20),
+              else if (!showMark)
+                const SizedBox(width: Wx.inset),
+              if (showMark)
+                Padding(
+                  padding: EdgeInsets.only(left: onBack == null ? Wx.inset : 0, right: 10),
+                  child: const WxMark(size: 22),
+                ),
               Expanded(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,

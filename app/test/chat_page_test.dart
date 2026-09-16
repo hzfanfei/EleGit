@@ -22,6 +22,8 @@ void main() {
     expect(find.text('octo/demo'), findsWidgets);
     expect(find.textContaining('从进度问起'), findsOneWidget);
     expect(find.text('这个仓库最近在做什么？'), findsOneWidget);
+    expect(find.text('README 里怎么写的？'), findsOneWidget);
+    expect(find.textContaining('检出'), findsNothing);
     expect(find.byType(ActionChip), findsNothing);
     expect(find.text('▍'), findsNothing);
     expect(find.text('API Key'), findsNothing);
@@ -77,5 +79,27 @@ void main() {
     await tester.tap(find.byTooltip('关闭会话').first);
     await tester.pump();
     expect(find.text('历史会话'), findsOneWidget);
+  });
+
+  testWidgets('composer stays typable while a reply is streaming', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: ChatPage(
+          api: FakeWenxiangApi(streamDelay: const Duration(milliseconds: 80)),
+          repo: sampleRepo(),
+          onBack: () {},
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.text('这个仓库最近在做什么？'));
+    await tester.pump();
+
+    expect(find.textContaining('生成中'), findsOneWidget);
+    await tester.enterText(find.byType(TextField), '先记下下一问');
+    expect(find.text('先记下下一问'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pumpAndSettle();
   });
 }
