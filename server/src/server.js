@@ -20,6 +20,7 @@ import {
   exchangeCode,
   suggestedCallbackUrls,
 } from "./oauth.js";
+import { isCancelled, requestSignal } from "./http-signal.js";
 import { loadStore } from "./store.js";
 import { createTunnelManager } from "./tunnel.js";
 import { ensureCheckout, formatLocalContext } from "./workspace.js";
@@ -118,8 +119,12 @@ app.use("/v1", (req, res, next) => {
   next();
 });
 
+function githubToken() {
+  return String(store.config.githubToken || "").trim();
+}
+
 function requireGithub(req, res, next) {
-  if (!store.config.githubToken) {
+  if (!githubToken()) {
     res.status(401).json({ error: "GitHub is not connected. Sign in from the phone browser." });
     return;
   }
@@ -133,7 +138,7 @@ app.get("/v1/status", (_req, res) => {
   res.json({
     name: "问象",
     github: {
-      connected: Boolean(store.config.githubToken),
+      connected: Boolean(githubToken()),
       user: store.config.githubUser,
       oauthReady: oauthReady(),
       callbackPath: "/oauth/github/callback",
@@ -190,7 +195,7 @@ app.get("/v1/github/oauth/status", (req, res) => {
   res.json({
     status: session.status,
     error: session.error || undefined,
-    connected: session.status === "connected" && Boolean(store.config.githubToken),
+    connected: session.status === "connected" && Boolean(githubToken()),
     user: session.status === "connected" ? store.config.githubUser : null,
   });
 });
@@ -255,34 +260,20 @@ app.delete("/v1/github/session", async (_req, res) => {
 
 app.get("/v1/repos", requireGithub, async (req, res) => {
   try {
-    const repos = await listRepos(store.config.githubToken, String(req.query.q || ""));
+    const repos = await listRepos(githubToken(), String(req.query.q || ""));
     res.json({ repos });
   } catch (err) {
     sendError(res, err);
   }
 });
 
-function requestSignal(req) {
-  const ac = new AbortController();
-  const abort = () => {
-    if (!ac.signal.aborted) ac.abort();
-  };
-  req.on("aborted", abort);
-  req.on("close", abort);
-  return ac.signal;
-}
-
-function isCancelled(err) {
-  return err?.code === "cancelled" || err?.message === "cancelled";
-}
-
 async function checkoutRepo(owner, repo, signal) {
-  const progress = await repoProgress(store.config.githubToken, owner, repo);
+  const progress = await repoProgress(githubToken(), owner, repo);
   const result = await ensureCheckout({
     workspaceRoot: store.config.workspaceRoot,
     owner,
     repo,
-    token: store.config.githubToken,
+    token: githubToken(),
     defaultBranch: progress.repo.defaultBranch,
     signal,
   });
@@ -294,7 +285,7 @@ app.post("/v1/repos/:owner/:repo/checkout", requireGithub, async (req, res) => {
     const { progress, dest, existed, local } = await checkoutRepo(
       req.params.owner,
       req.params.repo,
-      requestSignal(req),
+      requestSignal(req, res),
     );
     res.json({
       path: dest,
@@ -352,7 +343,7 @@ app.post("/v1/chat", requireGithub, async (req, res) => {
       return;
     }
     const session = sessions.resolveForChat(owner, repo, sessionId);
-    const signal = requestSignal(req);
+    const signal = requestSignal(req, res);
     req.on("close", () => {
       sessions.cancel?.(session).catch(() => {});
     });

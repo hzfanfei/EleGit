@@ -9,6 +9,17 @@ export function defaultHomeDir() {
   return process.env.WENXIANG_HOME || path.join(os.homedir(), ".wenxiang");
 }
 
+export function resolveGithubToken(config = {}, env = process.env) {
+  const fromConfig = [config.githubToken, config.github_token, config.access_token, config.token]
+    .map((value) => String(value || "").trim())
+    .find(Boolean);
+  if (fromConfig) return fromConfig;
+  const fromEnv = [env.GITHUB_TOKEN, env.GH_TOKEN, env.GITHUB_PAT]
+    .map((value) => String(value || "").trim())
+    .find(Boolean);
+  return fromEnv || "";
+}
+
 function defaultConfig() {
   return {
     apiKey: process.env.WENXIANG_API_KEY || randomBytes(24).toString("hex"),
@@ -72,6 +83,8 @@ export async function loadStore(homeDir = defaultHomeDir()) {
     }
   }
   applyEnv(config);
+  const token = resolveGithubToken(config);
+  if (token) config.githubToken = token;
   await writeFile(file, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
   return {
     homeDir,

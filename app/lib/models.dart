@@ -36,7 +36,9 @@ class ServerStatus {
     final tunnel = json['tunnel'] as Map<String, dynamic>? ?? {};
     final workspace = json['workspace'] as Map<String, dynamic>? ?? {};
     return ServerStatus(
-      githubConnected: github['connected'] == true,
+      githubConnected: github['connected'] == true ||
+          github['connected'] == 'true' ||
+          (user?['login'] ?? '').toString().trim().isNotEmpty,
       githubLogin: (user?['login'] ?? '').toString(),
       oauthReady: github['oauthReady'] == true,
       callbackUrls:

@@ -35,10 +35,78 @@ class HomePageState extends State<HomePage> {
   RepoItem? _cloning;
   Object? _cloneError;
   int _cloneAttempt = 0;
+  List<RepoItem> _remote = const [];
+  Object? _loadError;
+  bool _loadingRemote = false;
+
+  List<RepoItem> get _shown {
+    final seen = <String>{};
+    final out = <RepoItem>[];
+    void add(RepoItem? repo) {
+      if (repo == null || repo.fullName.isEmpty || seen.contains(repo.fullName)) {
+        return;
+      }
+      seen.add(repo.fullName);
+      out.add(repo);
+    }
+
+    add(widget.lastRepo);
+    for (final repo in widget.recent) {
+      add(repo);
+    }
+    for (final repo in _remote) {
+      add(repo);
+    }
+    return out;
+  }
+
+  RepoItem? get _primary => widget.lastRepo ?? (_shown.isEmpty ? null : _shown.first);
 
   List<RepoItem> get _recentOthers {
-    final lastName = widget.lastRepo?.fullName;
-    return widget.recent.where((repo) => repo.fullName != lastName).take(4).toList();
+    final lastName = _primary?.fullName;
+    return _shown.where((repo) => repo.fullName != lastName).take(4).toList();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.lastRepo == null && widget.recent.isEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _loadRemote();
+      });
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant HomePage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.recent.isNotEmpty || widget.lastRepo != null) {
+      return;
+    }
+    if (_remote.isEmpty && !_loadingRemote && _loadError == null) {
+      _loadRemote();
+    }
+  }
+
+  Future<void> _loadRemote() async {
+    setState(() {
+      _loadingRemote = true;
+      _loadError = null;
+    });
+    try {
+      final list = await widget.api.repos('');
+      if (!mounted) return;
+      setState(() {
+        _remote = list;
+        _loadingRemote = false;
+      });
+    } catch (err) {
+      if (!mounted) return;
+      setState(() {
+        _loadError = err;
+        _loadingRemote = false;
+      });
+    }
   }
 
   Future<void> openRepo(RepoItem repo) async {
@@ -92,9 +160,10 @@ class HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final last = widget.lastRepo;
+    final last = _primary;
     final others = _recentOthers;
     final blocked = _cloning != null && _cloneError == null;
+    final waiting = _loadingRemote && last == null && others.isEmpty;
     return Scaffold(
       body: Stack(
         children: [
@@ -115,18 +184,24 @@ class HomePageState extends State<HomePage> {
                   padding: Wx.pagePadding,
                   children: [
                     Text(
-                      last != null ? '继续上次' : '从仓库问起',
+                      widget.lastRepo != null ? '继续上次' : '从仓库问起',
                       style: Theme.of(context).textTheme.headlineMedium,
                     ),
                     const SizedBox(height: 8),
                     Text(
                       last != null
                           ? '点一下打开对话。本机还没有这份仓库时，会先落到 ~/问象。'
-                          : '已经授权。选一个仓库，或去全部仓库里找。',
+                          : waiting
+                              ? '正在读取已授权的仓库…'
+                              : '已经授权。选一个仓库，或去全部仓库里找。',
                       style: Theme.of(context).textTheme.bodyMedium,
                     ),
                     const SizedBox(height: 22),
-                    if (last != null)
+                    if (waiting)
+                      const WxBusy(label: '正在读取仓库')
+                    else if (_loadError != null && last == null && others.isEmpty)
+                      WxErrorPanel(error: _loadError!, onRetry: _loadRemote)
+                    else if (last != null)
                       _HomeRepoCard(
                         key: const Key('wx-home-last'),
                         repo: last,

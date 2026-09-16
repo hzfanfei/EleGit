@@ -74,10 +74,21 @@ describe("git auth header", () => {
     assert.equal(sso.message, GITHUB_GIT_FORBIDDEN_ZH);
   });
 
-  it("leaves unrelated git errors unchanged", () => {
+  it("leaves unrelated git errors as short Chinese, not English fatals", () => {
     const err = gitFailure("fatal: not a git repository");
-    assert.equal(err.message, "fatal: not a git repository");
+    assert.match(err.message, /[\u4e00-\u9fff]/);
+    assert.ok(!/^fatal:/i.test(err.message));
     assert.notEqual(err.status, 403);
+  });
+
+  it("maps leftover dest and missing repos to short Chinese", () => {
+    const exists = gitFailure(
+      "fatal: destination path '/home/fei/问象/octo/demo' already exists and is not an empty directory",
+    );
+    assert.match(exists.message, /目录|不完整|重试/);
+    assert.ok(!exists.message.includes("already exists"));
+    const missing = gitFailure("remote: Repository not found.\nfatal: repository 'https://github.com/acme/nope.git/' not found");
+    assert.match(missing.message, /找不到|仓库/);
   });
 });
 
@@ -143,5 +154,32 @@ describe("ensureCheckout", () => {
     const snap = await snapshotCheckout(result.dest);
     assert.match(formatLocalContext(snap), /Local checkout/);
     assert.match(formatLocalContext(snap), /Initial widget/);
+  });
+
+  it("replaces a leftover non-git dest so clone can land", async () => {
+    const tmp = await mkdtemp(path.join(os.tmpdir(), "wenxiang-src-"));
+    const workspace = await mkdtemp(path.join(os.tmpdir(), "wenxiang-ws-"));
+    git(["init", "-b", "main"], tmp);
+    git(["config", "user.email", "test@example.com"], tmp);
+    git(["config", "user.name", "Test"], tmp);
+    await writeFile(path.join(tmp, "README.md"), "# recovered\n");
+    git(["add", "."], tmp);
+    git(["commit", "-m", "Recover"], tmp);
+
+    const dest = path.join(workspace, "acme", "widget");
+    await mkdir(dest, { recursive: true });
+    await writeFile(path.join(dest, "stale.txt"), "partial clone leftover");
+
+    const result = await ensureCheckout({
+      workspaceRoot: workspace,
+      owner: "acme",
+      repo: "widget",
+      cloneUrl: tmp,
+      token: FAKE_OAUTH_TOKEN,
+      defaultBranch: "main",
+    });
+    assert.equal(result.local.present, true);
+    assert.ok(result.local.files.includes("README.md"));
+    assert.match(result.dest, /acme\/widget$/);
   });
 });

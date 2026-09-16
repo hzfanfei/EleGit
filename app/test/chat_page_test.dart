@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wenxiang/models.dart';
+import 'package:wenxiang/persist/app_memory.dart';
 import 'package:wenxiang/screens/chat_page.dart';
 import 'package:wenxiang/theme.dart';
 
@@ -184,5 +186,61 @@ void main() {
     expect(find.byTooltip('发送'), findsOneWidget);
     expect(find.textContaining('正在写'), findsNothing);
     expect(find.textContaining('Exception'), findsNothing);
+  });
+
+  testWidgets('restored local transcript stays after server sessions reset', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final memory = AppMemory(await SharedPreferences.getInstance());
+    await memory.saveChats(
+      'octo/demo',
+      RepoChatStore(
+        activeId: 'local-1',
+        sessions: [
+          ChatSession(
+            id: 'local-1',
+            title: '这个仓库最近在做什么？',
+            createdAt: '2026-09-16T00:00:00Z',
+            updatedAt: '2026-09-16T00:00:00Z',
+            active: true,
+          ),
+        ],
+        transcripts: {
+          'local-1': [
+            ChatMessage(role: 'user', content: '这个仓库最近在做什么？'),
+            ChatMessage(role: 'assistant', content: '最近在修登录。', engine: 'local-progress'),
+          ],
+        },
+      ),
+    );
+    final api = FakeWenxiangApi();
+    api.sessions
+      ..clear()
+      ..add(
+        ChatSession(
+          id: 'server-new',
+          title: '新会话',
+          createdAt: '2026-09-16T01:00:00Z',
+          updatedAt: '2026-09-16T01:00:00Z',
+          active: true,
+        ),
+      );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: ChatPage(
+          api: api,
+          repo: sampleRepo(),
+          memory: memory,
+          onBack: () {},
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.textContaining('最近在修登录'), findsOneWidget);
+    expect(find.text('你问'), findsOneWidget);
+    expect(find.textContaining('从进度问起'), findsNothing);
   });
 }

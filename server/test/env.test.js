@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 import { loadLocalEnv } from "../src/env.js";
-import { loadStore } from "../src/store.js";
+import { loadStore, resolveGithubToken } from "../src/store.js";
 
 describe("loadLocalEnv", () => {
   it("fills empty process env from a local .env file and does not override", async () => {
@@ -85,5 +85,31 @@ describe("OAuth client precedence", () => {
       if (previousSecret === undefined) delete process.env.GITHUB_CLIENT_SECRET;
       else process.env.GITHUB_CLIENT_SECRET = previousSecret;
     }
+  });
+});
+
+describe("GitHub session restore", () => {
+  it("treats a token already in ~/.wenxiang as a connected session", async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), "wenxiang-home-"));
+    await writeFile(
+      path.join(home, "config.json"),
+      JSON.stringify({
+        apiKey: "test-key",
+        githubToken: "gho_existing_session_token",
+        githubUser: { login: "octo" },
+      }),
+    );
+    const store = await loadStore(home);
+    assert.equal(store.config.githubToken, "gho_existing_session_token");
+    assert.equal(resolveGithubToken(store.config), "gho_existing_session_token");
+  });
+
+  it("picks up PAT aliases used in ~/.wenxiang config.json", () => {
+    assert.equal(
+      resolveGithubToken({ github_token: "github_pat_alias" }),
+      "github_pat_alias",
+    );
+    assert.equal(resolveGithubToken({ token: "gho_plain" }), "gho_plain");
+    assert.equal(resolveGithubToken({ githubToken: "" }, { GITHUB_TOKEN: "gho_from_env" }), "gho_from_env");
   });
 });

@@ -6,6 +6,8 @@ String humanizeError(Object error) {
   final lower = compact.toLowerCase();
 
   if (_readableChinese(compact)) return compact;
+  if (_isLeftoverDest(lower)) return '本机目录不完整。请重试。';
+  if (_isRepoMissing(lower)) return '找不到这个仓库。';
 
   if (_isSseDrop(lower)) {
     return '连接中断了。请重试。';
@@ -35,10 +37,20 @@ String? errorDetail(Object error) {
 }
 
 bool _readableChinese(String text) {
-  return RegExp(r'[\u4e00-\u9fff]').hasMatch(text) &&
-      !text.contains('Exception') &&
-      !text.contains('Error:') &&
-      text.length <= 80;
+  if (text.contains('Exception') || text.contains('Error:')) return false;
+  final chinese = RegExp(r'[\u4e00-\u9fff]').allMatches(text).length;
+  if (chinese == 0) return false;
+  final letters = RegExp(r'[A-Za-z]').allMatches(text).length;
+  return chinese >= letters && text.length <= 240;
+}
+
+bool _isLeftoverDest(String lower) {
+  return lower.contains('already exists') && lower.contains('not an empty directory');
+}
+
+bool _isRepoMissing(String lower) {
+  return lower.contains('repository not found') ||
+      (lower.contains('not found') && lower.contains('github.com'));
 }
 
 bool _isNetwork(String lower) {

@@ -113,8 +113,11 @@ void main() {
 
     expect(find.text('全部仓库'), findsOneWidget);
     expect(find.text('octo/demo'), findsWidgets);
+    expect(find.text('打开对话'), findsOneWidget);
     expect(find.text('重新打开 GitHub'), findsNothing);
     expect(find.text('搜索仓库名'), findsNothing);
+    expect(find.text('重新打开 GitHub', skipOffstage: false), findsNothing);
+    expect(find.textContaining('在浏览器完成授权', skipOffstage: false), findsNothing);
   });
 
   testWidgets('not logged in keeps the OAuth path', (tester) async {

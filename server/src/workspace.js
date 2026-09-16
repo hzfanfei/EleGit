@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -25,16 +25,37 @@ export function gitAuthConfigArgs(token) {
   return ["-c", `http.extraHeader=Authorization: Basic ${basic}`];
 }
 
+function zhGitError(message, text, extra = {}) {
+  const err = new Error(message);
+  err.detail = text;
+  Object.assign(err, extra);
+  return err;
+}
+
 export function gitFailure(output, code = 1) {
   const text = String(output || "").trim();
   if (isGithubGitPermissionDenied(text)) {
-    const err = new Error(GITHUB_GIT_FORBIDDEN_ZH);
-    err.status = 403;
-    err.code = "github_git_forbidden";
-    err.detail = text;
-    return err;
+    return zhGitError(GITHUB_GIT_FORBIDDEN_ZH, text, {
+      status: 403,
+      code: "github_git_forbidden",
+    });
   }
-  return new Error(text || `git exited ${code}`);
+  if (/already exists and is not an empty directory/i.test(text)) {
+    return zhGitError("本机目录不完整。请重试。", text, { code: "checkout_dirty" });
+  }
+  if (/repository .* not found|remote: repository not found/i.test(text)) {
+    return zhGitError("找不到这个仓库。", text, { status: 404, code: "repo_not_found" });
+  }
+  if (/could not resolve host|name or service not known|failed to connect|network is unreachable/i.test(text)) {
+    return zhGitError("连不上 GitHub。", text, { code: "git_network" });
+  }
+  if (/timed out/i.test(text)) {
+    return zhGitError("克隆超时。请重试。", text, { code: "git_timeout" });
+  }
+  if (text === "cancelled" || /operation cancelled|signal: cancelled/i.test(text)) {
+    return zhGitError("已取消", text, { code: "cancelled" });
+  }
+  return zhGitError("克隆失败。请重试。", text || `git exited ${code}`, { code: "git_failed" });
 }
 
 function isGithubGitPermissionDenied(text) {
@@ -141,9 +162,20 @@ export async function ensureCheckout({
   const dest = checkoutPath(workspaceRoot, owner, repo);
   await mkdir(path.dirname(dest), { recursive: true });
   const remote = cloneUrl || `https://github.com/${owner}/${repo}.git`;
-  const existed = existsSync(path.join(dest, ".git"));
+  let existed = existsSync(path.join(dest, ".git"));
+  if (!existed && existsSync(dest)) {
+    await rm(dest, { recursive: true, force: true });
+  }
+  existed = existsSync(path.join(dest, ".git"));
   if (!existed) {
-    await runGit(["clone", "--depth", "50", remote, dest], { token, signal });
+    try {
+      await runGit(["clone", "--depth", "50", remote, dest], { token, signal });
+    } catch (err) {
+      if (!existsSync(path.join(dest, ".git"))) {
+        await rm(dest, { recursive: true, force: true }).catch(() => {});
+      }
+      throw err;
+    }
   } else {
     await runGit(["remote", "set-url", "origin", remote], { cwd: dest, signal });
     await runGit(["fetch", "--depth", "50", "origin"], { cwd: dest, token, signal });
@@ -160,6 +192,9 @@ export async function ensureCheckout({
     }
   }
   const local = await snapshotCheckout(dest);
+  if (!local?.present) {
+    throw zhGitError("仓库没有完整写到本机。请重试。", dest, { code: "checkout_missing" });
+  }
   return { dest, existed, local };
 }
 

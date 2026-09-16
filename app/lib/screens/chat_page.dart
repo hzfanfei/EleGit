@@ -101,25 +101,25 @@ class _ChatPageState extends State<ChatPage> {
       }
       if (!mounted) return;
       setState(() {
-        if (list.isNotEmpty) {
-          final known = {for (final session in _sessions) session.id: session};
-          _sessions
-            ..clear()
-            ..addAll(list.map((session) {
-              final prior = known[session.id];
-              return prior == null || session.title != '新会话'
-                  ? session
-                  : ChatSession(
-                      id: session.id,
-                      title: prior.title,
-                      createdAt: session.createdAt,
-                      updatedAt: session.updatedAt,
-                      active: session.active,
-                    );
-            }));
-          final keep = _sessionId;
-          if (keep == null || !_sessions.any((session) => session.id == keep)) {
+        final known = {for (final session in _sessions) session.id: session};
+        for (final session in list) {
+          final prior = known[session.id];
+          if (prior == null) {
+            _sessions.add(session);
+            continue;
+          }
+          if (prior.title == '新会话' && session.title != '新会话') {
+            final index = _sessions.indexWhere((item) => item.id == session.id);
+            if (index >= 0) _sessions[index] = session;
+          }
+        }
+        final keep = _sessionId;
+        final keepHasTurns = keep != null && (_transcripts[keep]?.isNotEmpty ?? false);
+        if (!keepHasTurns && (keep == null || !_sessions.any((session) => session.id == keep))) {
+          if (list.isNotEmpty) {
             _sessionId = list.firstWhere((s) => s.active, orElse: () => list.first).id;
+          } else if (_sessions.isNotEmpty) {
+            _sessionId = _sessions.first.id;
           }
         }
       });

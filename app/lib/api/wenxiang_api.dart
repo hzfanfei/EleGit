@@ -120,10 +120,27 @@ class WenxiangApi {
       final res = await client
           .post(_uri('/v1/repos/$owner/$repo/checkout'), headers: _headers)
           .timeout(const Duration(minutes: 3));
-      final body = await _json(res, fallback: '克隆仓库失败');
+      Map<String, dynamic> body = {};
+      if (res.body.isNotEmpty) {
+        try {
+          final decoded = jsonDecode(res.body);
+          if (decoded is Map<String, dynamic>) body = decoded;
+        } catch (_) {}
+      }
+      if (res.statusCode == 499 || body['code'] == 'cancelled') {
+        throw const OperationCancelled();
+      }
+      if (res.statusCode >= 400) {
+        throw ApiException((body['error'] ?? '克隆仓库失败').toString());
+      }
       final local = body['local'] as Map<String, dynamic>? ?? {};
+      final present = local['present'] != false;
+      final path = (body['path'] ?? local['path'] ?? '').toString();
+      if (!present || path.isEmpty) {
+        throw ApiException('仓库没有完整写到本机。请重试。');
+      }
       return CheckoutResult(
-        path: (body['path'] ?? local['path'] ?? '').toString(),
+        path: path,
         branch: (local['branch'] ?? '').toString(),
         head: (local['head'] ?? '').toString(),
       );

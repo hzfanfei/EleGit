@@ -41,6 +41,7 @@ class ShellPageState extends State<ShellPage> {
   int _loginGen = 0;
   String _githubLogin = '';
   AppStep _afterChat = AppStep.home;
+  bool _includeLogin = false;
   final _homeKey = GlobalKey<HomePageState>();
   final _reposKey = GlobalKey<ReposPageState>();
 
@@ -83,6 +84,7 @@ class ShellPageState extends State<ShellPage> {
         _booting = false;
         _githubLogin = status.githubLogin.isNotEmpty ? status.githubLogin : (memory?.githubLogin() ?? '');
         _loginAutoStart = !status.githubConnected;
+        _includeLogin = !status.githubConnected;
         _lastRepo = memory?.lastRepo();
         _recent = memory?.recentRepos() ?? const [];
         _step = status.githubConnected ? AppStep.home : AppStep.login;
@@ -110,7 +112,7 @@ class ShellPageState extends State<ShellPage> {
       if (!mounted) return;
       setState(() {
         _lastRepo = _memory?.lastRepo() ?? _lastRepo;
-        _recent = _memory?.recentRepos().isNotEmpty == true ? _memory!.recentRepos() : list;
+        _recent = list.isNotEmpty ? list : (_memory?.recentRepos() ?? _recent);
       });
     } catch (_) {
       if (!mounted) return;
@@ -129,6 +131,7 @@ class ShellPageState extends State<ShellPage> {
     if (!mounted) return;
     setState(() {
       _githubLogin = status.githubLogin;
+      _includeLogin = true;
       _step = AppStep.home;
     });
     await _refreshRecent();
@@ -166,6 +169,7 @@ class ShellPageState extends State<ShellPage> {
   void _backToLogin() {
     setState(() {
       _loginAutoStart = false;
+      _includeLogin = true;
       _loginGen += 1;
       _step = AppStep.login;
     });
@@ -217,15 +221,16 @@ class ShellPageState extends State<ShellPage> {
       ];
     }
     return [
-      MaterialPage<void>(
-        key: ValueKey('login-$_loginGen'),
-        name: 'login',
-        child: _fit(LoginPage(
-          api: _api,
-          onReady: _afterLogin,
-          autoStart: _loginAutoStart,
-        )),
-      ),
+      if (_includeLogin || _step == AppStep.login)
+        MaterialPage<void>(
+          key: ValueKey('login-$_loginGen'),
+          name: 'login',
+          child: _fit(LoginPage(
+            api: _api,
+            onReady: _afterLogin,
+            autoStart: _loginAutoStart,
+          )),
+        ),
       if (_step == AppStep.home || _step == AppStep.repos || _step == AppStep.chat)
         MaterialPage<void>(
           key: const ValueKey('home'),

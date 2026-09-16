@@ -90,7 +90,8 @@ void main() {
     expect(find.textContaining('~/问象/octo/demo'), findsWidgets);
     await tester.pump(const Duration(milliseconds: 30));
     await tester.pump();
-    expect(find.text('没有落到本机'), findsOneWidget);
+    expect(find.text('没有落到本机'), findsNothing);
+    expect(find.textContaining('还没有写到本机'), findsNothing);
     expect(find.text('关闭'), findsOneWidget);
     expect(find.textContaining('克隆'), findsWidgets);
     expect(find.textContaining('检出'), findsNothing);

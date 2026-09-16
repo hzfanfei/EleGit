@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../copy/errors.dart';
 import '../models.dart';
 import '../theme.dart';
 import 'wx_chrome.dart';
@@ -90,12 +91,12 @@ class _WxCloneScrimState extends State<WxCloneScrim> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    failed ? '没有落到本机' : _stages[_stage],
+                    failed ? '克隆失败' : _stages[_stage],
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    failed ? '${widget.repo.fullName} 还没有写到本机。' : _stageDetail,
+                    failed ? humanizeError(widget.error!) : _stageDetail,
                     style: Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.5),
                   ),
                   const SizedBox(height: 6),

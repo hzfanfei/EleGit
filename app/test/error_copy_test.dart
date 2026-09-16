@@ -22,6 +22,26 @@ void main() {
     expect(humanizeError(ApiException('git clone failed: Authentication failed')), contains('克隆'));
   });
 
+  test('keeps long Chinese git errors instead of rewriting them as re-login', () {
+    const zh =
+        '无法访问该仓库：GitHub 返回 403。常见原因：仓库为私有且当前登录无权克隆、OAuth 未授予 repo 权限，或组织启用了 SSO 但尚未授权问象。请在 GitHub 授权中勾选 repo，并完成组织 SSO 授权后重试。';
+    expect(humanizeError(ApiException(zh)), zh);
+    expect(humanizeError(ApiException(zh)), isNot(contains('重新打开 GitHub')));
+  });
+
+  test('maps leftover dest and missing-repo git fatals to short Chinese', () {
+    expect(
+      humanizeError(ApiException(
+        "fatal: destination path '/home/fei/问象/octo/demo' already exists and is not an empty directory",
+      )),
+      matches(RegExp(r'目录|不完整|克隆')),
+    );
+    expect(
+      humanizeError(ApiException("fatal: repository 'https://github.com/acme/nope.git/' not found")),
+      matches(RegExp(r'找不到|仓库|克隆')),
+    );
+  });
+
   test('maps SSE drops without leaking stacks', () {
     expect(
       humanizeError(ApiException('ClientException: Connection closed before full headers were received')),
