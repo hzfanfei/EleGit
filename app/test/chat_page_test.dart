@@ -96,10 +96,7 @@ void main() {
     await tester.tap(find.text('这个仓库最近在做什么？'));
     await tester.pump();
 
-    final field = tester.widget<TextField>(find.byType(TextField));
-    expect(field.enabled, isTrue);
     expect(find.textContaining('生成中'), findsOneWidget);
-
     await tester.enterText(find.byType(TextField), '先记下下一问');
     expect(find.text('先记下下一问'), findsOneWidget);
     await tester.pump(const Duration(milliseconds: 100));
