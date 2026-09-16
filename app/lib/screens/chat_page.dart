@@ -523,38 +523,18 @@ class _FinishedTurn extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (message.role == 'user') {
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 22),
-        child: IntrinsicHeight(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const ColoredBox(
-                color: Wx.accent,
-                child: SizedBox(width: 2),
+      return _VoiceTurn(
+        voice: '你问',
+        voiceColor: Wx.accent,
+        railColor: Wx.accent,
+        railWidth: 3,
+        bottom: 20,
+        child: SelectableText(
+          message.content,
+          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                color: Wx.text,
+                height: 1.5,
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '你',
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.accent),
-                    ),
-                    const SizedBox(height: 6),
-                    SelectableText(
-                      message.content,
-                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                            color: Wx.text,
-                            height: 1.5,
-                          ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
         ),
       );
     }
@@ -568,26 +548,19 @@ class _FinishedTurn extends StatelessWidget {
         ),
       );
     }
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 28),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '问象',
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.muted),
-          ),
-          const SizedBox(height: 8),
-          WxReadableText(message.content),
-          if (message.engine != null && message.engine!.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            Text(
+    return _VoiceTurn(
+      voice: '问象',
+      voiceColor: Wx.text,
+      railColor: Wx.hairline,
+      railWidth: 2,
+      bottom: 32,
+      footer: message.engine != null && message.engine!.isNotEmpty
+          ? Text(
               message.engine == 'local-progress' ? '来自本地进度适配器' : '来自 ${message.engine}',
               style: Theme.of(context).textTheme.labelSmall,
-            ),
-          ],
-        ],
-      ),
+            )
+          : null,
+      child: WxReadableText(message.content),
     );
   }
 }
@@ -599,55 +572,108 @@ class _LiveTurn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return _VoiceTurn(
+      voice: '问象',
+      voiceColor: Wx.text,
+      railColor: Wx.hairline,
+      railWidth: 2,
+      bottom: 32,
+      footer: ValueListenableBuilder<String?>(
+        valueListenable: engine,
+        builder: (context, value, _) {
+          if (value == null || value.isEmpty) return const SizedBox.shrink();
+          return Text(
+            value == 'local-progress' ? '来自本地进度适配器' : '来自 $value',
+            style: Theme.of(context).textTheme.labelSmall,
+          );
+        },
+      ),
+      child: ValueListenableBuilder<String>(
+        valueListenable: text,
+        builder: (context, value, _) {
+          if (value.isEmpty) {
+            return const Row(
+              children: [
+                Text(
+                  '正在写…',
+                  style: TextStyle(color: Wx.muted, fontSize: 16, height: 1.55),
+                ),
+                SizedBox(width: 8),
+                _Caret(),
+              ],
+            );
+          }
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              WxReadableText(value),
+              const SizedBox(height: 6),
+              const _Caret(),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _VoiceTurn extends StatelessWidget {
+  const _VoiceTurn({
+    required this.voice,
+    required this.voiceColor,
+    required this.railColor,
+    required this.railWidth,
+    required this.child,
+    this.footer,
+    this.bottom = 24,
+  });
+
+  final String voice;
+  final Color voiceColor;
+  final Color railColor;
+  final double railWidth;
+  final Widget child;
+  final Widget? footer;
+  final double bottom;
+
+  @override
+  Widget build(BuildContext context) {
+    final ask = voice == '你问';
     return Padding(
-      padding: const EdgeInsets.only(bottom: 28),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '问象',
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.muted),
-          ),
-          const SizedBox(height: 8),
-          ValueListenableBuilder<String>(
-            valueListenable: text,
-            builder: (context, value, _) {
-              if (value.isEmpty) {
-                return const Row(
-                  children: [
-                    Text(
-                      '正在写…',
-                      style: TextStyle(color: Wx.muted, fontSize: 16, height: 1.55),
-                    ),
-                    SizedBox(width: 8),
-                    _Caret(),
-                  ],
-                );
-              }
-              return Column(
+      padding: EdgeInsets.only(bottom: bottom),
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ColoredBox(
+              color: railColor,
+              child: SizedBox(width: railWidth),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  WxReadableText(value),
-                  const SizedBox(height: 6),
-                  const _Caret(),
+                  Text(
+                    voice,
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: voiceColor,
+                          fontSize: ask ? 12 : 13,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: ask ? 0.4 : 0.8,
+                        ),
+                  ),
+                  const SizedBox(height: 8),
+                  child,
+                  if (footer != null) ...[
+                    const SizedBox(height: 10),
+                    footer!,
+                  ],
                 ],
-              );
-            },
-          ),
-          ValueListenableBuilder<String?>(
-            valueListenable: engine,
-            builder: (context, value, _) {
-              if (value == null || value.isEmpty) return const SizedBox.shrink();
-              return Padding(
-                padding: const EdgeInsets.only(top: 10),
-                child: Text(
-                  value == 'local-progress' ? '来自本地进度适配器' : '来自 $value',
-                  style: Theme.of(context).textTheme.labelSmall,
-                ),
-              );
-            },
-          ),
-        ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -4,6 +4,7 @@ import { corsOptions } from "./cors.js";
 import { loadLocalEnv } from "./env.js";
 import { createSessionStore, detectCursorEngine } from "./acp.js";
 import { streamAnswer } from "./ask.js";
+import { openSse, writeSse } from "./sse.js";
 import {
   formatProgressContext,
   listRepos,
@@ -315,10 +316,6 @@ app.delete("/v1/repos/:owner/:repo/sessions/:id", requireGithub, async (req, res
   }
 });
 
-function writeSse(res, event) {
-  res.write(`data: ${JSON.stringify(event)}\n\n`);
-}
-
 app.post("/v1/chat", requireGithub, async (req, res) => {
   try {
     const owner = String(req.body?.owner || "").trim();
@@ -331,15 +328,11 @@ app.post("/v1/chat", requireGithub, async (req, res) => {
       return;
     }
     const session = sessions.resolveForChat(owner, repo, sessionId);
+    openSse(res);
+    writeSse(res, { type: "meta", sessionId: session.id });
     const { progress, dest, local } = await checkoutRepo(owner, repo);
     const githubContext = formatProgressContext(progress);
     const context = `${githubContext}\n\n${formatLocalContext(local)}`;
-    res.status(200);
-    res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
-    res.setHeader("Cache-Control", "no-cache, no-transform");
-    res.setHeader("Connection", "keep-alive");
-    res.setHeader("X-Accel-Buffering", "no");
-    res.flushHeaders?.();
     writeSse(res, {
       type: "meta",
       repo: progress.repo.fullName,

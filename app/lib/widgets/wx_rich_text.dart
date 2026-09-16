@@ -25,7 +25,7 @@ List<RichBlock> splitRichBlocks(String src) {
   }
   if (cursor < src.length) {
     final rest = src.substring(cursor);
-    final open = RegExp(r'```[^\n]*\n');
+    final open = RegExp(r'```[^\n]*(?:\n|$)');
     final opened = open.firstMatch(rest);
     if (opened != null) {
       if (opened.start > 0) {
@@ -36,7 +36,7 @@ List<RichBlock> splitRichBlocks(String src) {
       parts.add(RichBlock(RichKind.prose, rest));
     }
   }
-  return parts.where((p) => p.text.trim().isNotEmpty).toList();
+  return parts.where((p) => p.kind == RichKind.code || p.text.trim().isNotEmpty).toList();
 }
 
 class WxReadableText extends StatelessWidget {

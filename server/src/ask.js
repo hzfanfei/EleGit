@@ -4,8 +4,12 @@ export { detectCursorEngine } from "./acp.js";
 export { whichSync } from "./which.js";
 export { buildAcpPrompt } from "./acp.js";
 
-export async function* streamText(text, { chunkSize = 2, delayMs = 10 } = {}) {
+export async function* streamText(text, { chunkSize = 2, delayMs = 8 } = {}) {
   const chars = [...String(text || "")];
+  if (chars.length <= chunkSize) {
+    if (chars.length) yield chars.join("");
+    return;
+  }
   for (let i = 0; i < chars.length; i += chunkSize) {
     yield chars.slice(i, i + chunkSize).join("");
     if (delayMs) await new Promise((r) => setTimeout(r, delayMs));
@@ -40,23 +44,23 @@ export function synthesizeLocalAnswer({ question, progress, context, local }) {
   const sections = [];
 
   sections.push(
-    `【${progress.repo.fullName}】最近推送 ${progress.repo.pushedAt || "未知"}，默认分支 ${progress.repo.defaultBranch}。`,
+    `**${progress.repo.fullName}**  \n最近推送 ${progress.repo.pushedAt || "未知"}，默认分支 \`${progress.repo.defaultBranch}\`。`,
   );
 
   if (!wantIssue && progress.commits.length) {
     const shown = progress.commits.slice(0, wantPr ? 5 : 8);
-    sections.push("最近提交：");
+    sections.push("## 最近提交");
     sections.push(
-      shown.map((c) => `· ${c.date.slice(0, 10)} ${c.author}：${c.message}`).join("\n"),
+      shown.map((c) => `- ${c.date.slice(0, 10)} ${c.author}：${c.message}`).join("\n"),
     );
   }
 
   if ((wantPr || !wantIssue) && progress.pulls.length) {
-    sections.push(`开放 PR（${progress.pulls.length}）：`);
+    sections.push(`## 开放 PR（${progress.pulls.length}）`);
     sections.push(
       progress.pulls
         .slice(0, 8)
-        .map((p) => `· #${p.number} ${p.draft ? "[草稿] " : ""}${p.title}（${p.user}）`)
+        .map((p) => `- #${p.number} ${p.draft ? "[草稿] " : ""}${p.title}（${p.user}）`)
         .join("\n"),
     );
   } else if (wantPr) {
@@ -65,11 +69,11 @@ export function synthesizeLocalAnswer({ question, progress, context, local }) {
 
   if (wantIssue || (!wantPr && progress.issues.length)) {
     if (progress.issues.length) {
-      sections.push(`开放 Issue（${progress.issues.length}）：`);
+      sections.push(`## 开放 Issue（${progress.issues.length}）`);
       sections.push(
         progress.issues
           .slice(0, 8)
-          .map((i) => `· #${i.number} ${i.title}`)
+          .map((i) => `- #${i.number} ${i.title}`)
           .join("\n"),
       );
     } else if (wantIssue) {
@@ -79,24 +83,26 @@ export function synthesizeLocalAnswer({ question, progress, context, local }) {
 
   if (local?.present) {
     const wantCode = /readme|文件|代码|怎么|启动|目录|checkout|本地/.test(q);
-    sections.push(`本机检出：${local.path}（${local.branch || "?"} @ ${local.head || "?"}）`);
+    sections.push(
+      `## 本机目录\n\`${local.path}\`（${local.branch || "?"} @ \`${local.head || "?"}\`）`,
+    );
     if (local.log && ((!wantPr && !wantIssue) || wantCode)) {
-      sections.push("本地 git log：");
+      sections.push("## 本地 git log");
       sections.push(
         local.log
           .split("\n")
           .slice(0, 8)
-          .map((line) => `· ${line}`)
+          .map((line) => `- ${line}`)
           .join("\n"),
       );
     }
     if (wantCode && local.files?.length) {
-      sections.push("检出内文件（节选）：");
-      sections.push(local.files.slice(0, 16).map((f) => `· ${f}`).join("\n"));
+      sections.push("## 本机文件（节选）");
+      sections.push(local.files.slice(0, 16).map((f) => `- \`${f}\``).join("\n"));
     }
     if (wantCode && local.readme) {
-      sections.push("README 摘录：");
-      sections.push(local.readme.slice(0, 800));
+      sections.push("## README 摘录");
+      sections.push(`\`\`\`\n${local.readme.slice(0, 800)}\n\`\`\``);
     }
   }
 
@@ -106,7 +112,7 @@ export function synthesizeLocalAnswer({ question, progress, context, local }) {
 
   sections.push(
     local?.present
-      ? "以上内容来自本机 GitHub API 与 ~/问象 检出，不是编造的演示数据。"
+      ? "以上内容来自本机 GitHub API 与 ~/问象 目录，不是编造的演示数据。"
       : "以上内容全部来自本机调用的 GitHub API，不是编造的演示数据。",
   );
   return sections.join("\n\n");
@@ -121,8 +127,10 @@ export async function* streamAnswer({
   session,
   sessions,
   githubContext,
+  detectEngine = detectCursorEngine,
+  streamOpts = { chunkSize: 2, delayMs: 8 },
 }) {
-  const engine = detectCursorEngine();
+  const engine = detectEngine();
   if (engine && sessions && session) {
     yield { type: "start", engine: "acp" };
     const queue = [];
@@ -138,7 +146,7 @@ export async function* streamAnswer({
         cwd: local?.present ? local.path : undefined,
         onDelta: (chunk) => {
           full += chunk;
-          queue.push({ type: "delta", text: chunk });
+          queue.push(chunk);
           notify?.();
         },
       })
@@ -159,7 +167,7 @@ export async function* streamAnswer({
         notify = undefined;
         continue;
       }
-      yield queue.shift();
+      yield* prefixDeltas(queue.shift(), streamOpts);
     }
     if (!fail && full) {
       yield { type: "done", engine: "acp", answer: full, sessionId: session.id };
@@ -167,18 +175,18 @@ export async function* streamAnswer({
     }
     const fallback = `${synthesizeLocalAnswer({ question, progress, context, local })}\n\n（本机探测到 Cursor ACP，但调用失败：${fail?.message || "empty output"}。已回退到本地进度适配器。）`;
     yield { type: "start", engine: "local-progress" };
-    yield* prefixDeltas(fallback);
+    yield* prefixDeltas(fallback, streamOpts);
     yield { type: "done", engine: "local-progress", answer: fallback, sessionId: session.id };
     return;
   }
   const answer = synthesizeLocalAnswer({ question, progress, context, local });
   yield { type: "start", engine: "local-progress" };
-  yield* prefixDeltas(answer);
+  yield* prefixDeltas(answer, streamOpts);
   yield { type: "done", engine: "local-progress", answer, sessionId: session?.id };
 }
 
-async function* prefixDeltas(text) {
-  for await (const piece of streamText(text)) {
+async function* prefixDeltas(text, streamOpts) {
+  for await (const piece of streamText(text, streamOpts)) {
     yield { type: "delta", text: piece };
   }
 }
