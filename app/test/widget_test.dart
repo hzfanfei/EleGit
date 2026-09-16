@@ -8,5 +8,6 @@ void main() {
     expect(find.textContaining('问象'), findsWidgets);
     expect(find.text('测试连接'), findsNothing);
     expect(find.text('API Key'), findsNothing);
+    expect(find.text('服务地址'), findsNothing);
   });
 }

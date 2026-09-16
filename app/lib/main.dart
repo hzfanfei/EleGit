@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 
 import 'api/wenxiang_api.dart';
 import 'config.dart';
+import 'copy/errors.dart';
 import 'models.dart';
 import 'screens/chat_page.dart';
 import 'screens/login_page.dart';
 import 'screens/repos_page.dart';
 import 'theme.dart';
+import 'widgets/wx_chrome.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -43,27 +45,37 @@ class _ShellPageState extends State<ShellPage> {
     apiKey: AppEnv.apiKey,
   );
   RepoItem? _repo;
-  String _bootError = '';
+  Object? _bootError;
+  bool _booting = true;
 
   @override
   void initState() {
     super.initState();
-    _boot();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _boot();
+    });
   }
 
   Future<void> _boot() async {
+    setState(() {
+      _booting = true;
+      _bootError = null;
+      _step = AppStep.boot;
+    });
     try {
       await _api.ping();
       final status = await _api.status();
       if (!mounted) return;
       setState(() {
+        _booting = false;
         _step = status.githubConnected ? AppStep.repos : AppStep.login;
       });
     } catch (err) {
       if (!mounted) return;
       setState(() {
-        _bootError = err.toString();
-        _step = AppStep.login;
+        _booting = false;
+        _bootError = err;
+        _step = AppStep.boot;
       });
     }
   }
@@ -74,27 +86,18 @@ class _ShellPageState extends State<ShellPage> {
     setState(() => _step = AppStep.repos);
   }
 
-  @override
-  Widget build(BuildContext context) {
+  Widget _page() {
     switch (_step) {
       case AppStep.boot:
-        return const Scaffold(
-          body: Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text('问象', style: TextStyle(fontSize: 32, fontWeight: FontWeight.w700)),
-                SizedBox(height: 20),
-                CircularProgressIndicator(),
-              ],
-            ),
-          ),
+        return _BootPane(
+          busy: _booting,
+          error: _bootError,
+          onRetry: _boot,
         );
       case AppStep.login:
         return LoginPage(
           api: _api,
           onReady: _afterLogin,
-          error: _bootError,
         );
       case AppStep.repos:
         return ReposPage(
@@ -112,5 +115,81 @@ class _ShellPageState extends State<ShellPage> {
           onBack: () => setState(() => _step = AppStep.repos),
         );
     }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 320),
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeInCubic,
+      transitionBuilder: (child, anim) {
+        return FadeTransition(
+          opacity: anim,
+          child: SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0, 0.018),
+              end: Offset.zero,
+            ).animate(anim),
+            child: child,
+          ),
+        );
+      },
+      child: KeyedSubtree(
+        key: ValueKey(_step),
+        child: _page(),
+      ),
+    );
+  }
+}
+
+class _BootPane extends StatelessWidget {
+  const _BootPane({
+    required this.busy,
+    required this.error,
+    required this.onRetry,
+  });
+
+  final bool busy;
+  final Object? error;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: Padding(
+          padding: Wx.pagePadding,
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 400),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const WxMark(size: 44),
+                  const SizedBox(height: 22),
+                  Text('问象', style: Theme.of(context).textTheme.displaySmall),
+                  const SizedBox(height: 10),
+                  Text(
+                    busy ? '正在连接本机服务' : (error == null ? '' : humanizeError(error!)),
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                  const SizedBox(height: 28),
+                  if (busy)
+                    const SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  else if (error != null)
+                    FilledButton(onPressed: onRetry, child: const Text('重试')),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
