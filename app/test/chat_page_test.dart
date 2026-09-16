@@ -27,6 +27,7 @@ void main() {
 
     expect(find.text('octo/demo'), findsWidgets);
     expect(find.textContaining('从进度问起'), findsOneWidget);
+    expect(find.textContaining('有本机 Agent'), findsOneWidget);
     expect(find.text('这个仓库最近在做什么？'), findsOneWidget);
     expect(find.text('README 里怎么写的？'), findsOneWidget);
     expect(find.textContaining('检出'), findsNothing);

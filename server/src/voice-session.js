@@ -1,4 +1,4 @@
-import { createCallMachine, pcmHasSpeech, runVoiceTurn } from "./voice-call.js";
+import { createCallMachine, runVoiceTurn } from "./voice-call.js";
 
 export function createVoiceSession({
   config,
@@ -168,9 +168,6 @@ export function createVoiceSession({
     onPcm(buf) {
       if (!started || closed) return;
       asr?.push?.(buf);
-      if (machine.state === "speaking" && pcmHasSpeech(buf)) {
-        bargeIn("energy");
-      }
     },
     barge() {
       if (machine.state === "speaking") bargeIn("tap");
