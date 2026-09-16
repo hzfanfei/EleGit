@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildCursorPrompt, detectCursorEngine, streamText, synthesizeLocalAnswer } from "../src/ask.js";
+import { buildCursorPrompt, detectCursorEngine, streamAnswer, streamText, synthesizeLocalAnswer } from "../src/ask.js";
 
 const sampleProgress = {
   repo: {
@@ -48,7 +48,9 @@ describe("synthesizeLocalAnswer", () => {
     });
     assert.match(text, /问象\/acme\/widget/);
     assert.match(text, /npm start/);
-    assert.match(text, /检出/);
+    assert.match(text, /## /);
+    assert.match(text, /^- /m);
+    assert.doesNotMatch(text, /检出/);
   });
 
   it("says when there are no open PRs", () => {
@@ -68,6 +70,33 @@ describe("streamText", () => {
     }
     assert.equal(parts.join(""), "进度如何");
     assert.ok(parts.length >= 2);
+  });
+});
+
+describe("streamAnswer", () => {
+  it("rechunks a large ACP delta before done so tokens appear progressively", async () => {
+    const events = [];
+    for await (const event of streamAnswer({
+      question: "进度如何",
+      progress: sampleProgress,
+      context: "Repository: acme/widget",
+      session: { id: "s1" },
+      detectEngine: () => ({ id: "acp" }),
+      streamOpts: { chunkSize: 2, delayMs: 0 },
+      sessions: {
+        prompt: async (_session, { onDelta }) => {
+          onDelta("最近提交已经合进主干。");
+        },
+      },
+    })) {
+      events.push(event);
+    }
+    const deltas = events.filter((event) => event.type === "delta");
+    assert.ok(deltas.length >= 4);
+    assert.equal(deltas.map((event) => event.text).join(""), "最近提交已经合进主干。");
+    assert.equal(events[0].type, "start");
+    assert.equal(events.at(-1).type, "done");
+    assert.ok(events.findIndex((event) => event.type === "delta") < events.findIndex((event) => event.type === "done"));
   });
 });
 
