@@ -67,8 +67,14 @@ export function checkoutPath(workspaceRoot, owner, repo) {
   );
 }
 
-function runGit(args, { cwd, token, timeoutMs = 180_000 } = {}) {
+export function runGit(args, { cwd, token, timeoutMs = 180_000, signal } = {}) {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      const err = new Error("cancelled");
+      err.code = "cancelled";
+      reject(err);
+      return;
+    }
     const env = { ...process.env, GIT_TERMINAL_PROMPT: "0" };
     const extra = gitAuthConfigArgs(token);
     const child = spawn("git", [...extra, ...args], {
@@ -78,9 +84,25 @@ function runGit(args, { cwd, token, timeoutMs = 180_000 } = {}) {
     });
     let stdout = "";
     let stderr = "";
+    let settled = false;
+    const done = (err, value) => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener?.("abort", onAbort);
+      clearTimeout(timer);
+      if (err) reject(err);
+      else resolve(value);
+    };
+    const onAbort = () => {
+      child.kill("SIGTERM");
+      const err = new Error("cancelled");
+      err.code = "cancelled";
+      done(err);
+    };
+    signal?.addEventListener?.("abort", onAbort, { once: true });
     const timer = setTimeout(() => {
       child.kill("SIGTERM");
-      reject(new Error(`git timed out: ${args.join(" ")}`));
+      done(new Error(`git timed out: ${args.join(" ")}`));
     }, timeoutMs);
     child.stdout.on("data", (chunk) => {
       stdout += chunk.toString();
@@ -89,16 +111,20 @@ function runGit(args, { cwd, token, timeoutMs = 180_000 } = {}) {
       stderr += chunk.toString();
     });
     child.on("error", (err) => {
-      clearTimeout(timer);
-      reject(err);
+      done(err);
     });
     child.on("close", (code) => {
-      clearTimeout(timer);
-      if (code !== 0) {
-        reject(gitFailure(stderr || stdout, code));
+      if (signal?.aborted) {
+        const err = new Error("cancelled");
+        err.code = "cancelled";
+        done(err);
         return;
       }
-      resolve(stdout.trim());
+      if (code !== 0) {
+        done(gitFailure(stderr || stdout, code));
+        return;
+      }
+      done(null, stdout.trim());
     });
   });
 }
@@ -110,23 +136,26 @@ export async function ensureCheckout({
   token,
   cloneUrl,
   defaultBranch = "main",
+  signal,
 }) {
   const dest = checkoutPath(workspaceRoot, owner, repo);
   await mkdir(path.dirname(dest), { recursive: true });
   const remote = cloneUrl || `https://github.com/${owner}/${repo}.git`;
   const existed = existsSync(path.join(dest, ".git"));
   if (!existed) {
-    await runGit(["clone", "--depth", "50", remote, dest], { token });
+    await runGit(["clone", "--depth", "50", remote, dest], { token, signal });
   } else {
-    await runGit(["remote", "set-url", "origin", remote], { cwd: dest });
-    await runGit(["fetch", "--depth", "50", "origin"], { cwd: dest, token });
+    await runGit(["remote", "set-url", "origin", remote], { cwd: dest, signal });
+    await runGit(["fetch", "--depth", "50", "origin"], { cwd: dest, token, signal });
     try {
-      await runGit(["checkout", defaultBranch], { cwd: dest });
+      await runGit(["checkout", defaultBranch], { cwd: dest, signal });
       await runGit(["pull", "--ff-only", "origin", defaultBranch], {
         cwd: dest,
         token,
+        signal,
       });
-    } catch {
+    } catch (err) {
+      if (err?.code === "cancelled") throw err;
       // Keep the existing checkout if the default branch cannot fast-forward.
     }
   }

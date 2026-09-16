@@ -71,6 +71,16 @@ describe("streamText", () => {
     assert.equal(parts.join(""), "进度如何");
     assert.ok(parts.length >= 2);
   });
+
+  it("stops yielding when the abort signal fires", async () => {
+    const ac = new AbortController();
+    const parts = [];
+    for await (const piece of streamText("进度如何最近提交", { chunkSize: 2, delayMs: 5, signal: ac.signal })) {
+      parts.push(piece);
+      ac.abort();
+    }
+    assert.ok(parts.join("").length < "进度如何最近提交".length);
+  });
 });
 
 describe("streamAnswer", () => {

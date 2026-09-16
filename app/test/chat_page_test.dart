@@ -159,4 +159,30 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
     await tester.pumpAndSettle();
   });
+
+  testWidgets('stop ends the waiting UI without a stack dump', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: ChatPage(
+          api: FakeWenxiangApi(streamDelay: const Duration(milliseconds: 80)),
+          repo: sampleRepo(),
+          onBack: () {},
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.text('这个仓库最近在做什么？'));
+    await tester.pump();
+
+    expect(find.byTooltip('停止'), findsOneWidget);
+    await tester.tap(find.byTooltip('停止'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump();
+
+    expect(find.byTooltip('发送'), findsOneWidget);
+    expect(find.textContaining('正在写'), findsNothing);
+    expect(find.textContaining('Exception'), findsNothing);
+  });
 }

@@ -43,6 +43,14 @@ app.options("*", cors(corsOptions));
 app.use(express.json({ limit: "1mb" }));
 
 function sendError(res, err) {
+  if (isCancelled(err)) {
+    if (!res.headersSent) {
+      res.status(499).json({ error: "已取消", code: "cancelled" });
+    } else {
+      res.end();
+    }
+    return;
+  }
   const status = err.status && Number.isInteger(err.status) ? err.status : 500;
   res.status(status).json({
     error: err.message || "Internal error",
@@ -254,7 +262,21 @@ app.get("/v1/repos", requireGithub, async (req, res) => {
   }
 });
 
-async function checkoutRepo(owner, repo) {
+function requestSignal(req) {
+  const ac = new AbortController();
+  const abort = () => {
+    if (!ac.signal.aborted) ac.abort();
+  };
+  req.on("aborted", abort);
+  req.on("close", abort);
+  return ac.signal;
+}
+
+function isCancelled(err) {
+  return err?.code === "cancelled" || err?.message === "cancelled";
+}
+
+async function checkoutRepo(owner, repo, signal) {
   const progress = await repoProgress(store.config.githubToken, owner, repo);
   const result = await ensureCheckout({
     workspaceRoot: store.config.workspaceRoot,
@@ -262,6 +284,7 @@ async function checkoutRepo(owner, repo) {
     repo,
     token: store.config.githubToken,
     defaultBranch: progress.repo.defaultBranch,
+    signal,
   });
   return { progress, ...result };
 }
@@ -271,6 +294,7 @@ app.post("/v1/repos/:owner/:repo/checkout", requireGithub, async (req, res) => {
     const { progress, dest, existed, local } = await checkoutRepo(
       req.params.owner,
       req.params.repo,
+      requestSignal(req),
     );
     res.json({
       path: dest,
@@ -328,9 +352,17 @@ app.post("/v1/chat", requireGithub, async (req, res) => {
       return;
     }
     const session = sessions.resolveForChat(owner, repo, sessionId);
+    const signal = requestSignal(req);
+    req.on("close", () => {
+      sessions.cancel?.(session).catch(() => {});
+    });
     openSse(res);
     writeSse(res, { type: "meta", sessionId: session.id });
-    const { progress, dest, local } = await checkoutRepo(owner, repo);
+    const { progress, dest, local } = await checkoutRepo(owner, repo, signal);
+    if (signal.aborted) {
+      res.end();
+      return;
+    }
     const githubContext = formatProgressContext(progress);
     const context = `${githubContext}\n\n${formatLocalContext(local)}`;
     writeSse(res, {
@@ -350,7 +382,9 @@ app.post("/v1/chat", requireGithub, async (req, res) => {
       local,
       session,
       sessions,
+      signal,
     })) {
+      if (signal.aborted) break;
       if (event.type === "done") {
         finalEngine = event.engine;
         finalAnswer = event.answer;
@@ -365,6 +399,10 @@ app.post("/v1/chat", requireGithub, async (req, res) => {
       } else {
         writeSse(res, event);
       }
+    }
+    if (signal.aborted) {
+      res.end();
+      return;
     }
     if (!finalAnswer) {
       writeSse(res, {

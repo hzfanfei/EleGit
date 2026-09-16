@@ -5,6 +5,8 @@ class FakeWenxiangApi extends WenxiangApi {
   FakeWenxiangApi({
     this.oauthThrows,
     this.oauthCompletes = false,
+    this.githubConnected = true,
+    this.githubLogin = 'octo',
     this.reposResult,
     this.reposThrows,
     this.checkoutPath = '/home/fei/问象/octo/demo',
@@ -18,6 +20,8 @@ class FakeWenxiangApi extends WenxiangApi {
 
   Object? oauthThrows;
   bool oauthCompletes;
+  bool githubConnected;
+  String githubLogin;
   List<RepoItem>? reposResult;
   Object? reposThrows;
   String checkoutPath;
@@ -29,6 +33,8 @@ class FakeWenxiangApi extends WenxiangApi {
   Duration streamPace;
   int startOAuthCalls = 0;
   int checkoutCalls = 0;
+  int cancelCheckoutCalls = 0;
+  int cancelChatCalls = 0;
   String? lastSessionId;
   int createSessionCalls = 0;
   final List<ChatSession> sessions = [
@@ -42,10 +48,13 @@ class FakeWenxiangApi extends WenxiangApi {
   ];
 
   @override
+  Future<void> ping() async {}
+
+  @override
   Future<ServerStatus> status() async {
     return ServerStatus(
-      githubConnected: true,
-      githubLogin: 'octo',
+      githubConnected: githubConnected,
+      githubLogin: githubLogin,
       oauthReady: true,
       callbackUrls: const [],
       deviceFlowReady: false,
@@ -103,6 +112,18 @@ class FakeWenxiangApi extends WenxiangApi {
   }
 
   @override
+  void cancelCheckout() {
+    cancelCheckoutCalls += 1;
+    checkoutThrows ??= const OperationCancelled();
+  }
+
+  @override
+  void cancelChat() {
+    cancelChatCalls += 1;
+    streamThrows ??= const OperationCancelled();
+  }
+
+  @override
   Future<List<ChatSession>> listSessions(String owner, String repo) async {
     return List<ChatSession>.from(sessions);
   }
@@ -139,6 +160,7 @@ class FakeWenxiangApi extends WenxiangApi {
     if (streamDelay > Duration.zero) {
       await Future<void>.delayed(streamDelay);
     }
+    if (streamThrows != null) throw streamThrows!;
     for (final event in streamEvents ??
         [
           ChatStreamEvent(type: 'start', engine: 'local-progress'),

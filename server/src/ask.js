@@ -4,13 +4,14 @@ export { detectCursorEngine } from "./acp.js";
 export { whichSync } from "./which.js";
 export { buildAcpPrompt } from "./acp.js";
 
-export async function* streamText(text, { chunkSize = 2, delayMs = 8 } = {}) {
+export async function* streamText(text, { chunkSize = 2, delayMs = 8, signal } = {}) {
   const chars = [...String(text || "")];
   if (chars.length <= chunkSize) {
-    if (chars.length) yield chars.join("");
+    if (chars.length && !signal?.aborted) yield chars.join("");
     return;
   }
   for (let i = 0; i < chars.length; i += chunkSize) {
+    if (signal?.aborted) return;
     yield chars.slice(i, i + chunkSize).join("");
     if (delayMs) await new Promise((r) => setTimeout(r, delayMs));
   }
@@ -129,7 +130,9 @@ export async function* streamAnswer({
   githubContext,
   detectEngine = detectCursorEngine,
   streamOpts = { chunkSize: 2, delayMs: 8 },
+  signal,
 }) {
+  const opts = { ...streamOpts, signal };
   const engine = detectEngine();
   if (engine && sessions && session) {
     yield { type: "start", engine: "acp" };
@@ -160,6 +163,10 @@ export async function* streamAnswer({
         notify?.();
       });
     while (!finished || queue.length) {
+      if (signal?.aborted) {
+        sessions.cancel?.(session).catch(() => {});
+        return;
+      }
       if (!queue.length) {
         await new Promise((resolve) => {
           notify = resolve;
@@ -167,7 +174,7 @@ export async function* streamAnswer({
         notify = undefined;
         continue;
       }
-      yield* prefixDeltas(queue.shift(), streamOpts);
+      yield* prefixDeltas(queue.shift(), opts);
     }
     if (!fail && full) {
       yield { type: "done", engine: "acp", answer: full, sessionId: session.id };
@@ -175,13 +182,15 @@ export async function* streamAnswer({
     }
     const fallback = `${synthesizeLocalAnswer({ question, progress, context, local })}\n\n（本机探测到 Cursor ACP，但调用失败：${fail?.message || "empty output"}。已回退到本地进度适配器。）`;
     yield { type: "start", engine: "local-progress" };
-    yield* prefixDeltas(fallback, streamOpts);
+    yield* prefixDeltas(fallback, opts);
+    if (signal?.aborted) return;
     yield { type: "done", engine: "local-progress", answer: fallback, sessionId: session.id };
     return;
   }
   const answer = synthesizeLocalAnswer({ question, progress, context, local });
   yield { type: "start", engine: "local-progress" };
-  yield* prefixDeltas(answer, streamOpts);
+  yield* prefixDeltas(answer, opts);
+  if (signal?.aborted) return;
   yield { type: "done", engine: "local-progress", answer, sessionId: session?.id };
 }
 

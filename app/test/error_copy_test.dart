@@ -22,6 +22,17 @@ void main() {
     expect(humanizeError(ApiException('git clone failed: Authentication failed')), contains('克隆'));
   });
 
+  test('maps SSE drops without leaking stacks', () {
+    expect(
+      humanizeError(ApiException('ClientException: Connection closed before full headers were received')),
+      contains('连接中断'),
+    );
+    expect(
+      humanizeError(ApiException('ClientException: Connection closed before full headers were received')),
+      isNot(contains('ClientException')),
+    );
+  });
+
   test('never returns empty copy', () {
     expect(humanizeError(''), isNot(isEmpty));
   });
