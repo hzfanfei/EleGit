@@ -56,6 +56,71 @@ class _MarkPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
+class WxPageHeader extends StatelessWidget {
+  const WxPageHeader({
+    super.key,
+    this.onBack,
+    this.backEnabled = true,
+    this.backTooltip = '返回',
+    required this.title,
+    this.subtitle,
+    this.trailing,
+  });
+
+  final VoidCallback? onBack;
+  final bool backEnabled;
+  final String backTooltip;
+  final String title;
+  final String? subtitle;
+  final List<Widget>? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasSubtitle = subtitle != null && subtitle!.isNotEmpty;
+    return SafeArea(
+      bottom: false,
+      child: SizedBox(
+        height: hasSubtitle ? 64 : 56,
+        child: Padding(
+          padding: const EdgeInsets.only(right: 4),
+          child: Row(
+            children: [
+              if (onBack != null)
+                IconButton(
+                  tooltip: backTooltip,
+                  onPressed: backEnabled ? onBack : null,
+                  icon: const Icon(Icons.arrow_back),
+                )
+              else
+                const SizedBox(width: 20),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    if (hasSubtitle)
+                      Text(
+                        subtitle!,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.labelSmall,
+                      ),
+                  ],
+                ),
+              ),
+              ...?trailing,
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class WxErrorPanel extends StatefulWidget {
   const WxErrorPanel({
     super.key,
@@ -93,26 +158,32 @@ class _WxErrorPanelState extends State<WxErrorPanel> {
               humanizeError(widget.error),
               style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: Wx.text),
             ),
-            if (detail != null) ...[
-              const SizedBox(height: 6),
-              TextButton(
-                onPressed: () => setState(() => _open = !_open),
-                child: Text(_open ? '收起详情' : '详情'),
+            if (detail != null && _open) ...[
+              const SizedBox(height: 8),
+              SelectableText(
+                detail,
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: Wx.muted,
+                      fontSize: 12,
+                      height: 1.45,
+                    ),
               ),
-              if (_open)
-                SelectableText(
-                  detail,
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: Wx.muted,
-                        fontSize: 12,
-                        height: 1.45,
+            ],
+            if (detail != null || widget.onRetry != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Row(
+                  children: [
+                    if (widget.onRetry != null)
+                      TextButton(onPressed: widget.onRetry, child: Text(widget.retryLabel)),
+                    if (detail != null)
+                      TextButton(
+                        onPressed: () => setState(() => _open = !_open),
+                        child: Text(_open ? '收起详情' : '详情'),
                       ),
+                  ],
                 ),
-            ],
-            if (widget.onRetry != null) ...[
-              const SizedBox(height: 4),
-              TextButton(onPressed: widget.onRetry, child: Text(widget.retryLabel)),
-            ],
+              ),
           ],
         ),
       ),

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../api/wenxiang_api.dart';
@@ -9,7 +10,7 @@ import '../widgets/wx_chrome.dart';
 
 typedef OpenUrl = Future<void> Function(Uri uri);
 
-enum _LoginPhase { opening, waiting, error }
+enum _LoginPhase { idle, opening, waiting, ready, error }
 
 class LoginPage extends StatefulWidget {
   const LoginPage({
@@ -18,24 +19,25 @@ class LoginPage extends StatefulWidget {
     required this.onReady,
     this.error = '',
     this.openUrl,
+    this.autoStart = true,
   });
 
   final WenxiangApi api;
   final Future<void> Function() onReady;
   final String error;
   final OpenUrl? openUrl;
+  final bool autoStart;
 
   @override
   State<LoginPage> createState() => _LoginPageState();
 }
 
 class _LoginPageState extends State<LoginPage> {
-  _LoginPhase _phase = _LoginPhase.opening;
+  _LoginPhase _phase = _LoginPhase.idle;
   Object? _error;
   Timer? _poll;
   Timer? _staleTimer;
   bool _stale = false;
-  bool _started = false;
 
   @override
   void initState() {
@@ -43,9 +45,13 @@ class _LoginPageState extends State<LoginPage> {
     if (widget.error.isNotEmpty) {
       _error = widget.error;
     }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _start();
-    });
+    if (widget.autoStart) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _start();
+      });
+    } else {
+      _phase = _LoginPhase.idle;
+    }
   }
 
   Future<void> _openBrowser(Uri uri) async {
@@ -60,7 +66,6 @@ class _LoginPageState extends State<LoginPage> {
     _poll?.cancel();
     _staleTimer?.cancel();
     setState(() {
-      _started = true;
       _stale = false;
       _phase = _LoginPhase.opening;
       _error = widget.error.isNotEmpty ? widget.error : null;
@@ -77,11 +82,14 @@ class _LoginPageState extends State<LoginPage> {
       _poll = Timer.periodic(const Duration(seconds: 2), (_) async {
         try {
           final done = await widget.api.pollOAuth(started.state);
-          if (done) {
-            _poll?.cancel();
-            _staleTimer?.cancel();
-            await widget.onReady();
-          }
+          if (!done) return;
+          _poll?.cancel();
+          _staleTimer?.cancel();
+          if (!mounted) return;
+          setState(() => _phase = _LoginPhase.ready);
+          HapticFeedback.lightImpact();
+          await Future<void>.delayed(const Duration(milliseconds: 560));
+          if (mounted) await widget.onReady();
         } catch (err) {
           _poll?.cancel();
           _staleTimer?.cancel();
@@ -110,9 +118,26 @@ class _LoginPageState extends State<LoginPage> {
     super.dispose();
   }
 
+  String get _bodyCopy {
+    switch (_phase) {
+      case _LoginPhase.idle:
+        return '已从仓库返回。要换 GitHub 账号，再打开一次授权。';
+      case _LoginPhase.opening:
+        return '正在打开 GitHub…';
+      case _LoginPhase.waiting:
+        return '请在浏览器完成 GitHub 授权，然后回到这里。';
+      case _LoginPhase.ready:
+        return '已授权，正在进入仓库…';
+      case _LoginPhase.error:
+        return '授权没有完成。可以重新打开 GitHub。';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final waiting = _phase == _LoginPhase.waiting;
+    final ready = _phase == _LoginPhase.ready;
+    final opening = _phase == _LoginPhase.opening;
     return Scaffold(
       body: SafeArea(
         child: Align(
@@ -131,7 +156,9 @@ class _LoginPageState extends State<LoginPage> {
                 Text('问象', style: Theme.of(context).textTheme.displaySmall),
                 const SizedBox(height: 10),
                 Text(
-                  '打开即用本机仓库问进度。接下来会在浏览器登录 GitHub。',
+                  _phase == _LoginPhase.idle
+                      ? '已经登录过。只有要换账号时，才需要再走一遍 GitHub。'
+                      : '打开即用本机仓库问进度。接下来会在浏览器登录 GitHub。',
                   style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                         color: Wx.muted,
                         height: 1.55,
@@ -151,31 +178,36 @@ class _LoginPageState extends State<LoginPage> {
                       children: [
                         _StepLine(
                           index: '1',
-                          label: _phase == _LoginPhase.opening ? '正在打开浏览器' : '已打开浏览器',
-                          active: _phase == _LoginPhase.opening,
-                          done: waiting || _phase == _LoginPhase.error,
+                          label: opening
+                              ? '正在打开浏览器'
+                              : (waiting || ready)
+                                  ? '已打开浏览器'
+                                  : '打开浏览器',
+                          active: opening,
+                          done: waiting || ready,
                         ),
                         const SizedBox(height: 14),
                         _StepLine(
                           index: '2',
-                          label: waiting ? '等待授权' : '在浏览器完成授权',
+                          label: ready
+                              ? '已授权'
+                              : waiting
+                                  ? '等待授权'
+                                  : '在浏览器完成授权',
                           active: waiting,
-                          done: false,
+                          done: ready,
                         ),
-                        const SizedBox(height: 16),
-                        if (waiting || _phase == _LoginPhase.opening)
+                        if (opening || waiting) ...[
+                          const SizedBox(height: 16),
                           const ClipRRect(
                             child: LinearProgressIndicator(minHeight: 2),
                           ),
+                        ],
                         const SizedBox(height: 14),
                         Text(
-                          waiting
-                              ? '请在浏览器完成 GitHub 授权，然后回到这里。'
-                              : _phase == _LoginPhase.opening
-                                  ? '正在打开 GitHub…'
-                                  : '授权没有完成。可以重新打开 GitHub。',
+                          _bodyCopy,
                           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                color: Wx.text,
+                                color: ready ? Wx.ok : Wx.text,
                                 height: 1.5,
                               ),
                         ),
@@ -197,13 +229,13 @@ class _LoginPageState extends State<LoginPage> {
                 const SizedBox(height: 28),
                 SizedBox(
                   width: double.infinity,
-                  child: _phase == _LoginPhase.error
+                  child: _phase == _LoginPhase.error || _phase == _LoginPhase.idle
                       ? FilledButton(
                           onPressed: _start,
                           child: const Text('重新打开 GitHub'),
                         )
                       : TextButton(
-                          onPressed: _started ? _start : null,
+                          onPressed: ready ? null : _start,
                           child: const Text('重新打开 GitHub'),
                         ),
                 ),
@@ -239,9 +271,19 @@ class _StepLine extends StatelessWidget {
           height: 22,
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: active ? Wx.accent : Wx.raised,
+            color: active
+                ? Wx.accent
+                : done
+                    ? Wx.ok
+                    : Wx.raised,
             borderRadius: BorderRadius.circular(11),
-            border: Border.all(color: active ? Wx.accent : Wx.hairline),
+            border: Border.all(
+              color: active
+                  ? Wx.accent
+                  : done
+                      ? Wx.ok
+                      : Wx.hairline,
+            ),
           ),
           child: Text(
             done && !active ? '✓' : index,

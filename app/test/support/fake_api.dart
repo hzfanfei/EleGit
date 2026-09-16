@@ -38,6 +38,24 @@ class FakeWenxiangApi extends WenxiangApi {
   ];
 
   @override
+  Future<ServerStatus> status() async {
+    return ServerStatus(
+      githubConnected: true,
+      githubLogin: 'octo',
+      oauthReady: true,
+      callbackUrls: const [],
+      deviceFlowReady: false,
+      cursorAvailable: false,
+      cursorEngine: 'local-progress',
+      tunnelUrl: '',
+      tunnelRunning: false,
+      tunnelError: '',
+      lanUrls: const [],
+      workspaceRoot: '/home/fei/问象',
+    );
+  }
+
+  @override
   Future<OAuthStart> startOAuth() async {
     startOAuthCalls += 1;
     if (oauthThrows != null) throw oauthThrows!;

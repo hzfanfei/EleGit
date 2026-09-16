@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import 'api/wenxiang_api.dart';
 import 'config.dart';
-import 'copy/errors.dart';
 import 'models.dart';
 import 'screens/chat_page.dart';
 import 'screens/login_page.dart';
@@ -47,6 +46,8 @@ class _ShellPageState extends State<ShellPage> {
   RepoItem? _repo;
   Object? _bootError;
   bool _booting = true;
+  bool _loginAutoStart = true;
+  String _githubLogin = '';
 
   @override
   void initState() {
@@ -68,6 +69,8 @@ class _ShellPageState extends State<ShellPage> {
       if (!mounted) return;
       setState(() {
         _booting = false;
+        _githubLogin = status.githubLogin;
+        _loginAutoStart = !status.githubConnected;
         _step = status.githubConnected ? AppStep.repos : AppStep.login;
       });
     } catch (err) {
@@ -81,9 +84,12 @@ class _ShellPageState extends State<ShellPage> {
   }
 
   Future<void> _afterLogin() async {
-    await _api.status();
+    final status = await _api.status();
     if (!mounted) return;
-    setState(() => _step = AppStep.repos);
+    setState(() {
+      _githubLogin = status.githubLogin;
+      _step = AppStep.repos;
+    });
   }
 
   Widget _page() {
@@ -98,15 +104,20 @@ class _ShellPageState extends State<ShellPage> {
         return LoginPage(
           api: _api,
           onReady: _afterLogin,
+          autoStart: _loginAutoStart,
         );
       case AppStep.repos:
         return ReposPage(
           api: _api,
+          githubLogin: _githubLogin,
           onOpen: (repo) => setState(() {
             _repo = repo;
             _step = AppStep.chat;
           }),
-          onBack: () => setState(() => _step = AppStep.login),
+          onBack: () => setState(() {
+            _loginAutoStart = false;
+            _step = AppStep.login;
+          }),
         );
       case AppStep.chat:
         return ChatPage(
@@ -171,7 +182,9 @@ class _BootPane extends StatelessWidget {
                   Text('问象', style: Theme.of(context).textTheme.displaySmall),
                   const SizedBox(height: 10),
                   Text(
-                    busy ? '正在连接本机服务' : (error == null ? '' : humanizeError(error!)),
+                    busy
+                        ? '正在连接本机服务'
+                        : (error == null ? '打开即问本机仓库进度。' : ''),
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
@@ -183,7 +196,7 @@ class _BootPane extends StatelessWidget {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   else if (error != null)
-                    FilledButton(onPressed: onRetry, child: const Text('重试')),
+                    WxErrorPanel(error: error!, onRetry: onRetry),
                 ],
               ),
             ),
