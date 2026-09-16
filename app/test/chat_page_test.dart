@@ -20,7 +20,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('octo/demo'), findsWidgets);
-    expect(find.textContaining('对着这份检出提问'), findsOneWidget);
+    expect(find.textContaining('从进度问起'), findsOneWidget);
     expect(find.text('这个仓库最近在做什么？'), findsOneWidget);
     expect(find.byType(ActionChip), findsNothing);
     expect(find.text('▍'), findsNothing);
@@ -67,11 +67,15 @@ void main() {
 
     await tester.tap(find.byTooltip('新建会话'));
     await tester.pump();
-    expect(find.textContaining('对着这份检出提问'), findsOneWidget);
+    expect(find.textContaining('从进度问起'), findsOneWidget);
 
     await tester.tap(find.byTooltip('历史会话'));
     await tester.pumpAndSettle();
     expect(find.text('历史会话'), findsOneWidget);
     expect(find.text('新会话'), findsWidgets);
+
+    await tester.tap(find.byTooltip('关闭会话').first);
+    await tester.pump();
+    expect(find.text('历史会话'), findsOneWidget);
   });
 }

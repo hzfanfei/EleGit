@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../api/wenxiang_api.dart';
+import '../copy/time.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../widgets/wx_chrome.dart';
@@ -12,11 +15,13 @@ class ReposPage extends StatefulWidget {
     required this.api,
     required this.onOpen,
     required this.onBack,
+    this.githubLogin = '',
   });
 
   final WenxiangApi api;
   final void Function(RepoItem repo) onOpen;
   final VoidCallback onBack;
+  final String githubLogin;
 
   @override
   State<ReposPage> createState() => _ReposPageState();
@@ -27,11 +32,16 @@ class _ReposPageState extends State<ReposPage> {
   List<RepoItem> _repos = [];
   Object? _error;
   RepoItem? _cloning;
+  Object? _cloneError;
+  int _cloneAttempt = 0;
   bool _loading = true;
 
   @override
   void initState() {
     super.initState();
+    _query.addListener(() {
+      if (mounted) setState(() {});
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _search();
     });
@@ -55,9 +65,11 @@ class _ReposPageState extends State<ReposPage> {
   }
 
   Future<void> _open(RepoItem repo) async {
-    if (_cloning != null) return;
+    if (_cloning != null && _cloneError == null) return;
     setState(() {
       _cloning = repo;
+      _cloneError = null;
+      _cloneAttempt += 1;
       _error = null;
     });
     try {
@@ -67,10 +79,19 @@ class _ReposPageState extends State<ReposPage> {
       widget.onOpen(repo);
     } catch (err) {
       if (!mounted) return;
-      setState(() => _error = err);
+      setState(() => _cloneError = err);
     } finally {
-      if (mounted) setState(() => _cloning = null);
+      if (mounted && _cloneError == null) {
+        setState(() => _cloning = null);
+      }
     }
+  }
+
+  void _dismissClone() {
+    setState(() {
+      _cloning = null;
+      _cloneError = null;
+    });
   }
 
   @override
@@ -81,47 +102,76 @@ class _ReposPageState extends State<ReposPage> {
 
   @override
   Widget build(BuildContext context) {
+    final blocked = _cloning != null;
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('选择仓库'),
-        leading: IconButton(
-          tooltip: '返回登录',
-          icon: const Icon(Icons.arrow_back),
-          onPressed: _cloning == null ? widget.onBack : null,
-        ),
-      ),
-      body: Stack(
+      body: Column(
         children: [
-          Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
-                child: TextField(
-                  controller: _query,
-                  textInputAction: TextInputAction.search,
-                  onSubmitted: (_) => _search(),
-                  enabled: _cloning == null,
-                  decoration: InputDecoration(
-                    hintText: '搜索仓库名',
-                    prefixIcon: const Icon(Icons.search, size: 20, color: Wx.faint),
-                    suffixIcon: IconButton(
-                      tooltip: '搜索',
-                      icon: const Icon(Icons.arrow_forward, size: 20),
-                      onPressed: _search,
+          WxPageHeader(
+            onBack: widget.onBack,
+            backEnabled: !blocked,
+            backTooltip: '重新登录',
+            title: '选择仓库',
+            subtitle: widget.githubLogin.isEmpty
+                ? '点进一个，问进度'
+                : widget.githubLogin,
+            trailing: widget.githubLogin.isEmpty
+                ? null
+                : [
+                    Padding(
+                      padding: const EdgeInsets.only(right: 12),
+                      child: Text(
+                        '已登录',
+                        style: Theme.of(context).textTheme.labelSmall,
+                      ),
                     ),
-                  ),
-                ),
-              ),
-              const WxHairline(),
-              if (_error != null && _cloning == null)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-                  child: WxErrorPanel(error: _error!, onRetry: _search),
-                ),
-              Expanded(child: _body()),
-            ],
+                  ],
           ),
-          if (_cloning != null) _CloneScrim(repo: _cloning!),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+            child: TextField(
+              controller: _query,
+              textInputAction: TextInputAction.search,
+              onSubmitted: (_) => _search(),
+              enabled: !blocked,
+              decoration: InputDecoration(
+                hintText: '搜索仓库名',
+                prefixIcon: const Icon(Icons.search, size: 20, color: Wx.faint),
+                suffixIcon: _query.text.isEmpty
+                    ? null
+                    : IconButton(
+                        tooltip: '清除',
+                        icon: const Icon(Icons.close, size: 18),
+                        onPressed: blocked
+                            ? null
+                            : () {
+                                _query.clear();
+                                _search();
+                              },
+                      ),
+              ),
+            ),
+          ),
+          const WxHairline(),
+          if (_error != null && _cloning == null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+              child: WxErrorPanel(error: _error!, onRetry: _search),
+            ),
+          Expanded(
+            child: Stack(
+              children: [
+                _body(),
+                if (_cloning != null)
+                  _CloneScrim(
+                    key: ValueKey(_cloneAttempt),
+                    repo: _cloning!,
+                    error: _cloneError,
+                    onRetry: _cloneError == null ? null : () => _open(_cloning!),
+                    onDismiss: _cloneError == null ? null : _dismissClone,
+                  ),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -171,6 +221,12 @@ class _RepoTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final initial = repo.owner.isNotEmpty ? repo.owner.substring(0, 1).toUpperCase() : '?';
+    final time = formatRelativeTime(repo.pushedAt);
+    final meta = [
+      repo.owner,
+      if (repo.language.isNotEmpty) repo.language,
+      if (time.isNotEmpty) time,
+    ].join(' · ');
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -179,9 +235,9 @@ class _RepoTile extends StatelessWidget {
         child: ConstrainedBox(
           constraints: const BoxConstraints(minHeight: 64),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+            padding: const EdgeInsets.fromLTRB(12, 12, 8, 12),
             child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Container(
                   width: 36,
@@ -210,7 +266,7 @@ class _RepoTile extends StatelessWidget {
                         children: [
                           Expanded(
                             child: Text(
-                              repo.fullName,
+                              repo.name,
                               style: Theme.of(context).textTheme.titleMedium,
                             ),
                           ),
@@ -229,6 +285,10 @@ class _RepoTile extends StatelessWidget {
                             ),
                         ],
                       ),
+                      if (meta.isNotEmpty) ...[
+                        const SizedBox(height: 3),
+                        Text(meta, style: Theme.of(context).textTheme.labelSmall),
+                      ],
                       if (repo.description.isNotEmpty) ...[
                         const SizedBox(height: 4),
                         Text(
@@ -238,13 +298,10 @@ class _RepoTile extends StatelessWidget {
                           style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Wx.muted),
                         ),
                       ],
-                      if (repo.language.isNotEmpty) ...[
-                        const SizedBox(height: 6),
-                        Text(repo.language, style: Theme.of(context).textTheme.labelSmall),
-                      ],
                     ],
                   ),
                 ),
+                const Icon(Icons.chevron_right, size: 20, color: Wx.faint),
               ],
             ),
           ),
@@ -254,12 +311,56 @@ class _RepoTile extends StatelessWidget {
   }
 }
 
-class _CloneScrim extends StatelessWidget {
-  const _CloneScrim({required this.repo});
+class _CloneScrim extends StatefulWidget {
+  const _CloneScrim({
+    required this.repo,
+    this.error,
+    this.onRetry,
+    this.onDismiss,
+  });
+
   final RepoItem repo;
+  final Object? error;
+  final VoidCallback? onRetry;
+  final VoidCallback? onDismiss;
+
+  @override
+  State<_CloneScrim> createState() => _CloneScrimState();
+}
+
+class _CloneScrimState extends State<_CloneScrim> {
+  static const _stages = ['正在准备检出', '正在克隆到本机', '即将打开'];
+  int _stage = 0;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(milliseconds: 900), (timer) {
+      if (!mounted || widget.error != null) return;
+      if (_stage < _stages.length - 1) {
+        setState(() => _stage += 1);
+      }
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant _CloneScrim oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.error != null) {
+      _timer?.cancel();
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
+    final failed = widget.error != null;
     return ColoredBox(
       color: const Color(0xCC0C0D0F),
       child: Center(
@@ -277,21 +378,42 @@ class _CloneScrim extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('正在检出', style: Theme.of(context).textTheme.titleLarge),
+                  Text(
+                    failed ? '检出没有完成' : _stages[_stage],
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
                   const SizedBox(height: 8),
                   Text(
-                    '正在把 ${repo.fullName} 克隆到本机问象目录…',
+                    '正在把 ${widget.repo.fullName} 克隆到本机问象目录…',
                     style: Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.5),
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    '~/问象/${repo.owner}/${repo.name}',
+                    '~/问象/${widget.repo.owner}/${widget.repo.name}',
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
-                  const SizedBox(height: 18),
-                  const ClipRRect(
-                    child: LinearProgressIndicator(minHeight: 2),
-                  ),
+                  if (!failed) ...[
+                    const SizedBox(height: 18),
+                    const ClipRRect(
+                      child: LinearProgressIndicator(minHeight: 2),
+                    ),
+                  ],
+                  if (failed) ...[
+                    const SizedBox(height: 16),
+                    WxErrorPanel(
+                      error: widget.error!,
+                      onRetry: widget.onRetry,
+                      retryLabel: '再试一次',
+                    ),
+                    if (widget.onDismiss != null)
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton(
+                          onPressed: widget.onDismiss,
+                          child: const Text('关闭'),
+                        ),
+                      ),
+                  ],
                 ],
               ),
             ),

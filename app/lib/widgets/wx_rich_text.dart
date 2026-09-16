@@ -62,7 +62,87 @@ class WxReadableText extends StatelessWidget {
   }
 }
 
+final _heading = RegExp(r'^(#{1,3})\s+(.*)$');
+final _bullet = RegExp(r'^[-*]\s+(.*)$');
+final _ordered = RegExp(r'^(\d+)\.\s+(.*)$');
+
+bool _hasStructure(String text) {
+  return text.split('\n').any((line) {
+    final t = line.trim();
+    return _heading.hasMatch(t) || _bullet.hasMatch(t) || _ordered.hasMatch(t);
+  });
+}
+
 Widget _prose(String text, Color color, bool selectable) {
+  if (_hasStructure(text)) {
+    final lines = text.split('\n');
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (var i = 0; i < lines.length; i++) ...[
+          if (i > 0) const SizedBox(height: 6),
+          _structuredLine(lines[i], color, selectable),
+        ],
+      ],
+    );
+  }
+  return _inline(text, color, selectable);
+}
+
+Widget _structuredLine(String line, Color color, bool selectable) {
+  final trimmed = line.trimRight();
+  final heading = _heading.firstMatch(trimmed.trimLeft());
+  if (heading != null) {
+    final level = heading.group(1)!.length;
+    final size = level == 1 ? 20.0 : level == 2 ? 18.0 : 16.0;
+    return _inline(
+      heading.group(2) ?? '',
+      color,
+      selectable,
+      size: size,
+      weight: FontWeight.w600,
+    );
+  }
+  final bullet = _bullet.firstMatch(trimmed.trimLeft());
+  if (bullet != null) {
+    return _listRow('·', bullet.group(1) ?? '', color, selectable);
+  }
+  final ordered = _ordered.firstMatch(trimmed.trimLeft());
+  if (ordered != null) {
+    return _listRow('${ordered.group(1)}.', ordered.group(2) ?? '', color, selectable);
+  }
+  if (trimmed.trim().isEmpty) return const SizedBox(height: 4);
+  return _inline(line, color, selectable);
+}
+
+Widget _listRow(String mark, String text, Color color, bool selectable) {
+  return Row(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      SizedBox(
+        width: 22,
+        child: Text(
+          mark,
+          style: TextStyle(
+            color: Wx.muted,
+            fontSize: 16,
+            height: 1.55,
+            fontFamilyFallback: Wx.fontFallback,
+          ),
+        ),
+      ),
+      Expanded(child: _inline(text, color, selectable)),
+    ],
+  );
+}
+
+Widget _inline(
+  String text,
+  Color color,
+  bool selectable, {
+  double size = 16,
+  FontWeight weight = FontWeight.w400,
+}) {
   final spans = <InlineSpan>[];
   final token = RegExp(r'\*\*([^*]+)\*\*|`([^`]+)`');
   var cursor = 0;
@@ -94,7 +174,8 @@ Widget _prose(String text, Color color, bool selectable) {
 
   final style = TextStyle(
     color: color,
-    fontSize: 16,
+    fontSize: size,
+    fontWeight: weight,
     height: 1.55,
     fontFamilyFallback: Wx.fontFallback,
   );

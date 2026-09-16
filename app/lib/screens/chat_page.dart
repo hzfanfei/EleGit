@@ -260,47 +260,41 @@ class _ChatPageState extends State<ChatPage> {
       backgroundColor: Wx.surface,
       showDragHandle: true,
       builder: (context) {
-        return SafeArea(
-          child: ListView(
-            shrinkWrap: true,
-            padding: const EdgeInsets.fromLTRB(8, 0, 8, 16),
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-                child: Text('历史会话', style: Theme.of(context).textTheme.titleMedium),
+        return StatefulBuilder(
+          builder: (context, setSheet) {
+            return SafeArea(
+              child: ListView(
+                shrinkWrap: true,
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 20),
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 4, 12, 14),
+                    child: Text('历史会话', style: Theme.of(context).textTheme.titleMedium),
+                  ),
+                  if (_sessions.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
+                      child: Text('还没有会话', style: Theme.of(context).textTheme.bodyMedium),
+                    ),
+                  for (final session in _sessions)
+                    _SessionRow(
+                      session: session,
+                      selected: session.id == _sessionId,
+                      onOpen: () {
+                        Navigator.pop(context);
+                        _switchSession(session);
+                      },
+                      onClose: _busy
+                          ? null
+                          : () async {
+                              await _closeSession(session);
+                              setSheet(() {});
+                            },
+                    ),
+                ],
               ),
-              if (_sessions.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                  child: Text('还没有会话', style: Theme.of(context).textTheme.bodyMedium),
-                ),
-              for (final session in _sessions)
-                ListTile(
-                  selected: session.id == _sessionId,
-                  selectedTileColor: Wx.raised,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  title: Text(
-                    session.title.isEmpty ? '新会话' : session.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _switchSession(session);
-                  },
-                  trailing: IconButton(
-                    tooltip: '关闭会话',
-                    icon: const Icon(Icons.close),
-                    onPressed: _busy
-                        ? null
-                        : () async {
-                            Navigator.pop(context);
-                            await _closeSession(session);
-                          },
-                  ),
-                ),
-            ],
-          ),
+            );
+          },
         );
       },
     );
@@ -326,50 +320,28 @@ class _ChatPageState extends State<ChatPage> {
     return Scaffold(
       body: Column(
         children: [
-          SafeArea(
-            bottom: false,
-            child: SizedBox(
-              height: 56,
-              child: Row(
-                children: [
-                  IconButton(
-                    tooltip: '返回仓库',
-                    onPressed: widget.onBack,
-                    icon: const Icon(Icons.arrow_back),
-                  ),
-                  Expanded(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          widget.repo.fullName,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                        Text(subtitle, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.labelSmall),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: '新建会话',
-                    onPressed: _busy ? null : _newSession,
-                    icon: const Icon(Icons.add_comment_outlined),
-                  ),
-                  IconButton(
-                    tooltip: '历史会话',
-                    onPressed: _openSessions,
-                    icon: const Icon(Icons.history),
-                  ),
-                ],
+          WxPageHeader(
+            onBack: widget.onBack,
+            backTooltip: '返回仓库',
+            title: widget.repo.fullName,
+            subtitle: subtitle,
+            trailing: [
+              IconButton(
+                tooltip: '新建会话',
+                onPressed: _busy ? null : _newSession,
+                icon: const Icon(Icons.add_comment_outlined),
               ),
-            ),
+              IconButton(
+                tooltip: '历史会话',
+                onPressed: _openSessions,
+                icon: const Icon(Icons.history),
+              ),
+            ],
           ),
           const WxHairline(),
           Expanded(
             child: itemCount == 0
                 ? _EmptyChat(
-                    repo: widget.repo.fullName,
                     onPick: _busy ? null : _send,
                   )
                 : ListView.builder(
@@ -408,8 +380,7 @@ class _ChatPageState extends State<ChatPage> {
 }
 
 class _EmptyChat extends StatelessWidget {
-  const _EmptyChat({required this.repo, required this.onPick});
-  final String repo;
+  const _EmptyChat({required this.onPick});
   final void Function(String text)? onPick;
 
   @override
@@ -417,18 +388,69 @@ class _EmptyChat extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(24, 36, 24, 16),
       children: [
-        Text(repo, style: Theme.of(context).textTheme.labelSmall),
-        const SizedBox(height: 8),
-        Text('对着这份检出提问。', style: Theme.of(context).textTheme.headlineMedium),
+        Text('从进度问起。', style: Theme.of(context).textTheme.headlineMedium),
         const SizedBox(height: 8),
         Text(
-          '回答来自本机仓库与 GitHub 进度。',
+          '回答来自本机仓库和 GitHub，不编造。',
           style: Theme.of(context).textTheme.bodyMedium,
         ),
         const SizedBox(height: 28),
         for (final q in _ChatPageState._suggestions)
           _SuggestRow(label: q, onTap: onPick == null ? null : () => onPick!(q)),
       ],
+    );
+  }
+}
+
+class _SessionRow extends StatelessWidget {
+  const _SessionRow({
+    required this.session,
+    required this.selected,
+    required this.onOpen,
+    this.onClose,
+  });
+
+  final ChatSession session;
+  final bool selected;
+  final VoidCallback onOpen;
+  final VoidCallback? onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final title = session.title.isEmpty ? '新会话' : session.title;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Material(
+        color: selected ? Wx.raised : Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          onTap: onOpen,
+          borderRadius: BorderRadius.circular(12),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 48),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodyLarge,
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: '关闭会话',
+                    icon: const Icon(Icons.close, size: 18),
+                    onPressed: onClose,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -478,19 +500,33 @@ class _FinishedTurn extends StatelessWidget {
     if (message.role == 'user') {
       return Padding(
         padding: const EdgeInsets.only(bottom: 22),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('你问', style: Theme.of(context).textTheme.labelSmall),
-            const SizedBox(height: 6),
-            SelectableText(
-              message.content,
-              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    color: Wx.muted,
-                    height: 1.5,
-                  ),
-            ),
-          ],
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const ColoredBox(
+                color: Wx.hairline,
+                child: SizedBox(width: 2),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('你', style: Theme.of(context).textTheme.labelSmall),
+                    const SizedBox(height: 6),
+                    SelectableText(
+                      message.content,
+                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                            color: Wx.text,
+                            height: 1.5,
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       );
     }
@@ -554,25 +590,13 @@ class _LiveTurn extends StatelessWidget {
                   ],
                 );
               }
-              return SelectableText.rich(
-                TextSpan(
-                  style: const TextStyle(
-                    color: Wx.text,
-                    fontSize: 16,
-                    height: 1.55,
-                    fontFamilyFallback: Wx.fontFallback,
-                  ),
-                  children: [
-                    TextSpan(text: value),
-                    const WidgetSpan(
-                      alignment: PlaceholderAlignment.middle,
-                      child: Padding(
-                        padding: EdgeInsets.only(left: 2),
-                        child: _Caret(),
-                      ),
-                    ),
-                  ],
-                ),
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  WxReadableText(value),
+                  const SizedBox(height: 6),
+                  const _Caret(),
+                ],
               );
             },
           ),
@@ -661,11 +685,12 @@ class _Composer extends StatelessWidget {
                   focusNode: focus,
                   minLines: 1,
                   maxLines: 6,
-                  enabled: !busy,
                   textInputAction: TextInputAction.send,
-                  onSubmitted: (_) => onSend(),
+                  onSubmitted: (_) {
+                    if (!busy) onSend();
+                  },
                   decoration: InputDecoration(
-                    hintText: busy ? '生成中…' : '问进度，像在 Cursor 里一样',
+                    hintText: busy ? '生成中，可先写下一条' : '问进度，像在 Cursor 里一样',
                     filled: true,
                     fillColor: Wx.surface,
                   ),

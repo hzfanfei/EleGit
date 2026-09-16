@@ -25,11 +25,13 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('选择仓库'), findsOneWidget);
-    expect(find.text('octo/demo'), findsOneWidget);
+    expect(find.byType(AppBar), findsNothing);
+    expect(find.text('demo'), findsOneWidget);
+    expect(find.textContaining('octo'), findsWidgets);
     expect(find.text('私有'), findsOneWidget);
     expect(find.text('测试连接'), findsNothing);
 
-    await tester.tap(find.text('octo/demo'));
+    await tester.tap(find.text('demo'));
     await tester.pump();
     expect(find.textContaining('正在把 octo/demo'), findsWidgets);
     await tester.pump(const Duration(milliseconds: 50));
@@ -63,5 +65,29 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('授权'), findsWidgets);
     expect(find.text('重试'), findsOneWidget);
+  });
+
+  testWidgets('clone failure stays on the overlay', (tester) async {
+    final errApi = FakeWenxiangApi(
+      checkoutDelay: const Duration(milliseconds: 20),
+      checkoutThrows: ApiException('git clone failed: Authentication failed'),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: ReposPage(api: errApi, onOpen: (_) {}, onBack: () {}),
+      ),
+    );
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('demo'));
+    await tester.pump();
+    expect(find.textContaining('正在把 octo/demo'), findsWidgets);
+    await tester.pump(const Duration(milliseconds: 30));
+    await tester.pump();
+    expect(find.text('检出没有完成'), findsOneWidget);
+    expect(find.text('关闭'), findsOneWidget);
+    expect(find.textContaining('克隆'), findsWidgets);
   });
 }
