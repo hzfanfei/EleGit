@@ -123,7 +123,7 @@ Widget _listRow(String mark, String text, Color color, bool selectable) {
         width: 22,
         child: Text(
           mark,
-          style: TextStyle(
+          style: const TextStyle(
             color: Wx.muted,
             fontSize: 16,
             height: 1.55,

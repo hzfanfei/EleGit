@@ -313,6 +313,7 @@ class _RepoTile extends StatelessWidget {
 
 class _CloneScrim extends StatefulWidget {
   const _CloneScrim({
+    super.key,
     required this.repo,
     this.error,
     this.onRetry,
@@ -384,7 +385,9 @@ class _CloneScrimState extends State<_CloneScrim> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    '正在把 ${widget.repo.fullName} 克隆到本机问象目录…',
+                    failed
+                        ? '${widget.repo.fullName} 还没有落到本机问象目录。'
+                        : '正在把 ${widget.repo.fullName} 克隆到本机问象目录…',
                     style: Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.5),
                   ),
                   const SizedBox(height: 6),

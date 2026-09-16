@@ -156,7 +156,9 @@ class _LoginPageState extends State<LoginPage> {
                 Text('问象', style: Theme.of(context).textTheme.displaySmall),
                 const SizedBox(height: 10),
                 Text(
-                  '打开即用本机仓库问进度。接下来会在浏览器登录 GitHub。',
+                  _phase == _LoginPhase.idle
+                      ? '已经登录过。只有要换账号时，才需要再走一遍 GitHub。'
+                      : '打开即用本机仓库问进度。接下来会在浏览器登录 GitHub。',
                   style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                         color: Wx.muted,
                         height: 1.55,
