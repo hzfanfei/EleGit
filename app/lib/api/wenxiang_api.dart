@@ -36,6 +36,17 @@ class WenxiangApi {
         'ngrok-skip-browser-warning': 'true',
       };
 
+  Uri voiceUri() {
+    final root = baseUrl.replaceAll(RegExp(r'/$'), '');
+    final ws = root.startsWith('https')
+        ? root.replaceFirst(RegExp(r'^https'), 'wss')
+        : root.replaceFirst(RegExp(r'^http'), 'ws');
+    return Uri.parse('$ws/v1/voice').replace(queryParameters: {
+      'key': apiKey,
+      'ngrok-skip-browser-warning': 'true',
+    });
+  }
+
   Map<String, String> get _headers => headers;
 
   http.Client? _checkoutClient;

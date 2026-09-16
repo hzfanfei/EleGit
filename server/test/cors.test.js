@@ -27,10 +27,17 @@ async function startServer() {
   const home = await mkdtemp(path.join(os.tmpdir(), "wenxiang-cors-"));
   const port = 18788;
   const env = { ...process.env };
-  delete env.GITHUB_CLIENT_ID;
-  delete env.GITHUB_CLIENT_SECRET;
-  delete env.WENXIANG_API_KEY;
-  delete env.WENXIANG_PUBLIC_URL;
+    delete env.GITHUB_CLIENT_ID;
+    delete env.GITHUB_CLIENT_SECRET;
+    delete env.WENXIANG_API_KEY;
+    delete env.WENXIANG_PUBLIC_URL;
+    delete env.VOLC_APP_ID;
+    delete env.VOLC_ACCESS_TOKEN;
+    delete env.VOLC_ACCESS_KEY;
+    delete env.VOLC_API_KEY;
+    delete env.DOUBAO_APP_ID;
+    delete env.DOUBAO_ACCESS_KEY;
+    delete env.OPENAI_API_KEY;
   const child = spawn(process.execPath, ["src/server.js"], {
     cwd: serverRoot,
     env: {
