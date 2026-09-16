@@ -185,6 +185,24 @@ export class AcpChannel {
     }
   }
 
+  async cancel() {
+    if (!this.alive || !this.sessionId || !this.child?.stdin) return;
+    try {
+      this.child.stdin.write(
+        `${JSON.stringify({
+          jsonrpc: "2.0",
+          method: "session/cancel",
+          params: { sessionId: this.sessionId },
+        })}\n`,
+      );
+    } catch {
+      // Best-effort; the phone already left.
+    }
+    const err = new Error("cancelled");
+    err.code = "cancelled";
+    this._failAll(err);
+  }
+
   async close() {
     this.alive = false;
     clearTimeout(this.idleTimer);
@@ -409,5 +427,9 @@ export function createSessionStore({
     return { engine: "acp", sessionId: session.id };
   }
 
-  return { list, create, close, resolveForChat, prompt, publicView };
+  async function cancel(session) {
+    if (session?.channel) await session.channel.cancel();
+  }
+
+  return { list, create, close, resolveForChat, prompt, cancel, publicView };
 }

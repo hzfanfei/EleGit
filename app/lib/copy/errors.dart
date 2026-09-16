@@ -7,6 +7,9 @@ String humanizeError(Object error) {
 
   if (_readableChinese(compact)) return compact;
 
+  if (_isSseDrop(lower)) {
+    return '连接中断了。请重试。';
+  }
   if (_isNetwork(lower)) {
     return '连不上本机问象服务。请确认电脑上的服务已启动。';
   }
@@ -62,4 +65,12 @@ bool _isClone(String lower) {
   return lower.contains('clone') ||
       lower.contains('checkout') ||
       lower.contains('authentication failed');
+}
+
+bool _isSseDrop(String lower) {
+  return lower.contains('connection closed') ||
+      lower.contains('connection abort') ||
+      lower.contains('broken pipe') ||
+      lower.contains('stream ended') ||
+      (lower.contains('sse') && (lower.contains('drop') || lower.contains('interrupt')));
 }

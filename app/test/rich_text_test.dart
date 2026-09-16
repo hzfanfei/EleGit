@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wenxiang/theme.dart';
 import 'package:wenxiang/widgets/wx_rich_text.dart';
@@ -11,7 +12,16 @@ void main() {
     expect(parts[0].kind, RichKind.prose);
     expect(parts[1].kind, RichKind.code);
     expect(parts[1].text, contains('void main()'));
+    expect(parts[1].language, '');
     expect(parts[2].kind, RichKind.prose);
+  });
+
+  test('keeps language on a closed fence', () {
+    const src = '说明如下：\n```dart\nvoid main() {}\n```\n结束';
+    final parts = splitRichBlocks(src);
+    expect(parts[1].kind, RichKind.code);
+    expect(parts[1].language, 'dart');
+    expect(parts[1].text, 'void main() {}');
   });
 
   test('keeps an unclosed fence as a code block', () {
@@ -29,6 +39,26 @@ void main() {
     expect(parts, hasLength(2));
     expect(parts[0].kind, RichKind.prose);
     expect(parts[1].kind, RichKind.code);
+    expect(parts[1].language, 'dart');
+  });
+
+  test('parses a github-style markdown table', () {
+    const src = '| 名称 | 状态 |\n| --- | --- |\n| 登录 | 已完成 |\n| 克隆 | 进行中 |';
+    final table = parseMarkdownTable(src);
+    expect(table, isNotNull);
+    expect(table!.headers, ['名称', '状态']);
+    expect(table.rows, [
+      ['登录', '已完成'],
+      ['克隆', '进行中'],
+    ]);
+  });
+
+  test('keeps a header-only table while it is still streaming', () {
+    const src = '| 名称 | 状态 |';
+    final table = parseMarkdownTable(src);
+    expect(table, isNotNull);
+    expect(table!.headers, ['名称', '状态']);
+    expect(table.rows, isEmpty);
   });
 
   testWidgets('renders headings and lists without raw markers', (tester) async {
@@ -60,5 +90,117 @@ void main() {
     expect(find.textContaining('void main() {'), findsOneWidget);
     expect(find.textContaining('**'), findsNothing);
     expect(find.textContaining('```'), findsNothing);
+  });
+
+  testWidgets('shows a language label on fenced code and hides the fence', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: const Scaffold(
+          body: WxReadableText('```yaml\nname: 问象\n```'),
+        ),
+      ),
+    );
+    expect(find.text('yaml'), findsOneWidget);
+    expect(find.textContaining('name: 问象'), findsOneWidget);
+    expect(find.textContaining('```'), findsNothing);
+    expect(find.byKey(const Key('wx-code-scroll')), findsOneWidget);
+    expect(find.byTooltip('复制'), findsOneWidget);
+  });
+
+  testWidgets('unclosed fence with a language still looks like a code block', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: const Scaffold(
+          body: WxReadableText('开始\n```dart'),
+        ),
+      ),
+    );
+    expect(find.text('dart'), findsOneWidget);
+    expect(find.byKey(const Key('wx-code-scroll')), findsOneWidget);
+    expect(find.textContaining('```'), findsNothing);
+  });
+
+  testWidgets('copy button puts the code on the clipboard', (tester) async {
+    String? copied;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.setData') {
+        copied = (call.arguments as Map)['text'] as String?;
+        return;
+      }
+      return null;
+    });
+    addTearDown(() {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null);
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: const Scaffold(
+          body: WxReadableText('```dart\nvoid main() {}\n```'),
+        ),
+      ),
+    );
+    await tester.tap(find.byTooltip('复制'));
+    await tester.pump();
+    expect(copied, 'void main() {}');
+  });
+
+  testWidgets('renders table columns without raw pipes', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: const Scaffold(
+          body: WxReadableText(
+            '## 进度\n\n| 名称 | 状态 |\n| --- | --- |\n| 登录 | 已完成 |\n| 克隆 | 进行中 |',
+          ),
+        ),
+      ),
+    );
+    expect(find.text('进度'), findsOneWidget);
+    expect(find.text('名称'), findsOneWidget);
+    expect(find.text('状态'), findsOneWidget);
+    expect(find.text('登录'), findsOneWidget);
+    expect(find.text('已完成'), findsOneWidget);
+    expect(find.text('克隆'), findsOneWidget);
+    expect(find.text('进行中'), findsOneWidget);
+    expect(find.textContaining('|'), findsNothing);
+    expect(find.textContaining('---'), findsNothing);
+    expect(find.byKey(const Key('wx-md-table')), findsOneWidget);
+    expect(find.byKey(const Key('wx-table-scroll')), findsOneWidget);
+  });
+
+  testWidgets('wide table and long code stay scrollable on a narrow screen', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: Scaffold(
+          body: SizedBox(
+            width: 160,
+            child: WxReadableText(
+              '| 很长的列名甲 | 很长的列名乙 | 很长的列名丙 |\n'
+              '| --- | --- | --- |\n'
+              '| 单元格内容甲 | 单元格内容乙 | 单元格内容丙 |\n\n'
+              '```js\nconst token = "${'x' * 80}";\n```',
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(tester.takeException(), isNull);
+    expect(find.byKey(const Key('wx-table-scroll')), findsOneWidget);
+    expect(find.byKey(const Key('wx-code-scroll')), findsOneWidget);
+    expect(find.textContaining('很长的列名甲'), findsOneWidget);
+    expect(find.textContaining('const token'), findsOneWidget);
+
+    final tableScroll = tester.widget<SingleChildScrollView>(
+      find.byKey(const Key('wx-table-scroll')),
+    );
+    final codeScroll = tester.widget<SingleChildScrollView>(
+      find.byKey(const Key('wx-code-scroll')),
+    );
+    expect(tableScroll.scrollDirection, Axis.horizontal);
+    expect(codeScroll.scrollDirection, Axis.horizontal);
   });
 }

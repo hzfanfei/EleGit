@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -8,6 +6,7 @@ import '../copy/time.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../widgets/wx_chrome.dart';
+import '../widgets/wx_clone_scrim.dart';
 
 class ReposPage extends StatefulWidget {
   const ReposPage({
@@ -24,10 +23,10 @@ class ReposPage extends StatefulWidget {
   final String githubLogin;
 
   @override
-  State<ReposPage> createState() => _ReposPageState();
+  State<ReposPage> createState() => ReposPageState();
 }
 
-class _ReposPageState extends State<ReposPage> {
+class ReposPageState extends State<ReposPage> {
   final _query = TextEditingController();
   List<RepoItem> _repos = [];
   Object? _error;
@@ -77,14 +76,26 @@ class _ReposPageState extends State<ReposPage> {
       if (!mounted) return;
       HapticFeedback.lightImpact();
       widget.onOpen(repo);
+      if (mounted) setState(() => _cloning = null);
+    } on OperationCancelled {
+      if (mounted) _dismissClone();
     } catch (err) {
       if (!mounted) return;
       setState(() => _cloneError = err);
-    } finally {
-      if (mounted && _cloneError == null) {
-        setState(() => _cloning = null);
-      }
     }
+  }
+
+  bool consumeBack() {
+    if (_cloning != null && _cloneError == null) {
+      cancelClone();
+      return true;
+    }
+    return false;
+  }
+
+  void cancelClone() {
+    widget.api.cancelCheckout();
+    _dismissClone();
   }
 
   void _dismissClone() {
@@ -96,20 +107,25 @@ class _ReposPageState extends State<ReposPage> {
 
   @override
   void dispose() {
+    if (_cloning != null && _cloneError == null) {
+      widget.api.cancelCheckout();
+    }
     _query.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final blocked = _cloning != null;
+    final blocked = _cloning != null && _cloneError == null;
     return Scaffold(
       body: Column(
         children: [
           WxPageHeader(
-            onBack: widget.onBack,
-            backEnabled: !blocked,
-            backTooltip: '重新登录',
+            onBack: () {
+              if (!consumeBack()) widget.onBack();
+            },
+            backEnabled: true,
+            backTooltip: blocked ? '取消克隆' : '返回首页',
             showMark: true,
             title: '仓库',
             subtitle: widget.githubLogin.isEmpty
@@ -152,12 +168,13 @@ class _ReposPageState extends State<ReposPage> {
               children: [
                 _body(),
                 if (_cloning != null)
-                  _CloneScrim(
+                  WxCloneScrim(
                     key: ValueKey(_cloneAttempt),
                     repo: _cloning!,
                     error: _cloneError,
                     onRetry: _cloneError == null ? null : () => _open(_cloning!),
-                    onDismiss: _cloneError == null ? null : _dismissClone,
+                    onDismiss: _cloneError == null ? cancelClone : _dismissClone,
+                    dismissLabel: _cloneError == null ? '取消' : '关闭',
                   ),
               ],
             ),
@@ -284,133 +301,6 @@ class _RepoTile extends StatelessWidget {
                 ),
                 const Icon(Icons.chevron_right, size: 20, color: Wx.faint),
               ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _CloneScrim extends StatefulWidget {
-  const _CloneScrim({
-    super.key,
-    required this.repo,
-    this.error,
-    this.onRetry,
-    this.onDismiss,
-  });
-
-  final RepoItem repo;
-  final Object? error;
-  final VoidCallback? onRetry;
-  final VoidCallback? onDismiss;
-
-  @override
-  State<_CloneScrim> createState() => _CloneScrimState();
-}
-
-class _CloneScrimState extends State<_CloneScrim> {
-  static const _stages = ['准备', '正在克隆', '即将打开'];
-  int _stage = 0;
-  Timer? _timer;
-
-  String get _path => '~/问象/${widget.repo.owner}/${widget.repo.name}';
-
-  String get _stageDetail {
-    switch (_stage) {
-      case 0:
-        return '先确认 ${widget.repo.fullName}，再落到本机。';
-      case 1:
-        return '正在克隆到 $_path';
-      default:
-        return '马上打开这份仓库。';
-    }
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _timer = Timer.periodic(const Duration(milliseconds: 900), (timer) {
-      if (!mounted || widget.error != null) return;
-      if (_stage < _stages.length - 1) {
-        setState(() => _stage += 1);
-      }
-    });
-  }
-
-  @override
-  void didUpdateWidget(covariant _CloneScrim oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.error != null) {
-      _timer?.cancel();
-    }
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final failed = widget.error != null;
-    return ColoredBox(
-      color: const Color(0xCC0C0D0F),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 360),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: Wx.surface,
-              borderRadius: BorderRadius.circular(Wx.radius),
-              border: Border.all(color: Wx.hairline),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(22, 22, 22, 20),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    failed ? '没有落到本机' : _stages[_stage],
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    failed ? '${widget.repo.fullName} 还没有写到本机。' : _stageDetail,
-                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.5),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    _path,
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                  if (!failed) ...[
-                    const SizedBox(height: 18),
-                    const ClipRRect(
-                      child: LinearProgressIndicator(minHeight: 2),
-                    ),
-                  ],
-                  if (failed) ...[
-                    const SizedBox(height: 16),
-                    WxErrorPanel(
-                      error: widget.error!,
-                      onRetry: widget.onRetry,
-                      retryLabel: '再试一次',
-                    ),
-                    if (widget.onDismiss != null)
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: TextButton(
-                          onPressed: widget.onDismiss,
-                          child: const Text('关闭'),
-                        ),
-                      ),
-                  ],
-                ],
-              ),
             ),
           ),
         ),

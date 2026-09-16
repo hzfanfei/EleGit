@@ -12,6 +12,13 @@ class ApiException implements Exception {
   String toString() => message;
 }
 
+class OperationCancelled implements Exception {
+  const OperationCancelled();
+
+  @override
+  String toString() => 'cancelled';
+}
+
 class WenxiangApi {
   WenxiangApi({required this.baseUrl, required this.apiKey});
 
@@ -30,6 +37,23 @@ class WenxiangApi {
       };
 
   Map<String, String> get _headers => headers;
+
+  http.Client? _checkoutClient;
+  http.Client? _chatClient;
+  bool _checkoutCancelled = false;
+  bool _chatCancelled = false;
+
+  void cancelCheckout() {
+    _checkoutCancelled = true;
+    _checkoutClient?.close();
+    _checkoutClient = null;
+  }
+
+  void cancelChat() {
+    _chatCancelled = true;
+    _chatClient?.close();
+    _chatClient = null;
+  }
 
   Future<Map<String, dynamic>> _json(
     http.Response res, {
@@ -89,16 +113,29 @@ class WenxiangApi {
   }
 
   Future<CheckoutResult> checkout(String owner, String repo) async {
-    final res = await http
-        .post(_uri('/v1/repos/$owner/$repo/checkout'), headers: _headers)
-        .timeout(const Duration(minutes: 3));
-    final body = await _json(res, fallback: '克隆仓库失败');
-    final local = body['local'] as Map<String, dynamic>? ?? {};
-    return CheckoutResult(
-      path: (body['path'] ?? local['path'] ?? '').toString(),
-      branch: (local['branch'] ?? '').toString(),
-      head: (local['head'] ?? '').toString(),
-    );
+    final client = http.Client();
+    _checkoutCancelled = false;
+    _checkoutClient = client;
+    try {
+      final res = await client
+          .post(_uri('/v1/repos/$owner/$repo/checkout'), headers: _headers)
+          .timeout(const Duration(minutes: 3));
+      final body = await _json(res, fallback: '克隆仓库失败');
+      final local = body['local'] as Map<String, dynamic>? ?? {};
+      return CheckoutResult(
+        path: (body['path'] ?? local['path'] ?? '').toString(),
+        branch: (local['branch'] ?? '').toString(),
+        head: (local['head'] ?? '').toString(),
+      );
+    } catch (err) {
+      if (_checkoutCancelled || err is OperationCancelled) {
+        throw const OperationCancelled();
+      }
+      rethrow;
+    } finally {
+      if (identical(_checkoutClient, client)) _checkoutClient = null;
+      client.close();
+    }
   }
 
   Future<ServerStatus> savePat(String token) async {
@@ -192,6 +229,8 @@ class WenxiangApi {
     String? sessionId,
   }) async* {
     final client = http.Client();
+    _chatCancelled = false;
+    _chatClient = client;
     try {
       final request = http.Request('POST', _uri('/v1/chat'))
         ..headers.addAll({
@@ -218,6 +257,7 @@ class WenxiangApi {
       }
       var buffer = '';
       await for (final chunk in res.stream.transform(utf8.decoder)) {
+        if (_chatCancelled) throw const OperationCancelled();
         buffer += chunk;
         final parts = buffer.split('\n\n');
         buffer = parts.removeLast();
@@ -230,7 +270,13 @@ class WenxiangApi {
         final event = ChatStreamEvent.fromSse(buffer);
         if (event != null) yield event;
       }
+    } catch (err) {
+      if (_chatCancelled || err is OperationCancelled) {
+        throw const OperationCancelled();
+      }
+      rethrow;
     } finally {
+      if (identical(_chatClient, client)) _chatClient = null;
       client.close();
     }
   }

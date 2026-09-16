@@ -95,4 +95,31 @@ void main() {
     expect(find.textContaining('克隆'), findsWidgets);
     expect(find.textContaining('检出'), findsNothing);
   });
+
+  testWidgets('clone can be cancelled without leaving the list', (tester) async {
+    final api = FakeWenxiangApi(checkoutDelay: const Duration(milliseconds: 80));
+    RepoItem? opened;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: ReposPage(api: api, onOpen: (repo) => opened = repo, onBack: () {}),
+      ),
+    );
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('demo'));
+    await tester.pump();
+    expect(find.text('取消'), findsOneWidget);
+
+    await tester.tap(find.text('取消'));
+    await tester.pump();
+    expect(api.cancelCheckoutCalls, 1);
+    expect(opened, isNull);
+    expect(find.text('demo'), findsOneWidget);
+    expect(find.text('取消'), findsNothing);
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump();
+    expect(opened, isNull);
+  });
 }

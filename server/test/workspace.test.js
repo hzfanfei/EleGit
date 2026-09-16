@@ -11,6 +11,7 @@ import {
   gitAuthConfigArgs,
   gitFailure,
   GITHUB_GIT_FORBIDDEN_ZH,
+  runGit,
   safeSegment,
   snapshotCheckout,
 } from "../src/workspace.js";
@@ -46,6 +47,12 @@ describe("git auth header", () => {
     assert.ok(argv.includes(remote));
     assert.ok(!argv.some((part) => /x-access-token:/i.test(part)));
     assert.ok(!argv.some((part) => /^https:\/\/.*@github\.com/.test(part)));
+  });
+
+  it("rejects immediately when the abort signal is already set", async () => {
+    const ac = new AbortController();
+    ac.abort();
+    await assert.rejects(() => runGit(["status"], { signal: ac.signal }), /cancelled/);
   });
 
   it("maps GitHub 403 clone failures to a Chinese permission hint", () => {

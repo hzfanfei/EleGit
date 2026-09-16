@@ -5,6 +5,7 @@ import '../api/wenxiang_api.dart';
 import '../copy/errors.dart';
 import '../copy/time.dart';
 import '../models.dart';
+import '../persist/app_memory.dart';
 import '../theme.dart';
 import '../widgets/wx_chrome.dart';
 import '../widgets/wx_rich_text.dart';
@@ -15,11 +16,13 @@ class ChatPage extends StatefulWidget {
     required this.api,
     required this.repo,
     required this.onBack,
+    this.memory,
   });
 
   final WenxiangApi api;
   final RepoItem repo;
   final VoidCallback onBack;
+  final AppMemory? memory;
 
   @override
   State<ChatPage> createState() => _ChatPageState();
@@ -58,23 +61,69 @@ class _ChatPageState extends State<ChatPage> {
   @override
   void initState() {
     super.initState();
+    _restoreLocal();
     _loadSessions();
+  }
+
+  void _restoreLocal() {
+    final stored = widget.memory?.loadChats(widget.repo.fullName);
+    if (stored == null || stored.sessions.isEmpty && stored.transcripts.isEmpty) {
+      return;
+    }
+    _sessions
+      ..clear()
+      ..addAll(stored.sessions);
+    _transcripts
+      ..clear()
+      ..addAll(stored.transcripts.map((key, value) => MapEntry(key, List<ChatMessage>.from(value))));
+    _sessionId = stored.activeId ?? (_sessions.isEmpty ? null : _sessions.first.id);
+  }
+
+  Future<void> _persist() async {
+    final memory = widget.memory;
+    if (memory == null) return;
+    await memory.saveChats(
+      widget.repo.fullName,
+      RepoChatStore(
+        sessions: List<ChatSession>.from(_sessions),
+        activeId: _sessionId,
+        transcripts: _transcripts.map((key, value) => MapEntry(key, List<ChatMessage>.from(value))),
+      ),
+    );
   }
 
   Future<void> _loadSessions() async {
     try {
       var list = await widget.api.listSessions(widget.repo.owner, widget.repo.name);
-      if (list.isEmpty) {
+      if (list.isEmpty && _sessions.isEmpty) {
         final created = await widget.api.createSession(widget.repo.owner, widget.repo.name);
         list = [created];
       }
       if (!mounted) return;
       setState(() {
-        _sessions
-          ..clear()
-          ..addAll(list);
-        _sessionId = list.firstWhere((s) => s.active, orElse: () => list.first).id;
+        if (list.isNotEmpty) {
+          final known = {for (final session in _sessions) session.id: session};
+          _sessions
+            ..clear()
+            ..addAll(list.map((session) {
+              final prior = known[session.id];
+              return prior == null || session.title != '新会话'
+                  ? session
+                  : ChatSession(
+                      id: session.id,
+                      title: prior.title,
+                      createdAt: session.createdAt,
+                      updatedAt: session.updatedAt,
+                      active: session.active,
+                    );
+            }));
+          final keep = _sessionId;
+          if (keep == null || !_sessions.any((session) => session.id == keep)) {
+            _sessionId = list.firstWhere((s) => s.active, orElse: () => list.first).id;
+          }
+        }
       });
+      await _persist();
     } catch (_) {
       // Chat can still send without a sessionId; the server will open an implicit one.
     }
@@ -93,6 +142,7 @@ class _ChatPageState extends State<ChatPage> {
       });
       _liveText.value = '';
       _liveEngine.value = null;
+      await _persist();
     } catch (err) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -109,6 +159,7 @@ class _ChatPageState extends State<ChatPage> {
     });
     _liveText.value = '';
     _liveEngine.value = null;
+    _persist();
   }
 
   Future<void> _closeSession(ChatSession session) async {
@@ -128,6 +179,7 @@ class _ChatPageState extends State<ChatPage> {
         _liveEngine.value = null;
       }
       if (_sessions.isEmpty) await _newSession();
+      await _persist();
     } catch (err) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -210,6 +262,20 @@ class _ChatPageState extends State<ChatPage> {
         ));
         _live = false;
       });
+      await _persist();
+    } on OperationCancelled {
+      if (!mounted) return;
+      setState(() {
+        if (_liveText.value.isNotEmpty) {
+          _messages.add(ChatMessage(
+            role: 'assistant',
+            content: _liveText.value,
+            engine: _liveEngine.value,
+          ));
+        }
+        _live = false;
+      });
+      await _persist();
     } catch (err) {
       if (!mounted) return;
       final shown = humanizeError(err);
@@ -226,6 +292,7 @@ class _ChatPageState extends State<ChatPage> {
         }
         _live = false;
       });
+      await _persist();
     } finally {
       if (mounted) {
         setState(() {
@@ -235,6 +302,11 @@ class _ChatPageState extends State<ChatPage> {
       }
       _jump();
     }
+  }
+
+  void _stop() {
+    if (!_busy) return;
+    widget.api.cancelChat();
   }
 
   bool get _nearBottom {
@@ -317,6 +389,7 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   void dispose() {
+    if (_busy) widget.api.cancelChat();
     _input.dispose();
     _focus.dispose();
     _scroll.dispose();
@@ -336,7 +409,10 @@ class _ChatPageState extends State<ChatPage> {
       body: Column(
         children: [
           WxPageHeader(
-            onBack: widget.onBack,
+            onBack: () {
+              _stop();
+              widget.onBack();
+            },
             backTooltip: '返回仓库',
             title: widget.repo.fullName,
             subtitle: subtitle,
@@ -387,6 +463,7 @@ class _ChatPageState extends State<ChatPage> {
             focus: _focus,
             busy: _busy,
             onSend: _send,
+            onStop: _stop,
           ),
         ],
       ),
@@ -721,12 +798,14 @@ class _Composer extends StatelessWidget {
     required this.focus,
     required this.busy,
     required this.onSend,
+    required this.onStop,
   });
 
   final TextEditingController controller;
   final FocusNode focus;
   final bool busy;
   final Future<void> Function() onSend;
+  final VoidCallback onStop;
 
   @override
   Widget build(BuildContext context) {
@@ -761,9 +840,10 @@ class _Composer extends StatelessWidget {
                 width: Wx.tap,
                 height: Wx.tap,
                 child: busy
-                    ? const Padding(
-                        padding: EdgeInsets.all(12),
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                    ? IconButton(
+                        tooltip: '停止',
+                        onPressed: onStop,
+                        icon: const Icon(Icons.stop_circle_outlined, size: 26, color: Wx.accent),
                       )
                     : IconButton.filled(
                         tooltip: '发送',

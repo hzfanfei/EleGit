@@ -84,6 +84,16 @@ class RepoItem {
       pushedAt: (json['pushedAt'] ?? '').toString(),
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'owner': owner,
+        'name': name,
+        'fullName': fullName,
+        'description': description,
+        'private': privateRepo,
+        'language': language,
+        'pushedAt': pushedAt,
+      };
 }
 
 class ChatSession {
@@ -110,6 +120,14 @@ class ChatSession {
       active: json['active'] == true,
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'createdAt': createdAt,
+        'updatedAt': updatedAt,
+        'active': active,
+      };
 }
 
 class ChatMessage {
@@ -124,6 +142,20 @@ class ChatMessage {
   String content;
   String? engine;
   bool streaming;
+
+  factory ChatMessage.fromJson(Map<String, dynamic> json) {
+    return ChatMessage(
+      role: (json['role'] ?? '').toString(),
+      content: (json['content'] ?? '').toString(),
+      engine: json['engine']?.toString(),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'role': role,
+        'content': content,
+        if (engine != null && engine!.isNotEmpty) 'engine': engine,
+      };
 }
 
 class ChatStreamEvent {
