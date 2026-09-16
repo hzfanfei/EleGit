@@ -14,6 +14,8 @@ class ServerStatus {
     required this.tunnelError,
     required this.lanUrls,
     required this.workspaceRoot,
+    this.voiceReady = false,
+    this.voiceHint = '还没配语音密钥',
   });
 
   final bool githubConnected;
@@ -28,6 +30,8 @@ class ServerStatus {
   final String tunnelError;
   final List<String> lanUrls;
   final String workspaceRoot;
+  final bool voiceReady;
+  final String voiceHint;
 
   factory ServerStatus.fromJson(Map<String, dynamic> json) {
     final github = json['github'] as Map<String, dynamic>? ?? {};
@@ -35,6 +39,7 @@ class ServerStatus {
     final cursor = json['cursor'] as Map<String, dynamic>? ?? {};
     final tunnel = json['tunnel'] as Map<String, dynamic>? ?? {};
     final workspace = json['workspace'] as Map<String, dynamic>? ?? {};
+    final voice = json['voice'] as Map<String, dynamic>? ?? {};
     return ServerStatus(
       githubConnected: github['connected'] == true ||
           github['connected'] == 'true' ||
@@ -52,6 +57,10 @@ class ServerStatus {
       tunnelError: (tunnel['error'] ?? '').toString(),
       lanUrls: ((json['lanUrls'] as List?) ?? []).map((e) => e.toString()).toList(),
       workspaceRoot: (workspace['root'] ?? '').toString(),
+      voiceReady: voice['ready'] == true,
+      voiceHint: voice['ready'] == true
+          ? ''
+          : (voice['hint'] ?? '还没配语音密钥').toString(),
     );
   }
 }

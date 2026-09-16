@@ -9,5 +9,9 @@ void main() {
     );
     expect(api.headers['X-Wenxiang-Key'], 'test-key');
     expect(api.headers['ngrok-skip-browser-warning'], 'true');
+    expect(api.voiceUri().path, '/v1/voice');
+    expect(api.voiceUri().scheme, 'wss');
+    expect(api.voiceUri().queryParameters['key'], 'test-key');
+    expect(api.voiceUri().queryParameters['ngrok-skip-browser-warning'], 'true');
   });
 }

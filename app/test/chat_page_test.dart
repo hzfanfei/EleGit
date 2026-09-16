@@ -3,8 +3,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wenxiang/models.dart';
 import 'package:wenxiang/persist/app_memory.dart';
+import 'package:wenxiang/screens/call_page.dart';
 import 'package:wenxiang/screens/chat_page.dart';
 import 'package:wenxiang/theme.dart';
+import 'package:wenxiang/voice/voice_client.dart';
+import 'package:wenxiang/voice/voice_media.dart';
 
 import 'support/fake_api.dart';
 
@@ -125,6 +128,7 @@ void main() {
     expect(find.byType(AppBar), findsNothing);
     expect(find.byTooltip('新建会话'), findsOneWidget);
     expect(find.byTooltip('历史会话'), findsOneWidget);
+    expect(find.byKey(const Key('wx-call')), findsOneWidget);
 
     await tester.tap(find.byTooltip('新建会话'));
     await tester.pump();
@@ -242,5 +246,30 @@ void main() {
     expect(find.textContaining('最近在修登录'), findsOneWidget);
     expect(find.text('你问'), findsOneWidget);
     expect(find.textContaining('从进度问起'), findsNothing);
+  });
+
+  testWidgets('call button opens the phone screen from chat', (tester) async {
+    final media = FakeVoiceMedia();
+    final client = FakeVoiceClient();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: ChatPage(
+          api: FakeWenxiangApi(voiceReady: true),
+          repo: sampleRepo(),
+          onBack: () {},
+          voiceMedia: media,
+          voiceClient: client,
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('wx-call')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byType(CallPage), findsOneWidget);
+    expect(find.text('开始通话'), findsOneWidget);
+    expect(find.text('octo/demo'), findsWidgets);
   });
 }

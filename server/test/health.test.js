@@ -31,6 +31,13 @@ describe("companion HTTP", () => {
     delete env.GITHUB_CLIENT_SECRET;
     delete env.WENXIANG_API_KEY;
     delete env.WENXIANG_PUBLIC_URL;
+    delete env.VOLC_APP_ID;
+    delete env.VOLC_ACCESS_TOKEN;
+    delete env.VOLC_ACCESS_KEY;
+    delete env.VOLC_API_KEY;
+    delete env.DOUBAO_APP_ID;
+    delete env.DOUBAO_ACCESS_KEY;
+    delete env.OPENAI_API_KEY;
     const child = spawn(process.execPath, ["src/server.js"], {
       cwd: root,
       env: {
@@ -65,6 +72,11 @@ describe("companion HTTP", () => {
       assert.ok(String(status.workspace.root).length > 0);
       assert.ok(String(status.github.publicUrl).startsWith('http'));
       assert.ok(Array.isArray(status.lanUrls));
+      assert.equal(status.voice.ready, false);
+      assert.equal(status.voice.hint, "还没配语音密钥");
+      assert.equal(status.voice.provider, undefined);
+      assert.ok(!JSON.stringify(status).includes("VOLC_"));
+      assert.ok(!JSON.stringify(status).includes("OPENAI_"));
     } finally {
       child.kill("SIGTERM");
     }

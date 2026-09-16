@@ -16,6 +16,8 @@ class FakeWenxiangApi extends WenxiangApi {
     this.streamThrows,
     this.streamDelay = Duration.zero,
     this.streamPace = Duration.zero,
+    this.voiceReady = false,
+    this.voiceHint = '还没配语音密钥',
   }) : super(baseUrl: 'http://127.0.0.1:8787', apiKey: 'test-key');
 
   Object? oauthThrows;
@@ -31,6 +33,8 @@ class FakeWenxiangApi extends WenxiangApi {
   Object? streamThrows;
   Duration streamDelay;
   Duration streamPace;
+  bool voiceReady;
+  String voiceHint;
   int startOAuthCalls = 0;
   int checkoutCalls = 0;
   int cancelCheckoutCalls = 0;
@@ -65,6 +69,8 @@ class FakeWenxiangApi extends WenxiangApi {
       tunnelError: '',
       lanUrls: const [],
       workspaceRoot: '/home/fei/问象',
+      voiceReady: voiceReady,
+      voiceHint: voiceReady ? '' : voiceHint,
     );
   }
 

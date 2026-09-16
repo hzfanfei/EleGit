@@ -23,6 +23,8 @@ import {
 import { isCancelled, requestSignal } from "./http-signal.js";
 import { loadStore } from "./store.js";
 import { createTunnelManager } from "./tunnel.js";
+import { publicVoiceStatus, resolveVoiceConfig } from "./voice-config.js";
+import { attachVoiceGateway } from "./voice-ws.js";
 import { ensureCheckout, formatLocalContext } from "./workspace.js";
 
 loadLocalEnv();
@@ -159,6 +161,7 @@ app.get("/v1/status", (_req, res) => {
       transport: cursor?.transport || null,
       fallback: "local-progress",
     },
+    voice: publicVoiceStatus(resolveVoiceConfig()),
     tunnel: tunnelStatus,
     lanUrls: lans,
     port: PORT,
@@ -432,7 +435,7 @@ app.post("/v1/tunnel/stop", (_req, res) => {
   res.json(tunnel.stop());
 });
 
-app.listen(PORT, BIND, () => {
+const httpServer = app.listen(PORT, BIND, () => {
   const lans = lanUrls(PORT);
   const callbacks = suggestedCallbackUrls({
     lanUrls: lans,
@@ -457,4 +460,12 @@ app.listen(PORT, BIND, () => {
       ? `Cursor engine: ${cursor.id} (${cursor.path})`
       : "Cursor engine: not found — chat will use local checkout + GitHub adapter",
   );
+  const voice = publicVoiceStatus(resolveVoiceConfig());
+  console.log(voice.ready ? "Voice call: ready" : "Voice call: 还没配语音密钥");
+});
+
+attachVoiceGateway(httpServer, {
+  getApiKey: () => store.config.apiKey,
+  checkoutRepo,
+  sessions,
 });

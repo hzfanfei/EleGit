@@ -7,8 +7,11 @@ import '../copy/time.dart';
 import '../models.dart';
 import '../persist/app_memory.dart';
 import '../theme.dart';
+import '../voice/voice_client.dart';
+import '../voice/voice_media.dart';
 import '../widgets/wx_chrome.dart';
 import '../widgets/wx_rich_text.dart';
+import 'call_page.dart';
 
 class ChatPage extends StatefulWidget {
   const ChatPage({
@@ -17,12 +20,16 @@ class ChatPage extends StatefulWidget {
     required this.repo,
     required this.onBack,
     this.memory,
+    this.voiceMedia,
+    this.voiceClient,
   });
 
   final WenxiangApi api;
   final RepoItem repo;
   final VoidCallback onBack;
   final AppMemory? memory;
+  final VoiceMedia? voiceMedia;
+  final VoiceCallClient? voiceClient;
 
   @override
   State<ChatPage> createState() => _ChatPageState();
@@ -46,6 +53,7 @@ class _ChatPageState extends State<ChatPage> {
   bool _live = false;
   bool _busy = false;
   String? _lastUser;
+  String _voiceHint = '还没配语音密钥';
 
   List<ChatMessage> get _messages =>
       _transcripts.putIfAbsent(_sessionId ?? '', () => <ChatMessage>[]);
@@ -63,6 +71,40 @@ class _ChatPageState extends State<ChatPage> {
     super.initState();
     _restoreLocal();
     _loadSessions();
+    _loadVoice();
+  }
+
+  Future<void> _loadVoice() async {
+    try {
+      final status = await widget.api.status();
+      if (!mounted) return;
+      setState(() {
+        _voiceHint = status.voiceReady ? '通话' : (status.voiceHint.isEmpty ? '还没配语音密钥' : status.voiceHint);
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _openCall() async {
+    if (_busy) widget.api.cancelChat();
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (context) => CallPage(
+          api: widget.api,
+          repo: widget.repo,
+          sessionId: _sessionId,
+          media: widget.voiceMedia,
+          client: widget.voiceClient,
+          onBack: () => Navigator.of(context).pop(),
+          onTranscript: (captions) {
+            if (captions.isEmpty) return;
+            setState(() {
+              _messages.addAll(captions);
+            });
+            _persist();
+          },
+        ),
+      ),
+    );
   }
 
   void _restoreLocal() {
@@ -426,6 +468,12 @@ class _ChatPageState extends State<ChatPage> {
                 tooltip: '历史会话',
                 onPressed: _openSessions,
                 icon: const Icon(Icons.history),
+              ),
+              IconButton(
+                key: const Key('wx-call'),
+                tooltip: _voiceHint,
+                onPressed: _openCall,
+                icon: const Icon(Icons.call_outlined),
               ),
             ],
           ),
