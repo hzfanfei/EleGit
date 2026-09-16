@@ -86,6 +86,32 @@ class RepoItem {
   }
 }
 
+class ChatSession {
+  ChatSession({
+    required this.id,
+    required this.title,
+    required this.createdAt,
+    required this.updatedAt,
+    required this.active,
+  });
+
+  final String id;
+  final String title;
+  final String createdAt;
+  final String updatedAt;
+  final bool active;
+
+  factory ChatSession.fromJson(Map<String, dynamic> json) {
+    return ChatSession(
+      id: (json['id'] ?? '').toString(),
+      title: (json['title'] ?? '新会话').toString(),
+      createdAt: (json['createdAt'] ?? '').toString(),
+      updatedAt: (json['updatedAt'] ?? '').toString(),
+      active: json['active'] == true,
+    );
+  }
+}
+
 class ChatMessage {
   ChatMessage({
     required this.role,
@@ -101,12 +127,19 @@ class ChatMessage {
 }
 
 class ChatStreamEvent {
-  ChatStreamEvent({required this.type, this.text = '', this.engine, this.error});
+  ChatStreamEvent({
+    required this.type,
+    this.text = '',
+    this.engine,
+    this.error,
+    this.sessionId,
+  });
 
   final String type;
   final String text;
   final String? engine;
   final String? error;
+  final String? sessionId;
 
   static ChatStreamEvent? fromSse(String raw) {
     final lines = raw.split('\n');
@@ -123,6 +156,7 @@ class ChatStreamEvent {
         text: (json['text'] ?? json['answer'] ?? '').toString(),
         engine: json['engine']?.toString(),
         error: json['error']?.toString(),
+        sessionId: json['sessionId']?.toString(),
       );
     } catch (_) {
       return null;

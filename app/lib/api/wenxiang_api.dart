@@ -157,11 +157,39 @@ class WenxiangApi {
         .toList();
   }
 
+  Future<List<ChatSession>> listSessions(String owner, String repo) async {
+    final res = await http
+        .get(_uri('/v1/repos/$owner/$repo/sessions'), headers: _headers)
+        .timeout(const Duration(seconds: 15));
+    final body = await _json(res, fallback: '读取会话失败');
+    final list = (body['sessions'] as List?) ?? [];
+    return list
+        .whereType<Map>()
+        .map((e) => ChatSession.fromJson(Map<String, dynamic>.from(e)))
+        .toList();
+  }
+
+  Future<ChatSession> createSession(String owner, String repo) async {
+    final res = await http
+        .post(_uri('/v1/repos/$owner/$repo/sessions'), headers: _headers)
+        .timeout(const Duration(seconds: 15));
+    final body = await _json(res, fallback: '新建会话失败');
+    return ChatSession.fromJson(body);
+  }
+
+  Future<void> closeSession(String owner, String repo, String id) async {
+    final res = await http
+        .delete(_uri('/v1/repos/$owner/$repo/sessions/$id'), headers: _headers)
+        .timeout(const Duration(seconds: 15));
+    await _json(res, fallback: '关闭会话失败');
+  }
+
   Stream<ChatStreamEvent> chatStream({
     required String owner,
     required String repo,
     required String message,
     required List<ChatMessage> history,
+    String? sessionId,
   }) async* {
     final client = http.Client();
     try {
@@ -174,6 +202,7 @@ class WenxiangApi {
           'owner': owner,
           'repo': repo,
           'message': message,
+          if (sessionId != null && sessionId.isNotEmpty) 'sessionId': sessionId,
           'history': history
               .map((m) => {'role': m.role, 'content': m.content})
               .toList(),

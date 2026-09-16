@@ -34,12 +34,128 @@ class _ChatPageState extends State<ChatPage> {
   final _input = TextEditingController();
   final _focus = FocusNode();
   final _scroll = ScrollController();
-  final List<ChatMessage> _messages = [];
+  final Map<String, List<ChatMessage>> _transcripts = {};
+  final List<ChatSession> _sessions = [];
   final ValueNotifier<String> _liveText = ValueNotifier('');
   final ValueNotifier<String?> _liveEngine = ValueNotifier(null);
+  String? _sessionId;
   bool _live = false;
   bool _busy = false;
   String? _lastUser;
+
+  List<ChatMessage> get _messages =>
+      _transcripts.putIfAbsent(_sessionId ?? '', () => <ChatMessage>[]);
+
+  ChatSession? get _currentSession {
+    if (_sessionId == null) return null;
+    for (final session in _sessions) {
+      if (session.id == _sessionId) return session;
+    }
+    return null;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSessions();
+  }
+
+  Future<void> _loadSessions() async {
+    try {
+      var list = await widget.api.listSessions(widget.repo.owner, widget.repo.name);
+      if (list.isEmpty) {
+        final created = await widget.api.createSession(widget.repo.owner, widget.repo.name);
+        list = [created];
+      }
+      if (!mounted) return;
+      setState(() {
+        _sessions
+          ..clear()
+          ..addAll(list);
+        _sessionId = list.firstWhere((s) => s.active, orElse: () => list.first).id;
+      });
+    } catch (_) {
+      // Chat can still send without a sessionId; the server will open an implicit one.
+    }
+  }
+
+  Future<void> _newSession() async {
+    if (_busy) return;
+    try {
+      final created = await widget.api.createSession(widget.repo.owner, widget.repo.name);
+      if (!mounted) return;
+      setState(() {
+        _sessions.insert(0, created);
+        _sessionId = created.id;
+        _transcripts[created.id] = [];
+        _live = false;
+      });
+      _liveText.value = '';
+      _liveEngine.value = null;
+    } catch (err) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(humanizeError(err))),
+      );
+    }
+  }
+
+  Future<void> _switchSession(ChatSession session) async {
+    if (_busy) return;
+    setState(() {
+      _sessionId = session.id;
+      _live = false;
+    });
+    _liveText.value = '';
+    _liveEngine.value = null;
+  }
+
+  Future<void> _closeSession(ChatSession session) async {
+    try {
+      await widget.api.closeSession(widget.repo.owner, widget.repo.name, session.id);
+      if (!mounted) return;
+      setState(() {
+        _sessions.removeWhere((s) => s.id == session.id);
+        _transcripts.remove(session.id);
+        if (_sessionId == session.id) {
+          _sessionId = _sessions.isEmpty ? null : _sessions.first.id;
+          _live = false;
+        }
+      });
+      if (_sessionId == null || _sessions.isEmpty) {
+        _liveText.value = '';
+        _liveEngine.value = null;
+      }
+      if (_sessions.isEmpty) await _newSession();
+    } catch (err) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(humanizeError(err))),
+      );
+    }
+  }
+
+  void _rememberSessionId(String? next) {
+    if (next == null || next.isEmpty || next == _sessionId) return;
+    final old = _sessionId ?? '';
+    final prior = _transcripts.remove(old);
+    if (prior != null) {
+      _transcripts[next] = prior;
+    }
+    _sessionId = next;
+    if (!_sessions.any((s) => s.id == next)) {
+      _sessions.insert(
+        0,
+        ChatSession(
+          id: next,
+          title: '新会话',
+          createdAt: '',
+          updatedAt: '',
+          active: true,
+        ),
+      );
+    }
+  }
 
   Future<void> _send([String? preset]) async {
     final text = (preset ?? _input.text).trim();
@@ -56,18 +172,20 @@ class _ChatPageState extends State<ChatPage> {
     });
     _jump(force: true);
 
-    final history = _messages
-        .where((m) => m.role != 'error')
-        .toList();
+    final history = _messages.where((m) => m.role != 'error').toList();
 
     try {
       await for (final event in widget.api.chatStream(
         owner: widget.repo.owner,
         repo: widget.repo.name,
         message: text,
+        sessionId: _sessionId,
         history: history,
       )) {
         if (!mounted) return;
+        if (event.sessionId != null && event.sessionId!.isNotEmpty) {
+          _rememberSessionId(event.sessionId);
+        }
         if (event.type == 'delta' && event.text.isNotEmpty) {
           _liveText.value += event.text;
           _jump();
@@ -136,6 +254,58 @@ class _ChatPageState extends State<ChatPage> {
     });
   }
 
+  Future<void> _openSessions() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Wx.surface,
+      showDragHandle: true,
+      builder: (context) {
+        return SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            padding: const EdgeInsets.fromLTRB(8, 0, 8, 16),
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                child: Text('历史会话', style: Theme.of(context).textTheme.titleMedium),
+              ),
+              if (_sessions.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                  child: Text('还没有会话', style: Theme.of(context).textTheme.bodyMedium),
+                ),
+              for (final session in _sessions)
+                ListTile(
+                  selected: session.id == _sessionId,
+                  selectedTileColor: Wx.raised,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  title: Text(
+                    session.title.isEmpty ? '新会话' : session.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _switchSession(session);
+                  },
+                  trailing: IconButton(
+                    tooltip: '关闭会话',
+                    icon: const Icon(Icons.close),
+                    onPressed: _busy
+                        ? null
+                        : () async {
+                            Navigator.pop(context);
+                            await _closeSession(session);
+                          },
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   @override
   void dispose() {
     _input.dispose();
@@ -148,6 +318,10 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   Widget build(BuildContext context) {
+    final session = _currentSession;
+    final subtitle = session == null || session.title.isEmpty || session.title == '新会话'
+        ? '问象'
+        : session.title;
     final itemCount = _messages.length + (_live ? 1 : 0);
     return Scaffold(
       body: Column(
@@ -173,11 +347,20 @@ class _ChatPageState extends State<ChatPage> {
                           overflow: TextOverflow.ellipsis,
                           style: Theme.of(context).textTheme.titleMedium,
                         ),
-                        Text('问象', style: Theme.of(context).textTheme.labelSmall),
+                        Text(subtitle, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.labelSmall),
                       ],
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  IconButton(
+                    tooltip: '新建会话',
+                    onPressed: _busy ? null : _newSession,
+                    icon: const Icon(Icons.add_comment_outlined),
+                  ),
+                  IconButton(
+                    tooltip: '历史会话',
+                    onPressed: _openSessions,
+                    icon: const Icon(Icons.history),
+                  ),
                 ],
               ),
             ),

@@ -25,6 +25,17 @@ class FakeWenxiangApi extends WenxiangApi {
   Object? streamThrows;
   int startOAuthCalls = 0;
   int checkoutCalls = 0;
+  String? lastSessionId;
+  int createSessionCalls = 0;
+  final List<ChatSession> sessions = [
+    ChatSession(
+      id: 's1',
+      title: '新会话',
+      createdAt: '2026-09-15T00:00:00.000Z',
+      updatedAt: '2026-09-15T00:00:00.000Z',
+      active: true,
+    ),
+  ];
 
   @override
   Future<OAuthStart> startOAuth() async {
@@ -70,18 +81,44 @@ class FakeWenxiangApi extends WenxiangApi {
   }
 
   @override
+  Future<List<ChatSession>> listSessions(String owner, String repo) async {
+    return List<ChatSession>.from(sessions);
+  }
+
+  @override
+  Future<ChatSession> createSession(String owner, String repo) async {
+    createSessionCalls += 1;
+    final created = ChatSession(
+      id: 's${sessions.length + 1}',
+      title: '新会话',
+      createdAt: '2026-09-15T00:00:00.000Z',
+      updatedAt: '2026-09-15T00:00:00.000Z',
+      active: true,
+    );
+    sessions.insert(0, created);
+    return created;
+  }
+
+  @override
+  Future<void> closeSession(String owner, String repo, String id) async {
+    sessions.removeWhere((s) => s.id == id);
+  }
+
+  @override
   Stream<ChatStreamEvent> chatStream({
     required String owner,
     required String repo,
     required String message,
     required List<ChatMessage> history,
+    String? sessionId,
   }) async* {
+    lastSessionId = sessionId;
     if (streamThrows != null) throw streamThrows!;
     for (final event in streamEvents ??
         [
           ChatStreamEvent(type: 'start', engine: 'local-progress'),
           ChatStreamEvent(type: 'delta', text: '最近在修登录。'),
-          ChatStreamEvent(type: 'done', engine: 'local-progress'),
+          ChatStreamEvent(type: 'done', engine: 'local-progress', sessionId: sessionId ?? 's1'),
         ]) {
       yield event;
     }

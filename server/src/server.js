@@ -2,7 +2,8 @@ import express from "express";
 import cors from "cors";
 import { corsOptions } from "./cors.js";
 import { loadLocalEnv } from "./env.js";
-import { streamAnswer, detectCursorEngine } from "./ask.js";
+import { createSessionStore, detectCursorEngine } from "./acp.js";
+import { streamAnswer } from "./ask.js";
 import {
   formatProgressContext,
   listRepos,
@@ -28,6 +29,7 @@ const PORT = Number(process.env.WENXIANG_PORT || 8787);
 const BIND = process.env.WENXIANG_BIND || "0.0.0.0";
 
 const store = await loadStore();
+const sessions = createSessionStore();
 const oauth = createOAuthSessions();
 const tunnel = createTunnelManager({
   port: PORT,
@@ -139,6 +141,8 @@ app.get("/v1/status", (_req, res) => {
     cursor: {
       available: Boolean(cursor),
       engine: cursor?.id || null,
+      mode: cursor?.mode || null,
+      transport: cursor?.transport || null,
       fallback: "local-progress",
     },
     tunnel: tunnelStatus,
@@ -287,6 +291,30 @@ app.get("/v1/repos/:owner/:repo/progress", requireGithub, async (req, res) => {
   }
 });
 
+app.get("/v1/repos/:owner/:repo/sessions", requireGithub, (req, res) => {
+  try {
+    res.json(sessions.list(req.params.owner, req.params.repo));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.post("/v1/repos/:owner/:repo/sessions", requireGithub, (req, res) => {
+  try {
+    res.status(201).json(sessions.create(req.params.owner, req.params.repo));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.delete("/v1/repos/:owner/:repo/sessions/:id", requireGithub, async (req, res) => {
+  try {
+    res.json(await sessions.close(req.params.owner, req.params.repo, req.params.id));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
 function writeSse(res, event) {
   res.write(`data: ${JSON.stringify(event)}\n\n`);
 }
@@ -296,13 +324,16 @@ app.post("/v1/chat", requireGithub, async (req, res) => {
     const owner = String(req.body?.owner || "").trim();
     const repo = String(req.body?.repo || "").trim();
     const message = String(req.body?.message || "").trim();
+    const sessionId = String(req.body?.sessionId || "").trim();
     const history = Array.isArray(req.body?.history) ? req.body.history : [];
     if (!owner || !repo || !message) {
       res.status(400).json({ error: "owner, repo, and message are required" });
       return;
     }
+    const session = sessions.resolveForChat(owner, repo, sessionId);
     const { progress, dest, local } = await checkoutRepo(owner, repo);
-    const context = `${formatProgressContext(progress)}\n\n${formatLocalContext(local)}`;
+    const githubContext = formatProgressContext(progress);
+    const context = `${githubContext}\n\n${formatLocalContext(local)}`;
     res.status(200);
     res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
     res.setHeader("Cache-Control", "no-cache, no-transform");
@@ -313,6 +344,7 @@ app.post("/v1/chat", requireGithub, async (req, res) => {
       type: "meta",
       repo: progress.repo.fullName,
       checkout: dest,
+      sessionId: session.id,
     });
     let finalEngine = "local-progress";
     let finalAnswer = "";
@@ -321,7 +353,10 @@ app.post("/v1/chat", requireGithub, async (req, res) => {
       history,
       progress,
       context,
+      githubContext,
       local,
+      session,
+      sessions,
     })) {
       if (event.type === "done") {
         finalEngine = event.engine;
@@ -332,6 +367,7 @@ app.post("/v1/chat", requireGithub, async (req, res) => {
           answer: event.answer,
           repo: progress.repo.fullName,
           checkout: dest,
+          sessionId: session.id,
         });
       } else {
         writeSse(res, event);
@@ -344,6 +380,7 @@ app.post("/v1/chat", requireGithub, async (req, res) => {
         answer: "",
         repo: progress.repo.fullName,
         checkout: dest,
+        sessionId: session.id,
       });
     }
     res.end();

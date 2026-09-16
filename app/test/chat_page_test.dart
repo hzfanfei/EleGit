@@ -47,4 +47,31 @@ void main() {
     expect(find.text('▍'), findsNothing);
     expect(find.textContaining('本地进度'), findsWidgets);
   });
+
+  testWidgets('session start and history stay on the quiet chrome, not an AppBar', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: ChatPage(
+          api: FakeWenxiangApi(),
+          repo: sampleRepo(),
+          onBack: () {},
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byType(AppBar), findsNothing);
+    expect(find.byTooltip('新建会话'), findsOneWidget);
+    expect(find.byTooltip('历史会话'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('新建会话'));
+    await tester.pump();
+    expect(find.textContaining('对着这份检出提问'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('历史会话'));
+    await tester.pumpAndSettle();
+    expect(find.text('历史会话'), findsOneWidget);
+    expect(find.text('新会话'), findsWidgets);
+  });
 }
