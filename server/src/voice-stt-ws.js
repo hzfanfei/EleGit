@@ -1,5 +1,6 @@
 import { WebSocketServer } from "ws";
 import { resolveVoiceConfig } from "./voice-config.js";
+import { sttErrorFromFailure } from "./voice-stt-copy.js";
 import { createVoiceProviders, voiceKeyFromRequest } from "./voice-ws.js";
 
 export function isSttUpgrade(req) {
@@ -54,13 +55,25 @@ export function createSttSession({
           finalText = String(text || "");
           if (finalText) emit({ type: "caption", role: "user", text: finalText, final: true });
         },
+        onAsrError: (detail) => {
+          const mapped = sttErrorFromFailure(detail?.err, detail?.message);
+          emit({ type: "error", code: mapped.code, hint: mapped.hint });
+          cleanup();
+        },
       });
       asr = providers.asr;
       if (!asr) {
         emit({ type: "error", code: "unconfigured", hint: config.hint || "还没配语音密钥" });
         return;
       }
-      await asr.start();
+      try {
+        await asr.start();
+      } catch (err) {
+        const mapped = sttErrorFromFailure(err);
+        emit({ type: "error", code: mapped.code, hint: mapped.hint });
+        cleanup();
+        return;
+      }
       emit({ type: "state", state: "listening" });
     },
     onPcm(data) {

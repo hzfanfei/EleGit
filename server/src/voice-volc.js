@@ -122,6 +122,7 @@ export function createVolcAsr({
   connect = (url, options) => new WebSocket(url, options),
   onPartial,
   onFinal,
+  onError,
 } = {}) {
   let socket = null;
   let opened = false;
@@ -151,6 +152,10 @@ export function createVolcAsr({
       });
       socket.on("message", (data) => {
         const frame = decodeVolcServerFrame(data);
+        if (frame.type === "error") {
+          onError?.({ message: frame.message, code: frame.code });
+          return;
+        }
         if (frame.type !== "result" || !frame.json) return;
         const extracted = extractAsrText(frame.json);
         if (!extracted.text) return;

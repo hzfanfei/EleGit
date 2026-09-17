@@ -36,7 +36,7 @@ export function resolveVoiceConfig(env = process.env) {
   return {
     ready: false,
     provider: null,
-    hint: "还没配语音密钥",
+    hint: "还没配语音密钥。请在本机问象服务的 .env 里配置。",
     volc: null,
     openai: null,
   };
@@ -64,6 +64,6 @@ function readyVolc({ appId, accessToken, apiKey, env }) {
 export function publicVoiceStatus(config = resolveVoiceConfig()) {
   return {
     ready: Boolean(config.ready),
-    hint: config.ready ? "" : config.hint || "还没配语音密钥",
+    hint: config.ready ? "" : config.hint || "还没配语音密钥。请在本机问象服务的 .env 里配置。",
   };
 }

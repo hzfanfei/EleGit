@@ -13,6 +13,7 @@ import '../theme.dart';
 import '../voice/device_media.dart';
 import '../voice/voice_client.dart';
 import '../voice/voice_media.dart';
+import '../copy/voice_stt_copy.dart';
 import '../voice/voice_stt_client.dart';
 import '../widgets/wx_chrome.dart';
 import '../widgets/wx_rich_text.dart';
@@ -59,7 +60,7 @@ class _ChatPageState extends State<ChatPage> {
   int? _editingIndex;
   String? _lastUser;
   bool _voiceReady = false;
-  String _voiceHint = '还没配语音密钥';
+  String _voiceHint = '还没配语音密钥。请在本机问象服务的 .env 里配置。';
   bool _voiceInputMode = false;
   bool _holding = false;
   bool _holdPending = false;
@@ -98,19 +99,33 @@ class _ChatPageState extends State<ChatPage> {
       if (!mounted) return;
       setState(() {
         _voiceReady = status.voiceReady;
-        _voiceHint = status.voiceReady ? '' : (status.voiceHint.isEmpty ? '还没配语音密钥' : status.voiceHint);
+        _voiceHint = status.voiceReady
+            ? ''
+            : (status.voiceHint.isEmpty ? humanizeSttEvent(code: 'unconfigured') : status.voiceHint);
       });
-    } catch (_) {}
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _voiceReady = false;
+        _voiceHint = '连不上问象服务，暂时无法使用语音。请确认电脑上的服务已启动。';
+      });
+    }
   }
 
   void _toggleVoiceInput() {
     if (!_voiceReady) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_voiceHint.isEmpty ? '还没配语音密钥' : _voiceHint)),
+        SnackBar(content: Text(_voiceHint.isEmpty ? humanizeSttEvent(code: 'unconfigured') : _voiceHint)),
       );
       return;
     }
-    if (_busy || _sttBusy || _holding) return;
+    if (_busy) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('正在生成回答，稍后再用语音')),
+      );
+      return;
+    }
+    if (_sttBusy || _holding) return;
     setState(() {
       _voiceInputMode = !_voiceInputMode;
       if (_voiceInputMode) _focus.unfocus();
@@ -126,7 +141,7 @@ class _ChatPageState extends State<ChatPage> {
     });
     final client = widget.sttClient ?? SocketSttClient(widget.api.sttUri());
     _stt = client;
-    _sttSub = client.connect().listen(_onSttEvent, onError: (_) => _failStt('识别失败'));
+    _sttSub = client.connect().listen(_onSttEvent, onError: (err) => _failStt(humanizeSttConnectionError(err)));
     client.start();
     final media = widget.voiceMedia ?? _media ?? DeviceVoiceMedia();
     _media = media;
@@ -200,10 +215,13 @@ class _ChatPageState extends State<ChatPage> {
   void _onSttEvent(VoiceEvent event) {
     if (!mounted) return;
     if (event.type == 'error') {
-      final hint = event.hint?.isNotEmpty == true
-          ? event.hint!
-          : (event.code == 'unconfigured' ? '还没配语音密钥' : '识别失败');
-      _failStt(hint);
+      _failStt(humanizeSttEvent(code: event.code, hint: event.hint));
+      if (event.code == 'unconfigured') {
+        setState(() {
+          _voiceReady = false;
+          _voiceHint = humanizeSttEvent(code: 'unconfigured');
+        });
+      }
       return;
     }
     if (event.type == 'caption' && event.text.isNotEmpty) {
@@ -217,7 +235,13 @@ class _ChatPageState extends State<ChatPage> {
         _holdLive = '';
         _holdHint = '';
       });
-      if (text.isNotEmpty) unawaited(_send(text));
+      if (text.isNotEmpty) {
+        unawaited(_send(text));
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(humanizeSttEvent(code: 'empty'))),
+        );
+      }
     }
     if (event.type == 'cancelled') {
       _disposeStt();
@@ -237,7 +261,9 @@ class _ChatPageState extends State<ChatPage> {
       _holdLive = '';
       _holdHint = '';
     });
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
+    );
   }
 
   void _disposeStt() {
@@ -1191,14 +1217,17 @@ class _Composer extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (holding && holdLive.isNotEmpty)
+              if ((holding || sttBusy) && holdLive.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),
                   child: Text(
                     holdLive,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Wx.muted),
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: sttBusy ? Wx.text : Wx.muted,
+                          fontStyle: sttBusy ? FontStyle.normal : FontStyle.italic,
+                        ),
                   ),
                 ),
               Row(
@@ -1206,9 +1235,16 @@ class _Composer extends StatelessWidget {
                 children: [
                   IconButton(
                     key: const Key('wx-voice-toggle'),
-                    tooltip: voiceInputMode ? '键盘输入' : '按住说话',
-                    onPressed: voiceLocked ? null : onToggleVoiceInput,
-                    icon: Icon(voiceInputMode ? Icons.keyboard_outlined : Icons.mic_none_outlined),
+                    tooltip: !voiceReady
+                        ? '语音未配置'
+                        : busy
+                            ? '生成中，暂不可用'
+                            : (voiceInputMode ? '键盘输入' : '按住说话'),
+                    onPressed: voiceLocked && voiceReady ? null : onToggleVoiceInput,
+                    icon: Icon(
+                      voiceInputMode ? Icons.keyboard_outlined : Icons.mic_none_outlined,
+                      color: !voiceReady ? Wx.faint : null,
+                    ),
                   ),
                   Expanded(
                     child: voiceInputMode
@@ -1217,9 +1253,13 @@ class _Composer extends StatelessWidget {
                             holding: holding,
                             holdCancel: holdCancel,
                             sttBusy: sttBusy,
-                            hint: holdHint.isNotEmpty
-                                ? holdHint
-                                : (sttBusy ? '识别中…' : '按住 说话'),
+                            hint: !voiceReady
+                                ? '语音未就绪'
+                                : busy
+                                    ? '生成中，稍后再说'
+                                    : holdHint.isNotEmpty
+                                        ? holdHint
+                                        : (sttBusy ? '识别中…' : '按住 说话'),
                             onHoldStart: onHoldStart,
                             onHoldMove: onHoldMove,
                             onHoldEnd: onHoldEnd,
@@ -1338,12 +1378,32 @@ class _HoldToSpeakPadState extends State<_HoldToSpeakPad> {
           border: Border.all(color: Wx.hairline),
         ),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: Text(
-          widget.hint,
-          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                color: enabled ? Wx.text : Wx.faint,
-                fontWeight: holding ? FontWeight.w600 : FontWeight.w400,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (widget.sttBusy) ...[
+              SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: enabled ? Wx.accent : Wx.faint,
+                ),
               ),
+              const SizedBox(width: 10),
+            ],
+            Flexible(
+              child: Text(
+                widget.hint,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      color: enabled ? Wx.text : Wx.faint,
+                      fontWeight: holding || widget.sttBusy ? FontWeight.w600 : FontWeight.w400,
+                    ),
+              ),
+            ),
+          ],
         ),
       ),
     );
