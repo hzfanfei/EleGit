@@ -8,9 +8,11 @@ import {
   checkoutPath,
   ensureCheckout,
   formatLocalContext,
+  getCheckoutSyncStatus,
   gitAuthConfigArgs,
   gitFailure,
   GITHUB_GIT_FORBIDDEN_ZH,
+  isCheckoutPresent,
   runGit,
   safeSegment,
   snapshotCheckout,
@@ -98,6 +100,87 @@ describe("checkout paths", () => {
     assert.equal(dest, path.join("/tmp/问象", "acme", "widget"));
     assert.throws(() => safeSegment("../etc", "owner"), /Invalid/);
     assert.throws(() => safeSegment("acme/widget", "repo"), /Invalid/);
+  });
+});
+
+describe("getCheckoutSyncStatus", () => {
+  it("reports missing checkout on disk", async () => {
+    const workspace = await mkdtemp(path.join(os.tmpdir(), "wenxiang-ws-"));
+    const status = await getCheckoutSyncStatus({
+      workspaceRoot: workspace,
+      owner: "acme",
+      repo: "widget",
+      fetchRemote: false,
+    });
+    assert.equal(status.present, false);
+    assert.equal(status.syncState, "missing");
+    assert.equal(isCheckoutPresent(workspace, "acme", "widget"), false);
+  });
+
+  it("reports current when local matches origin default branch", async () => {
+    const tmp = await mkdtemp(path.join(os.tmpdir(), "wenxiang-src-"));
+    const workspace = await mkdtemp(path.join(os.tmpdir(), "wenxiang-ws-"));
+    git(["init", "-b", "main"], tmp);
+    git(["config", "user.email", "test@example.com"], tmp);
+    git(["config", "user.name", "Test"], tmp);
+    await writeFile(path.join(tmp, "README.md"), "# ok\n");
+    git(["add", "."], tmp);
+    git(["commit", "-m", "One"], tmp);
+
+    await ensureCheckout({
+      workspaceRoot: workspace,
+      owner: "acme",
+      repo: "widget",
+      cloneUrl: tmp,
+      defaultBranch: "main",
+    });
+
+    const status = await getCheckoutSyncStatus({
+      workspaceRoot: workspace,
+      owner: "acme",
+      repo: "widget",
+      defaultBranch: "main",
+      fetchRemote: true,
+    });
+    assert.equal(status.present, true);
+    assert.equal(status.syncState, "current");
+    assert.equal(status.upToDate, true);
+    assert.equal(status.behind, 0);
+  });
+
+  it("reports behind after upstream advances", async () => {
+    const tmp = await mkdtemp(path.join(os.tmpdir(), "wenxiang-src-"));
+    const workspace = await mkdtemp(path.join(os.tmpdir(), "wenxiang-ws-"));
+    git(["init", "-b", "main"], tmp);
+    git(["config", "user.email", "test@example.com"], tmp);
+    git(["config", "user.name", "Test"], tmp);
+    await writeFile(path.join(tmp, "README.md"), "# v1\n");
+    git(["add", "."], tmp);
+    git(["commit", "-m", "v1"], tmp);
+
+    await ensureCheckout({
+      workspaceRoot: workspace,
+      owner: "acme",
+      repo: "behind",
+      cloneUrl: tmp,
+      defaultBranch: "main",
+    });
+
+    await writeFile(path.join(tmp, "README.md"), "# v2\n");
+    git(["add", "."], tmp);
+    git(["commit", "-m", "v2"], tmp);
+
+    const status = await getCheckoutSyncStatus({
+      workspaceRoot: workspace,
+      owner: "acme",
+      repo: "behind",
+      defaultBranch: "main",
+      fetchRemote: true,
+    });
+    assert.equal(status.present, true);
+    assert.equal(status.syncState, "behind");
+    assert.equal(status.upToDate, false);
+    assert.ok(status.behind >= 1);
   });
 });
 

@@ -26,7 +26,14 @@ import { createTunnelManager } from "./tunnel.js";
 import { publicVoiceStatus, resolveVoiceConfig } from "./voice-config.js";
 import { attachSttGateway } from "./voice-stt-ws.js";
 import { attachVoiceGateway, isVoiceCallEnabled } from "./voice-ws.js";
-import { ensureCheckout, formatLocalContext } from "./workspace.js";
+import {
+  checkoutPath,
+  detectDefaultBranch,
+  ensureCheckout,
+  formatLocalContext,
+  getCheckoutSyncStatus,
+  isCheckoutPresent,
+} from "./workspace.js";
 
 loadLocalEnv();
 
@@ -272,31 +279,82 @@ app.get("/v1/repos", requireGithub, async (req, res) => {
   }
 });
 
-async function checkoutRepo(owner, repo, signal) {
+async function resolveDefaultBranch(owner, repo) {
+  const dest = checkoutPath(store.config.workspaceRoot, owner, repo);
+  if (isCheckoutPresent(store.config.workspaceRoot, owner, repo)) {
+    return detectDefaultBranch(dest);
+  }
+  if (!githubToken()) {
+    return "main";
+  }
   const progress = await repoProgress(githubToken(), owner, repo);
+  return progress.repo.defaultBranch || "main";
+}
+
+async function checkoutRepo(owner, repo, signal) {
+  const present = isCheckoutPresent(store.config.workspaceRoot, owner, repo);
+  let progress = null;
+  if (githubToken()) {
+    progress = await repoProgress(githubToken(), owner, repo);
+  } else if (!present) {
+    const err = new Error("尚未登录 GitHub，无法首次克隆。请先在浏览器里登录。");
+    err.status = 401;
+    err.code = "github_required";
+    throw err;
+  }
+  const defaultBranch =
+    progress?.repo?.defaultBranch || (present ? await resolveDefaultBranch(owner, repo) : "main");
   const result = await ensureCheckout({
     workspaceRoot: store.config.workspaceRoot,
     owner,
     repo,
     token: githubToken(),
-    defaultBranch: progress.repo.defaultBranch,
+    defaultBranch,
     signal,
   });
   return { progress, ...result };
 }
 
-app.post("/v1/repos/:owner/:repo/checkout", requireGithub, async (req, res) => {
+app.get("/v1/repos/:owner/:repo/checkout-status", async (req, res) => {
   try {
+    const { owner, repo } = req.params;
+    let defaultBranch = String(req.query.branch || "").trim();
+    if (!defaultBranch) {
+      defaultBranch = await resolveDefaultBranch(owner, repo);
+    }
+    const status = await getCheckoutSyncStatus({
+      workspaceRoot: store.config.workspaceRoot,
+      owner,
+      repo,
+      defaultBranch,
+      fetchRemote: req.query.fetch !== "0",
+    });
+    res.json(status);
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.post("/v1/repos/:owner/:repo/checkout", async (req, res) => {
+  try {
+    const { owner, repo } = req.params;
+    if (!isCheckoutPresent(store.config.workspaceRoot, owner, repo) && !githubToken()) {
+      res.status(401).json({
+        error: "尚未登录 GitHub，无法首次克隆。请先在浏览器里登录。",
+        code: "github_required",
+      });
+      return;
+    }
     const { progress, dest, existed, local } = await checkoutRepo(
-      req.params.owner,
-      req.params.repo,
+      owner,
+      repo,
       requestSignal(req, res),
     );
     res.json({
       path: dest,
       existed,
       local,
-      repo: progress.repo,
+      repo: progress?.repo,
     });
   } catch (err) {
     sendError(res, err);

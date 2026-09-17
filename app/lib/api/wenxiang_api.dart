@@ -131,6 +131,14 @@ class WenxiangApi {
     return body['connected'] == true;
   }
 
+  Future<CheckoutSyncStatus> checkoutStatus(String owner, String repo) async {
+    final res = await http
+        .get(_uri('/v1/repos/$owner/$repo/checkout-status'), headers: _headers)
+        .timeout(const Duration(seconds: 45));
+    final body = await _json(res, fallback: '读取本机仓库状态失败');
+    return CheckoutSyncStatus.fromJson(body);
+  }
+
   Future<CheckoutResult> checkout(String owner, String repo) async {
     final client = http.Client();
     _checkoutCancelled = false;

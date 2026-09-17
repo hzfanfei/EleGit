@@ -6,6 +6,7 @@ import '../copy/time.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../widgets/wx_chrome.dart';
+import '../repo_open.dart';
 import '../widgets/wx_clone_scrim.dart';
 
 class ReposPage extends StatefulWidget {
@@ -31,6 +32,7 @@ class ReposPageState extends State<ReposPage> {
   List<RepoItem> _repos = [];
   Object? _error;
   RepoItem? _cloning;
+  WxCloneMode _cloneMode = WxCloneMode.clone;
   Object? _cloneError;
   int _cloneAttempt = 0;
   bool _loading = true;
@@ -66,22 +68,42 @@ class ReposPageState extends State<ReposPage> {
   Future<void> _open(RepoItem repo) async {
     if (_cloning != null && _cloneError == null) return;
     setState(() {
-      _cloning = repo;
       _cloneError = null;
-      _cloneAttempt += 1;
       _error = null;
     });
     try {
-      await widget.api.checkout(repo.owner, repo.name);
-      if (!mounted) return;
-      HapticFeedback.lightImpact();
-      widget.onOpen(repo);
-      if (mounted) setState(() => _cloning = null);
+      await openRepoWithSync(
+        api: widget.api,
+        repo: repo,
+        onScrim: (mode) {
+          if (!mounted) return;
+          setState(() {
+            _cloning = repo;
+            _cloneMode = mode;
+            _cloneAttempt += 1;
+          });
+        },
+        onReady: () async {
+          if (!mounted) return;
+          HapticFeedback.lightImpact();
+          widget.onOpen(repo);
+        },
+      );
+      if (mounted) {
+        setState(() {
+          _cloning = null;
+          _cloneError = null;
+        });
+      }
     } on OperationCancelled {
       if (mounted) _dismissClone();
     } catch (err) {
       if (!mounted) return;
-      setState(() => _cloneError = err);
+      setState(() {
+        _cloneError = err;
+        _cloning ??= repo;
+        _cloneAttempt += 1;
+      });
     }
   }
 
@@ -171,6 +193,7 @@ class ReposPageState extends State<ReposPage> {
                   WxCloneScrim(
                     key: ValueKey(_cloneAttempt),
                     repo: _cloning!,
+                    mode: _cloneMode,
                     error: _cloneError,
                     onRetry: _cloneError == null ? null : () => _open(_cloning!),
                     onDismiss: _cloneError == null ? cancelClone : _dismissClone,
