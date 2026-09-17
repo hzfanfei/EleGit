@@ -35,7 +35,7 @@ flutter pub get
 flutter run --dart-define-from-file=../.env
 ```
 
-手机不用填地址或 Key。对话页听筒可打电话：先在根目录 `.env` 填 `VOLC_APP_ID` / `VOLC_ACCESS_TOKEN`（或后备 `OPENAI_API_KEY`），见《配置说明.md》。
+手机不用填地址或 Key。对话页 **按住说话** 需在根目录 `.env` 填 `VOLC_APP_ID` / `VOLC_ACCESS_TOKEN`（或后备 `OPENAI_API_KEY`）；火山 **新版控制台**步骤见《配置说明.md》「火山豆包语音（新版控制台）」。
 
 ## 测试
 
