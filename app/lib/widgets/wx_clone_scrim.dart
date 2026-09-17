@@ -7,10 +7,13 @@ import '../models.dart';
 import '../theme.dart';
 import 'wx_chrome.dart';
 
+enum WxCloneMode { clone, sync }
+
 class WxCloneScrim extends StatefulWidget {
   const WxCloneScrim({
     super.key,
     required this.repo,
+    this.mode = WxCloneMode.clone,
     this.error,
     this.onRetry,
     this.onDismiss,
@@ -18,6 +21,7 @@ class WxCloneScrim extends StatefulWidget {
   });
 
   final RepoItem repo;
+  final WxCloneMode mode;
   final Object? error;
   final VoidCallback? onRetry;
   final VoidCallback? onDismiss;
@@ -28,13 +32,37 @@ class WxCloneScrim extends StatefulWidget {
 }
 
 class _WxCloneScrimState extends State<WxCloneScrim> {
-  static const _stages = ['准备', '正在克隆', '即将打开'];
+  late List<String> _stages;
   int _stage = 0;
   Timer? _timer;
 
   String get _path => '~/问象/${widget.repo.owner}/${widget.repo.name}';
 
+  @override
+  void initState() {
+    super.initState();
+    _stages = widget.mode == WxCloneMode.sync
+        ? ['准备', '正在更新', '即将打开']
+        : ['准备', '正在克隆', '即将打开'];
+    _timer = Timer.periodic(const Duration(milliseconds: 900), (timer) {
+      if (!mounted || widget.error != null) return;
+      if (_stage < _stages.length - 1) {
+        setState(() => _stage += 1);
+      }
+    });
+  }
+
   String get _stageDetail {
+    if (widget.mode == WxCloneMode.sync) {
+      switch (_stage) {
+        case 0:
+          return '本机已有 ${widget.repo.fullName}，先对齐远端。';
+        case 1:
+          return '正在更新 $_path';
+        default:
+          return '马上打开这份仓库。';
+      }
+    }
     switch (_stage) {
       case 0:
         return '先确认 ${widget.repo.fullName}，再落到本机。';
@@ -46,19 +74,14 @@ class _WxCloneScrimState extends State<WxCloneScrim> {
   }
 
   @override
-  void initState() {
-    super.initState();
-    _timer = Timer.periodic(const Duration(milliseconds: 900), (timer) {
-      if (!mounted || widget.error != null) return;
-      if (_stage < _stages.length - 1) {
-        setState(() => _stage += 1);
-      }
-    });
-  }
-
-  @override
   void didUpdateWidget(covariant WxCloneScrim oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.mode != oldWidget.mode) {
+      _stages = widget.mode == WxCloneMode.sync
+          ? ['准备', '正在更新', '即将打开']
+          : ['准备', '正在克隆', '即将打开'];
+      _stage = 0;
+    }
     if (widget.error != null) {
       _timer?.cancel();
     }
@@ -91,7 +114,9 @@ class _WxCloneScrimState extends State<WxCloneScrim> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    failed ? '克隆失败' : _stages[_stage],
+                    failed
+                        ? (widget.mode == WxCloneMode.sync ? '更新失败' : '克隆失败')
+                        : _stages[_stage],
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                   const SizedBox(height: 8),

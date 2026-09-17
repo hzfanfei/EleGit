@@ -18,6 +18,9 @@ const SKIP_DIR = new Set([
 export const GITHUB_GIT_FORBIDDEN_ZH =
   "无法访问该仓库：GitHub 返回 403。常见原因：仓库为私有且当前登录无权克隆、OAuth 未授予 repo 权限，或组织启用了 SSO 但尚未授权问象。请在 GitHub 授权中勾选 repo，并完成组织 SSO 授权后重试。";
 
+export const GIT_SYNC_AUTH_ZH =
+  "无法拉取更新：本机 Git 未能认证 GitHub。请在本机终端进入该仓库目录执行 git pull，或在问象里重新登录 GitHub。";
+
 export function gitAuthConfigArgs(token) {
   const value = String(token || "");
   if (!value) return [];
@@ -86,6 +89,144 @@ export function checkoutPath(workspaceRoot, owner, repo) {
     safeSegment(owner, "owner"),
     safeSegment(repo, "repo"),
   );
+}
+
+export function isCheckoutPresent(workspaceRoot, owner, repo) {
+  const dest = checkoutPath(workspaceRoot, owner, repo);
+  return existsSync(path.join(dest, ".git"));
+}
+
+export async function detectDefaultBranch(dest) {
+  try {
+    const sym = await runGit(["symbolic-ref", "refs/remotes/origin/HEAD"], { cwd: dest });
+    const match = sym.match(/refs\/remotes\/origin\/(.+)/);
+    if (match?.[1]) return match[1];
+  } catch {
+    // fall through
+  }
+  for (const name of ["main", "master"]) {
+    try {
+      await runGit(["rev-parse", `origin/${name}`], { cwd: dest });
+      return name;
+    } catch {
+      // try next
+    }
+  }
+  const head = await runGit(["rev-parse", "--abbrev-ref", "HEAD"], { cwd: dest }).catch(
+    () => "main",
+  );
+  return head === "HEAD" ? "main" : head;
+}
+
+async function revParseRef(ref, dest) {
+  try {
+    return await runGit(["rev-parse", ref], { cwd: dest });
+  } catch {
+    return "";
+  }
+}
+
+export async function getCheckoutSyncStatus({
+  workspaceRoot,
+  owner,
+  repo,
+  defaultBranch = "main",
+  token,
+  fetchRemote = true,
+  signal,
+} = {}) {
+  const dest = checkoutPath(workspaceRoot, owner, repo);
+  const present = existsSync(path.join(dest, ".git"));
+  if (!present) {
+    return {
+      present: false,
+      path: dest,
+      syncState: "missing",
+      upToDate: false,
+      behind: 0,
+      ahead: 0,
+      defaultBranch,
+    };
+  }
+
+  const branch = (await runGit(["rev-parse", "--abbrev-ref", "HEAD"], { cwd: dest, signal }).catch(
+    () => "",
+  )) || defaultBranch;
+  const headFull = await revParseRef("HEAD", dest);
+  const head = headFull ? headFull.slice(0, 7) : "";
+
+  let fetchError = "";
+  if (fetchRemote) {
+    try {
+      await runGit(["fetch", "--depth", "50", "origin"], { cwd: dest, token, signal });
+    } catch (err) {
+      fetchError = err?.message || String(err);
+      if (err?.code === "github_git_forbidden") {
+        return {
+          present: true,
+          path: dest,
+          branch,
+          head,
+          syncState: "auth_required",
+          upToDate: false,
+          behind: 0,
+          ahead: 0,
+          defaultBranch,
+          fetchError: GIT_SYNC_AUTH_ZH,
+        };
+      }
+    }
+  }
+
+  const track = defaultBranch || branch;
+  const remoteRef = `origin/${track}`;
+  const remoteHeadFull = await revParseRef(remoteRef, dest);
+  const remoteHead = remoteHeadFull ? remoteHeadFull.slice(0, 7) : "";
+
+  let ahead = 0;
+  let behind = 0;
+  if (headFull && remoteHeadFull) {
+    const counts = await runGit(["rev-list", "--left-right", "--count", `HEAD...${remoteRef}`], {
+      cwd: dest,
+      signal,
+    }).catch(() => "0\t0");
+    const parts = counts.split(/\s+/);
+    ahead = Number.parseInt(parts[0], 10) || 0;
+    behind = Number.parseInt(parts[1], 10) || 0;
+  }
+
+  let syncState = "unknown";
+  let upToDate = false;
+  if (headFull && remoteHeadFull && headFull === remoteHeadFull) {
+    syncState = "current";
+    upToDate = true;
+  } else if (behind > 0 && ahead === 0) {
+    syncState = "behind";
+  } else if (ahead > 0 && behind === 0) {
+    syncState = "ahead";
+    upToDate = true;
+  } else if (ahead > 0 && behind > 0) {
+    syncState = "diverged";
+  } else if (fetchError && !remoteHeadFull) {
+    syncState = "unknown";
+  } else if (remoteHeadFull) {
+    syncState = "current";
+    upToDate = behind === 0;
+  }
+
+  return {
+    present: true,
+    path: dest,
+    branch,
+    head,
+    remoteHead,
+    syncState,
+    upToDate,
+    behind,
+    ahead,
+    defaultBranch: track,
+    fetchError: fetchError && syncState === "unknown" ? fetchError : "",
+  };
 }
 
 export function runGit(args, { cwd, token, timeoutMs = 180_000, signal } = {}) {
@@ -177,18 +318,41 @@ export async function ensureCheckout({
       throw err;
     }
   } else {
+    const syncToken = undefined;
     await runGit(["remote", "set-url", "origin", remote], { cwd: dest, signal });
-    await runGit(["fetch", "--depth", "50", "origin"], { cwd: dest, token, signal });
-    try {
-      await runGit(["checkout", defaultBranch], { cwd: dest, signal });
-      await runGit(["pull", "--ff-only", "origin", defaultBranch], {
-        cwd: dest,
-        token,
-        signal,
+    const sync = await getCheckoutSyncStatus({
+      workspaceRoot,
+      owner,
+      repo,
+      defaultBranch,
+      token: syncToken,
+      fetchRemote: true,
+      signal,
+    });
+    if (sync.syncState === "auth_required") {
+      throw zhGitError(GIT_SYNC_AUTH_ZH, sync.fetchError, {
+        code: "git_sync_auth",
+        status: 403,
       });
-    } catch (err) {
-      if (err?.code === "cancelled") throw err;
-      // Keep the existing checkout if the default branch cannot fast-forward.
+    }
+    if (!sync.upToDate && sync.behind > 0) {
+      try {
+        await runGit(["checkout", defaultBranch], { cwd: dest, signal });
+        await runGit(["pull", "--ff-only", "origin", defaultBranch], {
+          cwd: dest,
+          token: syncToken,
+          signal,
+        });
+      } catch (err) {
+        if (err?.code === "cancelled") throw err;
+        if (err?.code === "github_git_forbidden") {
+          throw zhGitError(GIT_SYNC_AUTH_ZH, err.detail, {
+            code: "git_sync_auth",
+            status: 403,
+          });
+        }
+        // Keep the existing checkout if the default branch cannot fast-forward.
+      }
     }
   }
   const local = await snapshotCheckout(dest);

@@ -12,6 +12,8 @@ class FakeWenxiangApi extends WenxiangApi {
     this.checkoutPath = '/home/fei/问象/octo/demo',
     this.checkoutDelay = Duration.zero,
     this.checkoutThrows,
+    this.checkoutStatusResult,
+    this.checkoutStatusThrows,
     this.streamEvents,
     this.streamThrows,
     this.streamDelay = Duration.zero,
@@ -29,6 +31,8 @@ class FakeWenxiangApi extends WenxiangApi {
   String checkoutPath;
   Duration checkoutDelay;
   Object? checkoutThrows;
+  CheckoutSyncStatus? checkoutStatusResult;
+  Object? checkoutStatusThrows;
   List<ChatStreamEvent>? streamEvents;
   Object? streamThrows;
   Duration streamDelay;
@@ -37,6 +41,7 @@ class FakeWenxiangApi extends WenxiangApi {
   String voiceHint;
   int startOAuthCalls = 0;
   int checkoutCalls = 0;
+  int checkoutStatusCalls = 0;
   int cancelCheckoutCalls = 0;
   int cancelChatCalls = 0;
   String? lastSessionId;
@@ -105,6 +110,20 @@ class FakeWenxiangApi extends WenxiangApi {
         ];
     if (query.isEmpty) return all;
     return all.where((r) => r.fullName.contains(query)).toList();
+  }
+
+  @override
+  Future<CheckoutSyncStatus> checkoutStatus(String owner, String repo) async {
+    checkoutStatusCalls += 1;
+    if (checkoutStatusThrows != null) throw checkoutStatusThrows!;
+    return checkoutStatusResult ??
+        CheckoutSyncStatus(
+          present: true,
+          upToDate: true,
+          syncState: 'current',
+          behind: 0,
+          path: checkoutPath,
+        );
   }
 
   @override

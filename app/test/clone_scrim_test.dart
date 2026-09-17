@@ -7,6 +7,23 @@ import 'package:wenxiang/widgets/wx_clone_scrim.dart';
 import 'support/fake_api.dart';
 
 void main() {
+  testWidgets('sync mode shows 正在更新 copy', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: Scaffold(
+          body: WxCloneScrim(
+            repo: sampleRepo(),
+            mode: WxCloneMode.sync,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.textContaining('正在更新'), findsWidgets);
+    expect(find.textContaining('正在克隆'), findsNothing);
+  });
+
   testWidgets('clone failure shows the real error, not a false not-on-disk title', (tester) async {
     await tester.pumpWidget(
       MaterialApp(

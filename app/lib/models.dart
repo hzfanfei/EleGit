@@ -240,3 +240,29 @@ class CheckoutResult {
   final String branch;
   final String head;
 }
+
+class CheckoutSyncStatus {
+  CheckoutSyncStatus({
+    required this.present,
+    required this.upToDate,
+    required this.syncState,
+    required this.behind,
+    required this.path,
+  });
+
+  final bool present;
+  final bool upToDate;
+  final String syncState;
+  final int behind;
+  final String path;
+
+  factory CheckoutSyncStatus.fromJson(Map<String, dynamic> json) {
+    return CheckoutSyncStatus(
+      present: json['present'] == true,
+      upToDate: json['upToDate'] == true,
+      syncState: (json['syncState'] ?? '').toString(),
+      behind: (json['behind'] as num?)?.toInt() ?? 0,
+      path: (json['path'] ?? '').toString(),
+    );
+  }
+}
