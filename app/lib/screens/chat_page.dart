@@ -96,6 +96,9 @@ class _ChatPageState extends State<ChatPage> {
   void initState() {
     super.initState();
     _restoreLocal();
+    widget.api
+        .warmChatSession(widget.repo.owner, widget.repo.name)
+        .catchError((_) {});
     _loadSessions();
     _loadVoice();
     _voiceHoldTipVisible = !(widget.memory?.voiceHoldTipDismissed() ?? false);
@@ -393,9 +396,17 @@ class _ChatPageState extends State<ChatPage> {
         }
       });
       await _persist();
+      _warmAcp();
     } catch (_) {
       // Chat can still send without a sessionId; the server will open an implicit one.
     }
+  }
+
+  void _warmAcp() {
+    final id = _sessionId;
+    widget.api
+        .warmChatSession(widget.repo.owner, widget.repo.name, sessionId: id)
+        .catchError((_) {});
   }
 
   Future<void> _newSession() async {

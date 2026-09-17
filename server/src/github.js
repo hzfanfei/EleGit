@@ -134,6 +134,29 @@ export async function repoProgress(token, owner, repo) {
   };
 }
 
+/** Placeholder progress when GitHub API is deferred (chat fast path). */
+export function emptyRepoProgress(owner, repo, defaultBranch = "main") {
+  return {
+    repo: {
+      id: 0,
+      owner,
+      name: repo,
+      fullName: `${owner}/${repo}`,
+      description: "",
+      private: false,
+      defaultBranch,
+      pushedAt: "",
+      htmlUrl: `https://github.com/${owner}/${repo}`,
+      language: "",
+      openIssues: 0,
+      stargazers: 0,
+    },
+    commits: [],
+    pulls: [],
+    issues: [],
+  };
+}
+
 export async function startDeviceFlow(clientId) {
   if (!clientId) {
     const err = new Error(

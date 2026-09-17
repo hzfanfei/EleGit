@@ -15,11 +15,13 @@ Future<void> openRepoWithSync({
   } catch (_) {
     onScrim?.call(WxCloneMode.clone);
     await api.checkout(repo.owner, repo.name);
+    api.warmChatSession(repo.owner, repo.name).catchError((_) {});
     await onReady();
     return;
   }
 
   if (status.present && status.upToDate) {
+    api.warmChatSession(repo.owner, repo.name).catchError((_) {});
     await onReady();
     return;
   }
@@ -27,11 +29,13 @@ Future<void> openRepoWithSync({
   if (status.present && status.behind > 0) {
     onScrim?.call(WxCloneMode.sync);
     await api.checkout(repo.owner, repo.name);
+    api.warmChatSession(repo.owner, repo.name).catchError((_) {});
     await onReady();
     return;
   }
 
   onScrim?.call(WxCloneMode.clone);
   await api.checkout(repo.owner, repo.name);
+  api.warmChatSession(repo.owner, repo.name).catchError((_) {});
   await onReady();
 }

@@ -11,7 +11,7 @@ const ACP_CANDIDATES = [
 
 const WRITE_TOOL = /edit|write|delete|move|apply_patch|overwrite|commit/i;
 
-export const DEFAULT_ACP_MODEL = "composer-2.5";
+export const DEFAULT_ACP_MODEL = "composer-2.5-fast";
 
 export function acpModelId() {
   const raw = String(process.env.WENXIANG_CURSOR_MODEL || process.env.CURSOR_MODEL || DEFAULT_ACP_MODEL).trim();
@@ -399,19 +399,73 @@ export function createSessionStore({
       createdAt: now(),
       updatedAt: now(),
       turns: 0,
-      channel: null,
     };
     sessions.set(session.id, session);
     activeByRepo.set(repoKey(owner, repo), session.id);
     return publicView(session);
   }
 
+  const repoChannels = new Map();
+
+  function repoEntry(owner, repo, cwd) {
+    const key = repoKey(owner, repo);
+    const root = String(cwd || "").trim();
+    let entry = repoChannels.get(key);
+    if (!entry || (root && entry.cwd && entry.cwd !== root)) {
+      if (entry?.channel) entry.channel.close().catch(() => {});
+      entry = {
+        cwd: root,
+        channel: null,
+        warmPromise: null,
+        lock: Promise.resolve(),
+        promptingSessionId: null,
+      };
+      repoChannels.set(key, entry);
+    } else if (root && !entry.cwd) {
+      entry.cwd = root;
+    }
+    return entry;
+  }
+
+  async function withRepoLock(entry, fn) {
+    const prev = entry.lock;
+    let release;
+    entry.lock = new Promise((resolve) => {
+      release = resolve;
+    });
+    await prev;
+    try {
+      return await fn();
+    } finally {
+      release();
+    }
+  }
+
+  async function warmRepo(owner, repo, cwd) {
+    const command = resolveCommand();
+    const root = String(cwd || "").trim();
+    if (!command || !root) return { warmed: false };
+    const entry = repoEntry(owner, repo, root);
+    if (entry.channel?.alive) return { warmed: true, reused: true };
+    if (entry.warmPromise) {
+      await entry.warmPromise;
+      return { warmed: Boolean(entry.channel?.alive), reused: true };
+    }
+    entry.warmPromise = (async () => {
+      try {
+        if (entry.channel) await entry.channel.close().catch(() => {});
+        entry.channel = new AcpChannel({ command, cwd: root, spawnImpl, idleMs });
+        await entry.channel.start();
+      } finally {
+        entry.warmPromise = null;
+      }
+    })();
+    await entry.warmPromise;
+    return { warmed: true, reused: false };
+  }
+
   async function close(owner, repo, id) {
     const session = requireSession(owner, repo, id);
-    if (session.channel) {
-      await session.channel.close();
-      session.channel = null;
-    }
     sessions.delete(id);
     if (activeByRepo.get(repoKey(owner, repo)) === id) {
       const next = [...sessions.values()]
@@ -442,20 +496,36 @@ export function createSessionStore({
       err.code = "acp_missing";
       throw err;
     }
-    let seedHistory = session.turns === 0 && (history || []).length > 0;
-    if (!session.channel?.alive) {
-      if (session.channel) await session.channel.close().catch(() => {});
-      session.channel = new AcpChannel({ command, cwd, spawnImpl, idleMs });
-      await session.channel.start();
-      seedHistory = (history || []).length > 0;
+    const root = String(cwd || "").trim();
+    if (!root) {
+      const err = new Error("checkout cwd is required for ACP");
+      err.code = "checkout_missing";
+      throw err;
     }
+    await warmRepo(session.owner, session.repo, root);
+    const entry = repoEntry(session.owner, session.repo, root);
+    const channel = entry.channel;
+    if (!channel?.alive) {
+      const err = new Error("ACP channel failed to start");
+      err.code = "acp_dead";
+      throw err;
+    }
+    const seedHistory =
+      session.turns === 0 && (history || []).filter((m) => m?.content).length > 0;
     const text = buildAcpPrompt({
       question,
       history,
       githubContext,
       seedHistory,
     });
-    await session.channel.prompt(text, { onDelta });
+    await withRepoLock(entry, async () => {
+      entry.promptingSessionId = session.id;
+      try {
+        await channel.prompt(text, { onDelta });
+      } finally {
+        if (entry.promptingSessionId === session.id) entry.promptingSessionId = null;
+      }
+    });
     session.turns += 1;
     if (session.title === "新会话" && question) {
       session.title = String(question).replace(/\s+/g, " ").slice(0, 32);
@@ -465,8 +535,16 @@ export function createSessionStore({
   }
 
   async function cancel(session) {
-    if (session?.channel) await session.channel.cancel();
+    if (!session) return;
+    const entry = repoChannels.get(repoKey(session.owner, session.repo));
+    if (entry?.promptingSessionId === session.id && entry.channel) {
+      await entry.channel.cancel();
+    }
   }
 
-  return { list, create, close, resolveForChat, prompt, cancel, publicView };
+  async function warm(session, cwd) {
+    return warmRepo(session.owner, session.repo, cwd);
+  }
+
+  return { list, create, close, resolveForChat, prompt, cancel, warm, warmRepo, publicView };
 }

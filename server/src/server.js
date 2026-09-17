@@ -6,6 +6,7 @@ import { createSessionStore, detectCursorEngine } from "./acp.js";
 import { streamAnswer } from "./ask.js";
 import { openSse, writeSse } from "./sse.js";
 import {
+  emptyRepoProgress,
   formatProgressContext,
   listRepos,
   pollDeviceFlow,
@@ -30,9 +31,11 @@ import {
   checkoutPath,
   detectDefaultBranch,
   ensureCheckout,
+  formatAcpContext,
   formatLocalContext,
   getCheckoutSyncStatus,
   isCheckoutPresent,
+  snapshotCheckoutLite,
 } from "./workspace.js";
 
 loadLocalEnv();
@@ -291,17 +294,27 @@ async function resolveDefaultBranch(owner, repo) {
   return progress.repo.defaultBranch || "main";
 }
 
-async function checkoutRepo(owner, repo, signal) {
+async function checkoutRepo(owner, repo, signal, { fast = false } = {}) {
   const present = isCheckoutPresent(store.config.workspaceRoot, owner, repo);
+  const dest = checkoutPath(store.config.workspaceRoot, owner, repo);
   let progress = null;
+  let progressTask = null;
+
   if (githubToken()) {
-    progress = await repoProgress(githubToken(), owner, repo);
+    if (fast && present) {
+      const branchHint = await detectDefaultBranch(dest).catch(() => "main");
+      progress = emptyRepoProgress(owner, repo, branchHint);
+      progressTask = repoProgress(githubToken(), owner, repo).catch(() => null);
+    } else {
+      progress = await repoProgress(githubToken(), owner, repo);
+    }
   } else if (!present) {
     const err = new Error("尚未登录 GitHub，无法首次克隆。请先在浏览器里登录。");
     err.status = 401;
     err.code = "github_required";
     throw err;
   }
+
   const defaultBranch =
     progress?.repo?.defaultBranch || (present ? await resolveDefaultBranch(owner, repo) : "main");
   const result = await ensureCheckout({
@@ -310,8 +323,20 @@ async function checkoutRepo(owner, repo, signal) {
     repo,
     token: githubToken(),
     defaultBranch,
+    fetchRemote: !(fast && present),
     signal,
   });
+
+  if (!progress) {
+    progress = emptyRepoProgress(owner, repo, defaultBranch);
+  }
+  if (progressTask) {
+    progressTask
+      .then((full) => {
+        if (full) Object.assign(progress, full);
+      })
+      .catch(() => {});
+  }
   return { progress, ...result };
 }
 
@@ -350,6 +375,9 @@ app.post("/v1/repos/:owner/:repo/checkout", async (req, res) => {
       repo,
       requestSignal(req, res),
     );
+    if (detectCursorEngine()) {
+      sessions.warmRepo(owner, repo, dest).catch(() => {});
+    }
     res.json({
       path: dest,
       existed,
@@ -380,7 +408,28 @@ app.get("/v1/repos/:owner/:repo/sessions", requireGithub, (req, res) => {
 
 app.post("/v1/repos/:owner/:repo/sessions", requireGithub, (req, res) => {
   try {
-    res.status(201).json(sessions.create(req.params.owner, req.params.repo));
+    const { owner, repo } = req.params;
+    const view = sessions.create(owner, repo);
+    const dest = checkoutPath(store.config.workspaceRoot, owner, repo);
+    if (isCheckoutPresent(store.config.workspaceRoot, owner, repo)) {
+      sessions.warmRepo(owner, repo, dest).catch(() => {});
+    }
+    res.status(201).json(view);
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.post("/v1/repos/:owner/:repo/sessions/warm", requireGithub, async (req, res) => {
+  try {
+    const { owner, repo } = req.params;
+    const dest = checkoutPath(store.config.workspaceRoot, owner, repo);
+    if (!isCheckoutPresent(store.config.workspaceRoot, owner, repo)) {
+      res.json({ warmed: false, reason: "checkout_missing" });
+      return;
+    }
+    const out = await sessions.warmRepo(owner, repo, dest);
+    res.json(out);
   } catch (err) {
     sendError(res, err);
   }
@@ -412,13 +461,54 @@ app.post("/v1/chat", requireGithub, async (req, res) => {
     });
     openSse(res);
     writeSse(res, { type: "meta", sessionId: session.id });
-    const { progress, dest, local } = await checkoutRepo(owner, repo, signal);
+    if (detectCursorEngine()) {
+      writeSse(res, { type: "start", engine: "acp" });
+    }
+    const destGuess = checkoutPath(store.config.workspaceRoot, owner, repo);
+    const present = isCheckoutPresent(store.config.workspaceRoot, owner, repo);
+    const warmPromise =
+      present && detectCursorEngine()
+        ? sessions.warmRepo(owner, repo, destGuess).catch(() => {})
+        : Promise.resolve();
+    let progress;
+    let dest;
+    let local;
+    if (present) {
+      const snapPromise = snapshotCheckoutLite(destGuess);
+      const [, localSnap] = await Promise.all([warmPromise, snapPromise]);
+      if (localSnap?.present) {
+        dest = destGuess;
+        local = localSnap;
+        progress = emptyRepoProgress(owner, repo, local.branch || "main");
+        if (githubToken()) {
+          repoProgress(githubToken(), owner, repo)
+            .then((full) => {
+              if (full) Object.assign(progress, full);
+            })
+            .catch(() => {});
+        }
+      } else {
+        ({ progress, dest, local } = await checkoutRepo(owner, repo, signal, { fast: true }));
+        if (detectCursorEngine()) {
+          await sessions.warmRepo(owner, repo, dest).catch(() => {});
+        }
+      }
+    } else {
+      ({ progress, dest, local } = await Promise.all([
+        checkoutRepo(owner, repo, signal, { fast: true }),
+        warmPromise,
+      ]).then(([checkout]) => checkout));
+      if (detectCursorEngine()) {
+        await sessions.warmRepo(owner, repo, dest).catch(() => {});
+      }
+    }
     if (signal.aborted) {
       res.end();
       return;
     }
-    const githubContext = formatProgressContext(progress);
-    const context = `${githubContext}\n\n${formatLocalContext(local)}`;
+    const localContext = formatLocalContext(local);
+    const githubContext = formatAcpContext(local, progress);
+    const context = `${formatProgressContext(progress)}\n\n${localContext}`;
     writeSse(res, {
       type: "meta",
       repo: progress.repo.fullName,
@@ -531,7 +621,7 @@ const httpServer = app.listen(PORT, BIND, () => {
 
 attachVoiceGateway(httpServer, {
   getApiKey: () => store.config.apiKey,
-  checkoutRepo,
+  checkoutRepo: (owner, repo, signal) => checkoutRepo(owner, repo, signal, { fast: true }),
   sessions,
 });
 attachSttGateway(httpServer, {

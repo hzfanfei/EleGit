@@ -84,7 +84,7 @@ describe("streamText", () => {
 });
 
 describe("streamAnswer", () => {
-  it("rechunks a large ACP delta before done so tokens appear progressively", async () => {
+  it("forwards ACP chunks as-is without rechunking", async () => {
     const events = [];
     for await (const event of streamAnswer({
       question: "进度如何",
@@ -92,17 +92,17 @@ describe("streamAnswer", () => {
       context: "Repository: acme/widget",
       session: { id: "s1" },
       detectEngine: () => ({ id: "acp" }),
-      streamOpts: { chunkSize: 2, delayMs: 0 },
       sessions: {
         prompt: async (_session, { onDelta }) => {
-          onDelta("最近提交已经合进主干。");
+          onDelta("最近提交");
+          onDelta("已经合进主干。");
         },
       },
     })) {
       events.push(event);
     }
     const deltas = events.filter((event) => event.type === "delta");
-    assert.ok(deltas.length >= 4);
+    assert.equal(deltas.length, 2);
     assert.equal(deltas.map((event) => event.text).join(""), "最近提交已经合进主干。");
     assert.equal(events[0].type, "start");
     assert.equal(events.at(-1).type, "done");

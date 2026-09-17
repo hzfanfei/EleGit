@@ -16,14 +16,14 @@ import { whichSync } from "../src/which.js";
 const fakeAcp = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures", "fake-acp.js");
 
 describe("acpModelId", () => {
-  it("defaults to composer-2.5", () => {
+  it("defaults to composer-2.5-fast", () => {
     const prev = process.env.WENXIANG_CURSOR_MODEL;
     const prev2 = process.env.CURSOR_MODEL;
     delete process.env.WENXIANG_CURSOR_MODEL;
     delete process.env.CURSOR_MODEL;
     try {
-      assert.equal(acpModelId(), "composer-2.5");
-      assert.equal(DEFAULT_ACP_MODEL, "composer-2.5");
+      assert.equal(acpModelId(), "composer-2.5-fast");
+      assert.equal(DEFAULT_ACP_MODEL, "composer-2.5-fast");
     } finally {
       if (prev !== undefined) process.env.WENXIANG_CURSOR_MODEL = prev;
       if (prev2 !== undefined) process.env.CURSOR_MODEL = prev2;
@@ -111,6 +111,44 @@ describe("session store", () => {
     assert.equal(closed.closed, true);
     assert.throws(() => store.resolveForChat("hzfanfei", "fwechat", first.id), /Session not found/);
     assert.equal(store.resolveForChat("hzfanfei", "fwechat", second.id).id, second.id);
+  });
+
+  it("warms a shared repo ACP channel across sessions", async () => {
+    const store = createSessionStore({
+      resolveCommand: () => ({
+        id: "acp",
+        path: process.execPath,
+        args: [fakeAcp],
+        mode: "ask",
+        transport: "stdio",
+      }),
+      spawnImpl: spawn,
+    });
+    const cwd = process.cwd();
+    const first = await store.warmRepo("hzfanfei", "fwechat", cwd);
+    assert.equal(first.warmed, true);
+    assert.equal(first.reused, false);
+    const second = await store.warmRepo("hzfanfei", "fwechat", cwd);
+    assert.equal(second.warmed, true);
+    assert.equal(second.reused, true);
+    const session = store.resolveForChat("hzfanfei", "fwechat", "");
+    await store.prompt(session, {
+      question: "hello",
+      history: [],
+      githubContext: "",
+      cwd,
+      onDelta: () => {},
+    });
+    const other = store.create("hzfanfei", "fwechat");
+    await store.prompt(store.resolveForChat("hzfanfei", "fwechat", other.id), {
+      question: "again",
+      history: [],
+      githubContext: "",
+      cwd,
+      onDelta: () => {},
+    });
+    await store.close("hzfanfei", "fwechat", session.id);
+    await store.close("hzfanfei", "fwechat", other.id);
   });
 });
 

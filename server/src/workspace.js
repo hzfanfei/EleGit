@@ -298,6 +298,7 @@ export async function ensureCheckout({
   token,
   cloneUrl,
   defaultBranch = "main",
+  fetchRemote = true,
   signal,
 }) {
   const dest = checkoutPath(workspaceRoot, owner, repo);
@@ -326,7 +327,7 @@ export async function ensureCheckout({
       repo,
       defaultBranch,
       token: syncToken,
-      fetchRemote: true,
+      fetchRemote,
       signal,
     });
     if (sync.syncState === "auth_required") {
@@ -386,6 +387,17 @@ async function listTree(root, { maxEntries = 80 } = {}) {
   return out;
 }
 
+export async function snapshotCheckoutLite(dest) {
+  if (!existsSync(path.join(dest, ".git"))) {
+    return { path: dest, present: false };
+  }
+  const [branch, head] = await Promise.all([
+    runGit(["rev-parse", "--abbrev-ref", "HEAD"], { cwd: dest }).catch(() => ""),
+    runGit(["rev-parse", "--short", "HEAD"], { cwd: dest }).catch(() => ""),
+  ]);
+  return { present: true, path: dest, branch, head };
+}
+
 export async function snapshotCheckout(dest) {
   if (!existsSync(path.join(dest, ".git"))) {
     return { path: dest, present: false };
@@ -418,6 +430,22 @@ export async function snapshotCheckout(dest) {
     files,
     readme,
   };
+}
+
+/** Minimal facts for ACP ask mode — the agent reads the tree itself. */
+export function formatAcpContext(local, progress) {
+  const lines = [];
+  if (local?.present) {
+    lines.push(
+      `Local checkout: ${local.path}`,
+      `Branch: ${local.branch || "unknown"} @ ${local.head || "unknown"}`,
+    );
+  }
+  const fullName = progress?.repo?.fullName;
+  if (fullName) {
+    lines.push(`GitHub: ${fullName} (default ${progress.repo.defaultBranch || "main"})`);
+  }
+  return lines.join("\n");
 }
 
 export function formatLocalContext(local) {

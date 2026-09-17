@@ -61,6 +61,13 @@ class FakeWenxiangApi extends WenxiangApi {
   Future<void> ping() async {}
 
   @override
+  Future<void> warmChatSession(
+    String owner,
+    String repo, {
+    String? sessionId,
+  }) async {}
+
+  @override
   Future<ServerStatus> status() async {
     return ServerStatus(
       githubConnected: githubConnected,

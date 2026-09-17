@@ -265,6 +265,26 @@ class WenxiangApi {
     await _json(res, fallback: '关闭会话失败');
   }
 
+  /// Pre-start Cursor ACP for this repo so the first chat token arrives sooner.
+  Future<void> warmChatSession(
+    String owner,
+    String repo, {
+    String? sessionId,
+  }) async {
+    final res = await http
+        .post(
+          _uri('/v1/repos/$owner/$repo/sessions/warm'),
+          headers: _headers,
+          body: jsonEncode({
+            if (sessionId != null && sessionId.isNotEmpty) 'sessionId': sessionId,
+          }),
+        )
+        .timeout(const Duration(seconds: 45));
+    if (res.statusCode >= 400) {
+      await _json(res, fallback: '预热失败');
+    }
+  }
+
   Stream<ChatStreamEvent> chatStream({
     required String owner,
     required String repo,

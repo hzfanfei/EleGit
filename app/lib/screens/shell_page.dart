@@ -139,6 +139,7 @@ class ShellPageState extends State<ShellPage> {
 
   void _openRepo(RepoItem repo, {required AppStep from}) {
     _memory?.saveLastRepo(repo);
+    _api.warmChatSession(repo.owner, repo.name).catchError((_) {});
     setState(() {
       _lastRepo = repo;
       _recent = _memory?.recentRepos() ?? _recent;

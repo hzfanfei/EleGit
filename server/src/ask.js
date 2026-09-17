@@ -4,6 +4,17 @@ export { detectCursorEngine } from "./acp.js";
 export { whichSync } from "./which.js";
 export { buildAcpPrompt } from "./acp.js";
 
+export function streamOptsFromEnv() {
+  const rawSize = String(process.env.WENXIANG_STREAM_CHUNK_SIZE ?? "0").trim();
+  const rawDelay = String(process.env.WENXIANG_STREAM_DELAY_MS ?? "0").trim();
+  const chunkSize = Number.parseInt(rawSize, 10);
+  const delayMs = Number.parseInt(rawDelay, 10);
+  return {
+    chunkSize: Number.isFinite(chunkSize) && chunkSize > 0 ? chunkSize : 0,
+    delayMs: Number.isFinite(delayMs) && delayMs >= 0 ? delayMs : 0,
+  };
+}
+
 export async function* streamText(text, { chunkSize = 2, delayMs = 8, signal } = {}) {
   const chars = [...String(text || "")];
   if (chars.length <= chunkSize) {
@@ -129,7 +140,7 @@ export async function* streamAnswer({
   sessions,
   githubContext,
   detectEngine = detectCursorEngine,
-  streamOpts = { chunkSize: 2, delayMs: 8 },
+  streamOpts = streamOptsFromEnv(),
   signal,
 }) {
   const opts = { ...streamOpts, signal };
@@ -174,7 +185,8 @@ export async function* streamAnswer({
         notify = undefined;
         continue;
       }
-      yield* prefixDeltas(queue.shift(), opts);
+      const piece = queue.shift();
+      if (piece) yield { type: "delta", text: piece };
     }
     if (!fail && full) {
       yield { type: "done", engine: "acp", answer: full, sessionId: session.id };
@@ -195,7 +207,13 @@ export async function* streamAnswer({
 }
 
 async function* prefixDeltas(text, streamOpts) {
-  for await (const piece of streamText(text, streamOpts)) {
+  const chunkSize = streamOpts?.chunkSize ?? 0;
+  if (!chunkSize || chunkSize <= 0) {
+    const whole = String(text || "");
+    if (whole && !streamOpts?.signal?.aborted) yield { type: "delta", text: whole };
+    return;
+  }
+  for await (const piece of streamText(text, { ...streamOpts, chunkSize })) {
     yield { type: "delta", text: piece };
   }
 }
