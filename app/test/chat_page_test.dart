@@ -69,12 +69,12 @@ void main() {
     await tester.pump();
 
     expect(find.textContaining('void main'), findsNothing);
-    expect(find.textContaining('正在写'), findsOneWidget);
+    expect(find.textContaining('连接 Agent'), findsOneWidget);
     expect(find.text('你问'), findsOneWidget);
     expect(find.text('问象'), findsWidgets);
 
     await tester.pump(const Duration(milliseconds: 45));
-    expect(find.textContaining('正在写'), findsOneWidget);
+    expect(find.textContaining('连接 Agent'), findsOneWidget);
     expect(find.text('最近'), findsNothing);
 
     await tester.pump(const Duration(milliseconds: 45));
@@ -235,7 +235,8 @@ void main() {
     await tester.pump();
 
     expect(find.byTooltip('发送'), findsOneWidget);
-    expect(find.textContaining('正在写'), findsNothing);
+    expect(find.textContaining('连接 Agent'), findsNothing);
+    expect(find.textContaining('生成回答'), findsNothing);
     expect(find.textContaining('Exception'), findsNothing);
   });
 

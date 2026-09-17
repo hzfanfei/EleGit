@@ -55,6 +55,8 @@ class _ChatPageState extends State<ChatPage> {
   final List<ChatSession> _sessions = [];
   final ValueNotifier<String> _liveText = ValueNotifier('');
   final ValueNotifier<String?> _liveEngine = ValueNotifier(null);
+  final ValueNotifier<String> _livePhase = ValueNotifier('connect');
+  Timer? _livePhaseTimer;
   String? _sessionId;
   bool _live = false;
   bool _busy = false;
@@ -367,6 +369,57 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
+  void _setLivePhase(String phase) {
+    if (phase.isEmpty || _livePhase.value == phase) return;
+    _livePhase.value = phase;
+  }
+
+  void _startLivePhaseFallback() {
+    _livePhaseTimer?.cancel();
+    final sentAt = DateTime.now();
+    _livePhaseTimer = Timer.periodic(const Duration(milliseconds: 900), (timer) {
+      if (!mounted || !_live || _liveText.value.isNotEmpty) {
+        timer.cancel();
+        return;
+      }
+      final seconds = DateTime.now().difference(sentAt).inSeconds;
+      if (seconds >= 4) {
+        _setLivePhase('generate');
+      } else if (seconds >= 1.5 && _livePhase.value == 'connect') {
+        _setLivePhase('repo');
+      }
+    });
+  }
+
+  void _stopLivePhaseFallback() {
+    _livePhaseTimer?.cancel();
+    _livePhaseTimer = null;
+  }
+
+  Future<void> _refreshCurrentSessionMeta() async {
+    final id = _sessionId;
+    if (id == null || id.isEmpty) return;
+    try {
+      final list = await widget.api.listSessions(widget.repo.owner, widget.repo.name);
+      if (!mounted) return;
+      ChatSession? remote;
+      for (final session in list) {
+        if (session.id == id) {
+          remote = session;
+          break;
+        }
+      }
+      if (remote == null) return;
+      setState(() {
+        final index = _sessions.indexWhere((item) => item.id == id);
+        if (index >= 0) {
+          _sessions[index] = remote!;
+        }
+      });
+      await _persist();
+    } catch (_) {}
+  }
+
   Future<void> _loadSessions() async {
     try {
       var list = await widget.api.listSessions(widget.repo.owner, widget.repo.name);
@@ -426,6 +479,7 @@ class _ChatPageState extends State<ChatPage> {
       });
       _liveText.value = '';
       _liveEngine.value = null;
+      _livePhase.value = 'connect';
       await _persist();
     } catch (err) {
       if (!mounted) return;
@@ -444,6 +498,7 @@ class _ChatPageState extends State<ChatPage> {
     });
     _liveText.value = '';
     _liveEngine.value = null;
+    _livePhase.value = 'connect';
     _persist();
   }
 
@@ -540,6 +595,8 @@ class _ChatPageState extends State<ChatPage> {
     HapticFeedback.selectionClick();
     _liveText.value = '';
     _liveEngine.value = null;
+    _livePhase.value = 'connect';
+    _startLivePhaseFallback();
     setState(() {
       _messages.add(ChatMessage(role: 'user', content: text));
       _live = true;
@@ -548,6 +605,7 @@ class _ChatPageState extends State<ChatPage> {
     _jumpToLatest(force: true);
 
     final history = _messages.where((m) => m.role != 'error').toList();
+    var firstDelta = true;
 
     try {
       await for (final event in widget.api.chatStream(
@@ -561,11 +619,18 @@ class _ChatPageState extends State<ChatPage> {
         if (event.sessionId != null && event.sessionId!.isNotEmpty) {
           _rememberSessionId(event.sessionId);
         }
-        if (event.type == 'delta' && event.text.isNotEmpty) {
+        if (event.type == 'status' && event.phase != null && event.phase!.isNotEmpty) {
+          _setLivePhase(event.phase!);
+        } else if (event.type == 'delta' && event.text.isNotEmpty) {
+          if (firstDelta) {
+            firstDelta = false;
+            HapticFeedback.lightImpact();
+          }
           _liveText.value += event.text;
           _jumpToLatest();
         } else if (event.type == 'start' && event.engine != null) {
           _liveEngine.value = event.engine;
+          _setLivePhase('repo');
         } else if (event.type == 'done') {
           _liveEngine.value = event.engine ?? _liveEngine.value;
           if (event.text.isNotEmpty && _liveText.value.isEmpty) {
@@ -585,6 +650,7 @@ class _ChatPageState extends State<ChatPage> {
         _live = false;
       });
       await _persist();
+      unawaited(_refreshCurrentSessionMeta());
     } on OperationCancelled {
       if (!mounted) return;
       setState(() {
@@ -616,6 +682,7 @@ class _ChatPageState extends State<ChatPage> {
       });
       await _persist();
     } finally {
+      _stopLivePhaseFallback();
       if (mounted) {
         setState(() {
           _busy = false;
@@ -664,7 +731,23 @@ class _ChatPageState extends State<ChatPage> {
                       ),
                     ),
                   ),
-                  Text('历史会话', style: Theme.of(context).textTheme.titleMedium),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text('历史会话', style: Theme.of(context).textTheme.titleMedium),
+                      ),
+                      TextButton.icon(
+                        onPressed: _busy
+                            ? null
+                            : () async {
+                                Navigator.pop(context);
+                                await _newSession();
+                              },
+                        icon: const Icon(Icons.add_comment_outlined, size: 18),
+                        label: const Text('新建'),
+                      ),
+                    ],
+                  ),
                   const SizedBox(height: 12),
                   const WxHairline(),
                   const SizedBox(height: 8),
@@ -707,8 +790,10 @@ class _ChatPageState extends State<ChatPage> {
     _focus.dispose();
     _scroll.removeListener(_onScrollPosition);
     _scroll.dispose();
+    _stopLivePhaseFallback();
     _liveText.dispose();
     _liveEngine.dispose();
+    _livePhase.dispose();
     super.dispose();
   }
 
@@ -781,6 +866,7 @@ class _ChatPageState extends State<ChatPage> {
                       return _LiveTurn(
                         text: _liveText,
                         engine: _liveEngine,
+                        phase: _livePhase,
                       );
                     },
                         ),
@@ -1097,15 +1183,41 @@ class _FinishedTurn extends StatelessWidget {
               engineFootnote(message.engine),
               style: Theme.of(context).textTheme.labelSmall,
             ),
-      child: WxReadableText(message.content),
+      child: GestureDetector(
+        onLongPress: () async {
+          await Clipboard.setData(ClipboardData(text: message.content));
+          if (!context.mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('已复制回答')),
+          );
+        },
+        child: WxReadableText(message.content),
+      ),
     );
   }
 }
 
+String _livePhaseLabel(String phase) {
+  switch (phase) {
+    case 'repo':
+      return '读仓库、整理上下文…';
+    case 'generate':
+      return '生成回答…';
+    case 'connect':
+    default:
+      return '连接 Agent…';
+  }
+}
+
 class _LiveTurn extends StatelessWidget {
-  const _LiveTurn({required this.text, required this.engine});
+  const _LiveTurn({
+    required this.text,
+    required this.engine,
+    required this.phase,
+  });
   final ValueNotifier<String> text;
   final ValueNotifier<String?> engine;
+  final ValueNotifier<String> phase;
 
   @override
   Widget build(BuildContext context) {
@@ -1130,15 +1242,23 @@ class _LiveTurn extends StatelessWidget {
         valueListenable: text,
         builder: (context, value, _) {
           if (value.isEmpty) {
-            return const Row(
-              children: [
-                Text(
-                  '正在写…',
-                  style: TextStyle(color: Wx.muted, fontSize: 16, height: 1.55),
-                ),
-                SizedBox(width: 8),
-                _Caret(),
-              ],
+            return ValueListenableBuilder<String>(
+              valueListenable: phase,
+              builder: (context, livePhase, _) {
+                return Semantics(
+                  liveRegion: true,
+                  child: Row(
+                    children: [
+                      Text(
+                        _livePhaseLabel(livePhase),
+                        style: const TextStyle(color: Wx.muted, fontSize: 16, height: 1.55),
+                      ),
+                      const SizedBox(width: 8),
+                      const _Caret(),
+                    ],
+                  ),
+                );
+              },
             );
           }
           return Column(

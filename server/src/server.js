@@ -464,6 +464,7 @@ app.post("/v1/chat", requireGithub, async (req, res) => {
     if (detectCursorEngine()) {
       writeSse(res, { type: "start", engine: "acp" });
     }
+    writeSse(res, { type: "status", phase: "repo" });
     const destGuess = checkoutPath(store.config.workspaceRoot, owner, repo);
     const present = isCheckoutPresent(store.config.workspaceRoot, owner, repo);
     const warmPromise =
@@ -515,6 +516,7 @@ app.post("/v1/chat", requireGithub, async (req, res) => {
       checkout: dest,
       sessionId: session.id,
     });
+    writeSse(res, { type: "status", phase: "generate" });
     let finalEngine = "local-progress";
     let finalAnswer = "";
     for await (const event of streamAnswer({

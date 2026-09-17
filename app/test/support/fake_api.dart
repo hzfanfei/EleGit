@@ -195,7 +195,7 @@ class FakeWenxiangApi extends WenxiangApi {
       await Future<void>.delayed(streamDelay);
     }
     if (streamThrows != null) throw streamThrows!;
-    for (final event in streamEvents ??
+    final events = streamEvents ??
         [
           ChatStreamEvent(type: 'start', engine: 'local-progress'),
           ChatStreamEvent(
@@ -203,11 +203,28 @@ class FakeWenxiangApi extends WenxiangApi {
             text: message.contains('README') ? 'README 说先跑 flutter run。' : '最近在修登录。',
           ),
           ChatStreamEvent(type: 'done', engine: 'local-progress', sessionId: sessionId ?? 's1'),
-        ]) {
+        ];
+    for (final event in events) {
       if (streamPace > Duration.zero) {
         await Future<void>.delayed(streamPace);
       }
       yield event;
+      if (event.type == 'done') {
+        final id = event.sessionId ?? sessionId ?? (sessions.isEmpty ? null : sessions.first.id);
+        if (id == null) continue;
+        final index = sessions.indexWhere((s) => s.id == id);
+        if (index < 0) continue;
+        final prior = sessions[index];
+        if (prior.title != '新会话') continue;
+        final title = message.replaceAll(RegExp(r'\s+'), ' ');
+        sessions[index] = ChatSession(
+          id: prior.id,
+          title: title.length <= 32 ? title : title.substring(0, 32),
+          createdAt: prior.createdAt,
+          updatedAt: prior.updatedAt,
+          active: prior.active,
+        );
+      }
     }
   }
 }

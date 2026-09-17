@@ -176,6 +176,7 @@ class ChatStreamEvent {
     this.engine,
     this.error,
     this.sessionId,
+    this.phase,
   });
 
   final String type;
@@ -183,6 +184,7 @@ class ChatStreamEvent {
   final String? engine;
   final String? error;
   final String? sessionId;
+  final String? phase;
 
   static ChatStreamEvent? fromSse(String raw) {
     final lines = raw.split('\n');
@@ -200,6 +202,7 @@ class ChatStreamEvent {
         engine: json['engine']?.toString(),
         error: json['error']?.toString(),
         sessionId: json['sessionId']?.toString(),
+        phase: json['phase']?.toString(),
       );
     } catch (_) {
       return null;
