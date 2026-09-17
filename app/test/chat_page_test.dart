@@ -10,6 +10,15 @@ import 'package:wenxiang/voice/voice_stt_client.dart';
 
 import 'support/fake_api.dart';
 
+ScrollableState _chatScrollState(WidgetTester tester) {
+  return tester.state<ScrollableState>(
+    find.descendant(
+      of: find.byKey(const Key('wx-chat-list')),
+      matching: find.byType(Scrollable),
+    ).first,
+  );
+}
+
 void main() {
   testWidgets('empty chat is a short prompt, not a chip wall', (tester) async {
     await tester.pumpWidget(
@@ -304,5 +313,6 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('按住 说话'), findsOneWidget);
     expect(find.byKey(const Key('wx-hold-speak')), findsOneWidget);
+    expect(find.text('松手自动发送，上滑取消'), findsOneWidget);
   });
 }

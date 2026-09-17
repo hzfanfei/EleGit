@@ -16,6 +16,7 @@ import '../voice/voice_media.dart';
 import '../copy/voice_stt_copy.dart';
 import '../voice/voice_stt_client.dart';
 import '../widgets/wx_chrome.dart';
+import '../widgets/wx_hold_to_speak.dart';
 import '../widgets/wx_rich_text.dart';
 
 class ChatPage extends StatefulWidget {
@@ -73,6 +74,12 @@ class _ChatPageState extends State<ChatPage> {
   StreamSubscription<VoiceEvent>? _sttSub;
   StreamSubscription<Uint8List>? _micSub;
   double _holdStartY = 0;
+  bool _voiceHoldTipVisible = true;
+  bool _userScrolledAwayFromBottom = false;
+  bool _pendingNewBelow = false;
+  bool _autoFollowing = false;
+
+  static const _scrollBottomThreshold = 80.0;
 
   List<ChatMessage> get _messages =>
       _transcripts.putIfAbsent(_sessionId ?? '', () => <ChatMessage>[]);
@@ -91,6 +98,53 @@ class _ChatPageState extends State<ChatPage> {
     _restoreLocal();
     _loadSessions();
     _loadVoice();
+    _voiceHoldTipVisible = !(widget.memory?.voiceHoldTipDismissed() ?? false);
+    _scroll.addListener(_onScrollPosition);
+  }
+
+  void _onScrollPosition() {
+    if (!_scroll.hasClients || !mounted || _autoFollowing) return;
+    if (_nearBottom && (_userScrolledAwayFromBottom || _pendingNewBelow)) {
+      setState(() {
+        _userScrolledAwayFromBottom = false;
+        _pendingNewBelow = false;
+      });
+    }
+  }
+
+  bool _onChatScrollNotification(ScrollNotification notification) {
+    if (_autoFollowing) return false;
+    if (notification is ScrollUpdateNotification && notification.dragDetails != null) {
+      if (!_nearBottom && !_userScrolledAwayFromBottom) {
+        setState(() => _userScrolledAwayFromBottom = true);
+      }
+    }
+    return false;
+  }
+
+  void _jumpToLatest({bool force = false}) {
+    if (force) {
+      _userScrolledAwayFromBottom = false;
+      _pendingNewBelow = false;
+    } else if (_userScrolledAwayFromBottom || !_nearBottom) {
+      if (_live || _busy) {
+        if (!_pendingNewBelow) setState(() => _pendingNewBelow = true);
+      }
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!_scroll.hasClients || !mounted) return;
+      _autoFollowing = true;
+      try {
+        await _scroll.animateTo(
+          _scroll.position.maxScrollExtent + _scrollBottomThreshold,
+          duration: const Duration(milliseconds: 140),
+          curve: Curves.easeOutCubic,
+        );
+      } finally {
+        _autoFollowing = false;
+      }
+    });
   }
 
   Future<void> _loadVoice() async {
@@ -236,6 +290,7 @@ class _ChatPageState extends State<ChatPage> {
         _holdHint = '';
       });
       if (text.isNotEmpty) {
+        unawaited(_dismissVoiceHoldTip());
         unawaited(_send(text));
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -264,6 +319,12 @@ class _ChatPageState extends State<ChatPage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
     );
+  }
+
+  Future<void> _dismissVoiceHoldTip() async {
+    if (!_voiceHoldTipVisible) return;
+    setState(() => _voiceHoldTipVisible = false);
+    await widget.memory?.dismissVoiceHoldTip();
   }
 
   void _disposeStt() {
@@ -470,7 +531,7 @@ class _ChatPageState extends State<ChatPage> {
       _live = true;
       _busy = true;
     });
-    _jump(force: true);
+    _jumpToLatest(force: true);
 
     final history = _messages.where((m) => m.role != 'error').toList();
 
@@ -488,7 +549,7 @@ class _ChatPageState extends State<ChatPage> {
         }
         if (event.type == 'delta' && event.text.isNotEmpty) {
           _liveText.value += event.text;
-          _jump();
+          _jumpToLatest();
         } else if (event.type == 'start' && event.engine != null) {
           _liveEngine.value = event.engine;
         } else if (event.type == 'done') {
@@ -547,7 +608,7 @@ class _ChatPageState extends State<ChatPage> {
           _live = false;
         });
       }
-      _jump();
+      _jumpToLatest();
     }
   }
 
@@ -559,19 +620,7 @@ class _ChatPageState extends State<ChatPage> {
   bool get _nearBottom {
     if (!_scroll.hasClients) return true;
     final pos = _scroll.position;
-    return pos.pixels >= pos.maxScrollExtent - 96;
-  }
-
-  void _jump({bool force = false}) {
-    if (!force && !_nearBottom) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scroll.hasClients) return;
-      _scroll.animateTo(
-        _scroll.position.maxScrollExtent + 80,
-        duration: const Duration(milliseconds: 140),
-        curve: Curves.easeOutCubic,
-      );
-    });
+    return pos.pixels >= pos.maxScrollExtent - _scrollBottomThreshold;
   }
 
   Future<void> _openSessions() async {
@@ -642,6 +691,7 @@ class _ChatPageState extends State<ChatPage> {
     _media?.dispose();
     _input.dispose();
     _focus.dispose();
+    _scroll.removeListener(_onScrollPosition);
     _scroll.dispose();
     _liveText.dispose();
     _liveEngine.dispose();
@@ -681,15 +731,21 @@ class _ChatPageState extends State<ChatPage> {
           ),
           const WxHairline(),
           Expanded(
-            child: itemCount == 0
-                ? _EmptyChat(
-                    onPick: _busy ? null : _send,
-                  )
-                : ListView.builder(
-                    controller: _scroll,
-                    padding: const EdgeInsets.fromLTRB(Wx.inset, 20, Wx.inset, 16),
-                    itemCount: itemCount,
-                    itemBuilder: (context, index) {
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                itemCount == 0
+                    ? _EmptyChat(
+                        onPick: _busy ? null : _send,
+                      )
+                    : NotificationListener<ScrollNotification>(
+                        onNotification: _onChatScrollNotification,
+                        child: ListView.builder(
+                          key: const Key('wx-chat-list'),
+                          controller: _scroll,
+                          padding: const EdgeInsets.fromLTRB(Wx.inset, 20, Wx.inset, 16),
+                          itemCount: itemCount,
+                          itemBuilder: (context, index) {
                       if (index < _messages.length) {
                         final message = _messages[index];
                         return _FinishedTurn(
@@ -711,7 +767,19 @@ class _ChatPageState extends State<ChatPage> {
                         engine: _liveEngine,
                       );
                     },
+                        ),
+                      ),
+                if (_pendingNewBelow && itemCount > 0)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 10,
+                    child: Center(
+                      child: _NewMessagesPill(onTap: () => _jumpToLatest(force: true)),
+                    ),
                   ),
+              ],
+            ),
           ),
           const WxHairline(),
           _Composer(
@@ -725,6 +793,7 @@ class _ChatPageState extends State<ChatPage> {
             sttBusy: _sttBusy,
             holdLive: _holdLive,
             holdHint: _holdHint,
+            voiceHoldTipVisible: _voiceHoldTipVisible,
             onToggleVoiceInput: _toggleVoiceInput,
             onHoldStart: _beginHold,
             onHoldMove: _moveHold,
@@ -1179,6 +1248,7 @@ class _Composer extends StatelessWidget {
     required this.sttBusy,
     required this.holdLive,
     required this.holdHint,
+    required this.voiceHoldTipVisible,
     required this.onToggleVoiceInput,
     required this.onHoldStart,
     required this.onHoldMove,
@@ -1197,6 +1267,7 @@ class _Composer extends StatelessWidget {
   final bool sttBusy;
   final String holdLive;
   final String holdHint;
+  final bool voiceHoldTipVisible;
   final VoidCallback onToggleVoiceInput;
   final Future<void> Function(double globalY) onHoldStart;
   final void Function(double globalY) onHoldMove;
@@ -1219,15 +1290,10 @@ class _Composer extends StatelessWidget {
             children: [
               if ((holding || sttBusy) && holdLive.isNotEmpty)
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Text(
-                    holdLive,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: sttBusy ? Wx.text : Wx.muted,
-                          fontStyle: sttBusy ? FontStyle.normal : FontStyle.italic,
-                        ),
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: WxHoldLiveChip(
+                    text: holdLive,
+                    recognizing: sttBusy,
                   ),
                 ),
               Row(
@@ -1248,7 +1314,7 @@ class _Composer extends StatelessWidget {
                   ),
                   Expanded(
                     child: voiceInputMode
-                        ? _HoldToSpeakPad(
+                        ? WxHoldToSpeakPad(
                             enabled: voiceReady && !voiceLocked,
                             holding: holding,
                             holdCancel: holdCancel,
@@ -1298,6 +1364,23 @@ class _Composer extends StatelessWidget {
                   ),
                 ],
               ),
+              if (voiceInputMode &&
+                  voiceReady &&
+                  voiceHoldTipVisible &&
+                  !holding &&
+                  !sttBusy &&
+                  !busy &&
+                  holdHint.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    '松手自动发送，上滑取消',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: Wx.faint,
+                        ),
+                  ),
+                ),
             ],
           ),
         ),
@@ -1306,104 +1389,42 @@ class _Composer extends StatelessWidget {
   }
 }
 
-class _HoldToSpeakPad extends StatefulWidget {
-  const _HoldToSpeakPad({
-    required this.enabled,
-    required this.holding,
-    required this.holdCancel,
-    required this.sttBusy,
-    required this.hint,
-    required this.onHoldStart,
-    required this.onHoldMove,
-    required this.onHoldEnd,
-  });
+class _NewMessagesPill extends StatelessWidget {
+  const _NewMessagesPill({required this.onTap});
 
-  final bool enabled;
-  final bool holding;
-  final bool holdCancel;
-  final bool sttBusy;
-  final String hint;
-  final Future<void> Function(double globalY) onHoldStart;
-  final void Function(double globalY) onHoldMove;
-  final Future<void> Function() onHoldEnd;
-
-  @override
-  State<_HoldToSpeakPad> createState() => _HoldToSpeakPadState();
-}
-
-class _HoldToSpeakPadState extends State<_HoldToSpeakPad> {
-  bool _pointerActive = false;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final enabled = widget.enabled;
-    final holding = widget.holding;
-    final bg = !enabled
-        ? Wx.surface
-        : holding
-            ? (widget.holdCancel ? Wx.raised : Wx.accent.withValues(alpha: 0.14))
-            : Wx.surface;
-    return Listener(
-      key: const Key('wx-hold-speak'),
-      behavior: HitTestBehavior.opaque,
-      onPointerDown: enabled && !widget.sttBusy
-          ? (event) {
-              _pointerActive = true;
-              widget.onHoldStart(event.position.dy);
-            }
-          : null,
-      onPointerMove: enabled && _pointerActive
-          ? (event) {
-              widget.onHoldMove(event.position.dy);
-            }
-          : null,
-      onPointerUp: enabled && _pointerActive
-          ? (_) {
-              _pointerActive = false;
-              widget.onHoldEnd();
-            }
-          : null,
-      onPointerCancel: enabled && _pointerActive
-          ? (_) {
-              _pointerActive = false;
-              widget.onHoldEnd();
-            }
-          : null,
-      child: Container(
-        constraints: const BoxConstraints(minHeight: 48),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Wx.hairline),
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (widget.sttBusy) ...[
-              SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: enabled ? Wx.accent : Wx.faint,
-                ),
-              ),
-              const SizedBox(width: 10),
-            ],
-            Flexible(
-              child: Text(
-                widget.hint,
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      color: enabled ? Wx.text : Wx.faint,
-                      fontWeight: holding || widget.sttBusy ? FontWeight.w600 : FontWeight.w400,
+    return Material(
+      color: Wx.raised,
+      elevation: 0,
+      shadowColor: Colors.transparent,
+      borderRadius: BorderRadius.circular(20),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
+          key: const Key('wx-new-messages-pill'),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Wx.hairline),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '新消息',
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: Wx.text,
+                      fontWeight: FontWeight.w600,
                     ),
               ),
-            ),
-          ],
+              const SizedBox(width: 4),
+              Icon(Icons.south, size: 16, color: Wx.accent),
+            ],
+          ),
         ),
       ),
     );
