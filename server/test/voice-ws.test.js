@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { describe, it } from "node:test";
 import { WebSocket } from "ws";
-import { attachVoiceGateway, isVoiceUpgrade, voiceKeyFromRequest } from "../src/voice-ws.js";
+import {
+  attachVoiceGateway,
+  isVoiceCallEnabled,
+  isVoiceUpgrade,
+  voiceKeyFromRequest,
+} from "../src/voice-ws.js";
 
 function listen() {
   return new Promise((resolve) => {
@@ -23,6 +28,19 @@ function waitMessage(ws) {
 }
 
 describe("voice websocket", () => {
+  it("treats voice call as opt-in via WENXIANG_VOICE_CALL_ENABLED", () => {
+    const prev = process.env.WENXIANG_VOICE_CALL_ENABLED;
+    try {
+      delete process.env.WENXIANG_VOICE_CALL_ENABLED;
+      assert.equal(isVoiceCallEnabled(), false);
+      process.env.WENXIANG_VOICE_CALL_ENABLED = "true";
+      assert.equal(isVoiceCallEnabled(), true);
+    } finally {
+      if (prev === undefined) delete process.env.WENXIANG_VOICE_CALL_ENABLED;
+      else process.env.WENXIANG_VOICE_CALL_ENABLED = prev;
+    }
+  });
+
   it("reads the API key from header or query and only matches /v1/voice", () => {
     assert.equal(isVoiceUpgrade({ url: "/v1/voice?key=abc" }), true);
     assert.equal(isVoiceUpgrade({ url: "/v1/chat" }), false);
@@ -34,6 +52,8 @@ describe("voice websocket", () => {
   });
 
   it("rejects a missing key and tells an authenticated client when voice is unconfigured", async () => {
+    const prev = process.env.WENXIANG_VOICE_CALL_ENABLED;
+    process.env.WENXIANG_VOICE_CALL_ENABLED = "true";
     const server = await listen();
     attachVoiceGateway(server, {
       getApiKey: () => "test-key",
@@ -65,6 +85,34 @@ describe("voice websocket", () => {
       ws.close();
     } finally {
       server.close();
+      if (prev === undefined) delete process.env.WENXIANG_VOICE_CALL_ENABLED;
+      else process.env.WENXIANG_VOICE_CALL_ENABLED = prev;
+    }
+  });
+
+  it("returns 403 for /v1/voice when call gateway is disabled", async () => {
+    const prev = process.env.WENXIANG_VOICE_CALL_ENABLED;
+    delete process.env.WENXIANG_VOICE_CALL_ENABLED;
+    const server = await listen();
+    attachVoiceGateway(server, {
+      getApiKey: () => "test-key",
+      resolveConfig: () => ({ ready: true, provider: "volc", volc: {} }),
+      createAsk: () => async function* () {},
+      createProviders: () => ({ asr: { async start() {}, push() {}, stop() {} }, tts: null }),
+    });
+    const { port } = server.address();
+    try {
+      const status = await new Promise((resolve) => {
+        const ws = new WebSocket(`ws://127.0.0.1:${port}/v1/voice?key=test-key`);
+        ws.on("unexpected-response", (_req, res) => resolve(res.statusCode));
+        ws.on("open", () => resolve("opened"));
+        ws.on("error", () => {});
+      });
+      assert.equal(status, 403);
+    } finally {
+      server.close();
+      if (prev === undefined) delete process.env.WENXIANG_VOICE_CALL_ENABLED;
+      else process.env.WENXIANG_VOICE_CALL_ENABLED = prev;
     }
   });
 });

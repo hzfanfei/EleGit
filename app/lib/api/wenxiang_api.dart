@@ -37,11 +37,19 @@ class WenxiangApi {
       };
 
   Uri voiceUri() {
+    return _voiceWsUri('/v1/voice');
+  }
+
+  Uri sttUri() {
+    return _voiceWsUri('/v1/voice/stt');
+  }
+
+  Uri _voiceWsUri(String path) {
     final root = baseUrl.replaceAll(RegExp(r'/$'), '');
     final ws = root.startsWith('https')
         ? root.replaceFirst(RegExp(r'^https'), 'wss')
         : root.replaceFirst(RegExp(r'^http'), 'ws');
-    return Uri.parse('$ws/v1/voice').replace(queryParameters: {
+    return Uri.parse('$ws$path').replace(queryParameters: {
       'key': apiKey,
       'ngrok-skip-browser-warning': 'true',
     });

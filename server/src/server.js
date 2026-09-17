@@ -24,7 +24,8 @@ import { isCancelled, requestSignal } from "./http-signal.js";
 import { loadStore } from "./store.js";
 import { createTunnelManager } from "./tunnel.js";
 import { publicVoiceStatus, resolveVoiceConfig } from "./voice-config.js";
-import { attachVoiceGateway } from "./voice-ws.js";
+import { attachSttGateway } from "./voice-stt-ws.js";
+import { attachVoiceGateway, isVoiceCallEnabled } from "./voice-ws.js";
 import { ensureCheckout, formatLocalContext } from "./workspace.js";
 
 loadLocalEnv();
@@ -461,11 +462,19 @@ const httpServer = app.listen(PORT, BIND, () => {
       : "Cursor engine: not found — chat will use local checkout + GitHub adapter",
   );
   const voice = publicVoiceStatus(resolveVoiceConfig());
-  console.log(voice.ready ? "Voice call: ready" : "Voice call: 还没配语音密钥");
+  console.log(voice.ready ? "Voice STT: ready" : "Voice STT: 还没配语音密钥");
+  console.log(
+    isVoiceCallEnabled()
+      ? "Voice call (/v1/voice): enabled"
+      : "Voice call (/v1/voice): disabled (set WENXIANG_VOICE_CALL_ENABLED=true to debug)",
+  );
 });
 
 attachVoiceGateway(httpServer, {
   getApiKey: () => store.config.apiKey,
   checkoutRepo,
   sessions,
+});
+attachSttGateway(httpServer, {
+  getApiKey: () => store.config.apiKey,
 });
