@@ -91,6 +91,34 @@ export function createOpenAiAsr({
       socket?.close();
       socket = null;
     },
+    finalize() {
+      return new Promise((resolve) => {
+        if (!opened || !socket || socket.readyState !== 1) {
+          resolve();
+          return;
+        }
+        const timer = setTimeout(() => {
+          socket?.off("message", onMessage);
+          resolve();
+        }, 2500);
+        const onMessage = (data) => {
+          let msg;
+          try {
+            msg = JSON.parse(data.toString());
+          } catch {
+            return;
+          }
+          if (msg.type === "conversation.item.input_audio_transcription.completed") {
+            clearTimeout(timer);
+            socket?.off("message", onMessage);
+            if (msg.transcript) onFinal?.(msg.transcript);
+            resolve();
+          }
+        };
+        socket.on("message", onMessage);
+        send({ type: "input_audio_buffer.commit" });
+      });
+    },
   };
 }
 

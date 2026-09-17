@@ -27,6 +27,10 @@ export function isVoiceUpgrade(req) {
   }
 }
 
+export function isVoiceCallEnabled(env = process.env) {
+  return String(env.WENXIANG_VOICE_CALL_ENABLED || "").trim().toLowerCase() === "true";
+}
+
 export function createDefaultAsk() {
   return async function* (opts, signal) {
     const checkout = opts.checkout || {};
@@ -89,6 +93,11 @@ export function attachVoiceGateway(httpServer, {
 
   httpServer.on("upgrade", (req, socket, head) => {
     if (!isVoiceUpgrade(req)) return;
+    if (!isVoiceCallEnabled()) {
+      socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+      socket.destroy();
+      return;
+    }
     const expected = String(getApiKey?.() || "");
     if (!expected || voiceKeyFromRequest(req) !== expected) {
       socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -8,11 +10,12 @@ import '../copy/time.dart';
 import '../models.dart';
 import '../persist/app_memory.dart';
 import '../theme.dart';
+import '../voice/device_media.dart';
 import '../voice/voice_client.dart';
 import '../voice/voice_media.dart';
+import '../voice/voice_stt_client.dart';
 import '../widgets/wx_chrome.dart';
 import '../widgets/wx_rich_text.dart';
-import 'call_page.dart';
 
 class ChatPage extends StatefulWidget {
   const ChatPage({
@@ -22,7 +25,7 @@ class ChatPage extends StatefulWidget {
     required this.onBack,
     this.memory,
     this.voiceMedia,
-    this.voiceClient,
+    this.sttClient,
   });
 
   final WenxiangApi api;
@@ -30,7 +33,7 @@ class ChatPage extends StatefulWidget {
   final VoidCallback onBack;
   final AppMemory? memory;
   final VoiceMedia? voiceMedia;
-  final VoiceCallClient? voiceClient;
+  final VoiceSttClient? sttClient;
 
   @override
   State<ChatPage> createState() => _ChatPageState();
@@ -54,7 +57,20 @@ class _ChatPageState extends State<ChatPage> {
   bool _live = false;
   bool _busy = false;
   String? _lastUser;
+  bool _voiceReady = false;
   String _voiceHint = '还没配语音密钥';
+  bool _voiceInputMode = false;
+  bool _holding = false;
+  bool _holdPending = false;
+  bool _holdCancel = false;
+  bool _sttBusy = false;
+  String _holdLive = '';
+  String _holdHint = '';
+  VoiceMedia? _media;
+  VoiceSttClient? _stt;
+  StreamSubscription<VoiceEvent>? _sttSub;
+  StreamSubscription<Uint8List>? _micSub;
+  double _holdStartY = 0;
 
   List<ChatMessage> get _messages =>
       _transcripts.putIfAbsent(_sessionId ?? '', () => <ChatMessage>[]);
@@ -80,32 +96,154 @@ class _ChatPageState extends State<ChatPage> {
       final status = await widget.api.status();
       if (!mounted) return;
       setState(() {
-        _voiceHint = status.voiceReady ? '通话' : (status.voiceHint.isEmpty ? '还没配语音密钥' : status.voiceHint);
+        _voiceReady = status.voiceReady;
+        _voiceHint = status.voiceReady ? '' : (status.voiceHint.isEmpty ? '还没配语音密钥' : status.voiceHint);
       });
     } catch (_) {}
   }
 
-  Future<void> _openCall() async {
-    if (_busy) widget.api.cancelChat();
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(
-        builder: (context) => CallPage(
-          api: widget.api,
-          repo: widget.repo,
-          sessionId: _sessionId,
-          media: widget.voiceMedia,
-          client: widget.voiceClient,
-          onBack: () => Navigator.of(context).pop(),
-          onTranscript: (captions) {
-            if (captions.isEmpty) return;
-            setState(() {
-              _messages.addAll(captions);
-            });
-            _persist();
-          },
-        ),
-      ),
-    );
+  void _toggleVoiceInput() {
+    if (!_voiceReady) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_voiceHint.isEmpty ? '还没配语音密钥' : _voiceHint)),
+      );
+      return;
+    }
+    if (_busy || _sttBusy || _holding) return;
+    setState(() {
+      _voiceInputMode = !_voiceInputMode;
+      if (_voiceInputMode) _focus.unfocus();
+    });
+  }
+
+  Future<void> _beginHold(double globalY) async {
+    if (_busy || _sttBusy || _holding || _holdPending || !_voiceReady) return;
+    setState(() {
+      _holdPending = true;
+      _holdStartY = globalY;
+      _holdHint = '松开发送，上滑取消';
+    });
+    final client = widget.sttClient ?? SocketSttClient(widget.api.sttUri());
+    _stt = client;
+    _sttSub = client.connect().listen(_onSttEvent, onError: (_) => _failStt('识别失败'));
+    client.start();
+    final media = widget.voiceMedia ?? _media ?? DeviceVoiceMedia();
+    _media = media;
+    final allowed = await media.requestMic();
+    if (!mounted) return;
+    if (!allowed) {
+      _disposeStt();
+      if (mounted) {
+        setState(() {
+          _holdPending = false;
+          _holdHint = '';
+        });
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('需要麦克风才能说话')),
+      );
+      return;
+    }
+    _micSub = media.startMic().listen(client.sendPcm, onError: (_) {
+      _failStt('需要麦克风才能说话');
+    });
+    HapticFeedback.mediumImpact();
+    setState(() {
+      _holding = true;
+      _holdPending = false;
+      _holdCancel = false;
+      _holdLive = '';
+    });
+  }
+
+  void _moveHold(double globalY) {
+    if (!_holding && !_holdPending) return;
+    final cancel = _holdStartY - globalY > 72;
+    if (cancel == _holdCancel) return;
+    setState(() {
+      _holdCancel = cancel;
+      _holdHint = cancel ? '松开取消' : '松开发送，上滑取消';
+    });
+  }
+
+  Future<void> _endHold() async {
+    if (!_holding && !_holdPending && _stt == null) return;
+    final cancel = _holdCancel;
+    final pendingOnly = _holdPending && _stt == null;
+    setState(() {
+      _holding = false;
+      _holdPending = false;
+      _holdCancel = false;
+      _holdHint = '';
+    });
+    if (pendingOnly) {
+      setState(() => _holdLive = '');
+      return;
+    }
+    await _micSub?.cancel();
+    _micSub = null;
+    await _media?.stopMic();
+    if (cancel) {
+      _stt?.cancel();
+      _disposeStt();
+      setState(() => _holdLive = '');
+      return;
+    }
+    setState(() {
+      _sttBusy = true;
+      _holdHint = '识别中…';
+    });
+    _stt?.stop();
+  }
+
+  void _onSttEvent(VoiceEvent event) {
+    if (!mounted) return;
+    if (event.type == 'error') {
+      final hint = event.hint?.isNotEmpty == true
+          ? event.hint!
+          : (event.code == 'unconfigured' ? '还没配语音密钥' : '识别失败');
+      _failStt(hint);
+      return;
+    }
+    if (event.type == 'caption' && event.text.isNotEmpty) {
+      setState(() => _holdLive = event.text);
+    }
+    if (event.type == 'done') {
+      final text = event.text.trim();
+      _disposeStt();
+      setState(() {
+        _sttBusy = false;
+        _holdLive = '';
+        _holdHint = '';
+      });
+      if (text.isNotEmpty) unawaited(_send(text));
+    }
+    if (event.type == 'cancelled') {
+      _disposeStt();
+      setState(() {
+        _sttBusy = false;
+        _holdLive = '';
+        _holdHint = '';
+      });
+    }
+  }
+
+  void _failStt(String message) {
+    _disposeStt();
+    setState(() {
+      _sttBusy = false;
+      _holding = false;
+      _holdLive = '';
+      _holdHint = '';
+    });
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  void _disposeStt() {
+    _sttSub?.cancel();
+    _sttSub = null;
+    _stt?.dispose();
+    _stt = null;
   }
 
   void _restoreLocal() {
@@ -433,6 +571,9 @@ class _ChatPageState extends State<ChatPage> {
   @override
   void dispose() {
     if (_busy) widget.api.cancelChat();
+    _disposeStt();
+    _micSub?.cancel();
+    _media?.dispose();
     _input.dispose();
     _focus.dispose();
     _scroll.dispose();
@@ -470,12 +611,6 @@ class _ChatPageState extends State<ChatPage> {
                 onPressed: _openSessions,
                 icon: const Icon(Icons.history),
               ),
-              IconButton(
-                key: const Key('wx-call'),
-                tooltip: _voiceHint,
-                onPressed: _openCall,
-                icon: const Icon(Icons.call_outlined),
-              ),
             ],
           ),
           const WxHairline(),
@@ -511,6 +646,17 @@ class _ChatPageState extends State<ChatPage> {
             controller: _input,
             focus: _focus,
             busy: _busy,
+            voiceReady: _voiceReady,
+            voiceInputMode: _voiceInputMode,
+            holding: _holding || _holdPending,
+            holdCancel: _holdCancel,
+            sttBusy: _sttBusy,
+            holdLive: _holdLive,
+            holdHint: _holdHint,
+            onToggleVoiceInput: _toggleVoiceInput,
+            onHoldStart: _beginHold,
+            onHoldMove: _moveHold,
+            onHoldEnd: _endHold,
             onSend: _send,
             onStop: _stop,
           ),
@@ -847,6 +993,17 @@ class _Composer extends StatelessWidget {
     required this.controller,
     required this.focus,
     required this.busy,
+    required this.voiceReady,
+    required this.voiceInputMode,
+    required this.holding,
+    required this.holdCancel,
+    required this.sttBusy,
+    required this.holdLive,
+    required this.holdHint,
+    required this.onToggleVoiceInput,
+    required this.onHoldStart,
+    required this.onHoldMove,
+    required this.onHoldEnd,
     required this.onSend,
     required this.onStop,
   });
@@ -854,55 +1011,186 @@ class _Composer extends StatelessWidget {
   final TextEditingController controller;
   final FocusNode focus;
   final bool busy;
+  final bool voiceReady;
+  final bool voiceInputMode;
+  final bool holding;
+  final bool holdCancel;
+  final bool sttBusy;
+  final String holdLive;
+  final String holdHint;
+  final VoidCallback onToggleVoiceInput;
+  final Future<void> Function(double globalY) onHoldStart;
+  final void Function(double globalY) onHoldMove;
+  final Future<void> Function() onHoldEnd;
   final Future<void> Function() onSend;
   final VoidCallback onStop;
 
   @override
   Widget build(BuildContext context) {
+    final voiceLocked = busy || sttBusy;
     return ColoredBox(
       color: Wx.bg,
       child: SafeArea(
         top: false,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(Wx.inset, 10, 12, 10),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Expanded(
-                child: TextField(
-                  controller: controller,
-                  focusNode: focus,
-                  minLines: 1,
-                  maxLines: 6,
-                  textInputAction: TextInputAction.send,
-                  onSubmitted: (_) {
-                    if (!busy) onSend();
-                  },
-                  decoration: InputDecoration(
-                    hintText: busy ? '生成中，可先写下一条' : '问进度，像在 Cursor 里一样',
-                    filled: true,
-                    fillColor: Wx.surface,
+              if (holding && holdLive.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    holdLive,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Wx.muted),
                   ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              SizedBox(
-                width: Wx.tap,
-                height: Wx.tap,
-                child: busy
-                    ? IconButton(
-                        tooltip: '停止',
-                        onPressed: onStop,
-                        icon: const Icon(Icons.stop_circle_outlined, size: 26, color: Wx.accent),
-                      )
-                    : IconButton.filled(
-                        tooltip: '发送',
-                        onPressed: onSend,
-                        icon: const Icon(Icons.arrow_upward, size: 20),
-                      ),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  IconButton(
+                    key: const Key('wx-voice-toggle'),
+                    tooltip: voiceInputMode ? '键盘输入' : '按住说话',
+                    onPressed: voiceLocked ? null : onToggleVoiceInput,
+                    icon: Icon(voiceInputMode ? Icons.keyboard_outlined : Icons.mic_none_outlined),
+                  ),
+                  Expanded(
+                    child: voiceInputMode
+                        ? _HoldToSpeakPad(
+                            enabled: voiceReady && !voiceLocked,
+                            holding: holding,
+                            holdCancel: holdCancel,
+                            sttBusy: sttBusy,
+                            hint: holdHint.isNotEmpty
+                                ? holdHint
+                                : (sttBusy ? '识别中…' : '按住 说话'),
+                            onHoldStart: onHoldStart,
+                            onHoldMove: onHoldMove,
+                            onHoldEnd: onHoldEnd,
+                          )
+                        : TextField(
+                            controller: controller,
+                            focusNode: focus,
+                            minLines: 1,
+                            maxLines: 6,
+                            textInputAction: TextInputAction.send,
+                            onSubmitted: (_) {
+                              if (!busy) onSend();
+                            },
+                            decoration: InputDecoration(
+                              hintText: busy ? '生成中，可先写下一条' : '问进度，像在 Cursor 里一样',
+                              filled: true,
+                              fillColor: Wx.surface,
+                            ),
+                          ),
+                  ),
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    width: Wx.tap,
+                    height: Wx.tap,
+                    child: busy
+                        ? IconButton(
+                            tooltip: '停止',
+                            onPressed: onStop,
+                            icon: const Icon(Icons.stop_circle_outlined, size: 26, color: Wx.accent),
+                          )
+                        : IconButton.filled(
+                            tooltip: '发送',
+                            onPressed: voiceInputMode ? null : onSend,
+                            icon: const Icon(Icons.arrow_upward, size: 20),
+                          ),
+                  ),
+                ],
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HoldToSpeakPad extends StatefulWidget {
+  const _HoldToSpeakPad({
+    required this.enabled,
+    required this.holding,
+    required this.holdCancel,
+    required this.sttBusy,
+    required this.hint,
+    required this.onHoldStart,
+    required this.onHoldMove,
+    required this.onHoldEnd,
+  });
+
+  final bool enabled;
+  final bool holding;
+  final bool holdCancel;
+  final bool sttBusy;
+  final String hint;
+  final Future<void> Function(double globalY) onHoldStart;
+  final void Function(double globalY) onHoldMove;
+  final Future<void> Function() onHoldEnd;
+
+  @override
+  State<_HoldToSpeakPad> createState() => _HoldToSpeakPadState();
+}
+
+class _HoldToSpeakPadState extends State<_HoldToSpeakPad> {
+  bool _pointerActive = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = widget.enabled;
+    final holding = widget.holding;
+    final bg = !enabled
+        ? Wx.surface
+        : holding
+            ? (widget.holdCancel ? Wx.raised : Wx.accent.withValues(alpha: 0.14))
+            : Wx.surface;
+    return Listener(
+      key: const Key('wx-hold-speak'),
+      behavior: HitTestBehavior.opaque,
+      onPointerDown: enabled && !widget.sttBusy
+          ? (event) {
+              _pointerActive = true;
+              widget.onHoldStart(event.position.dy);
+            }
+          : null,
+      onPointerMove: enabled && _pointerActive
+          ? (event) {
+              widget.onHoldMove(event.position.dy);
+            }
+          : null,
+      onPointerUp: enabled && _pointerActive
+          ? (_) {
+              _pointerActive = false;
+              widget.onHoldEnd();
+            }
+          : null,
+      onPointerCancel: enabled && _pointerActive
+          ? (_) {
+              _pointerActive = false;
+              widget.onHoldEnd();
+            }
+          : null,
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 48),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Wx.hairline),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Text(
+          widget.hint,
+          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                color: enabled ? Wx.text : Wx.faint,
+                fontWeight: holding ? FontWeight.w600 : FontWeight.w400,
+              ),
         ),
       ),
     );
