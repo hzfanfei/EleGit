@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -8,20 +10,27 @@ import '../theme.dart';
 import '../widgets/wx_chrome.dart';
 import '../repo_open.dart';
 import '../widgets/wx_clone_scrim.dart';
+import 'login_page.dart';
 
 class ReposPage extends StatefulWidget {
   const ReposPage({
     super.key,
     required this.api,
     required this.onOpen,
-    required this.onBack,
+    required this.onAuthorized,
+    this.githubConnected = true,
     this.githubLogin = '',
+    this.autoStartOAuth = false,
+    this.lastRepo,
   });
 
   final WenxiangApi api;
   final void Function(RepoItem repo) onOpen;
-  final VoidCallback onBack;
+  final Future<void> Function() onAuthorized;
+  final bool githubConnected;
   final String githubLogin;
+  final bool autoStartOAuth;
+  final RepoItem? lastRepo;
 
   @override
   State<ReposPage> createState() => ReposPageState();
@@ -36,19 +45,42 @@ class ReposPageState extends State<ReposPage> {
   Object? _cloneError;
   int _cloneAttempt = 0;
   bool _loading = true;
+  bool _reauth = false;
+  Timer? _debounce;
 
   @override
   void initState() {
     super.initState();
-    _query.addListener(() {
-      if (mounted) setState(() {});
-    });
+    _query.addListener(_onQueryChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && widget.githubConnected) _search();
+    });
+  }
+
+  void _onQueryChanged() {
+    if (mounted) setState(() {});
+    if (!widget.githubConnected) return;
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 450), () {
       if (mounted) _search();
     });
   }
 
+  @override
+  void didUpdateWidget(covariant ReposPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.githubConnected && !oldWidget.githubConnected) {
+      _reauth = false;
+      _search();
+    }
+  }
+
+  void reload() {
+    if (widget.githubConnected) _search();
+  }
+
   Future<void> _search() async {
+    if (!widget.githubConnected) return;
     setState(() {
       _loading = true;
       _error = null;
@@ -67,9 +99,13 @@ class ReposPageState extends State<ReposPage> {
 
   Future<void> _open(RepoItem repo) async {
     if (_cloning != null && _cloneError == null) return;
+    HapticFeedback.lightImpact();
     setState(() {
       _cloneError = null;
       _error = null;
+      _cloning = repo;
+      _cloneMode = WxCloneMode.open;
+      _cloneAttempt += 1;
     });
     try {
       await openRepoWithSync(
@@ -129,30 +165,44 @@ class ReposPageState extends State<ReposPage> {
 
   @override
   void dispose() {
+    _debounce?.cancel();
     if (_cloning != null && _cloneError == null) {
       widget.api.cancelCheckout();
     }
+    _query.removeListener(_onQueryChanged);
     _query.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    if (!widget.githubConnected || _reauth) {
+      return LoginPage(
+        api: widget.api,
+        onReady: () async {
+          await widget.onAuthorized();
+          if (mounted) setState(() => _reauth = false);
+        },
+        autoStart: widget.autoStartOAuth && !widget.githubConnected,
+        reauth: _reauth,
+        onCancel: _reauth ? () => setState(() => _reauth = false) : null,
+      );
+    }
+
     final blocked = _cloning != null && _cloneError == null;
     return Scaffold(
       body: Column(
         children: [
           WxPageHeader(
-            onBack: () {
-              if (!consumeBack()) widget.onBack();
-            },
-            backEnabled: true,
-            backTooltip: blocked ? '取消克隆' : '返回首页',
             showMark: true,
-            title: '仓库',
-            subtitle: widget.githubLogin.isEmpty
-                ? '点进一个，问进度'
-                : widget.githubLogin,
+            title: '问象',
+            subtitle: widget.githubLogin.isEmpty ? '选一个仓库问进度' : widget.githubLogin,
+            trailing: [
+              TextButton(
+                onPressed: blocked ? null : () => setState(() => _reauth = true),
+                child: const Text('GitHub'),
+              ),
+            ],
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(Wx.inset, 4, Wx.inset, 12),
@@ -179,6 +229,8 @@ class ReposPageState extends State<ReposPage> {
               ),
             ),
           ),
+          if (_loading)
+            const LinearProgressIndicator(minHeight: 2),
           const WxHairline(),
           if (_error != null && _cloning == null)
             Padding(
@@ -216,23 +268,97 @@ class ReposPageState extends State<ReposPage> {
     }
     if (_repos.isEmpty) {
       return WxEmpty(
-        title: '没有找到仓库',
-        detail: '换个关键词，或清空搜索看看全部。',
+        title: _query.text.trim().isEmpty ? '还没有可见仓库' : '没有找到仓库',
+        detail: _query.text.trim().isEmpty
+            ? '确认 GitHub 已授权 repo 权限，或下拉刷新。'
+            : '换个关键词，或清空搜索看看全部。',
         action: TextButton(onPressed: _search, child: const Text('重新加载')),
       );
     }
-    return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(Wx.inset, 8, Wx.inset, 24),
-      itemCount: _repos.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 2),
-      itemBuilder: (context, index) {
-        final repo = _repos[index];
-        return _RepoTile(
-          repo: repo,
-          enabled: _cloning == null,
-          onTap: () => _open(repo),
-        );
-      },
+    final query = _query.text.trim();
+    final last = widget.lastRepo;
+    final showContinue = query.isEmpty && last != null && last.fullName.isNotEmpty;
+    return RefreshIndicator(
+      onRefresh: _search,
+      child: ListView.separated(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(Wx.inset, 8, Wx.inset, 24),
+        itemCount: _repos.length + (showContinue ? 1 : 0),
+        separatorBuilder: (_, __) => const SizedBox(height: 2),
+        itemBuilder: (context, index) {
+          if (showContinue && index == 0) {
+            return _ContinueRepoCard(
+              repo: last,
+              enabled: _cloning == null,
+              onOpen: () => _open(last),
+            );
+          }
+          final repo = _repos[index - (showContinue ? 1 : 0)];
+          return _RepoTile(
+            repo: repo,
+            enabled: _cloning == null,
+            onTap: () => _open(repo),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _ContinueRepoCard extends StatelessWidget {
+  const _ContinueRepoCard({
+    required this.repo,
+    required this.enabled,
+    required this.onOpen,
+  });
+
+  final RepoItem repo;
+  final bool enabled;
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Material(
+        color: Wx.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(Wx.radius),
+          side: const BorderSide(color: Wx.hairline),
+        ),
+        child: InkWell(
+          key: const Key('wx-home-last'),
+          onTap: enabled ? onOpen : null,
+          borderRadius: BorderRadius.circular(Wx.radius),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '继续上次',
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.muted),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        repo.fullName,
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                    ],
+                  ),
+                ),
+                FilledButton(
+                  onPressed: enabled ? onOpen : null,
+                  child: const Text('打开对话'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

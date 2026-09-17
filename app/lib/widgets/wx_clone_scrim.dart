@@ -7,7 +7,7 @@ import '../models.dart';
 import '../theme.dart';
 import 'wx_chrome.dart';
 
-enum WxCloneMode { clone, sync }
+enum WxCloneMode { open, clone, sync }
 
 class WxCloneScrim extends StatefulWidget {
   const WxCloneScrim({
@@ -41,9 +41,7 @@ class _WxCloneScrimState extends State<WxCloneScrim> {
   @override
   void initState() {
     super.initState();
-    _stages = widget.mode == WxCloneMode.sync
-        ? ['准备', '正在更新', '即将打开']
-        : ['准备', '正在克隆', '即将打开'];
+    _stages = _stagesFor(widget.mode);
     _timer = Timer.periodic(const Duration(milliseconds: 900), (timer) {
       if (!mounted || widget.error != null) return;
       if (_stage < _stages.length - 1) {
@@ -52,7 +50,28 @@ class _WxCloneScrimState extends State<WxCloneScrim> {
     });
   }
 
+  static List<String> _stagesFor(WxCloneMode mode) {
+    switch (mode) {
+      case WxCloneMode.open:
+        return ['正在打开', '准备对话', '即将进入'];
+      case WxCloneMode.sync:
+        return ['准备', '正在更新', '即将打开'];
+      case WxCloneMode.clone:
+        return ['准备', '正在克隆', '即将打开'];
+    }
+  }
+
   String get _stageDetail {
+    if (widget.mode == WxCloneMode.open) {
+      switch (_stage) {
+        case 0:
+          return '正在检查 ${widget.repo.fullName} 的本机目录。';
+        case 1:
+          return '正在连接问象服务并预热问答。';
+        default:
+          return '马上进入对话。';
+      }
+    }
     if (widget.mode == WxCloneMode.sync) {
       switch (_stage) {
         case 0:
@@ -77,9 +96,7 @@ class _WxCloneScrimState extends State<WxCloneScrim> {
   void didUpdateWidget(covariant WxCloneScrim oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.mode != oldWidget.mode) {
-      _stages = widget.mode == WxCloneMode.sync
-          ? ['准备', '正在更新', '即将打开']
-          : ['准备', '正在克隆', '即将打开'];
+      _stages = _stagesFor(widget.mode);
       _stage = 0;
     }
     if (widget.error != null) {
@@ -115,7 +132,11 @@ class _WxCloneScrimState extends State<WxCloneScrim> {
                 children: [
                   Text(
                     failed
-                        ? (widget.mode == WxCloneMode.sync ? '更新失败' : '克隆失败')
+                        ? (widget.mode == WxCloneMode.sync
+                            ? '更新失败'
+                            : widget.mode == WxCloneMode.open
+                                ? '打开失败'
+                                : '克隆失败')
                         : _stages[_stage],
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
@@ -143,7 +164,8 @@ class _WxCloneScrimState extends State<WxCloneScrim> {
                       retryLabel: '再试一次',
                     ),
                   ],
-                  if (widget.onDismiss != null) ...[
+                  if (widget.onDismiss != null &&
+                      (widget.mode != WxCloneMode.open || failed)) ...[
                     SizedBox(height: failed ? 4 : 14),
                     Align(
                       alignment: Alignment.centerRight,

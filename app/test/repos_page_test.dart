@@ -9,7 +9,16 @@ import 'support/fake_api.dart';
 
 void main() {
   testWidgets('repos list shows owner, privacy and opens after checkout', (tester) async {
-    final api = FakeWenxiangApi(checkoutDelay: const Duration(milliseconds: 40));
+    final api = FakeWenxiangApi(
+      checkoutDelay: const Duration(milliseconds: 40),
+      checkoutStatusResult: CheckoutSyncStatus(
+        present: true,
+        upToDate: false,
+        syncState: 'behind',
+        behind: 2,
+        path: '/home/fei/问象/octo/demo',
+      ),
+    );
     RepoItem? opened;
     await tester.pumpWidget(
       MaterialApp(
@@ -18,14 +27,14 @@ void main() {
           api: api,
           githubLogin: 'octo',
           onOpen: (repo) => opened = repo,
-          onBack: () {},
+          onAuthorized: () async {},
         ),
       ),
     );
     await tester.pump();
     await tester.pumpAndSettle();
 
-    expect(find.text('仓库'), findsOneWidget);
+    expect(find.text('问象'), findsOneWidget);
     expect(find.byType(AppBar), findsNothing);
     expect(find.text('demo'), findsOneWidget);
     expect(find.textContaining('octo'), findsWidgets);
@@ -37,7 +46,7 @@ void main() {
     await tester.tap(find.text('demo'));
     await tester.pump();
     expect(find.textContaining('~/问象/octo/demo'), findsWidgets);
-    expect(find.text('准备'), findsOneWidget);
+    expect(find.textContaining('正在'), findsWidgets);
     await tester.pump(const Duration(milliseconds: 50));
     await tester.pumpAndSettle();
     expect(api.checkoutCalls, 1);
@@ -49,7 +58,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: wenxiangTheme(),
-        home: ReposPage(api: emptyApi, onOpen: (_) {}, onBack: () {}),
+        home: ReposPage(api: emptyApi, onOpen: (_) {}, onAuthorized: () async {}),
       ),
     );
     await tester.pump();
@@ -62,7 +71,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: wenxiangTheme(),
-        home: ReposPage(api: errApi, onOpen: (_) {}, onBack: () {}),
+        home: ReposPage(api: errApi, onOpen: (_) {}, onAuthorized: () async {}),
       ),
     );
     await tester.pump();
@@ -75,11 +84,18 @@ void main() {
     final errApi = FakeWenxiangApi(
       checkoutDelay: const Duration(milliseconds: 20),
       checkoutThrows: ApiException('git clone failed: Authentication failed'),
+      checkoutStatusResult: CheckoutSyncStatus(
+        present: false,
+        upToDate: false,
+        syncState: 'missing',
+        behind: 0,
+        path: '/home/fei/问象/octo/demo',
+      ),
     );
     await tester.pumpWidget(
       MaterialApp(
         theme: wenxiangTheme(),
-        home: ReposPage(api: errApi, onOpen: (_) {}, onBack: () {}),
+        home: ReposPage(api: errApi, onOpen: (_) {}, onAuthorized: () async {}),
       ),
     );
     await tester.pump();
@@ -98,12 +114,21 @@ void main() {
   });
 
   testWidgets('clone can be cancelled without leaving the list', (tester) async {
-    final api = FakeWenxiangApi(checkoutDelay: const Duration(milliseconds: 80));
+    final api = FakeWenxiangApi(
+      checkoutDelay: const Duration(milliseconds: 80),
+      checkoutStatusResult: CheckoutSyncStatus(
+        present: false,
+        upToDate: false,
+        syncState: 'missing',
+        behind: 0,
+        path: '/home/fei/问象/octo/demo',
+      ),
+    );
     RepoItem? opened;
     await tester.pumpWidget(
       MaterialApp(
         theme: wenxiangTheme(),
-        home: ReposPage(api: api, onOpen: (repo) => opened = repo, onBack: () {}),
+        home: ReposPage(api: api, onOpen: (repo) => opened = repo, onAuthorized: () async {}),
       ),
     );
     await tester.pump();

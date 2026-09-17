@@ -9,6 +9,7 @@ Future<void> openRepoWithSync({
   required void Function(WxCloneMode mode)? onScrim,
   required Future<void> Function() onReady,
 }) async {
+  onScrim?.call(WxCloneMode.open);
   CheckoutSyncStatus status;
   try {
     status = await api.checkoutStatus(repo.owner, repo.name);

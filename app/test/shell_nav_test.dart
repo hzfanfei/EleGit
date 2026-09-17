@@ -16,9 +16,8 @@ void main() {
     return AppMemory(await SharedPreferences.getInstance());
   }
 
-  testWidgets('authorized home shows last repo instead of login or search', (tester) async {
+  testWidgets('authorized shell opens repo list as home', (tester) async {
     final store = await memory();
-    await store.saveLastRepo(sampleRepo());
     await store.saveGithubLogin('octo');
 
     await tester.pumpWidget(
@@ -30,18 +29,35 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    expect(find.text('继续上次'), findsOneWidget);
-    expect(find.text('octo/demo'), findsWidgets);
-    expect(find.text('打开对话'), findsOneWidget);
-    expect(find.text('全部仓库'), findsOneWidget);
-    expect(find.text('搜索仓库名'), findsNothing);
+    expect(find.text('搜索仓库名'), findsOneWidget);
+    expect(find.text('问象'), findsWidgets);
     expect(find.text('重新打开 GitHub'), findsNothing);
-    expect(find.textContaining('最近在修登录'), findsNothing);
+    expect(find.text('继续上次'), findsNothing);
   });
 
-  testWidgets('one tap on last repo clones if needed and opens chat history', (tester) async {
+  testWidgets('last repo shortcut opens chat when present', (tester) async {
     final store = await memory();
     await store.saveLastRepo(sampleRepo());
+    final api = FakeWenxiangApi();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: ShellPage(api: api, memory: store),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('继续上次'), findsOneWidget);
+    expect(find.text('打开对话'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('wx-home-last')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('从进度问起'), findsOneWidget);
+  });
+
+  testWidgets('repo tile opens chat with restored history', (tester) async {
+    final store = await memory();
     await store.saveChats(
       'octo/demo',
       RepoChatStore(
@@ -74,53 +90,16 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    await tester.tap(find.byKey(const Key('wx-home-last')));
+    await tester.tap(find.text('demo').first);
     await tester.pump();
     await tester.pumpAndSettle();
 
-    expect(api.checkoutCalls, 1);
+    expect(api.checkoutCalls, 0);
     expect(find.textContaining('最近在修登录'), findsOneWidget);
     expect(find.text('你问'), findsOneWidget);
-    expect(find.text('问象'), findsWidgets);
   });
 
-  testWidgets('authorized with repos but no last-used still offers a shortcut', (tester) async {
-    final store = await memory();
-    final api = FakeWenxiangApi(
-      reposResult: [
-        sampleRepo(),
-        RepoItem(
-          owner: 'octo',
-          name: 'widget',
-          fullName: 'octo/widget',
-          description: '',
-          privateRepo: false,
-          language: 'Go',
-          pushedAt: '2026-09-16T00:00:00Z',
-        ),
-      ],
-    );
-
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: wenxiangTheme(),
-        home: ShellPage(api: api, memory: store),
-      ),
-    );
-    await tester.pump();
-    await tester.pump();
-    await tester.pump();
-
-    expect(find.text('全部仓库'), findsOneWidget);
-    expect(find.text('octo/demo'), findsWidgets);
-    expect(find.text('打开对话'), findsOneWidget);
-    expect(find.text('重新打开 GitHub'), findsNothing);
-    expect(find.text('搜索仓库名'), findsNothing);
-    expect(find.text('重新打开 GitHub', skipOffstage: false), findsNothing);
-    expect(find.textContaining('在浏览器完成授权', skipOffstage: false), findsNothing);
-  });
-
-  testWidgets('not logged in keeps the OAuth path', (tester) async {
+  testWidgets('not logged in shows GitHub auth on repo home', (tester) async {
     final store = await memory();
     await tester.pumpWidget(
       MaterialApp(
@@ -135,12 +114,11 @@ void main() {
     await tester.pump();
 
     expect(find.text('重新打开 GitHub'), findsOneWidget);
-    expect(find.text('继续上次'), findsNothing);
+    expect(find.text('搜索仓库名'), findsNothing);
   });
 
-  testWidgets('back walks chat to home to login without reopening GitHub', (tester) async {
+  testWidgets('back from chat returns to repo list without OAuth', (tester) async {
     final store = await memory();
-    await store.saveLastRepo(sampleRepo());
     final api = FakeWenxiangApi();
 
     await tester.pumpWidget(
@@ -152,21 +130,13 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    await tester.tap(find.byKey(const Key('wx-home-last')));
+    await tester.tap(find.text('demo').first);
     await tester.pumpAndSettle();
     expect(find.textContaining('从进度问起'), findsOneWidget);
-    expect(find.text('octo/demo'), findsWidgets);
 
     await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
-    expect(find.text('继续上次'), findsOneWidget);
-    expect(find.text('全部仓库'), findsOneWidget);
+    expect(find.text('搜索仓库名'), findsOneWidget);
     expect(api.startOAuthCalls, 0);
-
-    await tester.binding.handlePopRoute();
-    await tester.pumpAndSettle();
-    expect(find.textContaining('已从仓库返回'), findsOneWidget);
-    expect(api.startOAuthCalls, 0);
-    expect(find.text('重新打开 GitHub'), findsOneWidget);
   });
 }

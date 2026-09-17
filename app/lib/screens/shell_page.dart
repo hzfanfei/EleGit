@@ -8,11 +8,9 @@ import '../persist/app_memory.dart';
 import '../theme.dart';
 import '../widgets/wx_chrome.dart';
 import 'chat_page.dart';
-import 'home_page.dart';
-import 'login_page.dart';
 import 'repos_page.dart';
 
-enum AppStep { boot, login, home, repos, chat }
+enum AppStep { boot, repos, chat }
 
 class ShellPage extends StatefulWidget {
   const ShellPage({super.key, this.api, this.memory});
@@ -34,15 +32,11 @@ class ShellPageState extends State<ShellPage> {
   AppMemory? _memory;
   RepoItem? _repo;
   RepoItem? _lastRepo;
-  List<RepoItem> _recent = const [];
   Object? _bootError;
   bool _booting = true;
-  bool _loginAutoStart = true;
-  int _loginGen = 0;
   String _githubLogin = '';
-  AppStep _afterChat = AppStep.home;
-  bool _includeLogin = false;
-  final _homeKey = GlobalKey<HomePageState>();
+  bool _githubConnected = false;
+  bool _oauthAutoStart = false;
   final _reposKey = GlobalKey<ReposPageState>();
 
   @override
@@ -50,7 +44,6 @@ class ShellPageState extends State<ShellPage> {
     super.initState();
     _memory = widget.memory;
     _lastRepo = _memory?.lastRepo();
-    _recent = _memory?.recentRepos() ?? const [];
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _boot();
     });
@@ -82,18 +75,14 @@ class ShellPageState extends State<ShellPage> {
       if (!mounted) return;
       setState(() {
         _booting = false;
+        _githubConnected = status.githubConnected;
         _githubLogin = status.githubLogin.isNotEmpty ? status.githubLogin : (memory?.githubLogin() ?? '');
-        _loginAutoStart = !status.githubConnected;
-        _includeLogin = !status.githubConnected;
-        _lastRepo = memory?.lastRepo();
-        _recent = memory?.recentRepos() ?? const [];
-        _step = status.githubConnected ? AppStep.home : AppStep.login;
+        _oauthAutoStart = !status.githubConnected;
+        _lastRepo = memory?.lastRepo() ?? _lastRepo;
+        _step = AppStep.repos;
       });
       if (status.githubLogin.isNotEmpty) {
         await memory?.saveGithubLogin(status.githubLogin);
-      }
-      if (status.githubConnected) {
-        await _refreshRecent();
       }
     } catch (err) {
       if (!mounted) return;
@@ -105,24 +94,7 @@ class ShellPageState extends State<ShellPage> {
     }
   }
 
-  Future<void> _refreshRecent() async {
-    try {
-      final list = await _api.repos('');
-      await _memory?.rememberRepos(list);
-      if (!mounted) return;
-      setState(() {
-        _lastRepo = _memory?.lastRepo() ?? _lastRepo;
-        _recent = list.isNotEmpty ? list : (_memory?.recentRepos() ?? _recent);
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _recent = _memory?.recentRepos() ?? _recent;
-      });
-    }
-  }
-
-  Future<void> _afterLogin() async {
+  Future<void> _onAuthorized() async {
     final status = await _api.status();
     final memory = await _ensureMemory();
     if (status.githubLogin.isNotEmpty) {
@@ -130,49 +102,27 @@ class ShellPageState extends State<ShellPage> {
     }
     if (!mounted) return;
     setState(() {
+      _githubConnected = status.githubConnected;
       _githubLogin = status.githubLogin;
-      _includeLogin = true;
-      _step = AppStep.home;
+      _oauthAutoStart = false;
     });
-    await _refreshRecent();
+    _reposKey.currentState?.reload();
   }
 
-  void _openRepo(RepoItem repo, {required AppStep from}) {
+  void _openRepo(RepoItem repo) {
     _memory?.saveLastRepo(repo);
     _api.warmChatSession(repo.owner, repo.name).catchError((_) {});
     setState(() {
-      _lastRepo = repo;
-      _recent = _memory?.recentRepos() ?? _recent;
       _repo = repo;
-      _afterChat = from;
       _step = AppStep.chat;
     });
   }
 
-  void _backToHome() {
-    _api.cancelChat();
-    setState(() => _step = AppStep.home);
-  }
-
-  void _backToRepos() {
-    _api.cancelChat();
-    setState(() => _step = AppStep.repos);
-  }
-
   void _backFromChat() {
-    if (_afterChat == AppStep.repos) {
-      _backToRepos();
-    } else {
-      _backToHome();
-    }
-  }
-
-  void _backToLogin() {
+    _api.cancelChat();
     setState(() {
-      _loginAutoStart = false;
-      _includeLogin = true;
-      _loginGen += 1;
-      _step = AppStep.login;
+      _step = AppStep.repos;
+      _lastRepo = _memory?.lastRepo();
     });
   }
 
@@ -183,13 +133,6 @@ class ShellPageState extends State<ShellPage> {
     }
     if (_step == AppStep.repos) {
       if (_reposKey.currentState?.consumeBack() == true) return true;
-      _backToHome();
-      return true;
-    }
-    if (_step == AppStep.home) {
-      if (_homeKey.currentState?.consumeBack() == true) return true;
-      _backToLogin();
-      return true;
     }
     return false;
   }
@@ -222,43 +165,20 @@ class ShellPageState extends State<ShellPage> {
       ];
     }
     return [
-      if (_includeLogin || _step == AppStep.login)
-        MaterialPage<void>(
-          key: ValueKey('login-$_loginGen'),
-          name: 'login',
-          child: _fit(LoginPage(
-            api: _api,
-            onReady: _afterLogin,
-            autoStart: _loginAutoStart,
-          )),
-        ),
-      if (_step == AppStep.home || _step == AppStep.repos || _step == AppStep.chat)
-        MaterialPage<void>(
-          key: const ValueKey('home'),
-          name: 'home',
-          child: _fit(HomePage(
-            key: _homeKey,
-            api: _api,
-            githubLogin: _githubLogin,
-            lastRepo: _lastRepo,
-            recent: _recent,
-            onOpen: (repo) => _openRepo(repo, from: AppStep.home),
-            onBrowse: () => setState(() => _step = AppStep.repos),
-            onBack: _backToLogin,
-          )),
-        ),
-      if (_step == AppStep.repos || (_step == AppStep.chat && _afterChat == AppStep.repos))
-        MaterialPage<void>(
-          key: const ValueKey('repos'),
-          name: 'repos',
-          child: _fit(ReposPage(
-            key: _reposKey,
-            api: _api,
-            githubLogin: _githubLogin,
-            onOpen: (repo) => _openRepo(repo, from: AppStep.repos),
-            onBack: _backToHome,
-          )),
-        ),
+      MaterialPage<void>(
+        key: ValueKey('repos-$_githubConnected-$_githubLogin'),
+        name: 'repos',
+        child: _fit(ReposPage(
+          key: _reposKey,
+          api: _api,
+          githubConnected: _githubConnected,
+          githubLogin: _githubLogin,
+          autoStartOAuth: _oauthAutoStart,
+          lastRepo: _lastRepo,
+          onAuthorized: _onAuthorized,
+          onOpen: _openRepo,
+        )),
+      ),
       if (_step == AppStep.chat && _repo != null)
         MaterialPage<void>(
           key: ValueKey('chat-${_repo!.fullName}'),
@@ -276,24 +196,20 @@ class ShellPageState extends State<ShellPage> {
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: _step == AppStep.login || _step == AppStep.boot,
+      canPop: _step == AppStep.boot || _step == AppStep.repos,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
         _handlePop();
       },
       child: SizedBox.expand(
         child: Navigator(
-        pages: _pages(),
-        onDidRemovePage: (page) {
-          final name = page.name;
-          if (name == 'chat' && _step == AppStep.chat) {
-            _backFromChat();
-          } else if (name == 'repos' && (_step == AppStep.repos || _step == AppStep.chat)) {
-            _backToHome();
-          } else if (name == 'home' && _step != AppStep.login && _step != AppStep.boot) {
-            _backToLogin();
-          }
-        },
+          pages: _pages(),
+          onDidRemovePage: (page) {
+            final name = page.name;
+            if (name == 'chat' && _step == AppStep.chat) {
+              _backFromChat();
+            }
+          },
         ),
       ),
     );

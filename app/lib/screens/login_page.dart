@@ -20,6 +20,8 @@ class LoginPage extends StatefulWidget {
     this.error = '',
     this.openUrl,
     this.autoStart = true,
+    this.onCancel,
+    this.reauth = false,
   });
 
   final WenxiangApi api;
@@ -27,6 +29,8 @@ class LoginPage extends StatefulWidget {
   final String error;
   final OpenUrl? openUrl;
   final bool autoStart;
+  final VoidCallback? onCancel;
+  final bool reauth;
 
   @override
   State<LoginPage> createState() => _LoginPageState();
@@ -147,7 +151,17 @@ class _LoginPageState extends State<LoginPage> {
             child: ListView(
               padding: Wx.pagePadding,
               children: [
-                const SizedBox(height: 20),
+                if (widget.onCancel != null)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: IconButton(
+                      tooltip: '返回仓库',
+                      onPressed: widget.onCancel,
+                      icon: const Icon(Icons.close),
+                    ),
+                  )
+                else
+                  const SizedBox(height: 20),
                 const Align(
                   alignment: Alignment.centerLeft,
                   child: WxMark(size: 40),
@@ -156,9 +170,11 @@ class _LoginPageState extends State<LoginPage> {
                 Text('问象', style: Theme.of(context).textTheme.displaySmall),
                 const SizedBox(height: 10),
                 Text(
-                  _phase == _LoginPhase.idle
-                      ? '已经登录过。只有要换账号时，才需要再走一遍 GitHub。'
-                      : '打开即用本机仓库问进度。接下来会在浏览器登录 GitHub。',
+                  widget.reauth
+                      ? '换 GitHub 账号后，会重新读取你有权限的仓库。'
+                      : _phase == _LoginPhase.idle
+                          ? '已经登录过。只有要换账号时，才需要再走一遍 GitHub。'
+                          : '打开即用本机仓库问进度。接下来会在浏览器登录 GitHub。',
                   style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                         color: Wx.muted,
                         height: 1.55,

@@ -78,6 +78,7 @@ class _ChatPageState extends State<ChatPage> {
   bool _userScrolledAwayFromBottom = false;
   bool _pendingNewBelow = false;
   bool _autoFollowing = false;
+  bool _preparingChat = true;
 
   static const _scrollBottomThreshold = 80.0;
 
@@ -99,7 +100,9 @@ class _ChatPageState extends State<ChatPage> {
     widget.api
         .warmChatSession(widget.repo.owner, widget.repo.name)
         .catchError((_) {});
-    _loadSessions();
+    _loadSessions().whenComplete(() {
+      if (mounted) setState(() => _preparingChat = false);
+    });
     _loadVoice();
     _voiceHoldTipVisible = !(widget.memory?.voiceHoldTipDismissed() ?? false);
     _scroll.addListener(_onScrollPosition);
@@ -717,8 +720,10 @@ class _ChatPageState extends State<ChatPage> {
         : session.title;
     final itemCount = _messages.length + (_live ? 1 : 0);
     return Scaffold(
-      body: Column(
+      body: Stack(
         children: [
+          Column(
+            children: [
           WxPageHeader(
             onBack: () {
               _stop();
@@ -730,12 +735,12 @@ class _ChatPageState extends State<ChatPage> {
             trailing: [
               IconButton(
                 tooltip: '新建会话',
-                onPressed: _busy ? null : _newSession,
+                onPressed: _busy || _preparingChat ? null : _newSession,
                 icon: const Icon(Icons.add_comment_outlined),
               ),
               IconButton(
                 tooltip: '历史会话',
-                onPressed: _openSessions,
+                onPressed: _preparingChat ? null : _openSessions,
                 icon: const Icon(Icons.history),
               ),
             ],
@@ -747,7 +752,7 @@ class _ChatPageState extends State<ChatPage> {
               children: [
                 itemCount == 0
                     ? _EmptyChat(
-                        onPick: _busy ? null : _send,
+                        onPick: _busy || _preparingChat ? null : _send,
                       )
                     : NotificationListener<ScrollNotification>(
                         onNotification: _onChatScrollNotification,
@@ -797,6 +802,7 @@ class _ChatPageState extends State<ChatPage> {
             controller: _input,
             focus: _focus,
             busy: _busy,
+            preparing: _preparingChat,
             voiceReady: _voiceReady,
             voiceInputMode: _voiceInputMode,
             holding: _holding || _holdPending,
@@ -812,6 +818,15 @@ class _ChatPageState extends State<ChatPage> {
             onSend: _send,
             onStop: _stop,
           ),
+            ],
+          ),
+          if (_preparingChat)
+            const ColoredBox(
+              color: Color(0x990C0D0F),
+              child: Center(
+                child: WxBusy(label: '正在准备对话…'),
+              ),
+            ),
         ],
       ),
     );
@@ -1252,6 +1267,7 @@ class _Composer extends StatelessWidget {
     required this.controller,
     required this.focus,
     required this.busy,
+    this.preparing = false,
     required this.voiceReady,
     required this.voiceInputMode,
     required this.holding,
@@ -1271,6 +1287,7 @@ class _Composer extends StatelessWidget {
   final TextEditingController controller;
   final FocusNode focus;
   final bool busy;
+  final bool preparing;
   final bool voiceReady;
   final bool voiceInputMode;
   final bool holding;
@@ -1288,7 +1305,8 @@ class _Composer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final voiceLocked = busy || sttBusy;
+    final voiceLocked = busy || preparing || sttBusy;
+    final inputLocked = busy || preparing;
     return ColoredBox(
       color: Wx.bg,
       child: SafeArea(
@@ -1348,10 +1366,15 @@ class _Composer extends StatelessWidget {
                             maxLines: 6,
                             textInputAction: TextInputAction.send,
                             onSubmitted: (_) {
-                              if (!busy) onSend();
+                              if (!inputLocked) onSend();
                             },
+                            enabled: !preparing,
                             decoration: InputDecoration(
-                              hintText: busy ? '生成中，可先写下一条' : '问进度，像在 Cursor 里一样',
+                              hintText: preparing
+                                  ? '正在准备对话…'
+                                  : busy
+                                      ? '生成中，可先写下一条'
+                                      : '问进度，像在 Cursor 里一样',
                               filled: true,
                               fillColor: Wx.surface,
                             ),
@@ -1369,7 +1392,7 @@ class _Composer extends StatelessWidget {
                           )
                         : IconButton.filled(
                             tooltip: '发送',
-                            onPressed: voiceInputMode ? null : onSend,
+                            onPressed: voiceInputMode || preparing ? null : onSend,
                             icon: const Icon(Icons.arrow_upward, size: 20),
                           ),
                   ),
@@ -1381,6 +1404,7 @@ class _Composer extends StatelessWidget {
                   !holding &&
                   !sttBusy &&
                   !busy &&
+                  !preparing &&
                   holdHint.isEmpty)
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
