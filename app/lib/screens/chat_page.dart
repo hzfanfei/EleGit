@@ -58,6 +58,8 @@ class _ChatPageState extends State<ChatPage> {
   final ValueNotifier<String?> _liveEngine = ValueNotifier(null);
   final ValueNotifier<String> _livePhase = ValueNotifier('connect');
   Timer? _livePhaseTimer;
+  Timer? _streamScrollTimer;
+  double _lastFollowExtent = -1;
   String? _sessionId;
   bool _live = false;
   bool _busy = false;
@@ -101,7 +103,7 @@ class _ChatPageState extends State<ChatPage> {
     super.initState();
     _typewriter = WxTypewriterStream(
       onReveal: () {
-        if (mounted && _live) _jumpToLatest();
+        if (mounted && _live) _followTypewriterTail();
       },
     );
     _restoreLocal();
@@ -136,10 +138,37 @@ class _ChatPageState extends State<ChatPage> {
     return false;
   }
 
+  void _cancelStreamScrollFollow() {
+    _streamScrollTimer?.cancel();
+    _streamScrollTimer = null;
+    _lastFollowExtent = -1;
+  }
+
+  /// While typewriter ticks, avoid stacked [animateTo] calls (they jitter short lists).
+  void _followTypewriterTail() {
+    if (_userScrolledAwayFromBottom || !_nearBottom) {
+      if (!_pendingNewBelow) setState(() => _pendingNewBelow = true);
+      return;
+    }
+    _streamScrollTimer?.cancel();
+    _streamScrollTimer = Timer(const Duration(milliseconds: 48), () {
+      if (!mounted || !_scroll.hasClients) return;
+      final pos = _scroll.position;
+      final target = pos.maxScrollExtent;
+      if (target <= 0) return;
+      if ((target - _lastFollowExtent).abs() < 0.5 && _nearBottom) return;
+      _lastFollowExtent = target;
+      _autoFollowing = true;
+      pos.jumpTo(target);
+      _autoFollowing = false;
+    });
+  }
+
   void _jumpToLatest({bool force = false}) {
     if (force) {
       _userScrolledAwayFromBottom = false;
       _pendingNewBelow = false;
+      _cancelStreamScrollFollow();
     } else if (_userScrolledAwayFromBottom || !_nearBottom) {
       if (_live || _busy) {
         if (!_pendingNewBelow) setState(() => _pendingNewBelow = true);
@@ -148,13 +177,20 @@ class _ChatPageState extends State<ChatPage> {
     }
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!_scroll.hasClients || !mounted) return;
+      final pos = _scroll.position;
+      final target = pos.maxScrollExtent;
+      if (target <= 0) return;
       _autoFollowing = true;
       try {
-        await _scroll.animateTo(
-          _scroll.position.maxScrollExtent + _scrollBottomThreshold,
-          duration: const Duration(milliseconds: 140),
-          curve: Curves.easeOutCubic,
-        );
+        if (_live) {
+          pos.jumpTo(target);
+        } else {
+          await pos.animateTo(
+            target,
+            duration: const Duration(milliseconds: 140),
+            curve: Curves.easeOutCubic,
+          );
+        }
       } finally {
         _autoFollowing = false;
       }
@@ -599,6 +635,7 @@ class _ChatPageState extends State<ChatPage> {
     _input.clear();
     _lastUser = text;
     HapticFeedback.selectionClick();
+    _cancelStreamScrollFollow();
     _typewriter.reset();
     _liveEngine.value = null;
     _livePhase.value = 'connect';
@@ -698,6 +735,7 @@ class _ChatPageState extends State<ChatPage> {
       await _persist();
     } finally {
       _stopLivePhaseFallback();
+      _cancelStreamScrollFollow();
       if (mounted) {
         setState(() {
           _busy = false;
@@ -806,6 +844,7 @@ class _ChatPageState extends State<ChatPage> {
     _scroll.removeListener(_onScrollPosition);
     _scroll.dispose();
     _stopLivePhaseFallback();
+    _cancelStreamScrollFollow();
     _typewriter.dispose();
     _liveEngine.dispose();
     _livePhase.dispose();
@@ -1212,6 +1251,24 @@ class _FinishedTurn extends StatelessWidget {
   }
 }
 
+/// Plain text while streaming — avoids markdown relayout jitter before the turn finishes.
+class _StreamingAssistantText extends StatelessWidget {
+  const _StreamingAssistantText(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+            color: Wx.text,
+            height: 1.55,
+          ),
+    );
+  }
+}
+
 String _livePhaseLabel(String phase) {
   switch (phase) {
     case 'repo':
@@ -1279,7 +1336,7 @@ class _LiveTurn extends StatelessWidget {
           return Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Expanded(child: WxReadableText(value)),
+              Expanded(child: _StreamingAssistantText(value)),
               const Padding(
                 padding: EdgeInsets.only(left: 2, bottom: 3),
                 child: _Caret(),
