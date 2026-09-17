@@ -75,6 +75,11 @@ class _ChatPageState extends State<ChatPage> {
   StreamSubscription<Uint8List>? _micSub;
   double _holdStartY = 0;
   bool _voiceHoldTipVisible = true;
+  bool _userScrolledAwayFromBottom = false;
+  bool _pendingNewBelow = false;
+  bool _autoFollowing = false;
+
+  static const _scrollBottomThreshold = 80.0;
 
   List<ChatMessage> get _messages =>
       _transcripts.putIfAbsent(_sessionId ?? '', () => <ChatMessage>[]);
@@ -94,6 +99,52 @@ class _ChatPageState extends State<ChatPage> {
     _loadSessions();
     _loadVoice();
     _voiceHoldTipVisible = !(widget.memory?.voiceHoldTipDismissed() ?? false);
+    _scroll.addListener(_onScrollPosition);
+  }
+
+  void _onScrollPosition() {
+    if (!_scroll.hasClients || !mounted || _autoFollowing) return;
+    if (_nearBottom && (_userScrolledAwayFromBottom || _pendingNewBelow)) {
+      setState(() {
+        _userScrolledAwayFromBottom = false;
+        _pendingNewBelow = false;
+      });
+    }
+  }
+
+  bool _onChatScrollNotification(ScrollNotification notification) {
+    if (_autoFollowing) return false;
+    if (notification is ScrollUpdateNotification && notification.dragDetails != null) {
+      if (!_nearBottom && !_userScrolledAwayFromBottom) {
+        setState(() => _userScrolledAwayFromBottom = true);
+      }
+    }
+    return false;
+  }
+
+  void _jumpToLatest({bool force = false}) {
+    if (force) {
+      _userScrolledAwayFromBottom = false;
+      _pendingNewBelow = false;
+    } else if (_userScrolledAwayFromBottom || !_nearBottom) {
+      if (_live || _busy) {
+        if (!_pendingNewBelow) setState(() => _pendingNewBelow = true);
+      }
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!_scroll.hasClients || !mounted) return;
+      _autoFollowing = true;
+      try {
+        await _scroll.animateTo(
+          _scroll.position.maxScrollExtent + _scrollBottomThreshold,
+          duration: const Duration(milliseconds: 140),
+          curve: Curves.easeOutCubic,
+        );
+      } finally {
+        _autoFollowing = false;
+      }
+    });
   }
 
   Future<void> _loadVoice() async {
@@ -480,7 +531,7 @@ class _ChatPageState extends State<ChatPage> {
       _live = true;
       _busy = true;
     });
-    _jump(force: true);
+    _jumpToLatest(force: true);
 
     final history = _messages.where((m) => m.role != 'error').toList();
 
@@ -498,7 +549,7 @@ class _ChatPageState extends State<ChatPage> {
         }
         if (event.type == 'delta' && event.text.isNotEmpty) {
           _liveText.value += event.text;
-          _jump();
+          _jumpToLatest();
         } else if (event.type == 'start' && event.engine != null) {
           _liveEngine.value = event.engine;
         } else if (event.type == 'done') {
@@ -557,7 +608,7 @@ class _ChatPageState extends State<ChatPage> {
           _live = false;
         });
       }
-      _jump();
+      _jumpToLatest();
     }
   }
 
@@ -569,19 +620,7 @@ class _ChatPageState extends State<ChatPage> {
   bool get _nearBottom {
     if (!_scroll.hasClients) return true;
     final pos = _scroll.position;
-    return pos.pixels >= pos.maxScrollExtent - 96;
-  }
-
-  void _jump({bool force = false}) {
-    if (!force && !_nearBottom) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scroll.hasClients) return;
-      _scroll.animateTo(
-        _scroll.position.maxScrollExtent + 80,
-        duration: const Duration(milliseconds: 140),
-        curve: Curves.easeOutCubic,
-      );
-    });
+    return pos.pixels >= pos.maxScrollExtent - _scrollBottomThreshold;
   }
 
   Future<void> _openSessions() async {
@@ -652,6 +691,7 @@ class _ChatPageState extends State<ChatPage> {
     _media?.dispose();
     _input.dispose();
     _focus.dispose();
+    _scroll.removeListener(_onScrollPosition);
     _scroll.dispose();
     _liveText.dispose();
     _liveEngine.dispose();
@@ -691,15 +731,21 @@ class _ChatPageState extends State<ChatPage> {
           ),
           const WxHairline(),
           Expanded(
-            child: itemCount == 0
-                ? _EmptyChat(
-                    onPick: _busy ? null : _send,
-                  )
-                : ListView.builder(
-                    controller: _scroll,
-                    padding: const EdgeInsets.fromLTRB(Wx.inset, 20, Wx.inset, 16),
-                    itemCount: itemCount,
-                    itemBuilder: (context, index) {
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                itemCount == 0
+                    ? _EmptyChat(
+                        onPick: _busy ? null : _send,
+                      )
+                    : NotificationListener<ScrollNotification>(
+                        onNotification: _onChatScrollNotification,
+                        child: ListView.builder(
+                          key: const Key('wx-chat-list'),
+                          controller: _scroll,
+                          padding: const EdgeInsets.fromLTRB(Wx.inset, 20, Wx.inset, 16),
+                          itemCount: itemCount,
+                          itemBuilder: (context, index) {
                       if (index < _messages.length) {
                         final message = _messages[index];
                         return _FinishedTurn(
@@ -721,7 +767,19 @@ class _ChatPageState extends State<ChatPage> {
                         engine: _liveEngine,
                       );
                     },
+                        ),
+                      ),
+                if (_pendingNewBelow && itemCount > 0)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 10,
+                    child: Center(
+                      child: _NewMessagesPill(onTap: () => _jumpToLatest(force: true)),
+                    ),
                   ),
+              ],
+            ),
           ),
           const WxHairline(),
           _Composer(
@@ -1323,6 +1381,48 @@ class _Composer extends StatelessWidget {
                         ),
                   ),
                 ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _NewMessagesPill extends StatelessWidget {
+  const _NewMessagesPill({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Wx.raised,
+      elevation: 0,
+      shadowColor: Colors.transparent,
+      borderRadius: BorderRadius.circular(20),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
+          key: const Key('wx-new-messages-pill'),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Wx.hairline),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '新消息',
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: Wx.text,
+                      fontWeight: FontWeight.w600,
+                    ),
+              ),
+              const SizedBox(width: 4),
+              Icon(Icons.south, size: 16, color: Wx.accent),
             ],
           ),
         ),
