@@ -23,7 +23,12 @@ rl.on("line", (line) => {
     });
     return;
   }
-  if (msg.method === "authenticate" || msg.method === "session/set_mode") {
+  if (
+    msg.method === "authenticate" ||
+    msg.method === "session/set_mode" ||
+    msg.method === "session/set_config_option" ||
+    msg.method === "session/set_model"
+  ) {
     reply({});
     return;
   }

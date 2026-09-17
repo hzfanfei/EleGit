@@ -145,6 +145,43 @@ void main() {
     expect(find.text('历史会话'), findsOneWidget);
   });
 
+  testWidgets('editing a sent user turn forks from there like AI chat', (tester) async {
+    final api = FakeWenxiangApi();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: ChatPage(
+          api: api,
+          repo: sampleRepo(),
+          onBack: () {},
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.text('这个仓库最近在做什么？'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('最近在修登录'), findsOneWidget);
+    expect(find.byTooltip('编辑'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('编辑'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('wx-edit-field')), findsOneWidget);
+    expect(find.text('取消'), findsOneWidget);
+
+    await tester.enterText(find.byKey(const Key('wx-edit-field')), 'README 里怎么写的？');
+    await tester.tap(find.text('发送'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('README 里怎么写的？'), findsWidgets);
+    expect(find.text('这个仓库最近在做什么？'), findsNothing);
+    expect(find.textContaining('最近在修登录'), findsNothing);
+    expect(find.textContaining('README 说先跑'), findsOneWidget);
+    expect(api.lastChatMessage, 'README 里怎么写的？');
+    expect(api.createSessionCalls, greaterThan(0));
+    expect(api.lastSessionId, isNot('s1'));
+  });
+
   testWidgets('composer stays typable while a reply is streaming', (tester) async {
     await tester.pumpWidget(
       MaterialApp(

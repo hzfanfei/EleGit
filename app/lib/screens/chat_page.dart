@@ -56,6 +56,7 @@ class _ChatPageState extends State<ChatPage> {
   String? _sessionId;
   bool _live = false;
   bool _busy = false;
+  int? _editingIndex;
   String? _lastUser;
   bool _voiceReady = false;
   String _voiceHint = '还没配语音密钥';
@@ -320,6 +321,7 @@ class _ChatPageState extends State<ChatPage> {
         _sessionId = created.id;
         _transcripts[created.id] = [];
         _live = false;
+        _editingIndex = null;
       });
       _liveText.value = '';
       _liveEngine.value = null;
@@ -337,6 +339,7 @@ class _ChatPageState extends State<ChatPage> {
     setState(() {
       _sessionId = session.id;
       _live = false;
+      _editingIndex = null;
     });
     _liveText.value = '';
     _liveEngine.value = null;
@@ -391,9 +394,46 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
+  void _beginEdit(int index) {
+    if (_busy || _live) return;
+    setState(() => _editingIndex = index);
+  }
+
+  void _cancelEdit() {
+    if (_editingIndex == null) return;
+    setState(() => _editingIndex = null);
+  }
+
+  Future<void> _commitEdit(int index, String text) async {
+    final next = text.trim();
+    if (next.isEmpty || _busy) return;
+    final prefix = List<ChatMessage>.from(_messages.take(index));
+    try {
+      final created = await widget.api.createSession(widget.repo.owner, widget.repo.name);
+      if (!mounted) return;
+      setState(() {
+        _editingIndex = null;
+        _sessions.insert(0, created);
+        _sessionId = created.id;
+        _transcripts[created.id] = prefix;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _editingIndex = null;
+        _messages
+          ..clear()
+          ..addAll(prefix);
+      });
+    }
+    await _persist();
+    await _send(next);
+  }
+
   Future<void> _send([String? preset]) async {
     final text = (preset ?? _input.text).trim();
     if (text.isEmpty || _busy) return;
+    _editingIndex = null;
     _input.clear();
     _lastUser = text;
     HapticFeedback.selectionClick();
@@ -629,6 +669,12 @@ class _ChatPageState extends State<ChatPage> {
                         return _FinishedTurn(
                           key: ValueKey('m-$index-${message.role}'),
                           message: message,
+                          editing: _editingIndex == index,
+                          onEdit: message.role == 'user' && !_busy && !_live
+                              ? () => _beginEdit(index)
+                              : null,
+                          onCancelEdit: _cancelEdit,
+                          onSubmitEdit: (text) => _commitEdit(index, text),
                           onRetry: message.role == 'error' && _lastUser != null && !_busy
                               ? () => _send(_lastUser)
                               : null,
@@ -787,27 +833,125 @@ class _SuggestRow extends StatelessWidget {
   }
 }
 
-class _FinishedTurn extends StatelessWidget {
-  const _FinishedTurn({super.key, required this.message, this.onRetry});
+class _EditableUserTurn extends StatefulWidget {
+  const _EditableUserTurn({
+    required this.message,
+    required this.editing,
+    this.onEdit,
+    this.onCancel,
+    this.onSubmit,
+  });
+
   final ChatMessage message;
+  final bool editing;
+  final VoidCallback? onEdit;
+  final VoidCallback? onCancel;
+  final Future<void> Function(String text)? onSubmit;
+
+  @override
+  State<_EditableUserTurn> createState() => _EditableUserTurnState();
+}
+
+class _EditableUserTurnState extends State<_EditableUserTurn> {
+  late final TextEditingController _edit = TextEditingController(text: widget.message.content);
+
+  @override
+  void didUpdateWidget(covariant _EditableUserTurn oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.editing && !oldWidget.editing) {
+      _edit.text = widget.message.content;
+      _edit.selection = TextSelection.fromPosition(TextPosition(offset: _edit.text.length));
+    }
+  }
+
+  @override
+  void dispose() {
+    _edit.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _VoiceTurn(
+      voice: '你问',
+      voiceColor: Wx.accent,
+      railColor: Wx.accent,
+      railWidth: 3,
+      bottom: 20,
+      trailing: widget.editing || widget.onEdit == null
+          ? null
+          : IconButton(
+              tooltip: '编辑',
+              visualDensity: VisualDensity.compact,
+              onPressed: widget.onEdit,
+              icon: const Icon(Icons.edit_outlined, size: 18),
+            ),
+      child: widget.editing
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                TextField(
+                  key: const Key('wx-edit-field'),
+                  controller: _edit,
+                  minLines: 1,
+                  maxLines: 8,
+                  autofocus: true,
+                  textInputAction: TextInputAction.newline,
+                  decoration: const InputDecoration(
+                    filled: true,
+                    fillColor: Wx.surface,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    TextButton(onPressed: widget.onCancel, child: const Text('取消')),
+                    const Spacer(),
+                    FilledButton(
+                      onPressed: () => widget.onSubmit?.call(_edit.text),
+                      child: const Text('发送'),
+                    ),
+                  ],
+                ),
+              ],
+            )
+          : SelectableText(
+              widget.message.content,
+              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                    color: Wx.text,
+                    height: 1.5,
+                  ),
+            ),
+    );
+  }
+}
+
+class _FinishedTurn extends StatelessWidget {
+  const _FinishedTurn({
+    super.key,
+    required this.message,
+    this.editing = false,
+    this.onEdit,
+    this.onCancelEdit,
+    this.onSubmitEdit,
+    this.onRetry,
+  });
+  final ChatMessage message;
+  final bool editing;
+  final VoidCallback? onEdit;
+  final VoidCallback? onCancelEdit;
+  final Future<void> Function(String text)? onSubmitEdit;
   final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) {
     if (message.role == 'user') {
-      return _VoiceTurn(
-        voice: '你问',
-        voiceColor: Wx.accent,
-        railColor: Wx.accent,
-        railWidth: 3,
-        bottom: 20,
-        child: SelectableText(
-          message.content,
-          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                color: Wx.text,
-                height: 1.5,
-              ),
-        ),
+      return _EditableUserTurn(
+        message: message,
+        editing: editing,
+        onEdit: onEdit,
+        onCancel: onCancelEdit,
+        onSubmit: onSubmitEdit,
       );
     }
     if (message.role == 'error') {
@@ -898,6 +1042,7 @@ class _VoiceTurn extends StatelessWidget {
     required this.railWidth,
     required this.child,
     this.footer,
+    this.trailing,
     this.bottom = 24,
   });
 
@@ -907,6 +1052,7 @@ class _VoiceTurn extends StatelessWidget {
   final double railWidth;
   final Widget child;
   final Widget? footer;
+  final Widget? trailing;
   final double bottom;
 
   @override
@@ -927,14 +1073,21 @@ class _VoiceTurn extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    voice,
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: voiceColor,
-                          fontSize: ask ? 12 : 13,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: ask ? 0.4 : 0.8,
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          voice,
+                          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                color: voiceColor,
+                                fontSize: ask ? 12 : 13,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: ask ? 0.4 : 0.8,
+                              ),
                         ),
+                      ),
+                      if (trailing != null) trailing!,
+                    ],
                   ),
                   const SizedBox(height: 8),
                   child,

@@ -11,6 +11,17 @@ const ACP_CANDIDATES = [
 
 const WRITE_TOOL = /edit|write|delete|move|apply_patch|overwrite|commit/i;
 
+export const DEFAULT_ACP_MODEL = "composer-2.5";
+
+export function acpModelId() {
+  const raw = String(process.env.WENXIANG_CURSOR_MODEL || process.env.CURSOR_MODEL || DEFAULT_ACP_MODEL).trim();
+  return raw || DEFAULT_ACP_MODEL;
+}
+
+function modelArgs() {
+  return ["--model", acpModelId()];
+}
+
 export function resolveAgentCommand() {
   for (const candidate of ACP_CANDIDATES) {
     const resolved = whichSync(candidate.bin);
@@ -19,8 +30,9 @@ export function resolveAgentCommand() {
         id: "acp",
         bin: candidate.bin,
         path: resolved,
-        args: [...authArgs(), ...candidate.args],
+        args: [...authArgs(), ...modelArgs(), ...candidate.args],
         mode: "ask",
+        model: acpModelId(),
         transport: "stdio",
       };
     }
@@ -128,6 +140,7 @@ export class AcpChannel {
         clientCapabilities: {
           fs: { readTextFile: false, writeTextFile: false },
           terminal: false,
+          _meta: { parameterizedModelPicker: true },
         },
         clientInfo: { name: "wenxiang", version: "0.1.0" },
       });
@@ -156,6 +169,7 @@ export class AcpChannel {
           // Stay on the default mode; write tools are still rejected.
         }
       }
+      await this._applyModel(created);
       this.alive = true;
       this._touch();
       return this.sessionId;
@@ -182,6 +196,29 @@ export class AcpChannel {
     } finally {
       this.onDelta = null;
       this._touch();
+    }
+  }
+
+  async _applyModel(created) {
+    const model = this.command?.model || acpModelId();
+    const options = created?.configOptions || [];
+    const modelOpt = options.find((opt) => opt.category === "model" || opt.configId === "model");
+    const configId = modelOpt?.configId || "model";
+    try {
+      await this.request("session/set_config_option", {
+        sessionId: this.sessionId,
+        configId,
+        value: model,
+      });
+    } catch {
+      try {
+        await this.request("session/set_model", {
+          sessionId: this.sessionId,
+          modelId: model,
+        });
+      } catch {
+        // Startup --model is the reliable pin.
+      }
     }
   }
 

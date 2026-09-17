@@ -5,6 +5,8 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   AcpChannel,
+  DEFAULT_ACP_MODEL,
+  acpModelId,
   buildAcpPrompt,
   createSessionStore,
   selectPermissionOption,
@@ -12,6 +14,22 @@ import {
 import { whichSync } from "../src/which.js";
 
 const fakeAcp = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures", "fake-acp.js");
+
+describe("acpModelId", () => {
+  it("defaults to composer-2.5", () => {
+    const prev = process.env.WENXIANG_CURSOR_MODEL;
+    const prev2 = process.env.CURSOR_MODEL;
+    delete process.env.WENXIANG_CURSOR_MODEL;
+    delete process.env.CURSOR_MODEL;
+    try {
+      assert.equal(acpModelId(), "composer-2.5");
+      assert.equal(DEFAULT_ACP_MODEL, "composer-2.5");
+    } finally {
+      if (prev !== undefined) process.env.WENXIANG_CURSOR_MODEL = prev;
+      if (prev2 !== undefined) process.env.CURSOR_MODEL = prev2;
+    }
+  });
+});
 
 describe("whichSync", () => {
   it("resolves node from PATH on this machine", () => {

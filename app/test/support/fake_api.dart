@@ -40,6 +40,7 @@ class FakeWenxiangApi extends WenxiangApi {
   int cancelCheckoutCalls = 0;
   int cancelChatCalls = 0;
   String? lastSessionId;
+  String? lastChatMessage;
   int createSessionCalls = 0;
   final List<ChatSession> sessions = [
     ChatSession(
@@ -162,6 +163,7 @@ class FakeWenxiangApi extends WenxiangApi {
     String? sessionId,
   }) async* {
     lastSessionId = sessionId;
+    lastChatMessage = message;
     if (streamThrows != null) throw streamThrows!;
     if (streamDelay > Duration.zero) {
       await Future<void>.delayed(streamDelay);
@@ -170,7 +172,10 @@ class FakeWenxiangApi extends WenxiangApi {
     for (final event in streamEvents ??
         [
           ChatStreamEvent(type: 'start', engine: 'local-progress'),
-          ChatStreamEvent(type: 'delta', text: '最近在修登录。'),
+          ChatStreamEvent(
+            type: 'delta',
+            text: message.contains('README') ? 'README 说先跑 flutter run。' : '最近在修登录。',
+          ),
           ChatStreamEvent(type: 'done', engine: 'local-progress', sessionId: sessionId ?? 's1'),
         ]) {
       if (streamPace > Duration.zero) {

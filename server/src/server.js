@@ -159,6 +159,7 @@ app.get("/v1/status", (_req, res) => {
       available: Boolean(cursor),
       engine: cursor?.id || null,
       mode: cursor?.mode || null,
+      model: cursor?.model || null,
       transport: cursor?.transport || null,
       fallback: "local-progress",
     },
