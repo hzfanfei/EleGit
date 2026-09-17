@@ -16,6 +16,7 @@ import '../voice/voice_media.dart';
 import '../copy/voice_stt_copy.dart';
 import '../voice/voice_stt_client.dart';
 import '../widgets/wx_chrome.dart';
+import '../widgets/wx_hold_to_speak.dart';
 import '../widgets/wx_rich_text.dart';
 
 class ChatPage extends StatefulWidget {
@@ -73,6 +74,7 @@ class _ChatPageState extends State<ChatPage> {
   StreamSubscription<VoiceEvent>? _sttSub;
   StreamSubscription<Uint8List>? _micSub;
   double _holdStartY = 0;
+  bool _voiceHoldTipVisible = true;
 
   List<ChatMessage> get _messages =>
       _transcripts.putIfAbsent(_sessionId ?? '', () => <ChatMessage>[]);
@@ -91,6 +93,7 @@ class _ChatPageState extends State<ChatPage> {
     _restoreLocal();
     _loadSessions();
     _loadVoice();
+    _voiceHoldTipVisible = !(widget.memory?.voiceHoldTipDismissed() ?? false);
   }
 
   Future<void> _loadVoice() async {
@@ -236,6 +239,7 @@ class _ChatPageState extends State<ChatPage> {
         _holdHint = '';
       });
       if (text.isNotEmpty) {
+        unawaited(_dismissVoiceHoldTip());
         unawaited(_send(text));
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -264,6 +268,12 @@ class _ChatPageState extends State<ChatPage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
     );
+  }
+
+  Future<void> _dismissVoiceHoldTip() async {
+    if (!_voiceHoldTipVisible) return;
+    setState(() => _voiceHoldTipVisible = false);
+    await widget.memory?.dismissVoiceHoldTip();
   }
 
   void _disposeStt() {
@@ -725,6 +735,7 @@ class _ChatPageState extends State<ChatPage> {
             sttBusy: _sttBusy,
             holdLive: _holdLive,
             holdHint: _holdHint,
+            voiceHoldTipVisible: _voiceHoldTipVisible,
             onToggleVoiceInput: _toggleVoiceInput,
             onHoldStart: _beginHold,
             onHoldMove: _moveHold,
@@ -1179,6 +1190,7 @@ class _Composer extends StatelessWidget {
     required this.sttBusy,
     required this.holdLive,
     required this.holdHint,
+    required this.voiceHoldTipVisible,
     required this.onToggleVoiceInput,
     required this.onHoldStart,
     required this.onHoldMove,
@@ -1197,6 +1209,7 @@ class _Composer extends StatelessWidget {
   final bool sttBusy;
   final String holdLive;
   final String holdHint;
+  final bool voiceHoldTipVisible;
   final VoidCallback onToggleVoiceInput;
   final Future<void> Function(double globalY) onHoldStart;
   final void Function(double globalY) onHoldMove;
@@ -1219,15 +1232,10 @@ class _Composer extends StatelessWidget {
             children: [
               if ((holding || sttBusy) && holdLive.isNotEmpty)
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Text(
-                    holdLive,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: sttBusy ? Wx.text : Wx.muted,
-                          fontStyle: sttBusy ? FontStyle.normal : FontStyle.italic,
-                        ),
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: WxHoldLiveChip(
+                    text: holdLive,
+                    recognizing: sttBusy,
                   ),
                 ),
               Row(
@@ -1248,7 +1256,7 @@ class _Composer extends StatelessWidget {
                   ),
                   Expanded(
                     child: voiceInputMode
-                        ? _HoldToSpeakPad(
+                        ? WxHoldToSpeakPad(
                             enabled: voiceReady && !voiceLocked,
                             holding: holding,
                             holdCancel: holdCancel,
@@ -1298,112 +1306,25 @@ class _Composer extends StatelessWidget {
                   ),
                 ],
               ),
+              if (voiceInputMode &&
+                  voiceReady &&
+                  voiceHoldTipVisible &&
+                  !holding &&
+                  !sttBusy &&
+                  !busy &&
+                  holdHint.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    '松手自动发送，上滑取消',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: Wx.faint,
+                        ),
+                  ),
+                ),
             ],
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _HoldToSpeakPad extends StatefulWidget {
-  const _HoldToSpeakPad({
-    required this.enabled,
-    required this.holding,
-    required this.holdCancel,
-    required this.sttBusy,
-    required this.hint,
-    required this.onHoldStart,
-    required this.onHoldMove,
-    required this.onHoldEnd,
-  });
-
-  final bool enabled;
-  final bool holding;
-  final bool holdCancel;
-  final bool sttBusy;
-  final String hint;
-  final Future<void> Function(double globalY) onHoldStart;
-  final void Function(double globalY) onHoldMove;
-  final Future<void> Function() onHoldEnd;
-
-  @override
-  State<_HoldToSpeakPad> createState() => _HoldToSpeakPadState();
-}
-
-class _HoldToSpeakPadState extends State<_HoldToSpeakPad> {
-  bool _pointerActive = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final enabled = widget.enabled;
-    final holding = widget.holding;
-    final bg = !enabled
-        ? Wx.surface
-        : holding
-            ? (widget.holdCancel ? Wx.raised : Wx.accent.withValues(alpha: 0.14))
-            : Wx.surface;
-    return Listener(
-      key: const Key('wx-hold-speak'),
-      behavior: HitTestBehavior.opaque,
-      onPointerDown: enabled && !widget.sttBusy
-          ? (event) {
-              _pointerActive = true;
-              widget.onHoldStart(event.position.dy);
-            }
-          : null,
-      onPointerMove: enabled && _pointerActive
-          ? (event) {
-              widget.onHoldMove(event.position.dy);
-            }
-          : null,
-      onPointerUp: enabled && _pointerActive
-          ? (_) {
-              _pointerActive = false;
-              widget.onHoldEnd();
-            }
-          : null,
-      onPointerCancel: enabled && _pointerActive
-          ? (_) {
-              _pointerActive = false;
-              widget.onHoldEnd();
-            }
-          : null,
-      child: Container(
-        constraints: const BoxConstraints(minHeight: 48),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Wx.hairline),
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (widget.sttBusy) ...[
-              SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: enabled ? Wx.accent : Wx.faint,
-                ),
-              ),
-              const SizedBox(width: 10),
-            ],
-            Flexible(
-              child: Text(
-                widget.hint,
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      color: enabled ? Wx.text : Wx.faint,
-                      fontWeight: holding || widget.sttBusy ? FontWeight.w600 : FontWeight.w400,
-                    ),
-              ),
-            ),
-          ],
         ),
       ),
     );

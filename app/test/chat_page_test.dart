@@ -304,5 +304,6 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('按住 说话'), findsOneWidget);
     expect(find.byKey(const Key('wx-hold-speak')), findsOneWidget);
+    expect(find.text('松手自动发送，上滑取消'), findsOneWidget);
   });
 }

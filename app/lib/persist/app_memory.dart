@@ -13,8 +13,13 @@ class AppMemory {
   static const lastRepoKey = 'wx.lastRepo';
   static const githubLoginKey = 'wx.githubLogin';
   static const recentReposKey = 'wx.recentRepos';
+  static const voiceHoldTipDismissedKey = 'wx.voiceHoldTipDismissed';
 
   static String chatsKey(String fullName) => 'wx.chats.$fullName';
+
+  bool voiceHoldTipDismissed() => prefs.getBool(voiceHoldTipDismissedKey) ?? false;
+
+  Future<void> dismissVoiceHoldTip() => prefs.setBool(voiceHoldTipDismissedKey, true);
 
   RepoItem? lastRepo() {
     final raw = prefs.getString(lastRepoKey);
