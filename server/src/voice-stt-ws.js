@@ -12,6 +12,45 @@ export function isSttUpgrade(req) {
   }
 }
 
+/** @param {string[]} segments committed finals */
+export function composeSttDisplay(segments, partial) {
+  const head = segments.join("");
+  const tail = String(partial || "");
+  if (!head) return tail;
+  if (!tail) return head;
+  if (tail.startsWith(head)) return tail;
+  return head + tail;
+}
+
+export function adoptSttFinal(segments, finalChunk) {
+  const seg = String(finalChunk || "").trim();
+  if (!seg) return;
+  const head = segments.join("");
+  if (!head) {
+    segments.push(seg);
+    return;
+  }
+  if (seg.startsWith(head)) {
+    segments.length = 0;
+    segments.push(seg);
+    return;
+  }
+  if (head.includes(seg)) return;
+  segments.push(seg);
+}
+
+export function mergeSttPartial({ segments, partial, incoming, partialMode }) {
+  const chunk = String(incoming || "");
+  if (!chunk) return partial;
+  if (partialMode === "delta") {
+    return partial + chunk;
+  }
+  const head = segments.join("");
+  if (!head) return chunk;
+  if (chunk.startsWith(head)) return chunk.slice(head.length);
+  return chunk;
+}
+
 export function createSttSession({
   config,
   send,
@@ -19,9 +58,10 @@ export function createSttSession({
 } = {}) {
   let asr = null;
   let closed = false;
+  const segments = [];
   let partial = "";
-  let finalText = "";
   let stopping = null;
+  const partialMode = config?.provider === "openai" ? "delta" : "cumulative";
 
   function emit(msg) {
     if (closed) return;
@@ -44,16 +84,20 @@ export function createSttSession({
         emit({ type: "error", code: "unconfigured", hint: config.hint || "还没配语音密钥" });
         return;
       }
+      segments.length = 0;
       partial = "";
-      finalText = "";
       const providers = createProviders(config, {
+        pushToTalk: true,
         onPartial: (text) => {
-          partial = String(text || "");
-          if (partial) emit({ type: "caption", role: "user", text: partial, final: false });
+          partial = mergeSttPartial({ segments, partial, incoming: text, partialMode });
+          const display = composeSttDisplay(segments, partial);
+          if (display) emit({ type: "caption", role: "user", text: display, final: false });
         },
         onFinal: (text) => {
-          finalText = String(text || "");
-          if (finalText) emit({ type: "caption", role: "user", text: finalText, final: true });
+          adoptSttFinal(segments, text);
+          partial = "";
+          const display = composeSttDisplay(segments, partial);
+          if (display) emit({ type: "caption", role: "user", text: display, final: true });
         },
         onAsrError: (detail) => {
           const mapped = sttErrorFromFailure(detail?.err, detail?.message);
@@ -97,7 +141,7 @@ export function createSttSession({
           }
         }
         await new Promise((resolve) => setTimeout(resolve, 120));
-        const text = String(finalText || partial || "").trim();
+        const text = composeSttDisplay(segments, partial).trim();
         emit({ type: "done", text });
         cleanup();
       })();

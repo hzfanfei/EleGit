@@ -100,7 +100,7 @@ export function defaultAsrConfigPayload() {
       enable_ddc: true,
       result_type: "single",
       show_utterances: true,
-      end_window_size: 700,
+      end_window_size: 1800,
     },
   };
 }

@@ -18,6 +18,7 @@ import '../voice/voice_stt_client.dart';
 import '../widgets/wx_chrome.dart';
 import '../widgets/wx_hold_to_speak.dart';
 import '../widgets/wx_rich_text.dart';
+import '../widgets/wx_typewriter_stream.dart';
 
 class ChatPage extends StatefulWidget {
   const ChatPage({
@@ -53,7 +54,7 @@ class _ChatPageState extends State<ChatPage> {
   final _scroll = ScrollController();
   final Map<String, List<ChatMessage>> _transcripts = {};
   final List<ChatSession> _sessions = [];
-  final ValueNotifier<String> _liveText = ValueNotifier('');
+  late final WxTypewriterStream _typewriter;
   final ValueNotifier<String?> _liveEngine = ValueNotifier(null);
   final ValueNotifier<String> _livePhase = ValueNotifier('connect');
   Timer? _livePhaseTimer;
@@ -98,6 +99,11 @@ class _ChatPageState extends State<ChatPage> {
   @override
   void initState() {
     super.initState();
+    _typewriter = WxTypewriterStream(
+      onReveal: () {
+        if (mounted && _live) _jumpToLatest();
+      },
+    );
     _restoreLocal();
     widget.api
         .warmChatSession(widget.repo.owner, widget.repo.name)
@@ -378,7 +384,7 @@ class _ChatPageState extends State<ChatPage> {
     _livePhaseTimer?.cancel();
     final sentAt = DateTime.now();
     _livePhaseTimer = Timer.periodic(const Duration(milliseconds: 900), (timer) {
-      if (!mounted || !_live || _liveText.value.isNotEmpty) {
+      if (!mounted || !_live || _typewriter.visible.value.isNotEmpty) {
         timer.cancel();
         return;
       }
@@ -477,7 +483,7 @@ class _ChatPageState extends State<ChatPage> {
         _live = false;
         _editingIndex = null;
       });
-      _liveText.value = '';
+      _typewriter.reset();
       _liveEngine.value = null;
       _livePhase.value = 'connect';
       await _persist();
@@ -496,7 +502,7 @@ class _ChatPageState extends State<ChatPage> {
       _live = false;
       _editingIndex = null;
     });
-    _liveText.value = '';
+    _typewriter.reset();
     _liveEngine.value = null;
     _livePhase.value = 'connect';
     _persist();
@@ -515,7 +521,7 @@ class _ChatPageState extends State<ChatPage> {
         }
       });
       if (_sessionId == null || _sessions.isEmpty) {
-        _liveText.value = '';
+        _typewriter.reset();
         _liveEngine.value = null;
       }
       if (_sessions.isEmpty) await _newSession();
@@ -593,7 +599,7 @@ class _ChatPageState extends State<ChatPage> {
     _input.clear();
     _lastUser = text;
     HapticFeedback.selectionClick();
-    _liveText.value = '';
+    _typewriter.reset();
     _liveEngine.value = null;
     _livePhase.value = 'connect';
     _startLivePhaseFallback();
@@ -626,60 +632,69 @@ class _ChatPageState extends State<ChatPage> {
             firstDelta = false;
             HapticFeedback.lightImpact();
           }
-          _liveText.value += event.text;
-          _jumpToLatest();
+          _typewriter.push(event.text);
         } else if (event.type == 'start' && event.engine != null) {
           _liveEngine.value = event.engine;
           _setLivePhase('repo');
         } else if (event.type == 'done') {
           _liveEngine.value = event.engine ?? _liveEngine.value;
-          if (event.text.isNotEmpty && _liveText.value.isEmpty) {
-            _liveText.value = event.text;
+          if (event.text.isNotEmpty && _typewriter.fullText.isEmpty) {
+            _typewriter.push(event.text);
           }
         } else if (event.type == 'error') {
           throw ApiException(event.error ?? '问答失败');
         }
       }
       if (!mounted) return;
+      await _typewriter.animateToEnd();
+      if (!mounted) return;
+      final answer = _typewriter.fullText;
       setState(() {
         _messages.add(ChatMessage(
           role: 'assistant',
-          content: _liveText.value,
+          content: answer,
           engine: _liveEngine.value,
         ));
         _live = false;
       });
+      _typewriter.reset();
       await _persist();
       unawaited(_refreshCurrentSessionMeta());
     } on OperationCancelled {
       if (!mounted) return;
+      _typewriter.flushNow();
+      final partial = _typewriter.fullText;
       setState(() {
-        if (_liveText.value.isNotEmpty) {
+        if (partial.isNotEmpty) {
           _messages.add(ChatMessage(
             role: 'assistant',
-            content: _liveText.value,
+            content: partial,
             engine: _liveEngine.value,
           ));
         }
         _live = false;
       });
+      _typewriter.reset();
       await _persist();
     } catch (err) {
       if (!mounted) return;
+      _typewriter.flushNow();
+      final partial = _typewriter.fullText;
       final shown = humanizeError(err);
       setState(() {
-        if (_liveText.value.isEmpty) {
+        if (partial.isEmpty) {
           _messages.add(ChatMessage(role: 'error', content: shown));
         } else {
           _messages.add(ChatMessage(
             role: 'assistant',
-            content: _liveText.value,
+            content: partial,
             engine: _liveEngine.value,
           ));
           _messages.add(ChatMessage(role: 'error', content: shown));
         }
         _live = false;
       });
+      _typewriter.reset();
       await _persist();
     } finally {
       _stopLivePhaseFallback();
@@ -791,7 +806,7 @@ class _ChatPageState extends State<ChatPage> {
     _scroll.removeListener(_onScrollPosition);
     _scroll.dispose();
     _stopLivePhaseFallback();
-    _liveText.dispose();
+    _typewriter.dispose();
     _liveEngine.dispose();
     _livePhase.dispose();
     super.dispose();
@@ -864,7 +879,7 @@ class _ChatPageState extends State<ChatPage> {
                         );
                       }
                       return _LiveTurn(
-                        text: _liveText,
+                        text: _typewriter.visible,
                         engine: _liveEngine,
                         phase: _livePhase,
                       );
@@ -1261,12 +1276,14 @@ class _LiveTurn extends StatelessWidget {
               },
             );
           }
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              WxReadableText(value),
-              const SizedBox(height: 6),
-              const _Caret(),
+              Expanded(child: WxReadableText(value)),
+              const Padding(
+                padding: EdgeInsets.only(left: 2, bottom: 3),
+                child: _Caret(),
+              ),
             ],
           );
         },

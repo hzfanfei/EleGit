@@ -68,6 +68,7 @@ export function createVoiceProviders(config, hooks = {}) {
     return {
       asr: createOpenAiAsr({
         openai: config.openai,
+        pushToTalk: hooks.pushToTalk === true,
         onPartial: hooks.onPartial,
         onFinal: hooks.onFinal,
         onSpeechStart: hooks.onSpeechStart,

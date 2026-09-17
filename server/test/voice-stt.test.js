@@ -2,7 +2,14 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { describe, it } from "node:test";
 import { WebSocket } from "ws";
-import { attachSttGateway, createSttSession, isSttUpgrade } from "../src/voice-stt-ws.js";
+import {
+  adoptSttFinal,
+  attachSttGateway,
+  composeSttDisplay,
+  createSttSession,
+  isSttUpgrade,
+  mergeSttPartial,
+} from "../src/voice-stt-ws.js";
 
 function listen() {
   return new Promise((resolve) => {
@@ -58,6 +65,21 @@ describe("voice stt websocket", () => {
     } finally {
       server.close();
     }
+  });
+
+  it("composes multi-segment hold-to-talk captions without dropping earlier words", () => {
+    const segments = [];
+    adoptSttFinal(segments, "第一句话。");
+    let partial = mergeSttPartial({
+      segments,
+      partial: "",
+      incoming: "第二句",
+      partialMode: "cumulative",
+    });
+    assert.equal(composeSttDisplay(segments, partial), "第一句话。第二句");
+    adoptSttFinal(segments, "第二句还在说");
+    partial = "";
+    assert.equal(composeSttDisplay(segments, partial), "第一句话。第二句还在说");
   });
 
   it("returns done text from a fake ASR on stop", async () => {

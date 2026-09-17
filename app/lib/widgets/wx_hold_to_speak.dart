@@ -23,7 +23,7 @@ class WxHoldLiveChip extends StatelessWidget {
       alignment: Alignment.centerLeft,
       child: Container(
         key: const Key('wx-hold-live-chip'),
-        constraints: const BoxConstraints(maxWidth: 520),
+        constraints: const BoxConstraints(maxWidth: 520, maxHeight: 220),
         padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
         decoration: BoxDecoration(
           color: Wx.raised,
@@ -45,14 +45,17 @@ class WxHoldLiveChip extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 4),
-            Text(
-              text,
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodyLarge?.copyWith(
-                color: Wx.text,
-                height: 1.45,
-                fontWeight: FontWeight.w500,
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 168),
+              child: SingleChildScrollView(
+                child: Text(
+                  text,
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    color: Wx.text,
+                    height: 1.45,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
               ),
             ),
           ],
