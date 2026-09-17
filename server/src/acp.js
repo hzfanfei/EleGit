@@ -75,6 +75,7 @@ export function buildAcpPrompt({ question, history, githubContext, seedHistory }
     "You are 问象, a local repo progress assistant running on the user's computer.",
     "You are in ask mode: read the checkout and answer. Do not edit files, commit, or change the working tree.",
     "Answer in Simplified Chinese unless the user writes in another language.",
+    "Be concise and efficient: lead with the direct answer; use short paragraphs or bullets; skip preamble, filler, and long recaps unless the user asks for detail.",
     "Do not invent commits, PRs, files, or dates. Prefer the local checkout when it disagrees with stale memory.",
   ];
   if (githubContext) {

@@ -27,6 +27,11 @@ function git(args, cwd) {
 
 const FAKE_OAUTH_TOKEN = "gho_test_placeholder_token";
 
+function endsWithOwnerRepo(fullPath, owner, repo) {
+  const normalized = path.normalize(String(fullPath || ""));
+  return normalized.endsWith(path.join(owner, repo));
+}
+
 describe("git auth header", () => {
   it("sends Basic x-access-token via http.extraHeader, not Bearer", () => {
     const args = gitAuthConfigArgs(FAKE_OAUTH_TOKEN);
@@ -207,7 +212,7 @@ describe("ensureCheckout", () => {
     });
     assert.equal(result.existed, false);
     assert.equal(result.local.present, true);
-    assert.match(result.local.path, /acme\/widget$/);
+    assert.ok(endsWithOwnerRepo(result.local.path, "acme", "widget"));
     assert.match(result.local.log, /Initial widget/);
     assert.ok(result.local.files.includes("README.md"));
     assert.match(result.local.readme, /npm start/);
@@ -263,6 +268,6 @@ describe("ensureCheckout", () => {
     });
     assert.equal(result.local.present, true);
     assert.ok(result.local.files.includes("README.md"));
-    assert.match(result.dest, /acme\/widget$/);
+    assert.ok(endsWithOwnerRepo(result.dest, "acme", "widget"));
   });
 });
