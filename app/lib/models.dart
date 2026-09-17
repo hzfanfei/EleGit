@@ -15,7 +15,7 @@ class ServerStatus {
     required this.lanUrls,
     required this.workspaceRoot,
     this.voiceReady = false,
-    this.voiceHint = '还没配语音密钥',
+    this.voiceHint = '还没配语音密钥。请在本机问象服务的 .env 里配置。',
   });
 
   final bool githubConnected;
@@ -60,7 +60,7 @@ class ServerStatus {
       voiceReady: voice['ready'] == true,
       voiceHint: voice['ready'] == true
           ? ''
-          : (voice['hint'] ?? '还没配语音密钥').toString(),
+          : (voice['hint'] ?? '还没配语音密钥。请在本机问象服务的 .env 里配置。').toString(),
     );
   }
 }

@@ -17,7 +17,7 @@ class FakeWenxiangApi extends WenxiangApi {
     this.streamDelay = Duration.zero,
     this.streamPace = Duration.zero,
     this.voiceReady = false,
-    this.voiceHint = '还没配语音密钥',
+    this.voiceHint = '还没配语音密钥。请在本机问象服务的 .env 里配置。',
   }) : super(baseUrl: 'http://127.0.0.1:8787', apiKey: 'test-key');
 
   Object? oauthThrows;

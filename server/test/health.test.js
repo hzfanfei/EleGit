@@ -73,7 +73,7 @@ describe("companion HTTP", () => {
       assert.ok(String(status.github.publicUrl).startsWith('http'));
       assert.ok(Array.isArray(status.lanUrls));
       assert.equal(status.voice.ready, false);
-      assert.equal(status.voice.hint, "还没配语音密钥");
+      assert.match(status.voice.hint, /还没配语音密钥/);
       assert.equal(status.voice.provider, undefined);
       assert.ok(!JSON.stringify(status).includes("VOLC_"));
       assert.ok(!JSON.stringify(status).includes("OPENAI_"));

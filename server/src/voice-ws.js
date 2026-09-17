@@ -59,6 +59,7 @@ export function createVoiceProviders(config, hooks = {}) {
         volc: config.volc,
         onPartial: hooks.onPartial,
         onFinal: hooks.onFinal,
+        onError: (detail) => hooks.onAsrError?.({ message: detail?.message, err: detail }),
       }),
       tts: (text, signal) => volcTts(config.volc, text, signal),
     };

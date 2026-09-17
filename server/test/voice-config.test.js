@@ -7,9 +7,10 @@ describe("resolveVoiceConfig", () => {
     const cfg = resolveVoiceConfig({});
     assert.equal(cfg.ready, false);
     assert.equal(cfg.provider, null);
-    assert.equal(cfg.hint, "还没配语音密钥");
+    assert.match(cfg.hint, /还没配语音密钥/);
     const pub = publicVoiceStatus(cfg);
-    assert.deepEqual(pub, { ready: false, hint: "还没配语音密钥" });
+    assert.equal(pub.ready, false);
+    assert.match(pub.hint, /还没配语音密钥/);
     assert.ok(!JSON.stringify(pub).includes("VOLC"));
     assert.ok(!JSON.stringify(pub).includes("openai"));
   });
