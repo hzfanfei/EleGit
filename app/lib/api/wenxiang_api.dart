@@ -106,7 +106,8 @@ class WenxiangApi {
     final res = await http.get(uri, headers: assetHeaders).timeout(const Duration(seconds: 20));
     final type = res.headers['content-type'] ?? '';
     if (res.statusCode >= 400 || res.bodyBytes.isEmpty || type.contains('text/html')) {
-      throw ApiException('图片加载失败');
+      final html = type.contains('text/html') ? ' html interstitial' : '';
+      throw ApiException('图片加载失败 HTTP ${res.statusCode}$html');
     }
     return res.bodyBytes;
   }

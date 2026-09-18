@@ -26,6 +26,22 @@ void main() {
     expect(cleaned, isNot(contains('<div')));
   });
 
+  test('keeps fenced Vue/HTML samples while stripping running-text chrome', () {
+    const md = '''
+像约翰和我这样的普通人。
+
+```html
+<div id="app"><span>{{ title }}</span></div>
+```
+
+行内 `<div id="app">` 也要留下。
+''';
+    final cleaned = normalizeBookMarkdown(md);
+    expect(cleaned, contains('```html\n<div id="app"><span>{{ title }}</span></div>\n```'));
+    expect(cleaned, contains('`<div id="app">`'));
+    expect(cleaned, contains('像约翰和我这样的普通人。'));
+  });
+
   test('strips calibre chrome from chapter titles', () {
     expect(sanitizeBookDisplayTitle('<span class="calibre14">**一**</span>'), '一');
     expect(

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createReadStream, existsSync, readdirSync, statSync } from "node:fs";
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import AdmZip from "adm-zip";
 import { findPandoc, htmlToMarkdown } from "./pandoc.js";
@@ -8,7 +8,7 @@ import { defaultWorkspaceRoot } from "./workspace.js";
 
 const BOOK_OWNER = "_book";
 const DEFAULT_BOOK_TEXT_MAX = 1_000_000;
-const MATERIALIZE_VERSION = 2;
+const MATERIALIZE_VERSION = 3;
 
 export function bookTextMaxChars(env = process.env) {
   const raw = String(env.WENXIANG_BOOK_TEXT_MAX_CHARS || String(DEFAULT_BOOK_TEXT_MAX)).trim();
@@ -74,7 +74,26 @@ function parseNavListHtml(html, level, out) {
   }
 }
 
-function parseNavTocFromHtml(html) {
+export function hrefFileAndFragment(href) {
+  const raw = decodeXml(String(href || "").trim()).replace(/\\/g, "/");
+  const hash = raw.indexOf("#");
+  return {
+    href: hash >= 0 ? raw.slice(0, hash) : raw,
+    fragment: hash >= 0 ? raw.slice(hash + 1).trim() : "",
+  };
+}
+
+export function chooseBookToc(navToc, ncxToc) {
+  const nav = Array.isArray(navToc) ? navToc : [];
+  const ncx = Array.isArray(ncxToc) ? ncxToc : [];
+  const navFrags = nav.filter((item) => item.fragment).length;
+  const ncxFrags = ncx.filter((item) => item.fragment).length;
+  if (ncxFrags > navFrags) return ncx;
+  if (navFrags > 0) return nav;
+  return nav.length ? nav : ncx;
+}
+
+export function parseNavTocFromHtml(html) {
   const block =
     html.match(
       /<nav[^>]*(?:epub:type=["'][^"']*toc[^"']*["']|role=["']doc-toc["'])[^>]*>([\s\S]*?)<\/nav>/i,
@@ -83,7 +102,10 @@ function parseNavTocFromHtml(html) {
   const ol = block.match(/<ol[^>]*>([\s\S]*?)<\/ol>/i)?.[1] || block;
   const out = [];
   parseNavListHtml(ol, 0, out);
-  return out;
+  return out.map((item) => {
+    const parts = hrefFileAndFragment(item.href);
+    return { ...item, href: parts.href, fragment: parts.fragment };
+  });
 }
 
 function spineIndexForHref(spine, href) {
@@ -103,7 +125,7 @@ export function parseNcxToc(ncx) {
   const out = [];
   let depth = 0;
   const token =
-    /<\/navPoint>|<navPoint\b[^>]*>|<navLabel>\s*<text>([\s\S]*?)<\/text>\s*<\/navLabel>\s*<content\s+src=["']([^"']+)["'][^>]*\/?>/gi;
+    /<\/navPoint>|<navPoint\b[^>]*>|<navLabel>\s*<text>([\s\S]*?)<\/text>\s*<\/navLabel>\s*<content\b[^>]*\bsrc=["']([^"']+)["'][^>]*\/?>/gi;
   let match;
   while ((match = token.exec(src))) {
     const raw = match[0];
@@ -139,7 +161,7 @@ export function splitHtmlByAnchorIds(html, ids) {
     const key = String(id || "").trim();
     if (!key || seen.has(key)) continue;
     seen.add(key);
-    const re = new RegExp(`\\sid=["']${escapeRegExp(key)}["']`, "i");
+    const re = new RegExp(`\\s(?:id|name)=["']${escapeRegExp(key)}["']`, "i");
     const found = re.exec(raw);
     if (!found) continue;
     let start = raw.lastIndexOf("<", found.index);
@@ -174,35 +196,54 @@ function sameSpineFile(tocHref, spineHref) {
   return path.posix.basename(normalizeEpubHref(tocHref)) === path.posix.basename(normalizeEpubHref(spineHref));
 }
 
+function withSpineIndex(toc, spine) {
+  return (toc || []).map((item) => ({
+    ...item,
+    index: Number.isInteger(item.index) ? item.index : spineIndexForHref(spine, item.href),
+  }));
+}
+
 async function loadEpubNavToc(extractedDir, opf, opfDir, spine) {
+  let navToc = [];
   const navHref = findNavDocumentHref(opf, opfDir);
   if (navHref) {
     const abs = resolvePath(extractedDir, navHref);
     if (abs && abs.startsWith(extractedDir)) {
       try {
-        const html = await readFile(abs, "utf8");
-        const raw = parseNavTocFromHtml(html);
-        const toc = [];
+        const raw = parseNavTocFromHtml(await readFile(abs, "utf8"));
         for (const item of raw) {
           const index = spineIndexForHref(spine, item.href);
           if (index < 0) continue;
-          toc.push({ index, title: item.title, level: item.level, href: item.href, fragment: "" });
+          navToc.push({
+            index,
+            title: item.title,
+            level: item.level,
+            href: item.href,
+            fragment: item.fragment || "",
+          });
         }
-        if (toc.length) return toc;
       } catch {
-        // fall through to NCX
+        navToc = [];
       }
     }
   }
+  let ncxToc = [];
   const ncxHref = findNcxDocumentHref(opf, opfDir);
-  if (!ncxHref) return [];
-  const ncxAbs = resolvePath(extractedDir, ncxHref);
-  if (!ncxAbs || !ncxAbs.startsWith(extractedDir)) return [];
-  try {
-    return parseNcxToc(await readFile(ncxAbs, "utf8"));
-  } catch {
-    return [];
+  if (ncxHref) {
+    const ncxAbs = resolvePath(extractedDir, ncxHref);
+    if (ncxAbs && ncxAbs.startsWith(extractedDir)) {
+      try {
+        ncxToc = withSpineIndex(parseNcxToc(await readFile(ncxAbs, "utf8")), spine);
+      } catch {
+        ncxToc = [];
+      }
+    }
   }
+  return chooseBookToc(navToc, ncxToc);
+}
+
+export function chapterSliceHtmlPath(spineAbs, fname) {
+  return path.join(path.dirname(String(spineAbs || "")), `._wx-in-${fname}.xhtml`);
 }
 
 function chapterMarkdownBasename(index, href) {
@@ -537,7 +578,7 @@ export async function ensureBookMaterialized(workspaceRoot, book) {
   const mediaDir = path.join(cacheDir, "media");
   let chapterIndex = 0;
 
-  async function writeChapterSlice({ sliceHtml, sourceHref, fragment, hint, htmlPath }) {
+  async function writeChapterSlice({ sliceHtml, sourceHref, sourceAbs, fragment, hint, htmlPath }) {
     const text = stripHtml(sliceHtml);
     if (!text) return;
     chunks.push(text);
@@ -546,20 +587,30 @@ export async function ensureBookMaterialized(workspaceRoot, book) {
     let converted = false;
     if (pandocPath) {
       let inputPath = htmlPath;
+      let cleanup = "";
       if (!inputPath) {
-        inputPath = path.join(chaptersDir, `._in-${fname}.xhtml`);
+        inputPath = chapterSliceHtmlPath(sourceAbs, fname);
         await writeFile(
           inputPath,
           `<!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml"><body>${sliceHtml}</body></html>`,
           "utf8",
         );
+        cleanup = inputPath;
       }
       converted = await htmlToMarkdown({
         htmlPath: inputPath,
         outPath,
         pandocPath,
         extractMediaDir: mediaDir,
+        resourcePath: path.dirname(sourceAbs || inputPath),
       });
+      if (cleanup) {
+        try {
+          await unlink(cleanup);
+        } catch {
+          // leftover temp is harmless
+        }
+      }
     }
     if (!converted) {
       const fallbackTitle = hint?.title || titleFromHtml(sliceHtml) || `第 ${chapterIndex + 1} 章`;
@@ -601,6 +652,7 @@ export async function ensureBookMaterialized(workspaceRoot, book) {
         await writeChapterSlice({
           sliceHtml: html,
           sourceHref: href,
+          sourceAbs: abs,
           fragment: "",
           hint: navMeta,
           htmlPath: abs,
@@ -614,6 +666,7 @@ export async function ensureBookMaterialized(workspaceRoot, book) {
         await writeChapterSlice({
           sliceHtml: slice.html,
           sourceHref: href,
+          sourceAbs: abs,
           fragment: slice.id,
           hint,
         });
@@ -929,20 +982,79 @@ export function sanitizeBookDisplayTitle(title) {
   return out.replace(/\s+/g, " ").trim().slice(0, 160);
 }
 
-export function rewriteBookHtmlChrome(markdown) {
-  let out = String(markdown || "").replace(HTML_FOOTNOTE, (_, inner) => {
+function mapOutsideInlineCode(text, rewrite) {
+  const re = /(`+)([^`\n]*?)\1/g;
+  let last = 0;
+  let out = "";
+  let match;
+  while ((match = re.exec(text))) {
+    out += rewrite(text.slice(last, match.index));
+    out += match[0];
+    last = match.index + match[0].length;
+  }
+  return out + rewrite(text.slice(last));
+}
+
+function mapMarkdownOutsideFences(markdown, rewrite) {
+  const lines = String(markdown || "").split("\n");
+  const out = [];
+  let fence = "";
+  let buf = [];
+  const flushText = () => {
+    if (!buf.length) return;
+    out.push(rewrite(buf.join("\n")));
+    buf = [];
+  };
+  for (const line of lines) {
+    const open = line.match(/^(```+|~~~+)/);
+    if (!fence && open) {
+      flushText();
+      fence = open[1];
+      out.push(line);
+      continue;
+    }
+    if (fence && line.startsWith(fence)) {
+      out.push(line);
+      fence = "";
+      continue;
+    }
+    if (fence) {
+      out.push(line);
+      continue;
+    }
+    buf.push(line);
+  }
+  if (fence) out.push(...buf);
+  else flushText();
+  return out.join("\n");
+}
+
+function stripChromeChunk(chunk) {
+  let out = String(chunk || "").replace(HTML_FOOTNOTE, (_, inner) => {
     const note = decodeHtmlEntities(String(inner || "").replace(/<[^>]+>/g, "")).trim();
     return note ? `（${note}）` : "";
   });
   out = out.replace(IMAGE_PLACEHOLDER, (_, _q, src, inner) => {
-    const path = String(src || "").trim();
+    const imagePath = String(src || "").trim();
     const alt = decodeHtmlEntities(String(inner || "").replace(/<[^>]+>/g, "")).trim();
-    if (!path) return alt;
-    return `![${alt === "Cover Image" ? "" : alt}](${path})`;
+    if (!imagePath) return alt;
+    return `![${alt === "Cover Image" ? "" : alt}](${imagePath})`;
   });
   out = out.replace(/<br\s*\/?>/gi, "\n");
-  out = out.replace(CHROME_TAG, "");
-  return decodeHtmlEntities(out).replace(/\n{3,}/g, "\n\n");
+  out = out.replace(CHROME_TAG, (tag) => {
+    if (/^<\/?(?:p|div|section|article|header|footer|figure|figcaption|nav|main|aside)\b/i.test(tag)) {
+      return "\n\n";
+    }
+    return "";
+  });
+  return decodeHtmlEntities(out);
+}
+
+export function rewriteBookHtmlChrome(markdown) {
+  return mapMarkdownOutsideFences(markdown, (prose) => mapOutsideInlineCode(prose, stripChromeChunk)).replace(
+    /\n{3,}/g,
+    "\n\n",
+  );
 }
 
 export async function readBookChapterMarkdown(materialized, filename) {

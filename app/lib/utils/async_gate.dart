@@ -39,7 +39,9 @@ bool isTransientNetworkError(Object error) {
       raw.contains('timed out') ||
       raw.contains('broken pipe') ||
       raw.contains('connection reset') ||
-      raw.contains('failed host');
+      raw.contains('failed host') ||
+      RegExp(r'http\s+(502|503|504)\b').hasMatch(raw) ||
+      raw.contains('html interstitial');
 }
 
 Future<T> retryTransient<T>(

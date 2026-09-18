@@ -66,7 +66,8 @@ double bookReaderAskReserve({
     case BookAskSheetLevel.hidden:
       return estimatedHiddenHeight;
     case BookAskSheetLevel.dock:
-      if (measuredHeight > 0 && measuredHeight <= estimatedDockHeight + dockSlack) {
+      if (measuredHeight > 0 &&
+          (measuredHeight - estimatedDockHeight).abs() <= dockSlack) {
         return measuredHeight;
       }
       return estimatedDockHeight;
@@ -1470,7 +1471,7 @@ class _AllQaHistoryList extends StatelessWidget {
   }
 }
 
-class _QaTurnCard extends StatelessWidget {
+class _QaTurnCard extends StatefulWidget {
   const _QaTurnCard({
     required this.turn,
     required this.onDelete,
@@ -1480,10 +1481,18 @@ class _QaTurnCard extends StatelessWidget {
   final VoidCallback onDelete;
 
   @override
+  State<_QaTurnCard> createState() => _QaTurnCardState();
+}
+
+class _QaTurnCardState extends State<_QaTurnCard> {
+  var _open = false;
+
+  @override
   Widget build(BuildContext context) {
+    final turn = widget.turn;
+    final theme = Theme.of(context);
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.fromLTRB(12, 10, 4, 10),
       decoration: BoxDecoration(
         color: Wx.surface.withValues(alpha: 0.65),
         borderRadius: BorderRadius.circular(14),
@@ -1496,23 +1505,60 @@ class _QaTurnCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _AskBubble(role: 'user', child: WxReadableText(turn.user.content)),
-                    for (final reply in turn.replies)
-                      _AskBubble(
-                        role: reply.role,
-                        child: WxReadableText(reply.content),
-                      ),
-                  ],
+                child: InkWell(
+                  onTap: () => setState(() => _open = !_open),
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(14),
+                    bottomLeft: Radius.circular(14),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 10, 4, 10),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _AskBubble(role: 'user', child: WxReadableText(turn.user.content)),
+                        if (_open)
+                          for (final reply in turn.replies)
+                            _AskBubble(
+                              role: reply.role,
+                              child: WxReadableText(reply.content),
+                            )
+                        else if (turn.replies.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: Text(
+                              '展开回答',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: Wx.faint,
+                                letterSpacing: 0.2,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
-              IconButton(
-                tooltip: '删除',
-                visualDensity: VisualDensity.compact,
-                onPressed: onDelete,
-                icon: Icon(Icons.delete_outline, size: 18, color: Wx.faint),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    tooltip: _open ? '收起回答' : '展开回答',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () => setState(() => _open = !_open),
+                    icon: Icon(
+                      _open ? Icons.expand_less : Icons.expand_more,
+                      size: 20,
+                      color: Wx.muted,
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: '删除',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: widget.onDelete,
+                    icon: Icon(Icons.delete_outline, size: 18, color: Wx.faint),
+                  ),
+                ],
               ),
             ],
           ),

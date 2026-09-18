@@ -273,6 +273,15 @@ describe("books", () => {
     assert.match(md, /诺亚 （译者注）似的/);
     assert.equal(md.includes("<span"), false);
     assert.equal(md.includes("<div"), false);
+
+    const sample = ["<", "div id=\"app\"><span>", "{", "{ title }", "}</span></div>"].join("");
+    const fenceOpen = "```html";
+    const inline = ["`", "<div id=\"app\">", "`"].join("");
+    const fenced = rewriteBookHtmlChrome(
+      ["像约翰和我这样的普通人。", "", fenceOpen, sample, "```", "", "行内 " + inline + " 也要留下。"].join("\n"),
+    );
+    assert.ok(fenced.includes(fenceOpen + "\n" + sample + "\n```"));
+    assert.ok(fenced.includes(inline));
   });
 
   it("strips calibre chrome from chapter titles", () => {

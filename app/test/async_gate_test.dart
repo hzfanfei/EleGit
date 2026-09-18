@@ -32,4 +32,11 @@ void main() {
     expect(peak, lessThanOrEqualTo(2));
     expect(attempts, greaterThan(3));
   });
+
+  test('retries tunnel 502/503/504 but not a 404', () {
+    expect(isTransientNetworkError(Exception('图片加载失败 HTTP 502')), isTrue);
+    expect(isTransientNetworkError(Exception('图片加载失败 HTTP 503')), isTrue);
+    expect(isTransientNetworkError(Exception('图片加载失败 HTTP 504')), isTrue);
+    expect(isTransientNetworkError(Exception('图片加载失败 HTTP 404')), isFalse);
+  });
 }

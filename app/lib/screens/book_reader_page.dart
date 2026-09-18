@@ -448,6 +448,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
     if (!mounted) return;
     setState(() {
       _askLevel = level;
+      _askHeight = 0;
       _sheetSize.value = _fractionForAskLevel(level);
     });
   }

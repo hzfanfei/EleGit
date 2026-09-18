@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wenxiang/models.dart';
+import 'package:wenxiang/persist/app_memory.dart';
+import 'package:wenxiang/persist/book_chat_store.dart';
 import 'package:wenxiang/theme.dart';
 import 'package:wenxiang/widgets/book_ask_panel.dart';
 
@@ -129,5 +132,77 @@ void main() {
     expect(find.text('墙纸是压抑的象征。'), findsNothing);
 
     await tester.pump(const Duration(milliseconds: 300));
+  });
+
+  testWidgets('history turns stay collapsed until opened', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final memory = AppMemory(prefs);
+    const place = BookReadingPlace(chapter: '第一章');
+    await memory.saveBookChats(
+      'demo',
+      BookChatStore.empty().upsertAnchorMessages(
+        anchorId: bookAnchorId(place),
+        place: place,
+        messages: [
+          ChatMessage(role: 'user', content: '墙纸是什么意思？'),
+          ChatMessage(role: 'assistant', content: '黄色墙纸象征被困住的精神状态。'),
+        ],
+      ),
+    );
+
+    final sheetSize = ValueNotifier<double>(0.45);
+    addTearDown(sheetSize.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: MediaQuery(
+          data: const MediaQueryData(size: Size(390, 844), padding: EdgeInsets.only(bottom: 34)),
+          child: Scaffold(
+            body: SizedBox(
+              height: 520,
+              child: BookAskPanel(
+                api: FakeWenxiangApi(),
+                book: BookItem(
+                  id: 'demo',
+                  filename: 'demo.epub',
+                  title: '演示书',
+                  author: '作者',
+                  language: 'zh',
+                  size: 1000,
+                  modifiedAt: '2026-09-15T00:00:00Z',
+                  hasCover: false,
+                ),
+                scrollController: ScrollController(),
+                sheetSize: sheetSize,
+                expanded: true,
+                memory: memory,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    await tester.tap(find.text('历史').last);
+    await tester.pump();
+
+    expect(find.text('墙纸是什么意思？'), findsOneWidget);
+    expect(find.text('黄色墙纸象征被困住的精神状态。'), findsNothing);
+    expect(find.byTooltip('展开回答'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('展开回答'));
+    await tester.pump();
+
+    expect(find.text('黄色墙纸象征被困住的精神状态。'), findsOneWidget);
+    expect(find.byTooltip('收起回答'), findsOneWidget);
   });
 }

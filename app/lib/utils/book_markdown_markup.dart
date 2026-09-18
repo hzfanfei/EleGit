@@ -47,8 +47,58 @@ String _fenceFromHtml(String inner) {
   return '\n```\n${code.trimRight()}\n```\n';
 }
 
-/// EPUB leftover HTML → markdown flutter_markdown can actually render.
-String normalizeBookMarkdown(String markdown) {
+String mapMarkdownOutsideFences(String markdown, String Function(String prose) rewrite) {
+  final lines = markdown.split('\n');
+  final out = <String>[];
+  var fence = '';
+  final buf = <String>[];
+  void flushText() {
+    if (buf.isEmpty) return;
+    out.add(rewrite(buf.join('\n')));
+    buf.clear();
+  }
+
+  for (final line in lines) {
+    final open = RegExp(r'^(```+|~~~+)').firstMatch(line);
+    if (fence.isEmpty && open != null) {
+      flushText();
+      fence = open.group(1)!;
+      out.add(line);
+      continue;
+    }
+    if (fence.isNotEmpty && line.startsWith(fence)) {
+      out.add(line);
+      fence = '';
+      continue;
+    }
+    if (fence.isNotEmpty) {
+      out.add(line);
+      continue;
+    }
+    buf.add(line);
+  }
+  if (fence.isNotEmpty) {
+    out.addAll(buf);
+  } else {
+    flushText();
+  }
+  return out.join('\n');
+}
+
+String mapOutsideInlineCode(String text, String Function(String chunk) rewrite) {
+  final re = RegExp(r'(`+)([^`\n]*?)\1');
+  final out = StringBuffer();
+  var last = 0;
+  for (final match in re.allMatches(text)) {
+    out.write(rewrite(text.substring(last, match.start)));
+    out.write(match.group(0));
+    last = match.end;
+  }
+  out.write(rewrite(text.substring(last)));
+  return out.toString();
+}
+
+String _normalizeBookProse(String markdown) {
   var out = markdown;
   out = out.replaceAllMapped(_htmlFootnote, (match) {
     final note = _stripHtml(match.group(1) ?? '');
@@ -83,9 +133,23 @@ String normalizeBookMarkdown(String markdown) {
   out = out.replaceAllMapped(_htmlStrong, (match) => '**${_stripHtml(match.group(2) ?? '')}**');
   out = out.replaceAllMapped(_htmlEm, (match) => '*${_stripHtml(match.group(2) ?? '')}*');
   out = out.replaceAll(_htmlBr, '\n');
-  out = out.replaceAll(_chromeTag, '');
-  out = decodeBookHtmlEntities(out).replaceAll(RegExp(r'\n{3,}'), '\n\n');
-  return out;
+  out = out.replaceAllMapped(_chromeTag, (match) {
+    final tag = match.group(0) ?? '';
+    if (RegExp(r'^</?(?:p|div|section|article|header|footer|figure|figcaption|nav|main|aside)\b', caseSensitive: false)
+        .hasMatch(tag)) {
+      return '\n\n';
+    }
+    return '';
+  });
+  return decodeBookHtmlEntities(out);
+}
+
+/// EPUB leftover HTML → markdown flutter_markdown can actually render.
+String normalizeBookMarkdown(String markdown) {
+  return mapMarkdownOutsideFences(
+    markdown,
+    (prose) => mapOutsideInlineCode(prose, _normalizeBookProse),
+  ).replaceAll(RegExp(r'\n{3,}'), '\n\n');
 }
 
 /// External http(s) target, or null for in-book / invalid hrefs.

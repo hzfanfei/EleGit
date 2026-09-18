@@ -18,12 +18,15 @@ export async function htmlToMarkdown({
   outPath,
   pandocPath = findPandoc(),
   extractMediaDir = "",
+  resourcePath = "",
 }) {
   const pandoc = String(pandocPath || findPandoc() || "").trim();
   if (!pandoc) return false;
   const args = ["-f", "html", "-t", "gfm", "--wrap=none"];
   const mediaDir = String(extractMediaDir || "").trim();
   if (mediaDir) args.push(`--extract-media=${mediaDir}`);
+  const resources = String(resourcePath || "").trim();
+  if (resources) args.push(`--resource-path=${resources}`);
   args.push("-o", outPath);
   try {
     if (htmlPath) {

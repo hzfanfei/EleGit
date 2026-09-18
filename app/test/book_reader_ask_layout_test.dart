@@ -98,6 +98,16 @@ void main() {
       ),
       BookAskPanel.estimatedHiddenHeight(media),
     );
+    expect(
+      bookReaderAskReserve(
+        level: BookAskSheetLevel.dock,
+        viewportHeight: 844,
+        estimatedDockHeight: dock,
+        measuredHeight: BookAskPanel.estimatedHiddenHeight(media),
+        estimatedHiddenHeight: BookAskPanel.estimatedHiddenHeight(media),
+      ),
+      dock,
+    );
   });
 
   testWidgets('collapsing the ask sheet lets the book fill the gap on the next frame', (tester) async {
