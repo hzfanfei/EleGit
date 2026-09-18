@@ -18,6 +18,7 @@ class ReposPage extends StatefulWidget {
     required this.api,
     required this.onOpen,
     required this.onAuthorized,
+    this.onOpenBooks,
     this.githubConnected = true,
     this.githubLogin = '',
     this.autoStartOAuth = false,
@@ -27,6 +28,7 @@ class ReposPage extends StatefulWidget {
   final WenxiangApi api;
   final void Function(RepoItem repo) onOpen;
   final Future<void> Function() onAuthorized;
+  final VoidCallback? onOpenBooks;
   final bool githubConnected;
   final String githubLogin;
   final bool autoStartOAuth;
@@ -198,6 +200,11 @@ class ReposPageState extends State<ReposPage> {
             title: '问象',
             subtitle: widget.githubLogin.isEmpty ? '选一个仓库问进度' : widget.githubLogin,
             trailing: [
+              if (widget.onOpenBooks != null)
+                TextButton(
+                  onPressed: blocked ? null : widget.onOpenBooks,
+                  child: const Text('问书'),
+                ),
               TextButton(
                 onPressed: blocked ? null : () => setState(() => _reauth = true),
                 child: const Text('GitHub'),

@@ -60,6 +60,45 @@ class FakeWenxiangApi extends WenxiangApi {
   @override
   Future<void> ping() async {}
 
+  List<BookItem> booksResult = const [];
+
+  @override
+  Future<List<BookItem>> listBooks() async => booksResult;
+
+  @override
+  Future<List<ChatSession>> listBookSessions(String bookId) async => List<ChatSession>.from(sessions);
+
+  @override
+  Future<ChatSession> createBookSession(String bookId) async => createSession('_book', bookId);
+
+  @override
+  Future<void> closeBookSession(String bookId, String id) async => closeSession('_book', bookId, id);
+
+  @override
+  Future<void> warmBookSession(String bookId, {String? sessionId}) async {}
+
+  @override
+  Future<void> downloadBookFile(
+    String bookId,
+    String destPath, {
+    void Function(int received, int? total)? onProgress,
+  }) async {}
+
+  @override
+  Stream<ChatStreamEvent> bookChatStream({
+    required String bookId,
+    required String message,
+    required List<ChatMessage> history,
+    String? sessionId,
+  }) =>
+      chatStream(
+        owner: '_book',
+        repo: bookId,
+        message: message,
+        history: history,
+        sessionId: sessionId,
+      );
+
   @override
   Future<void> warmChatSession(
     String owner,

@@ -244,6 +244,41 @@ class CheckoutResult {
   final String head;
 }
 
+class BookItem {
+  BookItem({
+    required this.id,
+    required this.filename,
+    required this.title,
+    required this.author,
+    required this.language,
+    required this.size,
+    required this.modifiedAt,
+    required this.hasCover,
+  });
+
+  final String id;
+  final String filename;
+  final String title;
+  final String author;
+  final String language;
+  final int size;
+  final String modifiedAt;
+  final bool hasCover;
+
+  factory BookItem.fromJson(Map<String, dynamic> json) {
+    return BookItem(
+      id: (json['id'] ?? '').toString(),
+      filename: (json['filename'] ?? '').toString(),
+      title: (json['title'] ?? '').toString(),
+      author: (json['author'] ?? '').toString(),
+      language: (json['language'] ?? '').toString(),
+      size: (json['size'] as num?)?.toInt() ?? 0,
+      modifiedAt: (json['modifiedAt'] ?? '').toString(),
+      hasCover: json['hasCover'] == true,
+    );
+  }
+}
+
 class CheckoutSyncStatus {
   CheckoutSyncStatus({
     required this.present,

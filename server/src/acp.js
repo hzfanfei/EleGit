@@ -99,6 +99,35 @@ export function buildAcpPrompt({ question, history, githubContext, seedHistory }
   return lines.join("\n");
 }
 
+export function buildBookAcpPrompt({ question, history, bookContext, seedHistory }) {
+  const lines = [
+    "You are 问象·问书, a local book Q&A assistant running on the user's computer.",
+    "You are in ask mode: read the unpacked EPUB files and text cache, then answer. Do not edit files.",
+    "Answer in Simplified Chinese unless the user writes in another language.",
+    "Be concise and efficient: lead with the direct answer; use short paragraphs or bullets.",
+    "Quote or paraphrase the book when helpful. Do not invent passages, characters, or events.",
+  ];
+  if (bookContext) {
+    lines.push("", "=== Book context ===", bookContext);
+  }
+  if (seedHistory) {
+    const historyText = (history || [])
+      .filter((m) => m?.content && (m.role === "user" || m.role === "assistant"))
+      .slice(-16)
+      .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
+      .join("\n");
+    if (historyText) {
+      lines.push(
+        "",
+        "=== Prior conversation (restore after reconnect; do not re-answer these) ===",
+        historyText,
+      );
+    }
+  }
+  lines.push("", "=== Question ===", question);
+  return lines.join("\n");
+}
+
 export class AcpChannel {
   constructor({ command, cwd, spawnImpl = spawn, idleMs = 15 * 60 * 1000 } = {}) {
     this.command = command;
@@ -490,7 +519,7 @@ export function createSessionStore({
     return sessions.get(activeByRepo.get(repoKey(owner, repo)));
   }
 
-  async function prompt(session, { question, history, githubContext, cwd, onDelta }) {
+  async function prompt(session, { question, history, githubContext, bookContext, cwd, onDelta, buildPrompt }) {
     const command = resolveCommand();
     if (!command) {
       const err = new Error("Cursor ACP CLI not found");
@@ -513,10 +542,14 @@ export function createSessionStore({
     }
     const seedHistory =
       session.turns === 0 && (history || []).filter((m) => m?.content).length > 0;
-    const text = buildAcpPrompt({
+    const makePrompt =
+      buildPrompt ||
+      (bookContext ? buildBookAcpPrompt : buildAcpPrompt);
+    const text = makePrompt({
       question,
       history,
       githubContext,
+      bookContext,
       seedHistory,
     });
     await withRepoLock(entry, async () => {

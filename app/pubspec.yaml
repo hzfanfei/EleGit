@@ -16,6 +16,8 @@ dependencies:
   record: ^6.1.2
   web_socket_channel: ^3.0.3
   audioplayers: ^6.5.1
+  path_provider: ^2.1.5
+  open_filex: ^4.7.0
 
 dev_dependencies:
   flutter_test:

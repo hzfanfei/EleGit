@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
@@ -266,6 +267,149 @@ class WenxiangApi {
   }
 
   /// Pre-start Cursor ACP for this repo so the first chat token arrives sooner.
+  Uri bookCoverUri(String bookId) => _uri('/v1/books/$bookId/cover');
+
+  Uri bookFileUri(String bookId) => _uri('/v1/books/$bookId/file');
+
+  Future<List<BookItem>> listBooks() async {
+    final res = await http
+        .get(_uri('/v1/books'), headers: _headers)
+        .timeout(const Duration(seconds: 25));
+    final body = await _json(res, fallback: '读取书单失败');
+    final list = (body['books'] as List?) ?? [];
+    return list
+        .whereType<Map>()
+        .map((e) => BookItem.fromJson(Map<String, dynamic>.from(e)))
+        .toList();
+  }
+
+  Future<List<ChatSession>> listBookSessions(String bookId) async {
+    final res = await http
+        .get(_uri('/v1/books/$bookId/sessions'), headers: _headers)
+        .timeout(const Duration(seconds: 15));
+    final body = await _json(res, fallback: '读取书籍会话失败');
+    final list = (body['sessions'] as List?) ?? [];
+    return list
+        .whereType<Map>()
+        .map((e) => ChatSession.fromJson(Map<String, dynamic>.from(e)))
+        .toList();
+  }
+
+  Future<ChatSession> createBookSession(String bookId) async {
+    final res = await http
+        .post(_uri('/v1/books/$bookId/sessions'), headers: _headers)
+        .timeout(const Duration(seconds: 15));
+    final body = await _json(res, fallback: '新建书籍会话失败');
+    return ChatSession.fromJson(body);
+  }
+
+  Future<void> closeBookSession(String bookId, String id) async {
+    final res = await http
+        .delete(_uri('/v1/books/$bookId/sessions/$id'), headers: _headers)
+        .timeout(const Duration(seconds: 15));
+    await _json(res, fallback: '关闭书籍会话失败');
+  }
+
+  Future<void> warmBookSession(String bookId, {String? sessionId}) async {
+    final res = await http
+        .post(
+          _uri('/v1/books/$bookId/sessions/warm'),
+          headers: _headers,
+          body: jsonEncode({
+            if (sessionId != null && sessionId.isNotEmpty) 'sessionId': sessionId,
+          }),
+        )
+        .timeout(const Duration(seconds: 45));
+    if (res.statusCode >= 400) {
+      await _json(res, fallback: '书籍预热失败');
+    }
+  }
+
+  Future<void> downloadBookFile(
+    String bookId,
+    String destPath, {
+    void Function(int received, int? total)? onProgress,
+  }) async {
+    final client = http.Client();
+    try {
+      final request = http.Request('GET', bookFileUri(bookId))..headers.addAll(_headers);
+      final res = await client.send(request).timeout(const Duration(minutes: 10));
+      if (res.statusCode >= 400) {
+        final raw = await res.stream.bytesToString();
+        throw ApiException(raw.isEmpty ? '下载失败' : raw);
+      }
+      final total = res.contentLength;
+      var received = 0;
+      final sink = File(destPath).openWrite();
+      await for (final chunk in res.stream) {
+        received += chunk.length;
+        sink.add(chunk);
+        onProgress?.call(received, total);
+      }
+      await sink.close();
+    } finally {
+      client.close();
+    }
+  }
+
+  Stream<ChatStreamEvent> bookChatStream({
+    required String bookId,
+    required String message,
+    required List<ChatMessage> history,
+    String? sessionId,
+  }) async* {
+    final client = http.Client();
+    _chatCancelled = false;
+    _chatClient = client;
+    try {
+      final request = http.Request('POST', _uri('/v1/books/chat'))
+        ..headers.addAll({
+          ..._headers,
+          'Accept': 'text/event-stream',
+        })
+        ..body = jsonEncode({
+          'bookId': bookId,
+          'message': message,
+          if (sessionId != null && sessionId.isNotEmpty) 'sessionId': sessionId,
+          'history': history
+              .map((m) => {'role': m.role, 'content': m.content})
+              .toList(),
+        });
+      final res = await client.send(request).timeout(const Duration(minutes: 4));
+      if (res.statusCode >= 400) {
+        final raw = await res.stream.bytesToString();
+        String error = '问书失败';
+        try {
+          error = (jsonDecode(raw)['error'] ?? error).toString();
+        } catch (_) {}
+        throw ApiException(error);
+      }
+      var buffer = '';
+      await for (final chunk in res.stream.transform(utf8.decoder)) {
+        if (_chatCancelled) throw const OperationCancelled();
+        buffer += chunk;
+        final parts = buffer.split('\n\n');
+        buffer = parts.removeLast();
+        for (final part in parts) {
+          final event = ChatStreamEvent.fromSse(part);
+          if (event != null) yield event;
+        }
+      }
+      if (buffer.trim().isNotEmpty) {
+        final event = ChatStreamEvent.fromSse(buffer);
+        if (event != null) yield event;
+      }
+    } catch (err) {
+      if (_chatCancelled || err is OperationCancelled) {
+        throw const OperationCancelled();
+      }
+      rethrow;
+    } finally {
+      if (identical(_chatClient, client)) _chatClient = null;
+      client.close();
+    }
+  }
+
   Future<void> warmChatSession(
     String owner,
     String repo, {

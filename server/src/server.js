@@ -3,7 +3,7 @@ import cors from "cors";
 import { corsOptions } from "./cors.js";
 import { loadLocalEnv } from "./env.js";
 import { createSessionStore, detectCursorEngine } from "./acp.js";
-import { streamAnswer } from "./ask.js";
+import { streamAnswer, synthesizeBookAnswer } from "./ask.js";
 import { openSse, writeSse } from "./sse.js";
 import {
   emptyRepoProgress,
@@ -37,6 +37,18 @@ import {
   isCheckoutPresent,
   snapshotCheckoutLite,
 } from "./workspace.js";
+import {
+  bookLocalView,
+  bookSessionOwner,
+  booksDir,
+  emptyBookProgress,
+  ensureBookMaterialized,
+  formatBookAcpContext,
+  listBooks,
+  openBookFileStream,
+  readCachedCover,
+  resolveBook,
+} from "./books.js";
 
 loadLocalEnv();
 
@@ -45,6 +57,7 @@ const BIND = process.env.WENXIANG_BIND || "0.0.0.0";
 
 const store = await loadStore();
 const sessions = createSessionStore();
+const bookSessions = createSessionStore();
 const oauth = createOAuthSessions();
 const tunnel = createTunnelManager({
   port: PORT,
@@ -164,6 +177,7 @@ app.get("/v1/status", (_req, res) => {
     },
     workspace: {
       root: store.config.workspaceRoot,
+      booksDir: booksDir(store.config.workspaceRoot),
     },
     cursor: {
       available: Boolean(cursor),
@@ -439,6 +453,195 @@ app.delete("/v1/repos/:owner/:repo/sessions/:id", requireGithub, async (req, res
   try {
     res.json(await sessions.close(req.params.owner, req.params.repo, req.params.id));
   } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.get("/v1/books", async (_req, res) => {
+  try {
+    const out = await listBooks(store.config.workspaceRoot);
+    res.json({ booksDir: out.dir, books: out.books });
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.get("/v1/books/:bookId/file", async (req, res) => {
+  try {
+    const book = await resolveBook(store.config.workspaceRoot, req.params.bookId);
+    res.setHeader("Content-Type", "application/epub+zip");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${encodeURIComponent(book.filename)}"`,
+    );
+    openBookFileStream(book.path).pipe(res);
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.get("/v1/books/:bookId/cover", async (req, res) => {
+  try {
+    const book = await resolveBook(store.config.workspaceRoot, req.params.bookId);
+    const materialized = await ensureBookMaterialized(store.config.workspaceRoot, book);
+    const cover = await readCachedCover(materialized.cacheDir);
+    if (!cover) {
+      res.status(404).json({ error: "Cover not found" });
+      return;
+    }
+    const type =
+      cover.ext === ".png"
+        ? "image/png"
+        : cover.ext === ".gif"
+          ? "image/gif"
+          : cover.ext === ".webp"
+            ? "image/webp"
+            : "image/jpeg";
+    res.setHeader("Content-Type", type);
+    openBookFileStream(cover.path).pipe(res);
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.get("/v1/books/:bookId/sessions", (req, res) => {
+  try {
+    const owner = bookSessionOwner();
+    res.json(bookSessions.list(owner, req.params.bookId));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.post("/v1/books/:bookId/sessions", (req, res) => {
+  try {
+    const owner = bookSessionOwner();
+    const view = bookSessions.create(owner, req.params.bookId);
+    res.status(201).json(view);
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.post("/v1/books/:bookId/sessions/warm", async (req, res) => {
+  try {
+    const book = await resolveBook(store.config.workspaceRoot, req.params.bookId);
+    const materialized = await ensureBookMaterialized(store.config.workspaceRoot, book);
+    const owner = bookSessionOwner();
+    const out = await bookSessions.warmRepo(owner, book.id, materialized.cacheDir);
+    res.json(out);
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.delete("/v1/books/:bookId/sessions/:id", async (req, res) => {
+  try {
+    const owner = bookSessionOwner();
+    res.json(await bookSessions.close(owner, req.params.bookId, req.params.id));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.post("/v1/books/chat", async (req, res) => {
+  try {
+    const bookId = String(req.body?.bookId || "").trim();
+    const message = String(req.body?.message || "").trim();
+    const sessionId = String(req.body?.sessionId || "").trim();
+    const history = Array.isArray(req.body?.history) ? req.body.history : [];
+    if (!bookId || !message) {
+      res.status(400).json({ error: "bookId and message are required" });
+      return;
+    }
+    const book = await resolveBook(store.config.workspaceRoot, bookId);
+    const materialized = await ensureBookMaterialized(store.config.workspaceRoot, book);
+    const owner = bookSessionOwner();
+    const session = bookSessions.resolveForChat(owner, bookId, sessionId);
+    const signal = requestSignal(req, res);
+    req.on("close", () => {
+      bookSessions.cancel?.(session).catch(() => {});
+    });
+    openSse(res);
+    writeSse(res, { type: "meta", sessionId: session.id, bookId: book.id });
+    if (detectCursorEngine()) {
+      writeSse(res, { type: "start", engine: "acp" });
+    }
+    writeSse(res, { type: "status", phase: "book" });
+    await bookSessions.warmRepo(owner, bookId, materialized.cacheDir).catch(() => {});
+    const bookContext = await formatBookAcpContext(book, materialized);
+    const local = bookLocalView(materialized, book);
+    const progress = emptyBookProgress(book);
+    const context = bookContext;
+    if (signal.aborted) {
+      res.end();
+      return;
+    }
+    writeSse(res, {
+      type: "meta",
+      book: { id: book.id, title: book.title, author: book.author },
+      cache: materialized.cacheDir,
+      sessionId: session.id,
+    });
+    writeSse(res, { type: "status", phase: "generate" });
+    let finalEngine = "local-progress";
+    let finalAnswer = "";
+    for await (const event of streamAnswer({
+      question: message,
+      history,
+      progress,
+      context,
+      githubContext: bookContext,
+      bookContext,
+      local,
+      session,
+      sessions: bookSessions,
+      signal,
+      synthesize: (opts) =>
+        synthesizeBookAnswer({
+          question: opts.question,
+          book,
+          bookContext,
+          local: opts.local,
+        }),
+    })) {
+      if (signal.aborted) break;
+      if (event.type === "done") {
+        finalEngine = event.engine;
+        finalAnswer = event.answer;
+        writeSse(res, {
+          type: "done",
+          engine: event.engine,
+          answer: event.answer,
+          bookId: book.id,
+          cache: materialized.cacheDir,
+          sessionId: session.id,
+        });
+      } else {
+        writeSse(res, event);
+      }
+    }
+    if (signal.aborted) {
+      res.end();
+      return;
+    }
+    if (!finalAnswer) {
+      writeSse(res, {
+        type: "done",
+        engine: finalEngine,
+        answer: "",
+        bookId: book.id,
+        cache: materialized.cacheDir,
+        sessionId: session.id,
+      });
+    }
+    res.end();
+  } catch (err) {
+    if (res.headersSent) {
+      writeSse(res, { type: "error", error: err.message });
+      res.end();
+      return;
+    }
     sendError(res, err);
   }
 });

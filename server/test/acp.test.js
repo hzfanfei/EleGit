@@ -8,6 +8,7 @@ import {
   DEFAULT_ACP_MODEL,
   acpModelId,
   buildAcpPrompt,
+  buildBookAcpPrompt,
   createSessionStore,
   selectPermissionOption,
 } from "../src/acp.js";
@@ -53,6 +54,19 @@ describe("selectPermissionOption", () => {
       selectPermissionOption({ toolCall: { kind: "read", title: "Read file" }, options }),
       "allow-once",
     );
+  });
+});
+
+describe("buildBookAcpPrompt", () => {
+  it("includes book context and question", () => {
+    const prompt = buildBookAcpPrompt({
+      question: "主角是谁？",
+      bookContext: "Book title: 样例书\nUnpacked EPUB directory: /tmp/book",
+      seedHistory: false,
+    });
+    assert.match(prompt, /问书/);
+    assert.match(prompt, /样例书/);
+    assert.match(prompt, /主角是谁/);
   });
 });
 

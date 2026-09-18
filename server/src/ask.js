@@ -2,7 +2,7 @@ import { detectCursorEngine } from "./acp.js";
 
 export { detectCursorEngine } from "./acp.js";
 export { whichSync } from "./which.js";
-export { buildAcpPrompt } from "./acp.js";
+export { buildAcpPrompt, buildBookAcpPrompt } from "./acp.js";
 
 export function streamOptsFromEnv() {
   const rawSize = String(process.env.WENXIANG_STREAM_CHUNK_SIZE ?? "0").trim();
@@ -131,6 +131,23 @@ export function synthesizeLocalAnswer({ question, progress, context, local }) {
   return sections.join("\n\n");
 }
 
+export function synthesizeBookAnswer({ question, book, bookContext, local }) {
+  const q = (question || "").toLowerCase();
+  const sections = [`**${book.title || book.id}**`];
+  if (book.author) sections.push(`作者：${book.author}`);
+  if (local?.present) {
+    sections.push(`## 本机缓存\n\`${local.path}\``);
+  }
+  if (bookContext) {
+    const excerpt = bookContext.split("Text excerpt")[1]?.trim().slice(0, 1200);
+    if (excerpt && /内容|章节|讲|谁|什么|quote|read/i.test(q)) {
+      sections.push("## 书摘（节选）", excerpt);
+    }
+  }
+  sections.push("以上内容来自本机 EPUB 缓存。若需更准的回答，请确认 Cursor ACP 可用。");
+  return sections.join("\n\n");
+}
+
 export async function* streamAnswer({
   question,
   history,
@@ -140,6 +157,8 @@ export async function* streamAnswer({
   session,
   sessions,
   githubContext,
+  bookContext,
+  synthesize = synthesizeLocalAnswer,
   detectEngine = detectCursorEngine,
   streamOpts = streamOptsFromEnv(),
   signal,
@@ -158,6 +177,7 @@ export async function* streamAnswer({
         question,
         history,
         githubContext: githubContext || context,
+        bookContext,
         cwd: local?.present ? local.path : undefined,
         onDelta: (chunk) => {
           full += chunk;
@@ -193,14 +213,14 @@ export async function* streamAnswer({
       yield { type: "done", engine: "acp", answer: full, sessionId: session.id };
       return;
     }
-    const fallback = `${synthesizeLocalAnswer({ question, progress, context, local })}\n\n（本机探测到 Cursor ACP，但调用失败：${fail?.message || "empty output"}。已回退到本地进度适配器。）`;
+    const fallback = `${synthesize({ question, progress, context, local, bookContext })}\n\n（本机探测到 Cursor ACP，但调用失败：${fail?.message || "empty output"}。已回退到本地进度适配器。）`;
     yield { type: "start", engine: "local-progress" };
     yield* prefixDeltas(fallback, opts);
     if (signal?.aborted) return;
     yield { type: "done", engine: "local-progress", answer: fallback, sessionId: session.id };
     return;
   }
-  const answer = synthesizeLocalAnswer({ question, progress, context, local });
+  const answer = synthesize({ question, progress, context, local, bookContext });
   yield { type: "start", engine: "local-progress" };
   yield* prefixDeltas(answer, opts);
   if (signal?.aborted) return;

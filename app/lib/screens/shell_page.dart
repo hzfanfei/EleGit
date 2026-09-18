@@ -7,10 +7,13 @@ import '../models.dart';
 import '../persist/app_memory.dart';
 import '../theme.dart';
 import '../widgets/wx_chrome.dart';
+import '../persist/book_local.dart';
+import 'book_chat_page.dart';
+import 'books_page.dart';
 import 'chat_page.dart';
 import 'repos_page.dart';
 
-enum AppStep { boot, repos, chat }
+enum AppStep { boot, repos, books, chat, bookChat }
 
 class ShellPage extends StatefulWidget {
   const ShellPage({super.key, this.api, this.memory});
@@ -31,7 +34,9 @@ class ShellPageState extends State<ShellPage> {
       );
   AppMemory? _memory;
   RepoItem? _repo;
+  BookItem? _book;
   RepoItem? _lastRepo;
+  BookLocalStore? _bookStore;
   Object? _bootError;
   bool _booting = true;
   String _githubLogin = '';
@@ -70,6 +75,9 @@ class ShellPageState extends State<ShellPage> {
     });
     try {
       final memory = await _ensureMemory();
+      if (memory != null) {
+        _bookStore = BookLocalStore(memory.prefs);
+      }
       await _api.ping();
       final status = await _api.status();
       if (!mounted) return;
@@ -118,6 +126,35 @@ class ShellPageState extends State<ShellPage> {
     });
   }
 
+  Future<void> _openBooks() async {
+    if (_bookStore == null) {
+      final memory = await _ensureMemory();
+      if (memory != null) _bookStore = BookLocalStore(memory.prefs);
+    }
+    if (!mounted || _bookStore == null) return;
+    setState(() => _step = AppStep.books);
+  }
+
+  void _backFromBooks() {
+    setState(() => _step = AppStep.repos);
+  }
+
+  void _openBookChat(BookItem book) {
+    _api.warmBookSession(book.id).catchError((_) {});
+    setState(() {
+      _book = book;
+      _step = AppStep.bookChat;
+    });
+  }
+
+  void _backFromBookChat() {
+    _api.cancelChat();
+    setState(() {
+      _step = AppStep.books;
+      _book = null;
+    });
+  }
+
   void _backFromChat() {
     _api.cancelChat();
     setState(() {
@@ -127,6 +164,14 @@ class ShellPageState extends State<ShellPage> {
   }
 
   bool _handlePop() {
+    if (_step == AppStep.bookChat) {
+      _backFromBookChat();
+      return true;
+    }
+    if (_step == AppStep.books) {
+      _backFromBooks();
+      return true;
+    }
     if (_step == AppStep.chat) {
       _backFromChat();
       return true;
@@ -177,8 +222,30 @@ class ShellPageState extends State<ShellPage> {
           lastRepo: _lastRepo,
           onAuthorized: _onAuthorized,
           onOpen: _openRepo,
+          onOpenBooks: _openBooks,
         )),
       ),
+      if (_step == AppStep.books && _bookStore != null)
+        MaterialPage<void>(
+          key: const ValueKey('books'),
+          name: 'books',
+          child: _fit(BooksPage(
+            api: _api,
+            bookStore: _bookStore!,
+            onBack: _backFromBooks,
+            onAsk: _openBookChat,
+          )),
+        ),
+      if (_step == AppStep.bookChat && _book != null)
+        MaterialPage<void>(
+          key: ValueKey('book-chat-${_book!.id}'),
+          name: 'bookChat',
+          child: _fit(BookChatPage(
+            api: _api,
+            book: _book!,
+            onBack: _backFromBookChat,
+          )),
+        ),
       if (_step == AppStep.chat && _repo != null)
         MaterialPage<void>(
           key: ValueKey('chat-${_repo!.fullName}'),
@@ -196,7 +263,7 @@ class ShellPageState extends State<ShellPage> {
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: _step == AppStep.boot || _step == AppStep.repos,
+      canPop: _step == AppStep.boot || _step == AppStep.repos || _step == AppStep.books,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
         _handlePop();
@@ -206,7 +273,11 @@ class ShellPageState extends State<ShellPage> {
           pages: _pages(),
           onDidRemovePage: (page) {
             final name = page.name;
-            if (name == 'chat' && _step == AppStep.chat) {
+            if (name == 'bookChat' && _step == AppStep.bookChat) {
+              _backFromBookChat();
+            } else if (name == 'books' && _step == AppStep.books) {
+              _backFromBooks();
+            } else if (name == 'chat' && _step == AppStep.chat) {
               _backFromChat();
             }
           },
