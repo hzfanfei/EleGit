@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 
 import '../models.dart';
+import '../utils/async_gate.dart';
 
 class ApiException implements Exception {
   ApiException(this.message);
@@ -68,32 +69,46 @@ class WenxiangApi {
     return _uri('/v1/books/$bookId/asset', {'path': cacheRelativePath});
   }
 
-  Future<Uint8List> fetchBookAssetBytes(String bookId, String cacheRelativePath) async {
-    final res = await http
-        .get(bookAssetUri(bookId, cacheRelativePath), headers: assetHeaders)
-        .timeout(const Duration(seconds: 20));
-    final type = res.headers['content-type'] ?? '';
-    if (res.statusCode >= 400 || res.bodyBytes.isEmpty || type.contains('text/html')) {
-      throw ApiException('图片加载失败');
-    }
-    return res.bodyBytes;
+  Future<Uint8List> fetchBookAssetBytes(String bookId, String cacheRelativePath) {
+    return bookAssetGate.run(() {
+      return retryTransient(() => _getAssetBytes(bookAssetUri(bookId, cacheRelativePath)));
+    });
   }
 
   Future<Uint8List> fetchBookAssetBytesFromCandidates(
     String bookId,
     Iterable<String> cacheRelativePaths,
-  ) async {
-    Object? last;
-    for (final path in cacheRelativePaths) {
-      final trimmed = path.trim();
-      if (trimmed.isEmpty) continue;
-      try {
-        return await fetchBookAssetBytes(bookId, trimmed);
-      } catch (err) {
-        last = err;
-      }
+  ) {
+    return bookAssetGate.run(() {
+      return retryTransient(() async {
+        Object? last;
+        for (final path in cacheRelativePaths) {
+          final trimmed = path.trim();
+          if (trimmed.isEmpty) continue;
+          try {
+            return await _getAssetBytes(bookAssetUri(bookId, trimmed));
+          } catch (err) {
+            last = err;
+          }
+        }
+        throw last ?? ApiException('图片加载失败');
+      });
+    });
+  }
+
+  Future<Uint8List> fetchUrlBytes(Uri uri) {
+    return bookAssetGate.run(() {
+      return retryTransient(() => _getAssetBytes(uri));
+    });
+  }
+
+  Future<Uint8List> _getAssetBytes(Uri uri) async {
+    final res = await http.get(uri, headers: assetHeaders).timeout(const Duration(seconds: 20));
+    final type = res.headers['content-type'] ?? '';
+    if (res.statusCode >= 400 || res.bodyBytes.isEmpty || type.contains('text/html')) {
+      throw ApiException('图片加载失败');
     }
-    throw last ?? ApiException('图片加载失败');
+    return res.bodyBytes;
   }
 
   http.Client? _checkoutClient;

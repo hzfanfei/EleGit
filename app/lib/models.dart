@@ -16,6 +16,7 @@ class ServerStatus {
     required this.workspaceRoot,
     this.voiceReady = false,
     this.voiceHint = '还没配语音密钥。请在本机问象服务的 .env 里配置。',
+    this.publicReachable,
   });
 
   final bool githubConnected;
@@ -32,6 +33,7 @@ class ServerStatus {
   final String workspaceRoot;
   final bool voiceReady;
   final String voiceHint;
+  final bool? publicReachable;
 
   factory ServerStatus.fromJson(Map<String, dynamic> json) {
     final github = json['github'] as Map<String, dynamic>? ?? {};
@@ -40,6 +42,8 @@ class ServerStatus {
     final tunnel = json['tunnel'] as Map<String, dynamic>? ?? {};
     final workspace = json['workspace'] as Map<String, dynamic>? ?? {};
     final voice = json['voice'] as Map<String, dynamic>? ?? {};
+    final tunnelHealth = json['tunnelHealth'] as Map<String, dynamic>? ?? {};
+    final reachable = tunnelHealth['reachable'] ?? tunnel['publicReachable'];
     return ServerStatus(
       githubConnected: github['connected'] == true ||
           github['connected'] == 'true' ||
@@ -61,6 +65,7 @@ class ServerStatus {
       voiceHint: voice['ready'] == true
           ? ''
           : (voice['hint'] ?? '还没配语音密钥。请在本机问象服务的 .env 里配置。').toString(),
+      publicReachable: reachable == true ? true : reachable == false ? false : null,
     );
   }
 }
@@ -244,6 +249,13 @@ class CheckoutResult {
   final String head;
 }
 
+/// Chapter / TOC titles: drop leftover Calibre tags and emphasis markers.
+String sanitizeBookDisplayTitle(String title) {
+  var out = title.replaceAll(RegExp(r'<[^>]+>', caseSensitive: false), ' ');
+  out = out.replaceAll('**', '').replaceAll('__', '').replaceAll(RegExp(r'`+'), '');
+  return out.replaceAll(RegExp(r'\s+'), ' ').trim();
+}
+
 class BookChapterEntry {
   const BookChapterEntry({
     required this.index,
@@ -264,7 +276,7 @@ class BookChapterEntry {
     return BookChapterEntry(
       index: (json['index'] as num?)?.toInt() ?? 0,
       file: (json['file'] ?? '').toString(),
-      title: (json['title'] ?? '').toString(),
+      title: sanitizeBookDisplayTitle((json['title'] ?? '').toString()),
       level: (json['level'] as num?)?.toInt() ?? 0,
       href: hrefRaw.isEmpty ? null : hrefRaw,
     );
@@ -285,7 +297,7 @@ class BookTocEntry {
   factory BookTocEntry.fromJson(Map<String, dynamic> json) {
     return BookTocEntry(
       index: (json['index'] as num?)?.toInt() ?? 0,
-      title: (json['title'] ?? '').toString(),
+      title: sanitizeBookDisplayTitle((json['title'] ?? '').toString()),
       level: (json['level'] as num?)?.toInt() ?? 0,
     );
   }

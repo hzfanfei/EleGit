@@ -7,6 +7,17 @@ void main() {
     expect(humanizeError(ApiException('无法连接问象服务（HTTP 503）')), '无法连接问象服务（HTTP 503）');
   });
 
+  test('maps TLS handshake failures to a tunnel hint', () {
+    expect(
+      humanizeError('HandshakeException: Connection terminated during handshake'),
+      contains('隧道'),
+    );
+    expect(
+      humanizeError('HandshakeException: Connection terminated during handshake'),
+      isNot(contains('局域网')),
+    );
+  });
+
   test('maps network failures to a reconnect hint', () {
     const raw = 'SocketException: Connection refused (OS Error: Connection refused, errno = 111)';
     expect(humanizeError(raw), contains('连不上本机问象服务'));

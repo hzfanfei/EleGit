@@ -8,6 +8,7 @@ import { defaultWorkspaceRoot } from "./workspace.js";
 
 const BOOK_OWNER = "_book";
 const DEFAULT_BOOK_TEXT_MAX = 1_000_000;
+const MATERIALIZE_VERSION = 2;
 
 export function bookTextMaxChars(env = process.env) {
   const raw = String(env.WENXIANG_BOOK_TEXT_MAX_CHARS || String(DEFAULT_BOOK_TEXT_MAX)).trim();
@@ -29,7 +30,10 @@ function titleFromHtml(html) {
 function titleFromMarkdown(md) {
   for (const line of String(md || "").split("\n")) {
     const m = line.match(/^#\s+(.+)/);
-    if (m?.[1]) return m[1].trim().slice(0, 160);
+    if (m?.[1]) {
+      const title = sanitizeBookDisplayTitle(m[1]);
+      if (title) return title;
+    }
   }
   return "";
 }
@@ -90,21 +94,112 @@ function spineIndexForHref(spine, href) {
   return spine.findIndex((h) => path.posix.basename(normalizeEpubHref(h)) === base);
 }
 
+function escapeRegExp(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+export function parseNcxToc(ncx) {
+  const src = String(ncx || "");
+  const out = [];
+  let depth = 0;
+  const token =
+    /<\/navPoint>|<navPoint\b[^>]*>|<navLabel>\s*<text>([\s\S]*?)<\/text>\s*<\/navLabel>\s*<content\s+src=["']([^"']+)["'][^>]*\/?>/gi;
+  let match;
+  while ((match = token.exec(src))) {
+    const raw = match[0];
+    if (raw.startsWith("</navPoint")) {
+      depth = Math.max(0, depth - 1);
+      continue;
+    }
+    if (/^<navPoint\b/i.test(raw)) {
+      depth += 1;
+      continue;
+    }
+    const title = decodeXml(String(match[1] || "").replace(/<[^>]+>/g, "")).trim();
+    const hrefRaw = decodeXml(String(match[2] || "").trim()).replace(/\\/g, "/");
+    const hash = hrefRaw.indexOf("#");
+    const file = hash >= 0 ? hrefRaw.slice(0, hash) : hrefRaw;
+    const fragment = hash >= 0 ? hrefRaw.slice(hash + 1).trim() : "";
+    if (!title) continue;
+    out.push({
+      title,
+      href: file,
+      fragment,
+      level: Math.max(0, depth - 1),
+    });
+  }
+  return out;
+}
+
+export function splitHtmlByAnchorIds(html, ids) {
+  const raw = String(html || "");
+  const points = [];
+  const seen = new Set();
+  for (const id of ids) {
+    const key = String(id || "").trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    const re = new RegExp(`\\sid=["']${escapeRegExp(key)}["']`, "i");
+    const found = re.exec(raw);
+    if (!found) continue;
+    let start = raw.lastIndexOf("<", found.index);
+    if (start < 0) start = found.index;
+    points.push({ id: key, start });
+  }
+  points.sort((a, b) => a.start - b.start);
+  if (!points.length) return [{ id: "", html: raw }];
+  const slices = [];
+  if (points[0].start > 0) {
+    const head = raw.slice(0, points[0].start);
+    if (stripHtml(head).trim()) slices.push({ id: "", html: head });
+  }
+  for (let i = 0; i < points.length; i += 1) {
+    const end = i + 1 < points.length ? points[i + 1].start : raw.length;
+    slices.push({ id: points[i].id, html: raw.slice(points[i].start, end) });
+  }
+  return slices;
+}
+
+function findNcxDocumentHref(opf, opfDir) {
+  const item =
+    String(opf || "").match(/<item\b[^>]*media-type=["']application\/x-dtbncx\+xml["'][^>]*>/i)?.[0] ||
+    String(opf || "").match(/<item\b[^>]*href=["'][^"']*\.ncx["'][^>]*>/i)?.[0] ||
+    "";
+  const href = item.match(/\bhref=["']([^"']+)["']/i)?.[1];
+  if (!href) return "";
+  return path.posix.join(opfDir, href).replace(/\\/g, "/");
+}
+
+function sameSpineFile(tocHref, spineHref) {
+  return path.posix.basename(normalizeEpubHref(tocHref)) === path.posix.basename(normalizeEpubHref(spineHref));
+}
+
 async function loadEpubNavToc(extractedDir, opf, opfDir, spine) {
   const navHref = findNavDocumentHref(opf, opfDir);
-  if (!navHref) return [];
-  const abs = resolvePath(extractedDir, navHref);
-  if (!abs || !abs.startsWith(extractedDir)) return [];
-  try {
-    const html = await readFile(abs, "utf8");
-    const raw = parseNavTocFromHtml(html);
-    const toc = [];
-    for (const item of raw) {
-      const index = spineIndexForHref(spine, item.href);
-      if (index < 0) continue;
-      toc.push({ index, title: item.title, level: item.level });
+  if (navHref) {
+    const abs = resolvePath(extractedDir, navHref);
+    if (abs && abs.startsWith(extractedDir)) {
+      try {
+        const html = await readFile(abs, "utf8");
+        const raw = parseNavTocFromHtml(html);
+        const toc = [];
+        for (const item of raw) {
+          const index = spineIndexForHref(spine, item.href);
+          if (index < 0) continue;
+          toc.push({ index, title: item.title, level: item.level, href: item.href, fragment: "" });
+        }
+        if (toc.length) return toc;
+      } catch {
+        // fall through to NCX
+      }
     }
-    return toc;
+  }
+  const ncxHref = findNcxDocumentHref(opf, opfDir);
+  if (!ncxHref) return [];
+  const ncxAbs = resolvePath(extractedDir, ncxHref);
+  if (!ncxAbs || !ncxAbs.startsWith(extractedDir)) return [];
+  try {
+    return parseNcxToc(await readFile(ncxAbs, "utf8"));
   } catch {
     return [];
   }
@@ -369,12 +464,15 @@ export async function ensureBookMaterialized(workspaceRoot, book) {
 
   const srcMtime = (await stat(book.path)).mtimeMs;
   let cachedMtime = 0;
+  let cachedVersion = 0;
   try {
     const metaRaw = await readFile(metaPath, "utf8");
     const meta = JSON.parse(metaRaw);
     cachedMtime = Number(meta.sourceMtime) || 0;
+    cachedVersion = Number(meta.materializeVersion) || 0;
   } catch {
     cachedMtime = 0;
+    cachedVersion = 0;
   }
 
   const chaptersDir = path.join(cacheDir, "chapters");
@@ -391,6 +489,7 @@ export async function ensureBookMaterialized(workspaceRoot, book) {
   }
   if (
     cachedMtime === srcMtime &&
+    cachedVersion >= MATERIALIZE_VERSION &&
     existsSync(textPath) &&
     existsSync(indexPath) &&
     existsSync(readingPath) &&
@@ -435,53 +534,90 @@ export async function ensureBookMaterialized(workspaceRoot, book) {
   const chapterFiles = [];
   await mkdir(chaptersDir, { recursive: true });
   const pandocPath = findPandoc();
+  const mediaDir = path.join(cacheDir, "media");
   let chapterIndex = 0;
+
+  async function writeChapterSlice({ sliceHtml, sourceHref, fragment, hint, htmlPath }) {
+    const text = stripHtml(sliceHtml);
+    if (!text) return;
+    chunks.push(text);
+    const fname = chapterMarkdownBasename(chapterIndex, fragment || sourceHref);
+    const outPath = path.join(chaptersDir, fname);
+    let converted = false;
+    if (pandocPath) {
+      let inputPath = htmlPath;
+      if (!inputPath) {
+        inputPath = path.join(chaptersDir, `._in-${fname}.xhtml`);
+        await writeFile(
+          inputPath,
+          `<!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml"><body>${sliceHtml}</body></html>`,
+          "utf8",
+        );
+      }
+      converted = await htmlToMarkdown({
+        htmlPath: inputPath,
+        outPath,
+        pandocPath,
+        extractMediaDir: mediaDir,
+      });
+    }
+    if (!converted) {
+      const fallbackTitle = hint?.title || titleFromHtml(sliceHtml) || `第 ${chapterIndex + 1} 章`;
+      await writeFile(outPath, `# ${fallbackTitle}\n\n${text}\n`, "utf8");
+    }
+    let mdBody = "";
+    try {
+      mdBody = await readFile(outPath, "utf8");
+    } catch {
+      mdBody = text;
+    }
+    const title =
+      sanitizeBookDisplayTitle(hint?.title || "") ||
+      titleFromMarkdown(mdBody) ||
+      titleFromHtml(sliceHtml) ||
+      `第 ${chapterIndex + 1} 章`;
+    chapterFiles.push({
+      index: chapterIndex,
+      file: fname,
+      title,
+      level: hint?.level ?? 0,
+      href: fragment ? `${sourceHref}#${fragment}` : sourceHref,
+      chars: mdBody.length,
+    });
+    chapterIndex += 1;
+  }
+
   for (const href of parsed.spine) {
     const abs = resolvePath(extractedDir, href);
     if (!abs || !abs.startsWith(extractedDir)) continue;
     try {
       const html = await readFile(abs, "utf8");
-      const text = stripHtml(html);
-      if (!text) continue;
-      chunks.push(text);
-      const fname = chapterMarkdownBasename(chapterIndex, href);
-      const outPath = path.join(chaptersDir, fname);
-      let converted = false;
-      if (pandocPath) {
-        converted = await htmlToMarkdown({
+      const fileHints = navToc.filter((item) => sameSpineFile(item.href || "", href));
+      const fragments = [...new Set(fileHints.map((item) => item.fragment).filter(Boolean))];
+      const slices =
+        fragments.length >= 1 ? splitHtmlByAnchorIds(html, fragments) : [{ id: "", html }];
+      if (slices.length <= 1) {
+        const navMeta = navTitleByIndex.get(chapterIndex) || fileHints[0];
+        await writeChapterSlice({
+          sliceHtml: html,
+          sourceHref: href,
+          fragment: "",
+          hint: navMeta,
           htmlPath: abs,
-          outPath,
-          pandocPath,
-          extractMediaDir: path.join(cacheDir, "media"),
+        });
+        continue;
+      }
+      for (const slice of slices) {
+        const hint = slice.id
+          ? fileHints.find((item) => item.fragment === slice.id)
+          : fileHints.find((item) => !item.fragment);
+        await writeChapterSlice({
+          sliceHtml: slice.html,
+          sourceHref: href,
+          fragment: slice.id,
+          hint,
         });
       }
-      if (!converted) {
-        const fallbackTitle = titleFromHtml(html) || `第 ${chapterIndex + 1} 章`;
-        const md = `# ${fallbackTitle}\n\n${text}\n`;
-        await writeFile(outPath, md, "utf8");
-      }
-      let mdBody = "";
-      try {
-        mdBody = await readFile(outPath, "utf8");
-      } catch {
-        mdBody = text;
-      }
-      const navMeta = navTitleByIndex.get(chapterIndex);
-      let title =
-        navMeta?.title ||
-        titleFromMarkdown(mdBody) ||
-        titleFromHtml(html) ||
-        `第 ${chapterIndex + 1} 章`;
-      const level = navMeta?.level ?? 0;
-      chapterFiles.push({
-        index: chapterIndex,
-        file: fname,
-        title,
-        level,
-        href,
-        chars: mdBody.length,
-      });
-      chapterIndex += 1;
     } catch {
       // skip chapter
     }
@@ -514,9 +650,7 @@ export async function ensureBookMaterialized(workspaceRoot, book) {
       level: c.level,
       href: c.href,
     })),
-    toc: navToc.length
-      ? navToc
-      : chapterFiles.map((c) => ({ index: c.index, title: c.title, level: c.level ?? 0 })),
+    toc: chapterFiles.map((c) => ({ index: c.index, title: c.title, level: c.level ?? 0 })),
   };
   await writeFile(readingPath, JSON.stringify(reading, null, 2), "utf8");
 
@@ -536,6 +670,7 @@ export async function ensureBookMaterialized(workspaceRoot, book) {
         sourceMtime: srcMtime,
         sourcePath: book.path,
         spine: parsed.spine,
+        materializeVersion: MATERIALIZE_VERSION,
       },
       null,
       2,
@@ -570,10 +705,23 @@ export function safeChapterFilename(name) {
   return base;
 }
 
+function sanitizeManifestTitles(items) {
+  if (!Array.isArray(items)) return items;
+  for (const item of items) {
+    if (item && typeof item.title === "string") {
+      item.title = sanitizeBookDisplayTitle(item.title) || item.title;
+    }
+  }
+  return items;
+}
+
 export async function loadBookReadingManifest(materialized) {
   const readingPath = materialized.readingPath || path.join(materialized.cacheDir, "reading.json");
   const raw = await readFile(readingPath, "utf8");
-  return JSON.parse(raw);
+  const manifest = JSON.parse(raw);
+  sanitizeManifestTitles(manifest.chapters);
+  sanitizeManifestTitles(manifest.toc);
+  return manifest;
 }
 
 export function safeBookCacheAssetRelativePath(relPath) {
@@ -767,6 +915,36 @@ export function rewriteBookMarkdownLinks(markdown) {
   });
 }
 
+const HTML_FOOTNOTE =
+  /<sup>\s*<a\b[^>]*>\s*<span\b[^>]*>([\s\S]*?)<\/span>\s*<\/a>\s*<\/sup>/gi;
+const IMAGE_PLACEHOLDER =
+  /<span\b[^>]*(?:data-)?original-image-src\s*=\s*(["'])([^"']+)\1[^>]*>([\s\S]*?)<\/span>/gi;
+const CHROME_TAG =
+  /<\/?(?:div|span|p|section|article|header|footer|figure|figcaption|nav|main|aside|font|center|sup|sub|u|small)(?:\s[^>]*)?>/gi;
+
+export function sanitizeBookDisplayTitle(title) {
+  let out = rewriteBookHtmlChrome(String(title || ""));
+  out = out.replace(/<[^>]+>/g, " ");
+  out = out.replace(/\*\*|__/g, "").replace(/`+/g, "");
+  return out.replace(/\s+/g, " ").trim().slice(0, 160);
+}
+
+export function rewriteBookHtmlChrome(markdown) {
+  let out = String(markdown || "").replace(HTML_FOOTNOTE, (_, inner) => {
+    const note = decodeHtmlEntities(String(inner || "").replace(/<[^>]+>/g, "")).trim();
+    return note ? `（${note}）` : "";
+  });
+  out = out.replace(IMAGE_PLACEHOLDER, (_, _q, src, inner) => {
+    const path = String(src || "").trim();
+    const alt = decodeHtmlEntities(String(inner || "").replace(/<[^>]+>/g, "")).trim();
+    if (!path) return alt;
+    return `![${alt === "Cover Image" ? "" : alt}](${path})`;
+  });
+  out = out.replace(/<br\s*\/?>/gi, "\n");
+  out = out.replace(CHROME_TAG, "");
+  return decodeHtmlEntities(out).replace(/\n{3,}/g, "\n\n");
+}
+
 export async function readBookChapterMarkdown(materialized, filename) {
   const safe = safeChapterFilename(filename);
   const chaptersDir = materialized.chaptersDir || path.join(materialized.cacheDir, "chapters");
@@ -777,7 +955,9 @@ export async function readBookChapterMarkdown(materialized, filename) {
     throw err;
   }
   const raw = await readFile(filePath, "utf8");
-  return rewriteBookMarkdownLinks(rewriteBookMarkdownImages(raw, materialized));
+  return rewriteBookMarkdownLinks(
+    rewriteBookMarkdownImages(rewriteBookHtmlChrome(raw), materialized),
+  );
 }
 
 export async function readCachedCover(cacheDir) {

@@ -14,6 +14,35 @@ void main() {
       normalizeBookMarkdown('<pre><code>const a = 1;</code></pre>'),
       contains('```\nconst a = 1;\n```'),
     );
+    final cleaned = normalizeBookMarkdown(
+      '<div class="calibre3"><span class="calibre10">像约翰和我这样的普通人。</span></div>\n'
+      '<span class="image placeholder" original-image-src="../images/cover.jpg">Cover Image</span>\n'
+      '诺亚 <sup><a href="#fn"><span class="image placeholder epub-footnote">译者注</span></a></sup>似的',
+    );
+    expect(cleaned, contains('像约翰和我这样的普通人。'));
+    expect(cleaned, contains('![](../images/cover.jpg)'));
+    expect(cleaned, contains('诺亚 （译者注）似的'));
+    expect(cleaned, isNot(contains('<span')));
+    expect(cleaned, isNot(contains('<div')));
+  });
+
+  test('strips calibre chrome from chapter titles', () {
+    expect(sanitizeBookDisplayTitle('<span class="calibre14">**一**</span>'), '一');
+    expect(
+      BookChapterEntry.fromJson({
+        'index': 4,
+        'file': '005.md',
+        'title': '<span class="calibre14">**一**</span>',
+      }).title,
+      '一',
+    );
+    expect(
+      BookTocEntry.fromJson({
+        'index': 2,
+        'title': '<span id="magic_copyright_title" class="calibre5">**版权信息**</span>',
+      }).title,
+      '版权信息',
+    );
   });
 
   test('classifies external and in-book links', () {

@@ -2,8 +2,6 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
-import 'package:http/http.dart' as http;
-
 import '../api/wenxiang_api.dart';
 import '../theme.dart';
 import '../utils/book_markdown_assets.dart';
@@ -143,15 +141,8 @@ class _BookMarkdownImageState extends State<_BookMarkdownImage> {
     }
   }
 
-  Future<Uint8List> _fetchAbsolute(String url) async {
-    final res = await http
-        .get(Uri.parse(url), headers: widget.api.assetHeaders)
-        .timeout(const Duration(seconds: 20));
-    final type = res.headers['content-type'] ?? '';
-    if (res.statusCode >= 400 || res.bodyBytes.isEmpty || type.contains('text/html')) {
-      throw ApiException('图片加载失败');
-    }
-    return res.bodyBytes;
+  Future<Uint8List> _fetchAbsolute(String url) {
+    return widget.api.fetchUrlBytes(Uri.parse(url));
   }
 
   void _remember(String key, Uint8List bytes) {

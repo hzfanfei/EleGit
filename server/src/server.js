@@ -23,6 +23,7 @@ import {
 } from "./oauth.js";
 import { isCancelled, requestSignal } from "./http-signal.js";
 import { loadStore } from "./store.js";
+import { createTunnelHealth } from "./tunnel-health.js";
 import { createTunnelManager } from "./tunnel.js";
 import { publicVoiceStatus, resolveVoiceConfig } from "./voice-config.js";
 import { attachSttGateway } from "./voice-stt-ws.js";
@@ -68,6 +69,9 @@ const tunnel = createTunnelManager({
   port: PORT,
   getConfig: () => store.config,
 });
+const tunnelHealth = createTunnelHealth({
+  getPublicUrl: () => store.config.publicUrl,
+});
 
 const app = express();
 app.use(cors(corsOptions));
@@ -95,7 +99,12 @@ function oauthReady() {
 }
 
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, name: "问象", service: "wenxiang" });
+  res.json({
+    ok: true,
+    name: "问象",
+    service: "wenxiang",
+    publicReachable: tunnelHealth.status().reachable,
+  });
 });
 
 app.get("/oauth/github/callback", async (req, res) => {
@@ -202,6 +211,7 @@ app.get("/v1/status", (_req, res) => {
       };
     })(),
     tunnel: tunnelStatus,
+    tunnelHealth: tunnelHealth.status(),
     lanUrls: lans,
     port: PORT,
   });
@@ -654,6 +664,7 @@ app.post("/v1/books/chat", async (req, res) => {
     }
     openSse(res);
     writeSse(res, { type: "meta", sessionId: session.id, bookId: book.id, engine: "acp" });
+    writeSse(res, { type: "status", phase: "connect" });
     writeSse(res, { type: "status", phase: "book" });
     if (signal.aborted) {
       res.end();
@@ -910,6 +921,7 @@ const httpServer = app.listen(PORT, BIND, () => {
       ? "Voice call (/v1/voice): enabled"
       : "Voice call (/v1/voice): disabled (set WENXIANG_VOICE_CALL_ENABLED=true to debug)",
   );
+  tunnelHealth.start();
 });
 
 attachVoiceGateway(httpServer, {

@@ -12,6 +12,21 @@ final _htmlAttr = RegExp(
   r'''\bhref\s*=\s*(["'])([^"']*)\1|\bhref\s*=\s*([^\s>]+)''',
   caseSensitive: false,
 );
+final _htmlFootnote = RegExp(
+  r'<sup>\s*<a\b[^>]*>\s*<span\b[^>]*>([\s\S]*?)</span>\s*</a>\s*</sup>',
+  caseSensitive: false,
+);
+final _imagePlaceholder = RegExp(
+  r'''<span\b[^>]*(?:data-)?original-image-src\s*=\s*(["'])([^"']+)\1[^>]*>([\s\S]*?)</span>''',
+  caseSensitive: false,
+);
+final _htmlStrong = RegExp(r'<(strong|b)\b[^>]*>([\s\S]*?)</\1>', caseSensitive: false);
+final _htmlEm = RegExp(r'<(em|i)\b[^>]*>([\s\S]*?)</\1>', caseSensitive: false);
+final _htmlBr = RegExp(r'<br\s*/?>', caseSensitive: false);
+final _chromeTag = RegExp(
+  r'</?(?:div|span|p|section|article|header|footer|figure|figcaption|nav|main|aside|font|center|sup|sub|u|small)(?:\s[^>]*)?>',
+  caseSensitive: false,
+);
 
 String decodeBookHtmlEntities(String raw) {
   return raw
@@ -34,7 +49,19 @@ String _fenceFromHtml(String inner) {
 
 /// EPUB leftover HTML → markdown flutter_markdown can actually render.
 String normalizeBookMarkdown(String markdown) {
-  var out = promoteBookHtmlImages(markdown);
+  var out = markdown;
+  out = out.replaceAllMapped(_htmlFootnote, (match) {
+    final note = _stripHtml(match.group(1) ?? '');
+    return note.isEmpty ? '' : '（$note）';
+  });
+  out = out.replaceAllMapped(_imagePlaceholder, (match) {
+    final src = (match.group(2) ?? '').trim();
+    final alt = _stripHtml(match.group(3) ?? '');
+    if (src.isEmpty) return alt;
+    final label = alt == 'Cover Image' ? '' : alt;
+    return '![$label]($src)';
+  });
+  out = promoteBookHtmlImages(out);
   out = out.replaceAllMapped(_htmlPreCode, (match) => _fenceFromHtml(match.group(1) ?? ''));
   out = out.replaceAllMapped(_htmlPre, (match) => _fenceFromHtml(match.group(1) ?? ''));
   out = out.replaceAllMapped(_htmlCode, (match) {
@@ -53,6 +80,11 @@ String normalizeBookMarkdown(String markdown) {
     if (href.isEmpty) return text.isEmpty ? (match.group(0) ?? '') : text;
     return '[${text.isEmpty ? href : text}]($href)';
   });
+  out = out.replaceAllMapped(_htmlStrong, (match) => '**${_stripHtml(match.group(2) ?? '')}**');
+  out = out.replaceAllMapped(_htmlEm, (match) => '*${_stripHtml(match.group(2) ?? '')}*');
+  out = out.replaceAll(_htmlBr, '\n');
+  out = out.replaceAll(_chromeTag, '');
+  out = decodeBookHtmlEntities(out).replaceAll(RegExp(r'\n{3,}'), '\n\n');
   return out;
 }
 

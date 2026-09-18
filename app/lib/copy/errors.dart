@@ -12,6 +12,9 @@ String humanizeError(Object error) {
   if (_isSseDrop(lower)) {
     return '连接中断了。请重试。';
   }
+  if (_isHandshake(lower)) {
+    return '公网隧道握手失败。请确认电脑上的问象服务和 ngrok 都在运行后重试。';
+  }
   if (_isNetwork(lower)) {
     return '连不上本机问象服务。请确认电脑上的服务已启动。';
   }
@@ -54,6 +57,10 @@ bool _isLeftoverDest(String lower) {
 bool _isRepoMissing(String lower) {
   return lower.contains('repository not found') ||
       (lower.contains('not found') && lower.contains('github.com'));
+}
+
+bool _isHandshake(String lower) {
+  return lower.contains('handshake') || lower.contains('certificate');
 }
 
 bool _isNetwork(String lower) {

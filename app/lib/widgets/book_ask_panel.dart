@@ -12,6 +12,7 @@ import '../models.dart';
 import '../persist/app_memory.dart';
 import '../persist/book_chat_store.dart';
 import '../theme.dart';
+import '../utils/ask_live_phase.dart';
 import '../voice/hold_to_speak_session.dart';
 import '../voice/voice_stt_client.dart';
 import 'wx_hold_to_speak.dart';
@@ -20,10 +21,12 @@ import 'wx_typewriter_stream.dart';
 
 enum BookAskScope { chapter, all }
 
-enum BookAskSheetLevel { dock, half, full }
+enum BookAskSheetLevel { hidden, dock, half, full }
 
 BookAskSheetLevel stepAskSheetUp(BookAskSheetLevel level) {
   switch (level) {
+    case BookAskSheetLevel.hidden:
+      return BookAskSheetLevel.dock;
     case BookAskSheetLevel.dock:
       return BookAskSheetLevel.half;
     case BookAskSheetLevel.half:
@@ -40,7 +43,37 @@ BookAskSheetLevel stepAskSheetDown(BookAskSheetLevel level) {
     case BookAskSheetLevel.half:
       return BookAskSheetLevel.dock;
     case BookAskSheetLevel.dock:
-      return BookAskSheetLevel.dock;
+      return BookAskSheetLevel.hidden;
+    case BookAskSheetLevel.hidden:
+      return BookAskSheetLevel.hidden;
+  }
+}
+
+const kBookAskHalfFraction = 0.45;
+const kBookAskFullFraction = 1.0;
+
+/// Space the reader must reserve for the ask sheet.
+/// Ignores a leftover expanded measurement after collapsing to dock.
+double bookReaderAskReserve({
+  required BookAskSheetLevel level,
+  required double viewportHeight,
+  required double estimatedDockHeight,
+  double measuredHeight = 0,
+  double dockSlack = 32,
+  double estimatedHiddenHeight = 0,
+}) {
+  switch (level) {
+    case BookAskSheetLevel.hidden:
+      return estimatedHiddenHeight;
+    case BookAskSheetLevel.dock:
+      if (measuredHeight > 0 && measuredHeight <= estimatedDockHeight + dockSlack) {
+        return measuredHeight;
+      }
+      return estimatedDockHeight;
+    case BookAskSheetLevel.half:
+      return viewportHeight * kBookAskHalfFraction;
+    case BookAskSheetLevel.full:
+      return viewportHeight * kBookAskFullFraction;
   }
 }
 
@@ -55,6 +88,7 @@ class BookAskPanel extends StatefulWidget {
     this.sheetController,
     this.sheetSnaps = const [0.18, 0.45],
     this.expanded,
+    this.hidden = false,
     this.fullscreen = false,
     this.chapterHint = '',
     this.readingPlace,
@@ -72,6 +106,7 @@ class BookAskPanel extends StatefulWidget {
   final DraggableScrollableController? sheetController;
   final List<double> sheetSnaps;
   final bool? expanded;
+  final bool hidden;
   final bool fullscreen;
   final String chapterHint;
   final ValueNotifier<BookReadingPlace>? readingPlace;
@@ -101,6 +136,11 @@ class BookAskPanel extends StatefulWidget {
         media.padding.bottom;
   }
 
+  /// Hidden peek: handle + home-indicator inset so the user can pull it back.
+  static double estimatedHiddenHeight(MediaQueryData media) {
+    return 8 + 11 + media.padding.bottom;
+  }
+
   @override
   State<BookAskPanel> createState() => BookAskPanelState();
 }
@@ -111,6 +151,8 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
   late final WxTypewriterStream _typewriter;
   late final HoldToSpeakSession _hold;
   late final AnimationController _pulse;
+  final _livePhase = ValueNotifier<String>('connect');
+  Timer? _livePhaseTimer;
   String? _sessionId;
   bool _live = false;
   bool _busy = false;
@@ -285,6 +327,8 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
     final message = _withReadingContext(raw);
     HapticFeedback.lightImpact();
     _input.clear();
+    _livePhase.value = 'connect';
+    _startLivePhaseFallback();
     setState(() {
       _messages.add(ChatMessage(role: 'user', content: raw));
       _busy = true;
@@ -307,6 +351,10 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
           _sessionId = event.sessionId;
         }
         switch (event.type) {
+          case 'status':
+            final phase = event.phase?.trim() ?? '';
+            if (phase.isNotEmpty) _livePhase.value = phase;
+            break;
           case 'delta':
             _typewriter.push(event.text);
             break;
@@ -355,6 +403,7 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
       });
       _typewriter.reset();
     } finally {
+      _stopLivePhaseFallback();
       if (mounted) {
         setState(() {
           _busy = false;
@@ -412,8 +461,11 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
   Widget _sheetChrome({required Widget child, bool tapToExpand = false}) {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
+      onVerticalDragUpdate: (_) {},
       onVerticalDragEnd: _onChromeDragEnd,
-      onTap: tapToExpand ? _expandForAnswer : widget.onRequestCollapse,
+      onTap: widget.hidden
+          ? widget.onRequestStepUp
+          : (tapToExpand ? _expandForAnswer : widget.onRequestCollapse),
       child: child,
     );
   }
@@ -529,12 +581,41 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
     );
   }
 
+  void _setLivePhase(String phase) {
+    if (phase.isEmpty || _livePhase.value == phase) return;
+    _livePhase.value = phase;
+  }
+
+  void _startLivePhaseFallback() {
+    _livePhaseTimer?.cancel();
+    final sentAt = DateTime.now();
+    _livePhaseTimer = Timer.periodic(const Duration(milliseconds: 400), (timer) {
+      if (!mounted || !_live || _typewriter.visible.value.isNotEmpty) {
+        timer.cancel();
+        return;
+      }
+      final next = nextAskLiveFallbackPhase(
+        current: _livePhase.value,
+        elapsed: DateTime.now().difference(sentAt),
+        book: true,
+      );
+      if (next != null) _setLivePhase(next);
+    });
+  }
+
+  void _stopLivePhaseFallback() {
+    _livePhaseTimer?.cancel();
+    _livePhaseTimer = null;
+  }
+
   @override
   void dispose() {
     if (_busy) widget.api.cancelChat();
+    _stopLivePhaseFallback();
     widget.readingPlace?.removeListener(_onReadingPlaceChanged);
     unawaited(_persistStore());
     widget.sheetSize.removeListener(_onSheetSize);
+    _livePhase.dispose();
     _pulse.dispose();
     _hold.dispose();
     _input.dispose();
@@ -574,7 +655,20 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
               ),
             ],
           ),
-          child: expanded
+          child: widget.hidden
+              ? SizedBox.expand(
+                  child: _sheetChrome(
+                    tapToExpand: true,
+                    child: const Align(
+                      alignment: Alignment.topCenter,
+                      child: Padding(
+                        padding: EdgeInsets.only(top: 8),
+                        child: _DragHandle(expanded: false, hidden: true),
+                      ),
+                    ),
+                  ),
+                )
+              : expanded
               ? Column(
                   children: [
                     _sheetChrome(
@@ -653,6 +747,7 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
                               turns: listAllBookQaTurns(_store),
                               live: _live,
                               typewriter: _typewriter,
+                              phase: _livePhase,
                               onDeleteTurn: _confirmDeleteTurn,
                             )
                           : ListView.builder(
@@ -664,9 +759,9 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
                                   return _AskBubble(
                                     role: 'assistant',
                                     streaming: true,
-                                    child: ValueListenableBuilder<String>(
-                                      valueListenable: _typewriter.visible,
-                                      builder: (_, text, __) => WxReadableText(text),
+                                    child: _BookAskLiveText(
+                                      typewriter: _typewriter,
+                                      phase: _livePhase,
                                     ),
                                   );
                                 }
@@ -741,18 +836,24 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
                         onTap: _expandForAnswer,
                         child: Padding(
                           padding: const EdgeInsets.fromLTRB(Wx.inset, 0, Wx.inset, 6),
-                          child: Text(
-                            _live
-                                ? (_peekAnswer?.trim().isNotEmpty == true
-                                    ? _peekAnswer!
-                                    : '正在生成回答…')
-                                : _peekAnswer!,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: Wx.muted,
-                              height: 1.35,
-                            ),
+                          child: ValueListenableBuilder<String>(
+                            valueListenable: _livePhase,
+                            builder: (_, phase, __) {
+                              final peek = _live
+                                  ? (_peekAnswer?.trim().isNotEmpty == true
+                                      ? _peekAnswer!
+                                      : askLivePhaseLabel(phase, book: true))
+                                  : _peekAnswer!;
+                              return Text(
+                                peek,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: Wx.muted,
+                                  height: 1.35,
+                                ),
+                              );
+                            },
                           ),
                         ),
                       ),
@@ -791,17 +892,20 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
 }
 
 class _DragHandle extends StatelessWidget {
-  const _DragHandle({required this.expanded, this.fullscreen = false});
+  const _DragHandle({required this.expanded, this.fullscreen = false, this.hidden = false});
 
   final bool expanded;
   final bool fullscreen;
+  final bool hidden;
 
   @override
   Widget build(BuildContext context) {
     return Semantics(
-      label: fullscreen
+      label: hidden
+          ? '上滑回到问书'
+          : fullscreen
           ? '下滑回到半屏'
-          : (expanded ? '上滑全屏，下滑收起' : '上滑展开解答'),
+          : (expanded ? '上滑全屏，下滑收起' : '上滑展开解答，下滑隐藏'),
       child: Container(
         width: 44,
         height: 5,
@@ -1142,6 +1246,42 @@ class _ComposerIsland extends StatelessWidget {
   }
 }
 
+class _BookAskLiveText extends StatelessWidget {
+  const _BookAskLiveText({
+    required this.typewriter,
+    required this.phase,
+  });
+
+  final WxTypewriterStream typewriter;
+  final ValueNotifier<String> phase;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return ValueListenableBuilder<String>(
+      valueListenable: typewriter.visible,
+      builder: (_, text, __) {
+        if (text.isNotEmpty) return WxReadableText(text);
+        return ValueListenableBuilder<String>(
+          valueListenable: phase,
+          builder: (_, livePhase, __) {
+            return Semantics(
+              liveRegion: true,
+              child: Text(
+                askLivePhaseLabel(livePhase, book: true),
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: Wx.muted,
+                  height: 1.45,
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
 class _AskBubble extends StatelessWidget {
   const _AskBubble({
     required this.role,
@@ -1256,6 +1396,7 @@ class _AllQaHistoryList extends StatelessWidget {
     required this.turns,
     required this.live,
     required this.typewriter,
+    required this.phase,
     required this.onDeleteTurn,
   });
 
@@ -1263,6 +1404,7 @@ class _AllQaHistoryList extends StatelessWidget {
   final List<BookQaTurn> turns;
   final bool live;
   final WxTypewriterStream typewriter;
+  final ValueNotifier<String> phase;
   final Future<void> Function(BookQaTurn turn) onDeleteTurn;
 
   @override
@@ -1293,9 +1435,9 @@ class _AllQaHistoryList extends StatelessWidget {
             child: _AskBubble(
               role: 'assistant',
               streaming: true,
-              child: ValueListenableBuilder<String>(
-                valueListenable: typewriter.visible,
-                builder: (_, text, __) => WxReadableText(text),
+              child: _BookAskLiveText(
+                typewriter: typewriter,
+                phase: phase,
               ),
             ),
           );

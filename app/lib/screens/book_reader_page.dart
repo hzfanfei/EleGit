@@ -76,8 +76,8 @@ class _BookReaderPageState extends State<BookReaderPage> {
   double _scrollFraction = 0;
 
   static const _dockSheet = 0.16;
-  static const _askExpandedSheet = 0.45;
-  static const _askFullSheet = 1.0;
+  static const _askExpandedSheet = kBookAskHalfFraction;
+  static const _askFullSheet = kBookAskFullFraction;
 
   @override
   void initState() {
@@ -431,6 +431,8 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
   double _fractionForAskLevel(BookAskSheetLevel level) {
     switch (level) {
+      case BookAskSheetLevel.hidden:
+        return 0;
       case BookAskSheetLevel.dock:
         return _dockSheet;
       case BookAskSheetLevel.half:
@@ -453,7 +455,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
   Future<void> _collapseAskSheet() => _setAskLevel(stepAskSheetDown(_askLevel));
 
   Future<void> _ensureAskHalf() async {
-    if (_askLevel == BookAskSheetLevel.dock) {
+    if (_askLevel == BookAskSheetLevel.hidden || _askLevel == BookAskSheetLevel.dock) {
       await _setAskLevel(BookAskSheetLevel.half);
     }
   }
@@ -594,10 +596,14 @@ class _BookReaderPageState extends State<BookReaderPage> {
           builder: (context, sheetFraction, _) {
             final h = media.size.height;
             final keyboard = MediaQuery.viewInsetsOf(context).bottom;
-            final fraction = sheetFraction.clamp(_dockSheet, _askFullSheet);
-            final panelH = _askHeight > 0
-                ? _askHeight
-                : BookAskPanel.estimatedDockHeight(media);
+            final fraction = sheetFraction.clamp(0.0, _askFullSheet);
+            final panelH = bookReaderAskReserve(
+              level: _askLevel,
+              viewportHeight: h,
+              estimatedDockHeight: BookAskPanel.estimatedDockHeight(media),
+              estimatedHiddenHeight: BookAskPanel.estimatedHiddenHeight(media),
+              measuredHeight: _askHeight,
+            );
             final readerBottom = panelH + keyboard;
 
             return Stack(
@@ -608,6 +614,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                   right: 0,
                   bottom: readerBottom,
                   child: ColoredBox(
+                    key: const Key('book-reader-body'),
                     color: palette.paper,
                     child: _chapterMarkdownByIndex.isEmpty
                         ? _OpeningSkeleton(
@@ -747,15 +754,21 @@ class _BookReaderPageState extends State<BookReaderPage> {
                         alignment: Alignment.bottomCenter,
                         child: SizedBox(
                           width: double.infinity,
-                          height: _askLevel == BookAskSheetLevel.dock
-                              ? null
-                              : h * _fractionForAskLevel(_askLevel),
+                          height: switch (_askLevel) {
+                            BookAskSheetLevel.hidden =>
+                              BookAskPanel.estimatedHiddenHeight(media),
+                            BookAskSheetLevel.dock => null,
+                            BookAskSheetLevel.half || BookAskSheetLevel.full =>
+                              h * _fractionForAskLevel(_askLevel),
+                          },
                           child: BookAskPanel(
                             api: widget.api,
                             book: widget.book,
                             scrollController: _askScrollController,
                             sheetSize: _sheetSize,
-                            expanded: _askLevel != BookAskSheetLevel.dock,
+                            hidden: _askLevel == BookAskSheetLevel.hidden,
+                            expanded: _askLevel != BookAskSheetLevel.dock &&
+                                _askLevel != BookAskSheetLevel.hidden,
                             fullscreen: _askLevel == BookAskSheetLevel.full,
                             chapterHint: _chapterHint,
                             readingPlace: _readingPlace,

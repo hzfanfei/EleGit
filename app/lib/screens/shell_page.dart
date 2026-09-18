@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api/wenxiang_api.dart';
 import '../config.dart';
+import '../copy/errors.dart';
 import '../models.dart';
 import '../persist/app_memory.dart';
 import '../theme.dart';
@@ -93,7 +94,7 @@ class ShellPageState extends State<ShellPage> {
       if (!mounted) return;
       setState(() {
         _booting = false;
-        _bootError = err;
+        _bootError = humanizeError(err);
         _step = AppStep.boot;
       });
     }
