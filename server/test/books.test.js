@@ -7,11 +7,15 @@ import { describe, it } from "node:test";
 import {
   bookIdFromFilename,
   booksDir,
+  clearBookAssetIndex,
   ensureBookMaterialized,
   listBooks,
   parseEpubBuffer,
   resolveBook,
   resolveBookCacheAssetPath,
+  readBookChapterMarkdown,
+  rewriteBookMarkdownImages,
+  rewriteBookMarkdownLinks,
   safeBookCacheAssetRelativePath,
 } from "../src/books.js";
 
@@ -167,6 +171,34 @@ describe("books", () => {
 
     const abs = resolveBookCacheAssetPath(materialized, "extracted/OEBPS/fig.png");
     assert.match(abs, /fig\.png$/);
+    const byName = resolveBookCacheAssetPath(materialized, "../Images/fig.png");
+    assert.match(byName, /fig\.png$/);
+    const md = await readBookChapterMarkdown(materialized, reading.chapters[0].file);
+    assert.match(md, /extracted\/OEBPS\/fig\.png|fig\.png|image placeholder/);
+  });
+
+  it("rewrites markdown and html image refs onto cached files", async () => {
+    const cacheDir = await mkdtemp(path.join(os.tmpdir(), "wx-books-rewrite-"));
+    const imageDir = path.join(cacheDir, "extracted", "OEBPS", "Images");
+    await mkdir(imageDir, { recursive: true });
+    await writeFile(path.join(imageDir, "image00483.jpeg"), Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+    clearBookAssetIndex(cacheDir);
+    const md = rewriteBookMarkdownImages(
+      '见图 ![{%}](../Images/image00483.jpeg)\n<img src="../Images/image00483.jpeg" class="sgc-4" style="width:85.0%" />',
+      { cacheDir },
+    );
+    assert.match(md, /!\[\]\(extracted\/OEBPS\/Images\/image00483\.jpeg\)/);
+    assert.equal(md.includes("<img"), false);
+    assert.equal(md.includes("../Images/"), false);
+  });
+
+  it("rewrites leftover html anchors to markdown links", () => {
+    const md = rewriteBookMarkdownLinks(
+      '见 <a href="https://vuejs.org">官网</a> 与 <a href="foo.com?a=1&amp;b=2">foo.com?a=1&amp;b=2</a>',
+    );
+    assert.match(md, /\[官网\]\(https:\/\/vuejs.org\)/);
+    assert.match(md, /\[foo.com\?a=1&b=2\]\(foo.com\?a=1&b=2\)/);
+    assert.equal(md.includes("<a "), false);
   });
 
   it("parses spine when manifest items list href before id", async () => {

@@ -2,11 +2,10 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../widgets/book_markdown_body.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-
 import '../api/wenxiang_api.dart';
 import '../models.dart';
 import '../persist/app_memory.dart';
@@ -14,6 +13,8 @@ import '../persist/book_chat_store.dart';
 import '../persist/book_reader_prefs.dart';
 import '../persist/book_reading_progress.dart';
 import '../theme.dart';
+import '../utils/book_markdown_markup.dart';
+import '../utils/book_reader_markdown_style.dart';
 import '../utils/book_reader_prefetch.dart';
 import '../widgets/book_ask_panel.dart';
 import '../widgets/book_reader_chrome.dart';
@@ -226,6 +227,29 @@ class _BookReaderPageState extends State<BookReaderPage> {
         ),
       );
     }
+  }
+
+  Future<void> _onBookLink(String href, String text) async {
+    final external = bookMarkdownExternalUri(href);
+    if (external != null) {
+      final opened = await launchUrl(external, mode: LaunchMode.externalApplication);
+      if (!opened && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('无法打开链接：$href'), behavior: SnackBarBehavior.floating),
+        );
+      }
+      return;
+    }
+    final manifest = _manifest;
+    if (manifest == null) return;
+    final index = resolveBookMarkdownChapterLink(
+      href: href,
+      text: text,
+      chapters: manifest.chapters,
+      toc: manifest.toc,
+    );
+    if (index == null || index == _activeChapterIndex) return;
+    await _jumpToChapter(index);
   }
 
   Future<void> _jumpToChapter(int index, {double scrollOffset = 0}) async {
@@ -554,30 +578,10 @@ class _BookReaderPageState extends State<BookReaderPage> {
     final manifest = _manifest;
     final media = MediaQuery.of(context);
     final topContentPad = _chromeVisible ? media.padding.top + 52 : media.padding.top + 12;
-    final styleSheet = MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
-      p: TextStyle(
-        fontSize: _settings.fontSize,
-        height: _settings.lineHeight,
-        letterSpacing: 0.12,
-        color: palette.ink,
-      ),
-      h1: TextStyle(
-        fontSize: _settings.fontSize + 6,
-        fontWeight: FontWeight.w700,
-        height: 1.35,
-        color: palette.ink,
-      ),
-      h2: TextStyle(
-        fontSize: _settings.fontSize + 3,
-        fontWeight: FontWeight.w700,
-        height: 1.35,
-        color: palette.ink,
-      ),
-      blockSpacing: 12,
-      listIndent: 24,
-      horizontalRuleDecoration: BoxDecoration(
-        border: Border(top: BorderSide(color: Wx.hairline, width: 0.5)),
-      ),
+    final styleSheet = bookReaderMarkdownStyle(
+      theme: Theme.of(context),
+      palette: palette,
+      settings: _settings,
     );
 
     WidgetsBinding.instance.addPostFrameCallback((_) => _measureAskPanel());
@@ -666,6 +670,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                                         spineHref: chapter?.href,
                                         data: body,
                                         styleSheet: styleSheet,
+                                        onTapLink: _onBookLink,
                                       ),
                                     ],
                                   ),

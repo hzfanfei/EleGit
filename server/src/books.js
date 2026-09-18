@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { createReadStream, existsSync } from "node:fs";
+import { createReadStream, existsSync, readdirSync, statSync } from "node:fs";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import AdmZip from "adm-zip";
@@ -408,6 +408,7 @@ export async function ensureBookMaterialized(workspaceRoot, book) {
     };
   }
 
+  clearBookAssetIndex(cacheDir);
   const buffer = await readFile(book.path);
   const parsed = parseEpubBuffer(buffer, { filename: book.filename });
   const zip = parsed.zip;
@@ -602,26 +603,83 @@ export function safeBookCacheAssetRelativePath(relPath) {
   return normalized.replace(/^\//, "");
 }
 
+const BOOK_ASSET_EXT = /\.(png|jpe?g|gif|webp|svg)$/i;
+
+function walkNamedFiles(dir, out, depth = 0) {
+  if (depth > 8 || !existsSync(dir)) return;
+  let entries = [];
+  try {
+    entries = readdirSyncSafe(dir);
+  } catch {
+    return;
+  }
+  for (const name of entries) {
+    const abs = path.join(dir, name);
+    let statInfo;
+    try {
+      statInfo = statSyncSafe(abs);
+    } catch {
+      continue;
+    }
+    if (statInfo?.isDirectory()) walkNamedFiles(abs, out, depth + 1);
+    else if (statInfo && BOOK_ASSET_EXT.test(name)) {
+      const key = name.toLowerCase();
+      if (!out.has(key)) out.set(key, abs);
+    }
+  }
+}
+
+function readdirSyncSafe(dir) {
+  return readdirSync(dir);
+}
+
+function statSyncSafe(abs) {
+  return statSync(abs);
+}
+
+const assetIndexByCache = new Map();
+
+export function findBookAssetByName(cacheDir, filename) {
+  const base = path.posix.basename(String(filename || "").split("?")[0]);
+  if (!base || !BOOK_ASSET_EXT.test(base)) return "";
+  const root = path.normalize(String(cacheDir || ""));
+  if (!root) return "";
+  let index = assetIndexByCache.get(root);
+  if (!index) {
+    index = new Map();
+    walkNamedFiles(path.join(root, "extracted"), index);
+    walkNamedFiles(path.join(root, "media"), index);
+    walkNamedFiles(path.join(root, "chapters"), index);
+    assetIndexByCache.set(root, index);
+  }
+  return index.get(base.toLowerCase()) || "";
+}
+
+export function clearBookAssetIndex(cacheDir) {
+  if (cacheDir) assetIndexByCache.delete(path.normalize(cacheDir));
+  else assetIndexByCache.clear();
+}
+
 export function resolveBookCacheAssetPath(materialized, relativePath) {
-  const rel = safeBookCacheAssetRelativePath(relativePath);
   const cacheDir = path.normalize(String(materialized.cacheDir || ""));
   if (!cacheDir) {
     const err = new Error("Book cache missing");
     err.status = 500;
     throw err;
   }
-  const abs = path.normalize(path.join(cacheDir, ...rel.split("/")));
-  if (!abs.startsWith(cacheDir)) {
-    const err = new Error("Invalid asset path");
-    err.status = 400;
-    throw err;
+  const raw = decodeURIComponent(String(relativePath || "").trim()).replace(/\\/g, "/");
+  try {
+    const rel = safeBookCacheAssetRelativePath(raw);
+    const abs = path.normalize(path.join(cacheDir, ...rel.split("/")));
+    if (abs.startsWith(cacheDir) && existsSync(abs)) return abs;
+  } catch {
+    // Fall through to filename search — EPUB markdown often uses ../Images/foo.jpeg
   }
-  if (!existsSync(abs)) {
-    const err = new Error("Asset not found");
-    err.status = 404;
-    throw err;
-  }
-  return abs;
+  const found = findBookAssetByName(cacheDir, raw);
+  if (found && found.startsWith(cacheDir)) return found;
+  const err = new Error("Asset not found");
+  err.status = 404;
+  throw err;
 }
 
 export function contentTypeForBookAsset(filePath) {
@@ -643,6 +701,72 @@ export function contentTypeForBookAsset(filePath) {
   }
 }
 
+const MD_IMAGE = /!\[([^\]]*)\]\((<)?([^)\s>]+)(?:>)?(?:\s+(?:"[^"]*"|'[^']*'))?\)/g;
+const HTML_IMG = /<img\b[^>]*>/gi;
+
+function htmlImgAttr(tag, name) {
+  const match = String(tag || "").match(
+    new RegExp(`\\b${name}\\s*=\\s*(["'])([\\s\\S]*?)\\1|\\b${name}\\s*=\\s*([^\\s>]+)`, "i"),
+  );
+  if (!match) return "";
+  return String(match[2] ?? match[3] ?? "").trim();
+}
+
+function cleanImageAlt(alt) {
+  const text = String(alt || "").trim();
+  if (!text || text === "{%}" || /^\{.+\}$/.test(text)) return "";
+  return text;
+}
+
+function resolvedBookImageRel(materialized, src) {
+  const cacheDir = materialized?.cacheDir;
+  const raw = String(src || "").trim();
+  if (!cacheDir || !raw || /^https?:/i.test(raw) || raw.startsWith("data:")) return "";
+  try {
+    const abs = resolveBookCacheAssetPath(materialized, raw);
+    const rel = path.relative(cacheDir, abs).replace(/\\/g, "/");
+    if (!rel || rel.startsWith("..")) return "";
+    return rel;
+  } catch {
+    return "";
+  }
+}
+
+export function rewriteBookMarkdownImages(markdown, materialized) {
+  const cacheDir = materialized?.cacheDir;
+  if (!cacheDir) return String(markdown || "");
+  const rewritten = String(markdown || "").replace(MD_IMAGE, (full, alt, _lt, src) => {
+    const rel = resolvedBookImageRel(materialized, src);
+    return rel ? `![${cleanImageAlt(alt)}](${rel})` : full;
+  });
+  return rewritten.replace(HTML_IMG, (full) => {
+    const rel = resolvedBookImageRel(materialized, htmlImgAttr(full, "src"));
+    if (!rel) return full;
+    return `![${cleanImageAlt(htmlImgAttr(full, "alt"))}](${rel})`;
+  });
+}
+
+const HTML_A = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
+
+function decodeHtmlEntities(raw) {
+  return String(raw || "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+}
+
+export function rewriteBookMarkdownLinks(markdown) {
+  return String(markdown || "").replace(HTML_A, (full, attrs, inner) => {
+    const href = decodeHtmlEntities(htmlImgAttr(`<a ${attrs}>`, "href"));
+    const text = decodeHtmlEntities(String(inner || "").replace(/<[^>]+>/g, "")).trim();
+    if (!href) return text || full;
+    return `[${text || href}](${href})`;
+  });
+}
+
 export async function readBookChapterMarkdown(materialized, filename) {
   const safe = safeChapterFilename(filename);
   const chaptersDir = materialized.chaptersDir || path.join(materialized.cacheDir, "chapters");
@@ -652,7 +776,8 @@ export async function readBookChapterMarkdown(materialized, filename) {
     err.status = 400;
     throw err;
   }
-  return readFile(filePath, "utf8");
+  const raw = await readFile(filePath, "utf8");
+  return rewriteBookMarkdownLinks(rewriteBookMarkdownImages(raw, materialized));
 }
 
 export async function readCachedCover(cacheDir) {

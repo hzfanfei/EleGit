@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
@@ -65,6 +66,34 @@ class WenxiangApi {
 
   Uri bookAssetUri(String bookId, String cacheRelativePath) {
     return _uri('/v1/books/$bookId/asset', {'path': cacheRelativePath});
+  }
+
+  Future<Uint8List> fetchBookAssetBytes(String bookId, String cacheRelativePath) async {
+    final res = await http
+        .get(bookAssetUri(bookId, cacheRelativePath), headers: assetHeaders)
+        .timeout(const Duration(seconds: 20));
+    final type = res.headers['content-type'] ?? '';
+    if (res.statusCode >= 400 || res.bodyBytes.isEmpty || type.contains('text/html')) {
+      throw ApiException('图片加载失败');
+    }
+    return res.bodyBytes;
+  }
+
+  Future<Uint8List> fetchBookAssetBytesFromCandidates(
+    String bookId,
+    Iterable<String> cacheRelativePaths,
+  ) async {
+    Object? last;
+    for (final path in cacheRelativePaths) {
+      final trimmed = path.trim();
+      if (trimmed.isEmpty) continue;
+      try {
+        return await fetchBookAssetBytes(bookId, trimmed);
+      } catch (err) {
+        last = err;
+      }
+    }
+    throw last ?? ApiException('图片加载失败');
   }
 
   http.Client? _checkoutClient;

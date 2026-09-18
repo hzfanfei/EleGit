@@ -1,9 +1,15 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:http/http.dart' as http;
 
 import '../api/wenxiang_api.dart';
 import '../theme.dart';
 import '../utils/book_markdown_assets.dart';
+import '../utils/book_markdown_markup.dart';
+
+final Map<String, Uint8List> _bookImageBytes = {};
 
 class BookMarkdownBody extends StatelessWidget {
   const BookMarkdownBody({
@@ -14,6 +20,7 @@ class BookMarkdownBody extends StatelessWidget {
     required this.data,
     required this.styleSheet,
     this.spineHref,
+    this.onTapLink,
   });
 
   final WenxiangApi api;
@@ -22,25 +29,33 @@ class BookMarkdownBody extends StatelessWidget {
   final String? spineHref;
   final String data;
   final MarkdownStyleSheet styleSheet;
+  final void Function(String href, String text)? onTapLink;
 
   @override
   Widget build(BuildContext context) {
     return MarkdownBody(
-      data: data,
+      data: normalizeBookMarkdown(data),
       styleSheet: styleSheet,
-      imageBuilder: (uri, title, alt) => _BookMarkdownImage(
+      onTapLink: (text, href, title) {
+        final target = (href ?? '').trim();
+        if (target.isEmpty) return;
+        onTapLink?.call(target, text);
+      },
+      sizedImageBuilder: (config) => _BookMarkdownImage(
         api: api,
         bookId: bookId,
         chapterFile: chapterFile,
         spineHref: spineHref,
-        uri: uri,
-        alt: alt ?? title ?? '',
+        uri: config.uri,
+        alt: config.alt ?? config.title ?? '',
+        width: config.width,
+        height: config.height,
       ),
     );
   }
 }
 
-class _BookMarkdownImage extends StatelessWidget {
+class _BookMarkdownImage extends StatefulWidget {
   const _BookMarkdownImage({
     required this.api,
     required this.bookId,
@@ -48,6 +63,8 @@ class _BookMarkdownImage extends StatelessWidget {
     required this.uri,
     required this.alt,
     this.spineHref,
+    this.width,
+    this.height,
   });
 
   final WenxiangApi api;
@@ -56,57 +73,140 @@ class _BookMarkdownImage extends StatelessWidget {
   final String? spineHref;
   final Uri uri;
   final String alt;
+  final double? width;
+  final double? height;
+
+  @override
+  State<_BookMarkdownImage> createState() => _BookMarkdownImageState();
+}
+
+class _BookMarkdownImageState extends State<_BookMarkdownImage> {
+  late Future<Uint8List?> _bytes;
+
+  @override
+  void initState() {
+    super.initState();
+    _bytes = _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant _BookMarkdownImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.uri != widget.uri ||
+        oldWidget.bookId != widget.bookId ||
+        oldWidget.chapterFile != widget.chapterFile ||
+        oldWidget.spineHref != widget.spineHref) {
+      _bytes = _load();
+    }
+  }
+
+  String get _raw {
+    try {
+      return Uri.decodeFull(widget.uri.toString());
+    } catch (_) {
+      return widget.uri.toString();
+    }
+  }
+
+  Future<Uint8List?> _load() async {
+    final raw = _raw;
+    if (raw.startsWith('data:image/') && !raw.contains('image/svg')) {
+      try {
+        return UriData.parse(raw).contentAsBytes();
+      } catch (_) {
+        return null;
+      }
+    }
+    if (raw.startsWith('data:')) return null;
+
+    final candidates = raw.startsWith('http://') || raw.startsWith('https://')
+        ? <String>[raw]
+        : bookMarkdownAssetCandidates(
+            src: raw,
+            chapterFile: widget.chapterFile,
+            spineHref: widget.spineHref,
+          );
+    if (candidates.isEmpty) return null;
+
+    final cacheKey = '${widget.bookId}::${candidates.join('|')}';
+    final cached = _bookImageBytes[cacheKey];
+    if (cached != null) return cached;
+
+    try {
+      final bytes = raw.startsWith('http://') || raw.startsWith('https://')
+          ? await _fetchAbsolute(raw)
+          : await widget.api.fetchBookAssetBytesFromCandidates(widget.bookId, candidates);
+      _remember(cacheKey, bytes);
+      return bytes;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<Uint8List> _fetchAbsolute(String url) async {
+    final res = await http
+        .get(Uri.parse(url), headers: widget.api.assetHeaders)
+        .timeout(const Duration(seconds: 20));
+    final type = res.headers['content-type'] ?? '';
+    if (res.statusCode >= 400 || res.bodyBytes.isEmpty || type.contains('text/html')) {
+      throw ApiException('图片加载失败');
+    }
+    return res.bodyBytes;
+  }
+
+  void _remember(String key, Uint8List bytes) {
+    _bookImageBytes[key] = bytes;
+    if (_bookImageBytes.length <= 80) return;
+    _bookImageBytes.remove(_bookImageBytes.keys.first);
+  }
 
   @override
   Widget build(BuildContext context) {
-    final raw = uri.toString();
-    final resolved = raw.startsWith('http://') || raw.startsWith('https://') || raw.startsWith('data:')
-        ? raw
-        : resolveBookMarkdownAssetRef(
-            src: Uri.decodeComponent(raw),
-            chapterFile: chapterFile,
-            spineHref: spineHref,
+    return FutureBuilder<Uint8List?>(
+      future: _bytes,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const SizedBox(
+            height: 120,
+            child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
           );
+        }
+        final bytes = snapshot.data;
+        if (bytes == null || bytes.isEmpty) return _broken();
+        return _framed(
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final maxW = constraints.maxWidth.isFinite && constraints.maxWidth > 0
+                  ? constraints.maxWidth
+                  : MediaQuery.sizeOf(context).width;
+              return Image.memory(
+                bytes,
+                fit: BoxFit.contain,
+                width: widget.width ?? maxW,
+                height: widget.height,
+                gaplessPlayback: true,
+                errorBuilder: (_, __, ___) => _broken(),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
 
-    if (resolved == null || resolved.isEmpty) {
-      return _brokenImage(alt, '无法解析图片路径');
-    }
-
-    final imageUri = resolved.startsWith('http://') ||
-            resolved.startsWith('https://') ||
-            resolved.startsWith('data:')
-        ? Uri.parse(resolved)
-        : api.bookAssetUri(bookId, resolved);
-
+  Widget _framed(Widget child) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(8),
-        child: Image.network(
-          imageUri.toString(),
-          headers: api.assetHeaders,
-          fit: BoxFit.contain,
-          errorBuilder: (_, __, ___) => _brokenImage(alt, '图片加载失败'),
-          loadingBuilder: (context, child, progress) {
-            if (progress == null) return child;
-            return SizedBox(
-              height: 120,
-              child: Center(
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  value: progress.expectedTotalBytes != null
-                      ? progress.cumulativeBytesLoaded / progress.expectedTotalBytes!
-                      : null,
-                ),
-              ),
-            );
-          },
-        ),
+        child: child,
       ),
     );
   }
 
-  Widget _brokenImage(String alt, String hint) {
+  Widget _broken() {
+    final hint = widget.alt.trim();
+    final showHint = hint.isNotEmpty && hint != '{%}' && !hint.startsWith('{');
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
@@ -116,7 +216,7 @@ class _BookMarkdownImage extends StatelessWidget {
         border: Border.all(color: Wx.hairline),
       ),
       child: Text(
-        alt.isNotEmpty ? alt : hint,
+        showHint ? hint : '图片加载失败',
         style: const TextStyle(color: Wx.faint, fontSize: 13),
       ),
     );
