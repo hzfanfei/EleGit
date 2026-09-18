@@ -3,9 +3,122 @@ import { createReadStream, existsSync } from "node:fs";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import AdmZip from "adm-zip";
+import { findPandoc, htmlToMarkdown } from "./pandoc.js";
 import { defaultWorkspaceRoot } from "./workspace.js";
 
 const BOOK_OWNER = "_book";
+const DEFAULT_BOOK_TEXT_MAX = 1_000_000;
+
+export function bookTextMaxChars(env = process.env) {
+  const raw = String(env.WENXIANG_BOOK_TEXT_MAX_CHARS || String(DEFAULT_BOOK_TEXT_MAX)).trim();
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_BOOK_TEXT_MAX;
+}
+
+function titleFromHtml(html) {
+  const h1 = String(html || "").match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
+  if (h1?.[1]) {
+    const t = stripHtml(h1[1]).trim();
+    if (t) return t.slice(0, 160);
+  }
+  const t = firstTag(html, "title");
+  if (t) return t.slice(0, 160);
+  return "";
+}
+
+function titleFromMarkdown(md) {
+  for (const line of String(md || "").split("\n")) {
+    const m = line.match(/^#\s+(.+)/);
+    if (m?.[1]) return m[1].trim().slice(0, 160);
+  }
+  return "";
+}
+
+function normalizeEpubHref(href) {
+  return decodeXml(String(href || "").split("#")[0].trim())
+    .replace(/^\.\//, "")
+    .replace(/\\/g, "/")
+    .toLowerCase();
+}
+
+function findNavDocumentHref(opf, opfDir) {
+  for (const block of opf.matchAll(/<item\b([^>]+)\/?>/gi)) {
+    const attrs = block[1];
+    if (!/\bproperties=["'][^"']*\bnav\b/i.test(attrs)) continue;
+    const hrefM = attrs.match(/\bhref=["']([^"']+)["']/i);
+    if (hrefM?.[1]) {
+      return path.posix.join(opfDir, hrefM[1]).replace(/\\/g, "/");
+    }
+  }
+  return "";
+}
+
+function parseNavListHtml(html, level, out) {
+  const re = /<li(?:\s[^>]*)?>([\s\S]*?)<\/li>/gi;
+  let match;
+  while ((match = re.exec(html)) !== null) {
+    const body = match[1];
+    const link = body.match(/<a\b[^>]*\bhref=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/i);
+    if (link) {
+      const title = stripHtml(link[2]).trim();
+      if (title) {
+        out.push({ href: link[1], title: title.slice(0, 160), level });
+      }
+    }
+    const nested = body.match(/<ol[^>]*>([\s\S]*?)<\/ol>/i);
+    if (nested?.[1]) parseNavListHtml(nested[1], level + 1, out);
+  }
+}
+
+function parseNavTocFromHtml(html) {
+  const block =
+    html.match(
+      /<nav[^>]*(?:epub:type=["'][^"']*toc[^"']*["']|role=["']doc-toc["'])[^>]*>([\s\S]*?)<\/nav>/i,
+    )?.[1] || html.match(/<nav[^>]*>([\s\S]*?)<\/nav>/i)?.[1];
+  if (!block) return [];
+  const ol = block.match(/<ol[^>]*>([\s\S]*?)<\/ol>/i)?.[1] || block;
+  const out = [];
+  parseNavListHtml(ol, 0, out);
+  return out;
+}
+
+function spineIndexForHref(spine, href) {
+  const norm = normalizeEpubHref(href);
+  const idx = spine.findIndex((h) => normalizeEpubHref(h) === norm);
+  if (idx >= 0) return idx;
+  const base = path.posix.basename(norm);
+  return spine.findIndex((h) => path.posix.basename(normalizeEpubHref(h)) === base);
+}
+
+async function loadEpubNavToc(extractedDir, opf, opfDir, spine) {
+  const navHref = findNavDocumentHref(opf, opfDir);
+  if (!navHref) return [];
+  const abs = resolvePath(extractedDir, navHref);
+  if (!abs || !abs.startsWith(extractedDir)) return [];
+  try {
+    const html = await readFile(abs, "utf8");
+    const raw = parseNavTocFromHtml(html);
+    const toc = [];
+    for (const item of raw) {
+      const index = spineIndexForHref(spine, item.href);
+      if (index < 0) continue;
+      toc.push({ index, title: item.title, level: item.level });
+    }
+    return toc;
+  } catch {
+    return [];
+  }
+}
+
+function chapterMarkdownBasename(index, href) {
+  const stem = path
+    .basename(String(href || "chapter"), path.extname(String(href || "")))
+    .replace(/[^\w\u4e00-\u9fff-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 48);
+  const num = String(index + 1).padStart(3, "0");
+  return `${num}-${stem || "chapter"}.md`;
+}
 
 export function booksDir(workspaceRoot = defaultWorkspaceRoot()) {
   const custom = String(process.env.WENXIANG_BOOKS_DIR || "").trim();
@@ -88,6 +201,18 @@ function readZipBuffer(zip, entryPath) {
   return zip.readFile(entry);
 }
 
+/** Map manifest item id → href (attribute order in OPF varies). */
+function parseOpfManifestHrefs(opf) {
+  const map = new Map();
+  for (const match of String(opf || "").matchAll(/<item\b([^>]+)\/?>/gi)) {
+    const attrs = match[1];
+    const id = attrs.match(/\bid=["']([^"']+)["']/i)?.[1];
+    const href = attrs.match(/\bhref=["']([^"']+)["']/i)?.[1];
+    if (id && href) map.set(id, href);
+  }
+  return map;
+}
+
 export function parseEpubBuffer(buffer, { filename = "book.epub" } = {}) {
   const zip = new AdmZip(buffer);
   const container = readZipText(zip, "META-INF/container.xml");
@@ -122,14 +247,14 @@ export function parseEpubBuffer(buffer, { filename = "book.epub" } = {}) {
     }
   }
 
+  const manifestHrefs = parseOpfManifestHrefs(opf);
   const spine = [];
   const spineBlock = opf.match(/<spine[^>]*>([\s\S]*?)<\/spine>/i)?.[1] || "";
   for (const match of spineBlock.matchAll(/<itemref[^>]+idref=["']([^"']+)["']/gi)) {
     const idref = match[1];
-    const itemRe = new RegExp(`<item[^>]+id=["']${idref}["'][^>]+href=["']([^"']+)["']`, "i");
-    const hrefMatch = opf.match(itemRe);
-    if (hrefMatch?.[1]) {
-      spine.push(path.posix.join(opfDir, hrefMatch[1]).replace(/\\/g, "/"));
+    const href = manifestHrefs.get(idref);
+    if (href) {
+      spine.push(path.posix.join(opfDir, href).replace(/\\/g, "/"));
     }
   }
 
@@ -252,8 +377,35 @@ export async function ensureBookMaterialized(workspaceRoot, book) {
     cachedMtime = 0;
   }
 
-  if (cachedMtime === srcMtime && existsSync(textPath)) {
-    return { cacheDir, extractedDir, textPath, coverPath, fresh: false };
+  const chaptersDir = path.join(cacheDir, "chapters");
+  const indexPath = path.join(cacheDir, "INDEX.md");
+  const readingPath = path.join(cacheDir, "reading.json");
+  let cachedChapterCount = 0;
+  if (existsSync(readingPath)) {
+    try {
+      const cached = JSON.parse(await readFile(readingPath, "utf8"));
+      cachedChapterCount = Array.isArray(cached.chapters) ? cached.chapters.length : 0;
+    } catch {
+      cachedChapterCount = 0;
+    }
+  }
+  if (
+    cachedMtime === srcMtime &&
+    existsSync(textPath) &&
+    existsSync(indexPath) &&
+    existsSync(readingPath) &&
+    cachedChapterCount > 0
+  ) {
+    return {
+      cacheDir,
+      extractedDir,
+      textPath,
+      coverPath,
+      chaptersDir,
+      indexPath,
+      readingPath,
+      fresh: false,
+    };
   }
 
   const buffer = await readFile(book.path);
@@ -268,20 +420,104 @@ export async function ensureBookMaterialized(workspaceRoot, book) {
     await writeFile(dest, zip.readFile(entry));
   }
 
+  const opf = readZipText(parsed.zip, parsed.opfPath || "OEBPS/content.opf");
+  const opfDir = path.posix.dirname(String(parsed.opfPath || "OEBPS/content.opf").replace(/^\//, ""));
+  const navToc = await loadEpubNavToc(extractedDir, opf, opfDir, parsed.spine);
+  const navTitleByIndex = new Map();
+  for (const item of navToc) {
+    if (!navTitleByIndex.has(item.index)) {
+      navTitleByIndex.set(item.index, { title: item.title, level: item.level });
+    }
+  }
+
   const chunks = [];
+  const chapterFiles = [];
+  await mkdir(chaptersDir, { recursive: true });
+  const pandocPath = findPandoc();
+  let chapterIndex = 0;
   for (const href of parsed.spine) {
     const abs = resolvePath(extractedDir, href);
     if (!abs || !abs.startsWith(extractedDir)) continue;
     try {
       const html = await readFile(abs, "utf8");
       const text = stripHtml(html);
-      if (text) chunks.push(text);
+      if (!text) continue;
+      chunks.push(text);
+      const fname = chapterMarkdownBasename(chapterIndex, href);
+      const outPath = path.join(chaptersDir, fname);
+      let converted = false;
+      if (pandocPath) {
+        converted = await htmlToMarkdown({
+          htmlPath: abs,
+          outPath,
+          pandocPath,
+          extractMediaDir: path.join(cacheDir, "media"),
+        });
+      }
+      if (!converted) {
+        const fallbackTitle = titleFromHtml(html) || `第 ${chapterIndex + 1} 章`;
+        const md = `# ${fallbackTitle}\n\n${text}\n`;
+        await writeFile(outPath, md, "utf8");
+      }
+      let mdBody = "";
+      try {
+        mdBody = await readFile(outPath, "utf8");
+      } catch {
+        mdBody = text;
+      }
+      const navMeta = navTitleByIndex.get(chapterIndex);
+      let title =
+        navMeta?.title ||
+        titleFromMarkdown(mdBody) ||
+        titleFromHtml(html) ||
+        `第 ${chapterIndex + 1} 章`;
+      const level = navMeta?.level ?? 0;
+      chapterFiles.push({
+        index: chapterIndex,
+        file: fname,
+        title,
+        level,
+        href,
+        chars: mdBody.length,
+      });
+      chapterIndex += 1;
     } catch {
       // skip chapter
     }
   }
-  const plain = chunks.join("\n\n").slice(0, 500_000);
+  const plain = chunks.join("\n\n").slice(0, bookTextMaxChars());
   await writeFile(textPath, plain, "utf8");
+
+  const indexLines = [
+    `# ${parsed.title || book.title || book.id}`,
+    parsed.author ? `\n作者：${parsed.author}\n` : "",
+    "",
+    "问书工作区：请先读本文件，再按需打开 `chapters/` 下的章节 Markdown。",
+    "",
+    "## 目录",
+    ...chapterFiles.map(
+      (c, i) => `${i + 1}. [${c.title}](chapters/${c.file}) — ${c.chars} 字`,
+    ),
+  ].filter((line) => line !== "");
+  await writeFile(indexPath, indexLines.join("\n"), "utf8");
+
+  const reading = {
+    id: book.id,
+    title: parsed.title || book.title,
+    author: parsed.author || book.author,
+    converter: pandocPath ? "pandoc" : "plain",
+    chapters: chapterFiles.map((c) => ({
+      index: c.index,
+      file: c.file,
+      title: c.title,
+      level: c.level,
+      href: c.href,
+    })),
+    toc: navToc.length
+      ? navToc
+      : chapterFiles.map((c) => ({ index: c.index, title: c.title, level: c.level ?? 0 })),
+  };
+  await writeFile(readingPath, JSON.stringify(reading, null, 2), "utf8");
 
   if (parsed.coverBuffer?.length) {
     const ext = parsed.coverExt || ".jpg";
@@ -306,7 +542,117 @@ export async function ensureBookMaterialized(workspaceRoot, book) {
     "utf8",
   );
 
-  return { cacheDir, extractedDir, textPath, coverPath, fresh: true };
+  return {
+    cacheDir,
+    extractedDir,
+    textPath,
+    coverPath,
+    chaptersDir,
+    indexPath,
+    readingPath,
+    fresh: true,
+  };
+}
+
+export function safeChapterFilename(name) {
+  const base = path.basename(String(name || "").trim());
+  if (!base || base === "." || base === "..") {
+    const err = new Error("Invalid chapter file");
+    err.status = 400;
+    throw err;
+  }
+  if (!/^\d{3}-[\w\u4e00-\u9fff-]+\.md$/i.test(base)) {
+    const err = new Error("Invalid chapter file");
+    err.status = 400;
+    throw err;
+  }
+  return base;
+}
+
+export async function loadBookReadingManifest(materialized) {
+  const readingPath = materialized.readingPath || path.join(materialized.cacheDir, "reading.json");
+  const raw = await readFile(readingPath, "utf8");
+  return JSON.parse(raw);
+}
+
+export function safeBookCacheAssetRelativePath(relPath) {
+  const raw = decodeURIComponent(String(relPath || "").trim()).replace(/\\/g, "/");
+  if (!raw || raw.includes("\0")) {
+    const err = new Error("Invalid asset path");
+    err.status = 400;
+    throw err;
+  }
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw)) {
+    const err = new Error("Invalid asset path");
+    err.status = 400;
+    throw err;
+  }
+  const parts = raw.split("/").filter((part) => part.length > 0);
+  if (parts.some((part) => part === "..")) {
+    const err = new Error("Invalid asset path");
+    err.status = 400;
+    throw err;
+  }
+  const normalized = path.posix.normalize(raw);
+  if (normalized.startsWith("..") || normalized.includes("/../")) {
+    const err = new Error("Invalid asset path");
+    err.status = 400;
+    throw err;
+  }
+  return normalized.replace(/^\//, "");
+}
+
+export function resolveBookCacheAssetPath(materialized, relativePath) {
+  const rel = safeBookCacheAssetRelativePath(relativePath);
+  const cacheDir = path.normalize(String(materialized.cacheDir || ""));
+  if (!cacheDir) {
+    const err = new Error("Book cache missing");
+    err.status = 500;
+    throw err;
+  }
+  const abs = path.normalize(path.join(cacheDir, ...rel.split("/")));
+  if (!abs.startsWith(cacheDir)) {
+    const err = new Error("Invalid asset path");
+    err.status = 400;
+    throw err;
+  }
+  if (!existsSync(abs)) {
+    const err = new Error("Asset not found");
+    err.status = 404;
+    throw err;
+  }
+  return abs;
+}
+
+export function contentTypeForBookAsset(filePath) {
+  const ext = path.extname(String(filePath || "")).toLowerCase();
+  switch (ext) {
+    case ".png":
+      return "image/png";
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    case ".gif":
+      return "image/gif";
+    case ".webp":
+      return "image/webp";
+    case ".svg":
+      return "image/svg+xml";
+    default:
+      return "application/octet-stream";
+  }
+}
+
+export async function readBookChapterMarkdown(materialized, filename) {
+  const safe = safeChapterFilename(filename);
+  const chaptersDir = materialized.chaptersDir || path.join(materialized.cacheDir, "chapters");
+  const filePath = path.join(chaptersDir, safe);
+  if (!filePath.startsWith(path.normalize(chaptersDir))) {
+    const err = new Error("Invalid chapter path");
+    err.status = 400;
+    throw err;
+  }
+  return readFile(filePath, "utf8");
 }
 
 export async function readCachedCover(cacheDir) {
@@ -319,26 +665,40 @@ export async function readCachedCover(cacheDir) {
   return null;
 }
 
+export async function readBookFullText(materialized, { maxChars = bookTextMaxChars() } = {}) {
+  try {
+    const raw = await readFile(materialized.textPath, "utf8");
+    const limit = Number.isFinite(maxChars) && maxChars > 0 ? maxChars : raw.length;
+    return raw.slice(0, limit);
+  } catch {
+    return "";
+  }
+}
+
 export async function formatBookAcpContext(book, materialized) {
   const lines = [
     `Book title: ${book.title}`,
     `Book id: ${book.id}`,
     `EPUB file: ${book.path}`,
-    `Unpacked EPUB directory: ${materialized.extractedDir}`,
-    `Plain-text cache: ${materialized.textPath}`,
+    `Book workspace (ACP cwd): ${materialized.cacheDir}`,
+    `Table of contents: ${materialized.indexPath || path.join(materialized.cacheDir, "INDEX.md")}`,
+    `Chapter markdown: ${materialized.chaptersDir || path.join(materialized.cacheDir, "chapters")}/`,
+    `Plain-text cache (fallback): ${materialized.textPath}`,
   ];
   if (book.author) lines.push(`Author: ${book.author}`);
   try {
-    const excerpt = (await readFile(materialized.textPath, "utf8")).slice(0, 4000);
-    if (excerpt) {
-      lines.push("", "Text excerpt (full text is in the cache file):", excerpt);
+    const indexPath = materialized.indexPath || path.join(materialized.cacheDir, "INDEX.md");
+    const index = (await readFile(indexPath, "utf8")).slice(0, 6000);
+    if (index) {
+      lines.push("", "=== INDEX.md (read this first) ===", index);
     }
   } catch {
-    // no excerpt
+    // no index
   }
   lines.push(
     "",
-    "When answering, read the unpacked HTML/XHTML under the extracted directory and the text cache.",
+    "Workflow: read INDEX.md, then open only the chapter files you need under chapters/.",
+    "Prefer chapters/*.md over raw HTML in extracted/. Do not edit files.",
     "Do not invent passages that are not in the book files.",
   );
   return lines.join("\n");
@@ -358,11 +718,8 @@ export function emptyBookProgress(book) {
 }
 
 export function bookLocalView(materialized, book) {
-  const files = [];
-  if (materialized.extractedDir) {
-    files.push("extracted/");
-    files.push("text.txt");
-  }
+  const files = ["INDEX.md", "chapters/", "text.txt"];
+  if (materialized.extractedDir) files.push("extracted/");
   return {
     present: true,
     path: materialized.cacheDir,

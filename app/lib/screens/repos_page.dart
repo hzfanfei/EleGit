@@ -41,7 +41,7 @@ class ReposPage extends StatefulWidget {
 class ReposPageState extends State<ReposPage> {
   final _query = TextEditingController();
   List<RepoItem> _repos = [];
-  Object? _error;
+  bool _localOnly = false;
   RepoItem? _cloning;
   WxCloneMode _cloneMode = WxCloneMode.clone;
   Object? _cloneError;
@@ -55,16 +55,15 @@ class ReposPageState extends State<ReposPage> {
     super.initState();
     _query.addListener(_onQueryChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && widget.githubConnected) _search();
+      if (mounted) _loadRepos();
     });
   }
 
   void _onQueryChanged() {
     if (mounted) setState(() {});
-    if (!widget.githubConnected) return;
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 450), () {
-      if (mounted) _search();
+      if (mounted) _loadRepos();
     });
   }
 
@@ -73,27 +72,44 @@ class ReposPageState extends State<ReposPage> {
     super.didUpdateWidget(oldWidget);
     if (widget.githubConnected && !oldWidget.githubConnected) {
       _reauth = false;
-      _search();
+      _loadRepos();
     }
   }
 
   void reload() {
-    if (widget.githubConnected) _search();
+    _loadRepos();
   }
 
-  Future<void> _search() async {
-    if (!widget.githubConnected) return;
+  Future<void> _loadRepos() async {
+    final query = _query.text.trim();
     setState(() {
       _loading = true;
-      _error = null;
     });
     try {
-      final repos = await widget.api.repos(_query.text.trim());
+      List<RepoItem> repos;
+      var localOnly = !widget.githubConnected;
+      if (widget.githubConnected) {
+        try {
+          repos = await widget.api.repos(query);
+          localOnly = false;
+        } catch (_) {
+          repos = await widget.api.localRepos(query);
+          localOnly = true;
+        }
+      } else {
+        repos = await widget.api.localRepos(query);
+      }
       if (!mounted) return;
-      setState(() => _repos = repos);
-    } catch (err) {
+      setState(() {
+        _repos = repos;
+        _localOnly = localOnly;
+      });
+    } catch (_) {
       if (!mounted) return;
-      setState(() => _error = err);
+      setState(() {
+        _repos = [];
+        _localOnly = true;
+      });
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -104,7 +120,6 @@ class ReposPageState extends State<ReposPage> {
     HapticFeedback.lightImpact();
     setState(() {
       _cloneError = null;
-      _error = null;
       _cloning = repo;
       _cloneMode = WxCloneMode.open;
       _cloneAttempt += 1;
@@ -178,7 +193,7 @@ class ReposPageState extends State<ReposPage> {
 
   @override
   Widget build(BuildContext context) {
-    if (!widget.githubConnected || _reauth) {
+    if (_reauth) {
       return LoginPage(
         api: widget.api,
         onReady: () async {
@@ -187,18 +202,21 @@ class ReposPageState extends State<ReposPage> {
         },
         autoStart: widget.autoStartOAuth && !widget.githubConnected,
         reauth: _reauth,
-        onCancel: _reauth ? () => setState(() => _reauth = false) : null,
+        onCancel: () => setState(() => _reauth = false),
       );
     }
 
     final blocked = _cloning != null && _cloneError == null;
+    final subtitle = widget.githubConnected
+        ? (widget.githubLogin.isEmpty ? '选一个仓库问进度' : widget.githubLogin)
+        : (_localOnly ? '本机 ~/问象 仓库' : '选一个仓库问进度');
     return Scaffold(
       body: Column(
         children: [
           WxPageHeader(
             showMark: true,
             title: '问象',
-            subtitle: widget.githubLogin.isEmpty ? '选一个仓库问进度' : widget.githubLogin,
+            subtitle: subtitle,
             trailing: [
               if (widget.onOpenBooks != null)
                 TextButton(
@@ -207,7 +225,7 @@ class ReposPageState extends State<ReposPage> {
                 ),
               TextButton(
                 onPressed: blocked ? null : () => setState(() => _reauth = true),
-                child: const Text('GitHub'),
+                child: Text(widget.githubConnected ? 'GitHub' : '连接 GitHub'),
               ),
             ],
           ),
@@ -216,10 +234,10 @@ class ReposPageState extends State<ReposPage> {
             child: TextField(
               controller: _query,
               textInputAction: TextInputAction.search,
-              onSubmitted: (_) => _search(),
+              onSubmitted: (_) => _loadRepos(),
               enabled: !blocked,
               decoration: InputDecoration(
-                hintText: '搜索仓库名',
+                hintText: _localOnly ? '搜索本机仓库' : '搜索仓库名',
                 prefixIcon: const Icon(Icons.search, size: 20, color: Wx.faint),
                 suffixIcon: _query.text.isEmpty
                     ? null
@@ -230,7 +248,7 @@ class ReposPageState extends State<ReposPage> {
                             ? null
                             : () {
                                 _query.clear();
-                                _search();
+                                _loadRepos();
                               },
                       ),
               ),
@@ -239,11 +257,6 @@ class ReposPageState extends State<ReposPage> {
           if (_loading)
             const LinearProgressIndicator(minHeight: 2),
           const WxHairline(),
-          if (_error != null && _cloning == null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(Wx.inset, 16, Wx.inset, 0),
-              child: WxErrorPanel(error: _error!, onRetry: _search),
-            ),
           Expanded(
             child: Stack(
               children: [
@@ -270,23 +283,23 @@ class ReposPageState extends State<ReposPage> {
     if (_loading && _repos.isEmpty) {
       return const WxBusy(label: '正在读取仓库');
     }
-    if (_error != null && _repos.isEmpty) {
-      return const SizedBox.shrink();
-    }
     if (_repos.isEmpty) {
+      final query = _query.text.trim();
       return WxEmpty(
-        title: _query.text.trim().isEmpty ? '还没有可见仓库' : '没有找到仓库',
-        detail: _query.text.trim().isEmpty
-            ? '确认 GitHub 已授权 repo 权限，或下拉刷新。'
+        title: query.isEmpty ? '本机还没有仓库' : '没有找到仓库',
+        detail: query.isEmpty
+            ? (widget.githubConnected
+                ? '把仓库克隆到 ~/问象/<owner>/<repo>，或连接 GitHub 搜索远程。'
+                : '把已有 git 仓库放到 ~/问象/<owner>/<repo>，或点「连接 GitHub」。')
             : '换个关键词，或清空搜索看看全部。',
-        action: TextButton(onPressed: _search, child: const Text('重新加载')),
+        action: TextButton(onPressed: _loadRepos, child: const Text('重新加载')),
       );
     }
     final query = _query.text.trim();
     final last = widget.lastRepo;
     final showContinue = query.isEmpty && last != null && last.fullName.isNotEmpty;
     return RefreshIndicator(
-      onRefresh: _search,
+      onRefresh: _loadRepos,
       child: ListView.separated(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(Wx.inset, 8, Wx.inset, 24),

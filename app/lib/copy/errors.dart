@@ -24,6 +24,9 @@ String humanizeError(Object error) {
   if (lower.contains('engine') && (lower.contains('unavail') || lower.contains('fail'))) {
     return '问答引擎暂时不可用。请稍后重试。';
   }
+  if (lower.contains('session not found')) {
+    return '问书会话已过期。请再问一次。';
+  }
 
   return '出了点问题。请稍后重试。';
 }

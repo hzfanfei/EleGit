@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, rm } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -94,6 +94,64 @@ export function checkoutPath(workspaceRoot, owner, repo) {
 export function isCheckoutPresent(workspaceRoot, owner, repo) {
   const dest = checkoutPath(workspaceRoot, owner, repo);
   return existsSync(path.join(dest, ".git"));
+}
+
+const LOCAL_REPO_SKIP = new Set(["books", ".book-cache"]);
+
+export async function listLocalRepos(workspaceRoot, q = "") {
+  const needle = String(q || "")
+    .trim()
+    .toLowerCase();
+  const out = [];
+  let owners;
+  try {
+    owners = await readdir(workspaceRoot, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  for (const ownerDir of owners) {
+    if (!ownerDir.isDirectory()) continue;
+    const ownerName = ownerDir.name;
+    if (ownerName.startsWith(".") || LOCAL_REPO_SKIP.has(ownerName)) continue;
+    const ownerPath = path.join(workspaceRoot, ownerName);
+    let repoDirs;
+    try {
+      repoDirs = await readdir(ownerPath, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const repoDir of repoDirs) {
+      if (!repoDir.isDirectory() || repoDir.name.startsWith(".")) continue;
+      const dest = path.join(ownerPath, repoDir.name);
+      if (!existsSync(path.join(dest, ".git"))) continue;
+      const fullName = `${ownerName}/${repoDir.name}`;
+      if (
+        needle &&
+        !fullName.toLowerCase().includes(needle) &&
+        !repoDir.name.toLowerCase().includes(needle)
+      ) {
+        continue;
+      }
+      let pushedAt = "";
+      try {
+        pushedAt = (await stat(dest)).mtime.toISOString();
+      } catch {
+        /* ignore */
+      }
+      out.push({
+        owner: ownerName,
+        name: repoDir.name,
+        fullName,
+        description: "本机仓库",
+        private: false,
+        language: "",
+        pushedAt,
+        local: true,
+      });
+    }
+  }
+  out.sort((a, b) => String(b.pushedAt || "").localeCompare(String(a.pushedAt || "")));
+  return out;
 }
 
 export async function detectDefaultBranch(dest) {

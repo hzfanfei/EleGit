@@ -123,8 +123,22 @@ describe("session store", () => {
 
     const closed = await store.close("hzfanfei", "fwechat", first.id);
     assert.equal(closed.closed, true);
-    assert.throws(() => store.resolveForChat("hzfanfei", "fwechat", first.id), /Session not found/);
+    const recovered = store.resolveForChat("hzfanfei", "fwechat", first.id);
+    assert.equal(recovered.id, second.id);
     assert.equal(store.resolveForChat("hzfanfei", "fwechat", second.id).id, second.id);
+    const fresh = createSessionStore({
+      resolveCommand: () => ({
+        id: "acp",
+        path: process.execPath,
+        args: [fakeAcp],
+        mode: "ask",
+        transport: "stdio",
+      }),
+      spawnImpl: spawn,
+    });
+    const afterRestart = fresh.resolveForChat("hzfanfei", "fwechat", first.id);
+    assert.ok(afterRestart.id);
+    assert.notEqual(afterRestart.id, first.id);
   });
 
   it("warms a shared repo ACP channel across sessions", async () => {

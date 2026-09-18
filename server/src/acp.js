@@ -99,14 +99,22 @@ export function buildAcpPrompt({ question, history, githubContext, seedHistory }
   return lines.join("\n");
 }
 
-export function buildBookAcpPrompt({ question, history, bookContext, seedHistory }) {
+export function buildBookAcpPrompt({ question, history, bookContext, seedHistory, currentChapter }) {
   const lines = [
     "You are 问象·问书, a local book Q&A assistant running on the user's computer.",
-    "You are in ask mode: read the unpacked EPUB files and text cache, then answer. Do not edit files.",
+    "You are in ask mode: read INDEX.md and chapter markdown under chapters/, then answer. Do not edit files.",
     "Answer in Simplified Chinese unless the user writes in another language.",
     "Be concise and efficient: lead with the direct answer; use short paragraphs or bullets.",
     "Quote or paraphrase the book when helpful. Do not invent passages, characters, or events.",
   ];
+  const chapter = String(currentChapter || "").trim();
+  if (chapter) {
+    lines.push(
+      "",
+      "=== Current reading chapter (open the matching file under chapters/ first) ===",
+      chapter,
+    );
+  }
   if (bookContext) {
     lines.push("", "=== Book context ===", bookContext);
   }
@@ -508,10 +516,13 @@ export function createSessionStore({
   }
 
   function resolveForChat(owner, repo, sessionId) {
-    if (sessionId) {
-      const session = requireSession(owner, repo, sessionId);
-      activeByRepo.set(repoKey(owner, repo), session.id);
-      return session;
+    const requested = String(sessionId || "").trim();
+    if (requested) {
+      const existing = sessions.get(requested);
+      if (existing && existing.owner === owner && existing.repo === repo) {
+        activeByRepo.set(repoKey(owner, repo), existing.id);
+        return existing;
+      }
     }
     const activeId = activeByRepo.get(repoKey(owner, repo));
     if (activeId && sessions.has(activeId)) return sessions.get(activeId);

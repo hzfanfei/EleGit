@@ -15,6 +15,11 @@ class Wx {
   static const danger = Color(0xFFD27A6C);
   static const ok = Color(0xFF8A9A7B);
 
+  /// Warm paper tone for long-form reading (slightly lifted from bg).
+  static const readerPaper = Color(0xFF121110);
+  static const readerInk = Color(0xFFE8E4DC);
+  static const readerMuted = Color(0xFF7A756C);
+
   /// System UI + CJK. Do not name an unregistered webfont — CanvasKit will
   /// double-paint Latin glyphs if the family is not in Flutter's font registry.
   static const fontFallback = [

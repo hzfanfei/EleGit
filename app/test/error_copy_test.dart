@@ -53,6 +53,10 @@ void main() {
     );
   });
 
+  test('maps stale ACP sessions after companion restart', () {
+    expect(humanizeError(ApiException('Session not found')), contains('会话'));
+  });
+
   test('never returns empty copy', () {
     expect(humanizeError(''), isNot(isEmpty));
   });

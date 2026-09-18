@@ -99,7 +99,7 @@ void main() {
     expect(find.text('你问'), findsOneWidget);
   });
 
-  testWidgets('not logged in shows GitHub auth on repo home', (tester) async {
+  testWidgets('not logged in shows local repos on repo home', (tester) async {
     final store = await memory();
     await tester.pumpWidget(
       MaterialApp(
@@ -111,10 +111,11 @@ void main() {
       ),
     );
     await tester.pump();
-    await tester.pump();
+    await tester.pumpAndSettle();
 
-    expect(find.text('重新打开 GitHub'), findsOneWidget);
-    expect(find.text('搜索仓库名'), findsNothing);
+    expect(find.text('demo'), findsOneWidget);
+    expect(find.text('连接 GitHub'), findsOneWidget);
+    expect(find.text('重新打开 GitHub'), findsNothing);
   });
 
   testWidgets('back from chat returns to repo list without OAuth', (tester) async {

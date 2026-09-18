@@ -9,6 +9,8 @@ class FakeWenxiangApi extends WenxiangApi {
     this.githubLogin = 'octo',
     this.reposResult,
     this.reposThrows,
+    this.localReposResult,
+    this.localReposThrows,
     this.checkoutPath = '/home/fei/问象/octo/demo',
     this.checkoutDelay = Duration.zero,
     this.checkoutThrows,
@@ -28,6 +30,8 @@ class FakeWenxiangApi extends WenxiangApi {
   String githubLogin;
   List<RepoItem>? reposResult;
   Object? reposThrows;
+  List<RepoItem>? localReposResult;
+  Object? localReposThrows;
   String checkoutPath;
   Duration checkoutDelay;
   Object? checkoutThrows;
@@ -78,11 +82,24 @@ class FakeWenxiangApi extends WenxiangApi {
   Future<void> warmBookSession(String bookId, {String? sessionId}) async {}
 
   @override
-  Future<void> downloadBookFile(
-    String bookId,
-    String destPath, {
-    void Function(int received, int? total)? onProgress,
-  }) async {}
+  Future<BookReadingManifest> fetchBookReadingManifest(String bookId) async {
+    const chapters = [
+      BookChapterEntry(index: 0, file: '001-chapter.md', title: '第一章'),
+    ];
+    return BookReadingManifest(
+      bookId: bookId,
+      title: 'Test book',
+      author: '',
+      converter: 'plain',
+      chapters: chapters,
+      toc: [BookTocEntry(index: 0, title: '第一章')],
+    );
+  }
+
+  @override
+  Future<String> fetchBookChapterMarkdown(String bookId, String filename) async {
+    return '# 第一章\n\n正文。';
+  }
 
   @override
   Stream<ChatStreamEvent> bookChatStream({
@@ -90,6 +107,7 @@ class FakeWenxiangApi extends WenxiangApi {
     required String message,
     required List<ChatMessage> history,
     String? sessionId,
+    String? chapter,
   }) =>
       chatStream(
         owner: '_book',
@@ -151,6 +169,26 @@ class FakeWenxiangApi extends WenxiangApi {
             fullName: 'octo/demo',
             description: '示例仓库',
             privateRepo: true,
+            language: 'Dart',
+            pushedAt: '2026-09-15T00:00:00Z',
+          ),
+        ];
+    if (query.isEmpty) return all;
+    return all.where((r) => r.fullName.contains(query)).toList();
+  }
+
+  @override
+  Future<List<RepoItem>> localRepos(String query) async {
+    if (localReposThrows != null) throw localReposThrows!;
+    final all = localReposResult ??
+        reposResult ??
+        [
+          RepoItem(
+            owner: 'octo',
+            name: 'demo',
+            fullName: 'octo/demo',
+            description: '本机仓库',
+            privateRepo: false,
             language: 'Dart',
             pushedAt: '2026-09-15T00:00:00Z',
           ),

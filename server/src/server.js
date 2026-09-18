@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import { corsOptions } from "./cors.js";
 import { loadLocalEnv } from "./env.js";
-import { createSessionStore, detectCursorEngine } from "./acp.js";
+import { buildBookAcpPrompt, createSessionStore, detectCursorEngine } from "./acp.js";
 import { streamAnswer, synthesizeBookAnswer } from "./ask.js";
 import { openSse, writeSse } from "./sse.js";
 import {
@@ -35,19 +35,24 @@ import {
   formatLocalContext,
   getCheckoutSyncStatus,
   isCheckoutPresent,
+  listLocalRepos,
   snapshotCheckoutLite,
 } from "./workspace.js";
 import {
-  bookLocalView,
   bookSessionOwner,
+  bookLocalView,
   booksDir,
   emptyBookProgress,
   ensureBookMaterialized,
   formatBookAcpContext,
   listBooks,
+  loadBookReadingManifest,
+  contentTypeForBookAsset,
   openBookFileStream,
+  readBookChapterMarkdown,
   readCachedCover,
   resolveBook,
+  resolveBookCacheAssetPath,
 } from "./books.js";
 
 loadLocalEnv();
@@ -188,6 +193,14 @@ app.get("/v1/status", (_req, res) => {
       fallback: "local-progress",
     },
     voice: publicVoiceStatus(resolveVoiceConfig()),
+    books: (() => {
+      const acp = detectCursorEngine();
+      return {
+        engine: "acp",
+        ready: Boolean(acp),
+        model: acp?.model || null,
+      };
+    })(),
     tunnel: tunnelStatus,
     lanUrls: lans,
     port: PORT,
@@ -287,10 +300,20 @@ app.delete("/v1/github/session", async (_req, res) => {
   res.json({ connected: false });
 });
 
+app.get("/v1/repos/local", async (req, res) => {
+  try {
+    const q = String(req.query.q || "");
+    const repos = await listLocalRepos(store.config.workspaceRoot, q);
+    res.json({ repos, source: "local" });
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
 app.get("/v1/repos", requireGithub, async (req, res) => {
   try {
     const repos = await listRepos(githubToken(), String(req.query.q || ""));
-    res.json({ repos });
+    res.json({ repos, source: "github" });
   } catch (err) {
     sendError(res, err);
   }
@@ -331,13 +354,14 @@ async function checkoutRepo(owner, repo, signal, { fast = false } = {}) {
 
   const defaultBranch =
     progress?.repo?.defaultBranch || (present ? await resolveDefaultBranch(owner, repo) : "main");
+  const canFetchRemote = Boolean(githubToken());
   const result = await ensureCheckout({
     workspaceRoot: store.config.workspaceRoot,
     owner,
     repo,
     token: githubToken(),
     defaultBranch,
-    fetchRemote: !(fast && present),
+    fetchRemote: canFetchRemote && !(fast && present),
     signal,
   });
 
@@ -366,7 +390,7 @@ app.get("/v1/repos/:owner/:repo/checkout-status", async (req, res) => {
       owner,
       repo,
       defaultBranch,
-      fetchRemote: req.query.fetch !== "0",
+      fetchRemote: req.query.fetch !== "0" && Boolean(githubToken()),
     });
     res.json(status);
   } catch (err) {
@@ -480,6 +504,49 @@ app.get("/v1/books/:bookId/file", async (req, res) => {
   }
 });
 
+app.get("/v1/books/:bookId/reading", async (req, res) => {
+  try {
+    const book = await resolveBook(store.config.workspaceRoot, req.params.bookId);
+    const materialized = await ensureBookMaterialized(store.config.workspaceRoot, book);
+    const manifest = await loadBookReadingManifest(materialized);
+    res.json({
+      bookId: book.id,
+      title: manifest.title || book.title,
+      author: manifest.author || book.author,
+      converter: manifest.converter || "plain",
+      chapters: manifest.chapters || [],
+      toc: manifest.toc || manifest.chapters || [],
+      workspace: materialized.cacheDir,
+    });
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.get("/v1/books/:bookId/chapters/:filename", async (req, res) => {
+  try {
+    const book = await resolveBook(store.config.workspaceRoot, req.params.bookId);
+    const materialized = await ensureBookMaterialized(store.config.workspaceRoot, book);
+    const markdown = await readBookChapterMarkdown(materialized, req.params.filename);
+    res.setHeader("Content-Type", "text/markdown; charset=utf-8");
+    res.send(markdown);
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.get("/v1/books/:bookId/asset", async (req, res) => {
+  try {
+    const book = await resolveBook(store.config.workspaceRoot, req.params.bookId);
+    const materialized = await ensureBookMaterialized(store.config.workspaceRoot, book);
+    const abs = resolveBookCacheAssetPath(materialized, req.query.path);
+    res.setHeader("Content-Type", contentTypeForBookAsset(abs));
+    openBookFileStream(abs).pipe(res);
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
 app.get("/v1/books/:bookId/cover", async (req, res) => {
   try {
     const book = await resolveBook(store.config.workspaceRoot, req.params.bookId);
@@ -525,11 +592,25 @@ app.post("/v1/books/:bookId/sessions", (req, res) => {
 
 app.post("/v1/books/:bookId/sessions/warm", async (req, res) => {
   try {
+    if (!detectCursorEngine()) {
+      res.status(503).json({
+        error: "问书需要本机 Cursor Agent（ACP）。请安装 agent 并 login。",
+        code: "acp_unconfigured",
+      });
+      return;
+    }
     const book = await resolveBook(store.config.workspaceRoot, req.params.bookId);
     const materialized = await ensureBookMaterialized(store.config.workspaceRoot, book);
     const owner = bookSessionOwner();
-    const out = await bookSessions.warmRepo(owner, book.id, materialized.cacheDir);
-    res.json(out);
+    const sessionId = String(req.body?.sessionId || "").trim();
+    const session = bookSessions.resolveForChat(owner, book.id, sessionId);
+    await bookSessions.warm(session, materialized.cacheDir);
+    res.json({
+      warmed: true,
+      engine: "acp",
+      workspace: materialized.cacheDir,
+      chaptersDir: materialized.chaptersDir,
+    });
   } catch (err) {
     sendError(res, err);
   }
@@ -549,6 +630,7 @@ app.post("/v1/books/chat", async (req, res) => {
     const bookId = String(req.body?.bookId || "").trim();
     const message = String(req.body?.message || "").trim();
     const sessionId = String(req.body?.sessionId || "").trim();
+    const chapter = String(req.body?.chapter || "").trim();
     const history = Array.isArray(req.body?.history) ? req.body.history : [];
     if (!bookId || !message) {
       res.status(400).json({ error: "bookId and message are required" });
@@ -562,26 +644,35 @@ app.post("/v1/books/chat", async (req, res) => {
     req.on("close", () => {
       bookSessions.cancel?.(session).catch(() => {});
     });
-    openSse(res);
-    writeSse(res, { type: "meta", sessionId: session.id, bookId: book.id });
-    if (detectCursorEngine()) {
-      writeSse(res, { type: "start", engine: "acp" });
+    const acp = detectCursorEngine();
+    if (!acp) {
+      res.status(503).json({
+        error: "问书需要本机 Cursor Agent（ACP）。请安装 agent 并 login。",
+        code: "acp_unconfigured",
+      });
+      return;
     }
+    openSse(res);
+    writeSse(res, { type: "meta", sessionId: session.id, bookId: book.id, engine: "acp" });
     writeSse(res, { type: "status", phase: "book" });
-    await bookSessions.warmRepo(owner, bookId, materialized.cacheDir).catch(() => {});
-    const bookContext = await formatBookAcpContext(book, materialized);
-    const local = bookLocalView(materialized, book);
-    const progress = emptyBookProgress(book);
-    const context = bookContext;
     if (signal.aborted) {
       res.end();
       return;
     }
+
+    await bookSessions.warm(session, materialized.cacheDir).catch(() => {});
+    const bookContext = await formatBookAcpContext(book, materialized);
+    const local = bookLocalView(materialized, book);
+    const progress = emptyBookProgress(book);
+    writeSse(res, { type: "start", engine: "acp" });
     writeSse(res, {
       type: "meta",
       book: { id: book.id, title: book.title, author: book.author },
       cache: materialized.cacheDir,
+      workspace: materialized.cacheDir,
+      chaptersDir: materialized.chaptersDir,
       sessionId: session.id,
+      model: acp.model || null,
     });
     writeSse(res, { type: "status", phase: "generate" });
     let finalEngine = "local-progress";
@@ -590,29 +681,26 @@ app.post("/v1/books/chat", async (req, res) => {
       question: message,
       history,
       progress,
-      context,
-      githubContext: bookContext,
+      context: bookContext,
       bookContext,
       local,
       session,
       sessions: bookSessions,
-      signal,
+      buildPrompt: (opts) =>
+        buildBookAcpPrompt({ ...opts, currentChapter: chapter || undefined }),
       synthesize: (opts) =>
-        synthesizeBookAnswer({
-          question: opts.question,
-          book,
-          bookContext,
-          local: opts.local,
-        }),
+        synthesizeBookAnswer({ ...opts, question: message, book, bookContext, local }),
+      signal,
     })) {
       if (signal.aborted) break;
       if (event.type === "done") {
         finalEngine = event.engine;
-        finalAnswer = event.answer;
+        finalAnswer = event.answer || "";
         writeSse(res, {
           type: "done",
-          engine: event.engine,
-          answer: event.answer,
+          engine: finalEngine,
+          model: acp.model || null,
+          answer: finalAnswer,
           bookId: book.id,
           cache: materialized.cacheDir,
           sessionId: session.id,

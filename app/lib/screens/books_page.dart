@@ -1,10 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:open_filex/open_filex.dart';
-
 import '../api/wenxiang_api.dart';
 import '../models.dart';
-import '../persist/book_local.dart';
 import '../theme.dart';
 import '../widgets/wx_chrome.dart';
 
@@ -12,15 +8,15 @@ class BooksPage extends StatefulWidget {
   const BooksPage({
     super.key,
     required this.api,
-    required this.bookStore,
     required this.onBack,
-    required this.onAsk,
+    required this.onRead,
+    this.opening = false,
   });
 
   final WenxiangApi api;
-  final BookLocalStore bookStore;
   final VoidCallback onBack;
-  final void Function(BookItem book) onAsk;
+  final Future<void> Function(BookItem book, {bool expandAsk}) onRead;
+  final bool opening;
 
   @override
   State<BooksPage> createState() => _BooksPageState();
@@ -30,8 +26,6 @@ class _BooksPageState extends State<BooksPage> {
   List<BookItem> _books = [];
   Object? _error;
   bool _loading = true;
-  String? _downloadingId;
-  double? _downloadProgress;
 
   @override
   void initState() {
@@ -58,58 +52,9 @@ class _BooksPageState extends State<BooksPage> {
     }
   }
 
-  Future<void> _download(BookItem book) async {
-    if (_downloadingId != null) return;
-    HapticFeedback.lightImpact();
-    setState(() {
-      _downloadingId = book.id;
-      _downloadProgress = null;
-    });
-    try {
-      final dest = await BookLocalStore.targetPath(book.id, book.filename);
-      await widget.api.downloadBookFile(
-        book.id,
-        dest,
-        onProgress: (received, total) {
-          if (!mounted) return;
-          setState(() {
-            _downloadProgress = total == null || total <= 0 ? null : received / total;
-          });
-        },
-      );
-      await widget.bookStore.remember(book.id, dest);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('已下载《${book.title}》')),
-      );
-    } catch (err) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(err.toString())),
-      );
-    } finally {
-      if (mounted) {
-        setState(() {
-          _downloadingId = null;
-          _downloadProgress = null;
-        });
-      }
-    }
-  }
-
-  Future<void> _openLocal(BookItem book) async {
-    final path = widget.bookStore.localPath(book.id);
-    if (path == null) {
-      await _download(book);
-      return;
-    }
-    final result = await OpenFilex.open(path);
-    if (!mounted) return;
-    if (result.type != ResultType.done) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(result.message)),
-      );
-    }
+  Future<void> _read(BookItem book, {bool expandAsk = false}) async {
+    if (widget.opening) return;
+    await widget.onRead(book, expandAsk: expandAsk);
   }
 
   @override
@@ -168,17 +113,11 @@ class _BooksPageState extends State<BooksPage> {
         itemCount: _books.length,
         itemBuilder: (context, index) {
           final book = _books[index];
-          final local = widget.bookStore.localPath(book.id);
-          final downloading = _downloadingId == book.id;
           return _BookCard(
             api: widget.api,
             book: book,
-            downloaded: local != null,
-            downloading: downloading,
-            progress: downloading ? _downloadProgress : null,
-            onDownload: () => _download(book),
-            onOpen: () => _openLocal(book),
-            onAsk: () => widget.onAsk(book),
+            onRead: () => _read(book),
+            onAsk: () => _read(book, expandAsk: true),
           );
         },
       ),
@@ -190,21 +129,13 @@ class _BookCard extends StatelessWidget {
   const _BookCard({
     required this.api,
     required this.book,
-    required this.downloaded,
-    required this.downloading,
-    required this.progress,
-    required this.onDownload,
-    required this.onOpen,
+    required this.onRead,
     required this.onAsk,
   });
 
   final WenxiangApi api;
   final BookItem book;
-  final bool downloaded;
-  final bool downloading;
-  final double? progress;
-  final VoidCallback onDownload;
-  final VoidCallback onOpen;
+  final VoidCallback onRead;
   final VoidCallback onAsk;
 
   @override
@@ -215,7 +146,7 @@ class _BookCard extends StatelessWidget {
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
-        onTap: onAsk,
+        onTap: onRead,
         child: Padding(
           padding: const EdgeInsets.all(10),
           child: Column(
@@ -224,27 +155,7 @@ class _BookCard extends StatelessWidget {
               Expanded(
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(8),
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      _cover(),
-                      if (downloading)
-                        ColoredBox(
-                          color: Colors.black45,
-                          child: Center(
-                            child: SizedBox(
-                              width: 36,
-                              height: 36,
-                              child: CircularProgressIndicator(
-                                value: progress,
-                                strokeWidth: 2.5,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
+                  child: _cover(),
                 ),
               ),
               const SizedBox(height: 8),
@@ -265,22 +176,17 @@ class _BookCard extends StatelessWidget {
               Row(
                 children: [
                   IconButton(
-                    tooltip: downloaded ? '打开' : '下载',
+                    tooltip: '阅读',
                     visualDensity: VisualDensity.compact,
-                    onPressed: downloading ? null : (downloaded ? onOpen : onDownload),
-                    icon: Icon(downloaded ? Icons.menu_book_outlined : Icons.download_outlined, size: 18),
+                    onPressed: onRead,
+                    icon: const Icon(Icons.menu_book_outlined, size: 18),
                   ),
                   IconButton(
-                    tooltip: '问书',
+                    tooltip: '边读边问',
                     visualDensity: VisualDensity.compact,
-                    onPressed: downloading ? null : onAsk,
+                    onPressed: onAsk,
                     icon: const Icon(Icons.chat_bubble_outline, size: 18),
                   ),
-                  if (downloaded)
-                    const Padding(
-                      padding: EdgeInsets.only(left: 4),
-                      child: Icon(Icons.offline_pin, size: 16, color: Wx.accent),
-                    ),
                 ],
               ),
             ],

@@ -244,6 +244,88 @@ class CheckoutResult {
   final String head;
 }
 
+class BookChapterEntry {
+  const BookChapterEntry({
+    required this.index,
+    required this.file,
+    required this.title,
+    this.level = 0,
+    this.href,
+  });
+
+  final int index;
+  final String file;
+  final String title;
+  final int level;
+  final String? href;
+
+  factory BookChapterEntry.fromJson(Map<String, dynamic> json) {
+    final hrefRaw = (json['href'] ?? '').toString().trim();
+    return BookChapterEntry(
+      index: (json['index'] as num?)?.toInt() ?? 0,
+      file: (json['file'] ?? '').toString(),
+      title: (json['title'] ?? '').toString(),
+      level: (json['level'] as num?)?.toInt() ?? 0,
+      href: hrefRaw.isEmpty ? null : hrefRaw,
+    );
+  }
+}
+
+class BookTocEntry {
+  BookTocEntry({
+    required this.index,
+    required this.title,
+    this.level = 0,
+  });
+
+  final int index;
+  final String title;
+  final int level;
+
+  factory BookTocEntry.fromJson(Map<String, dynamic> json) {
+    return BookTocEntry(
+      index: (json['index'] as num?)?.toInt() ?? 0,
+      title: (json['title'] ?? '').toString(),
+      level: (json['level'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
+class BookReadingManifest {
+  BookReadingManifest({
+    required this.bookId,
+    required this.title,
+    required this.author,
+    required this.converter,
+    required this.chapters,
+    required this.toc,
+  });
+
+  final String bookId;
+  final String title;
+  final String author;
+  final String converter;
+  final List<BookChapterEntry> chapters;
+  final List<BookTocEntry> toc;
+
+  factory BookReadingManifest.fromJson(Map<String, dynamic> json) {
+    final chapters = (json['chapters'] as List?) ?? [];
+    final tocRaw = (json['toc'] as List?) ?? chapters;
+    return BookReadingManifest(
+      bookId: (json['bookId'] ?? '').toString(),
+      title: (json['title'] ?? '').toString(),
+      author: (json['author'] ?? '').toString(),
+      converter: (json['converter'] ?? 'plain').toString(),
+      chapters: chapters
+          .map((e) => BookChapterEntry.fromJson(Map<String, dynamic>.from(e as Map)))
+          .toList(),
+      toc: tocRaw
+          .map((e) => BookTocEntry.fromJson(Map<String, dynamic>.from(e as Map)))
+          .toList(),
+    );
+  }
+}
+
 class BookItem {
   BookItem({
     required this.id,

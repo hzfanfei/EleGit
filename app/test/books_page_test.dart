@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wenxiang/models.dart';
-import 'package:wenxiang/persist/book_local.dart';
 import 'package:wenxiang/screens/books_page.dart';
 import 'package:wenxiang/theme.dart';
 
@@ -12,8 +10,6 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   testWidgets('books grid renders titles', (tester) async {
-    SharedPreferences.setMockInitialValues({});
-    final prefs = await SharedPreferences.getInstance();
     final api = FakeWenxiangApi(
       booksResult: [
         BookItem(
@@ -34,9 +30,8 @@ void main() {
         theme: wenxiangTheme(),
         home: BooksPage(
           api: api,
-          bookStore: BookLocalStore(prefs),
           onBack: () {},
-          onAsk: (_) {},
+          onRead: (_, {expandAsk = false}) async {},
         ),
       ),
     );

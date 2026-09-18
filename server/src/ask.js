@@ -158,6 +158,7 @@ export async function* streamAnswer({
   sessions,
   githubContext,
   bookContext,
+  buildPrompt,
   synthesize = synthesizeLocalAnswer,
   detectEngine = detectCursorEngine,
   streamOpts = streamOptsFromEnv(),
@@ -179,6 +180,7 @@ export async function* streamAnswer({
         githubContext: githubContext || context,
         bookContext,
         cwd: local?.present ? local.path : undefined,
+        buildPrompt,
         onDelta: (chunk) => {
           full += chunk;
           queue.push(chunk);

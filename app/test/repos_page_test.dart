@@ -66,18 +66,44 @@ void main() {
     expect(find.textContaining('没有找到仓库'), findsOneWidget);
   });
 
-  testWidgets('repos error state is readable Chinese', (tester) async {
+  testWidgets('github failure falls back to local repos without error panel', (tester) async {
     final errApi = FakeWenxiangApi(reposThrows: ApiException('HTTP 401 Unauthorized'));
     await tester.pumpWidget(
       MaterialApp(
         theme: wenxiangTheme(),
-        home: ReposPage(api: errApi, onOpen: (_) {}, onAuthorized: () async {}),
+        home: ReposPage(
+          api: errApi,
+          githubConnected: true,
+          onOpen: (_) {},
+          onAuthorized: () async {},
+        ),
       ),
     );
     await tester.pump();
     await tester.pumpAndSettle();
-    expect(find.textContaining('授权'), findsWidgets);
-    expect(find.text('重试'), findsOneWidget);
+    expect(find.text('demo'), findsOneWidget);
+    expect(find.textContaining('出了点问题'), findsNothing);
+    expect(find.text('重试'), findsNothing);
+  });
+
+  testWidgets('offline home shows local repos list', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: ReposPage(
+          api: FakeWenxiangApi(),
+          githubConnected: false,
+          onOpen: (_) {},
+          onAuthorized: () async {},
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(find.text('问象'), findsOneWidget);
+    expect(find.text('demo'), findsOneWidget);
+    expect(find.text('连接 GitHub'), findsOneWidget);
+    expect(find.textContaining('出了点问题'), findsNothing);
   });
 
   testWidgets('clone failure stays on the overlay', (tester) async {

@@ -11,6 +11,8 @@ import {
   listBooks,
   parseEpubBuffer,
   resolveBook,
+  resolveBookCacheAssetPath,
+  safeBookCacheAssetRelativePath,
 } from "../src/books.js";
 
 function makeSampleEpub(title = "测试书") {
@@ -45,6 +47,34 @@ function makeSampleEpub(title = "测试书") {
   return zip.toBuffer();
 }
 
+function makeHrefFirstManifestEpub() {
+  const zip = new AdmZip();
+  zip.addFile(
+    "META-INF/container.xml",
+    Buffer.from(
+      `<?xml version="1.0"?><container><rootfiles><rootfile full-path="EPUB/content.opf"/></rootfiles></container>`,
+    ),
+  );
+  zip.addFile(
+    "EPUB/content.opf",
+    Buffer.from(`<?xml version="1.0"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>属性顺序</dc:title>
+  </metadata>
+  <manifest>
+    <item href="text00001.html" id="id_1" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine toc="ncx"><itemref idref="id_1"/></spine>
+</package>`),
+  );
+  zip.addFile(
+    "EPUB/text00001.html",
+    Buffer.from("<html><body><p>正文段落。</p></body></html>"),
+  );
+  return zip.toBuffer();
+}
+
 describe("books", () => {
   it("derives book ids from filenames", () => {
     assert.equal(bookIdFromFilename("My Book.epub"), "My_Book");
@@ -72,5 +102,86 @@ describe("books", () => {
     const materialized = await ensureBookMaterialized(root, book);
     const text = await readFile(materialized.textPath, "utf8");
     assert.match(text, /第一章内容/);
+    const index = await readFile(materialized.indexPath, "utf8");
+    assert.match(index, /样例书/);
+    assert.match(index, /chapters\//);
+    const chapterMd = await readFile(
+      path.join(materialized.chaptersDir, "001-chapter1.md"),
+      "utf8",
+    );
+    assert.match(chapterMd, /第一章内容/);
+    const readingRaw = await readFile(materialized.readingPath, "utf8");
+    const reading = JSON.parse(readingRaw);
+    assert.equal(reading.chapters.length, 1);
+    assert.equal(reading.chapters[0].file, "001-chapter1.md");
+  });
+
+  it("rejects unsafe book asset paths", () => {
+    assert.throws(() => safeBookCacheAssetRelativePath("../etc/passwd"));
+    assert.throws(() => safeBookCacheAssetRelativePath("extracted/../secret"));
+    assert.equal(safeBookCacheAssetRelativePath("extracted/OEBPS/fig.png"), "extracted/OEBPS/fig.png");
+  });
+
+  it("resolves book assets under the materialized cache", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "wx-books-asset-"));
+    const dir = booksDir(root);
+    await mkdir(dir, { recursive: true });
+    const zip = new AdmZip();
+    zip.addFile(
+      "META-INF/container.xml",
+      Buffer.from(
+        `<?xml version="1.0"?><container><rootfiles><rootfile full-path="OEBPS/content.opf"/></rootfiles></container>`,
+      ),
+    );
+    zip.addFile(
+      "OEBPS/content.opf",
+      Buffer.from(`<?xml version="1.0"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="2.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>图</dc:title></metadata>
+  <manifest>
+    <item id="ch1" href="chapter1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="fig" href="fig.png" media-type="image/png"/>
+  </manifest>
+  <spine><itemref idref="ch1"/></spine>
+</package>`),
+    );
+    const png = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+      0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+      0x89, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
+      0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
+      0x42, 0x60, 0x82,
+    ]);
+    zip.addFile("OEBPS/fig.png", png);
+    zip.addFile(
+      "OEBPS/chapter1.xhtml",
+      Buffer.from('<html><body><p>见图。</p><img src="fig.png" alt="示例图"/></body></html>'),
+    );
+    await writeFile(path.join(dir, "fig.epub"), zip.toBuffer());
+
+    const listed = await listBooks(root);
+    const book = await resolveBook(root, listed.books[0].id);
+    const materialized = await ensureBookMaterialized(root, book);
+    const reading = JSON.parse(await readFile(materialized.readingPath, "utf8"));
+    assert.equal(reading.chapters[0].href, "OEBPS/chapter1.xhtml");
+
+    const abs = resolveBookCacheAssetPath(materialized, "extracted/OEBPS/fig.png");
+    assert.match(abs, /fig\.png$/);
+  });
+
+  it("parses spine when manifest items list href before id", async () => {
+    const parsed = parseEpubBuffer(makeHrefFirstManifestEpub(), { filename: "order.epub" });
+    assert.equal(parsed.spine.length, 1);
+    assert.match(parsed.spine[0], /text00001\.html$/);
+
+    const root = await mkdtemp(path.join(os.tmpdir(), "wx-books-order-"));
+    const dir = booksDir(root);
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, "order.epub"), makeHrefFirstManifestEpub());
+    const listed = await listBooks(root);
+    const book = await resolveBook(root, listed.books[0].id);
+    const materialized = await ensureBookMaterialized(root, book);
+    const reading = JSON.parse(await readFile(materialized.readingPath, "utf8"));
+    assert.equal(reading.chapters.length, 1);
   });
 });

@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
@@ -58,6 +57,16 @@ class WenxiangApi {
 
   Map<String, String> get _headers => headers;
 
+  /// Headers for authenticated GETs (e.g. book markdown images).
+  Map<String, String> get assetHeaders => {
+        'X-Wenxiang-Key': apiKey,
+        'ngrok-skip-browser-warning': 'true',
+      };
+
+  Uri bookAssetUri(String bookId, String cacheRelativePath) {
+    return _uri('/v1/books/$bookId/asset', {'path': cacheRelativePath});
+  }
+
   http.Client? _checkoutClient;
   http.Client? _chatClient;
   bool _checkoutCancelled = false;
@@ -94,6 +103,11 @@ class WenxiangApi {
     final res = await http.get(_uri('/health'), headers: _headers).timeout(const Duration(seconds: 8));
     if (res.statusCode != 200) {
       throw ApiException('无法连接问象服务（HTTP ${res.statusCode}）');
+    }
+    if (apiKey.trim().isEmpty) {
+      throw ApiException(
+        'App 未配置 API Key。请在仓库根目录运行 node scripts/sync-app-env.js 后重新编译 App。',
+      );
     }
   }
 
@@ -239,6 +253,18 @@ class WenxiangApi {
         .toList();
   }
 
+  Future<List<RepoItem>> localRepos(String query) async {
+    final res = await http
+        .get(_uri('/v1/repos/local', {'q': query}), headers: _headers)
+        .timeout(const Duration(seconds: 15));
+    final body = await _json(res, fallback: '读取本机仓库失败');
+    final list = (body['repos'] as List?) ?? [];
+    return list
+        .whereType<Map>()
+        .map((e) => RepoItem.fromJson(Map<String, dynamic>.from(e)))
+        .toList();
+  }
+
   Future<List<ChatSession>> listSessions(String owner, String repo) async {
     final res = await http
         .get(_uri('/v1/repos/$owner/$repo/sessions'), headers: _headers)
@@ -268,8 +294,6 @@ class WenxiangApi {
 
   /// Pre-start Cursor ACP for this repo so the first chat token arrives sooner.
   Uri bookCoverUri(String bookId) => _uri('/v1/books/$bookId/cover');
-
-  Uri bookFileUri(String bookId) => _uri('/v1/books/$bookId/file');
 
   Future<List<BookItem>> listBooks() async {
     final res = await http
@@ -310,6 +334,25 @@ class WenxiangApi {
     await _json(res, fallback: '关闭书籍会话失败');
   }
 
+  Future<BookReadingManifest> fetchBookReadingManifest(String bookId) async {
+    final res = await http
+        .get(_uri('/v1/books/$bookId/reading'), headers: _headers)
+        .timeout(const Duration(seconds: 60));
+    final body = await _json(res, fallback: '加载书籍目录失败');
+    return BookReadingManifest.fromJson(Map<String, dynamic>.from(body));
+  }
+
+  Future<String> fetchBookChapterMarkdown(String bookId, String filename) async {
+    final safe = Uri.encodeComponent(filename);
+    final res = await http
+        .get(_uri('/v1/books/$bookId/chapters/$safe'), headers: _headers)
+        .timeout(const Duration(seconds: 60));
+    if (res.statusCode >= 400) {
+      await _json(res, fallback: '加载章节失败');
+    }
+    return res.body;
+  }
+
   Future<void> warmBookSession(String bookId, {String? sessionId}) async {
     final res = await http
         .post(
@@ -325,38 +368,12 @@ class WenxiangApi {
     }
   }
 
-  Future<void> downloadBookFile(
-    String bookId,
-    String destPath, {
-    void Function(int received, int? total)? onProgress,
-  }) async {
-    final client = http.Client();
-    try {
-      final request = http.Request('GET', bookFileUri(bookId))..headers.addAll(_headers);
-      final res = await client.send(request).timeout(const Duration(minutes: 10));
-      if (res.statusCode >= 400) {
-        final raw = await res.stream.bytesToString();
-        throw ApiException(raw.isEmpty ? '下载失败' : raw);
-      }
-      final total = res.contentLength;
-      var received = 0;
-      final sink = File(destPath).openWrite();
-      await for (final chunk in res.stream) {
-        received += chunk.length;
-        sink.add(chunk);
-        onProgress?.call(received, total);
-      }
-      await sink.close();
-    } finally {
-      client.close();
-    }
-  }
-
   Stream<ChatStreamEvent> bookChatStream({
     required String bookId,
     required String message,
     required List<ChatMessage> history,
     String? sessionId,
+    String? chapter,
   }) async* {
     final client = http.Client();
     _chatCancelled = false;
@@ -371,6 +388,7 @@ class WenxiangApi {
           'bookId': bookId,
           'message': message,
           if (sessionId != null && sessionId.isNotEmpty) 'sessionId': sessionId,
+          if (chapter != null && chapter.isNotEmpty) 'chapter': chapter,
           'history': history
               .map((m) => {'role': m.role, 'content': m.content})
               .toList(),

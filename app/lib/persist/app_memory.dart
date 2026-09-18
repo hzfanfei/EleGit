@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models.dart';
+import 'book_chat_store.dart';
 
 /// Local-only place memory. Never stores tokens, API keys, or OAuth secrets.
 class AppMemory {
@@ -16,6 +17,7 @@ class AppMemory {
   static const voiceHoldTipDismissedKey = 'wx.voiceHoldTipDismissed';
 
   static String chatsKey(String fullName) => 'wx.chats.$fullName';
+  static String bookChatsKey(String bookId) => 'wx.bookChats.$bookId';
 
   bool voiceHoldTipDismissed() => prefs.getBool(voiceHoldTipDismissedKey) ?? false;
 
@@ -113,6 +115,22 @@ class AppMemory {
 
   Future<void> saveChats(String fullName, RepoChatStore store) {
     return prefs.setString(chatsKey(fullName), jsonEncode(store.toJson()));
+  }
+
+  BookChatStore loadBookChats(String bookId) {
+    final raw = prefs.getString(bookChatsKey(bookId));
+    if (raw == null || raw.isEmpty) return BookChatStore.empty();
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return BookChatStore.empty();
+      return BookChatStore.fromJson(Map<String, dynamic>.from(decoded));
+    } catch (_) {
+      return BookChatStore.empty();
+    }
+  }
+
+  Future<void> saveBookChats(String bookId, BookChatStore store) {
+    return prefs.setString(bookChatsKey(bookId), jsonEncode(store.toJson()));
   }
 }
 

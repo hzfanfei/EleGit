@@ -7,13 +7,12 @@ import '../models.dart';
 import '../persist/app_memory.dart';
 import '../theme.dart';
 import '../widgets/wx_chrome.dart';
-import '../persist/book_local.dart';
-import 'book_chat_page.dart';
+import 'book_reader_page.dart';
 import 'books_page.dart';
 import 'chat_page.dart';
 import 'repos_page.dart';
 
-enum AppStep { boot, repos, books, chat, bookChat }
+enum AppStep { boot, repos, books, chat, bookRead }
 
 class ShellPage extends StatefulWidget {
   const ShellPage({super.key, this.api, this.memory});
@@ -35,8 +34,9 @@ class ShellPageState extends State<ShellPage> {
   AppMemory? _memory;
   RepoItem? _repo;
   BookItem? _book;
+  bool _bookExpandAsk = false;
+  bool _bookOpening = false;
   RepoItem? _lastRepo;
-  BookLocalStore? _bookStore;
   Object? _bootError;
   bool _booting = true;
   String _githubLogin = '';
@@ -75,9 +75,6 @@ class ShellPageState extends State<ShellPage> {
     });
     try {
       final memory = await _ensureMemory();
-      if (memory != null) {
-        _bookStore = BookLocalStore(memory.prefs);
-      }
       await _api.ping();
       final status = await _api.status();
       if (!mounted) return;
@@ -85,7 +82,7 @@ class ShellPageState extends State<ShellPage> {
         _booting = false;
         _githubConnected = status.githubConnected;
         _githubLogin = status.githubLogin.isNotEmpty ? status.githubLogin : (memory?.githubLogin() ?? '');
-        _oauthAutoStart = !status.githubConnected;
+        _oauthAutoStart = false;
         _lastRepo = memory?.lastRepo() ?? _lastRepo;
         _step = AppStep.repos;
       });
@@ -126,12 +123,7 @@ class ShellPageState extends State<ShellPage> {
     });
   }
 
-  Future<void> _openBooks() async {
-    if (_bookStore == null) {
-      final memory = await _ensureMemory();
-      if (memory != null) _bookStore = BookLocalStore(memory.prefs);
-    }
-    if (!mounted || _bookStore == null) return;
+  void _openBooks() {
     setState(() => _step = AppStep.books);
   }
 
@@ -139,19 +131,33 @@ class ShellPageState extends State<ShellPage> {
     setState(() => _step = AppStep.repos);
   }
 
-  void _openBookChat(BookItem book) {
-    _api.warmBookSession(book.id).catchError((_) {});
-    setState(() {
-      _book = book;
-      _step = AppStep.bookChat;
-    });
+  Future<void> _openBookRead(BookItem book, {bool expandAsk = false}) async {
+    if (_bookOpening) return;
+    if (!mounted) return;
+    setState(() => _bookOpening = true);
+    try {
+      if (!mounted) return;
+      setState(() {
+        _book = book;
+        _bookExpandAsk = expandAsk;
+        _step = AppStep.bookRead;
+      });
+    } catch (err) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(err.toString())),
+      );
+    } finally {
+      if (mounted) setState(() => _bookOpening = false);
+    }
   }
 
-  void _backFromBookChat() {
+  void _backFromBookRead() {
     _api.cancelChat();
     setState(() {
       _step = AppStep.books;
       _book = null;
+      _bookExpandAsk = false;
     });
   }
 
@@ -164,8 +170,8 @@ class ShellPageState extends State<ShellPage> {
   }
 
   bool _handlePop() {
-    if (_step == AppStep.bookChat) {
-      _backFromBookChat();
+    if (_step == AppStep.bookRead) {
+      _backFromBookRead();
       return true;
     }
     if (_step == AppStep.books) {
@@ -225,25 +231,28 @@ class ShellPageState extends State<ShellPage> {
           onOpenBooks: _openBooks,
         )),
       ),
-      if (_step == AppStep.books && _bookStore != null)
+      if (_step == AppStep.books)
         MaterialPage<void>(
           key: const ValueKey('books'),
           name: 'books',
           child: _fit(BooksPage(
             api: _api,
-            bookStore: _bookStore!,
             onBack: _backFromBooks,
-            onAsk: _openBookChat,
+            onRead: _openBookRead,
+            opening: _bookOpening,
           )),
         ),
-      if (_step == AppStep.bookChat && _book != null)
+      if (_step == AppStep.bookRead && _book != null)
         MaterialPage<void>(
-          key: ValueKey('book-chat-${_book!.id}'),
-          name: 'bookChat',
-          child: _fit(BookChatPage(
+          key: ValueKey('book-read-${_book!.id}'),
+          name: 'bookRead',
+          child: _fit(BookReaderPage(
             api: _api,
             book: _book!,
-            onBack: _backFromBookChat,
+            expandAsk: _bookExpandAsk,
+            prefs: _memory?.prefs,
+            memory: _memory,
+            onBack: _backFromBookRead,
           )),
         ),
       if (_step == AppStep.chat && _repo != null)
@@ -273,8 +282,8 @@ class ShellPageState extends State<ShellPage> {
           pages: _pages(),
           onDidRemovePage: (page) {
             final name = page.name;
-            if (name == 'bookChat' && _step == AppStep.bookChat) {
-              _backFromBookChat();
+            if (name == 'bookRead' && _step == AppStep.bookRead) {
+              _backFromBookRead();
             } else if (name == 'books' && _step == AppStep.books) {
               _backFromBooks();
             } else if (name == 'chat' && _step == AppStep.chat) {

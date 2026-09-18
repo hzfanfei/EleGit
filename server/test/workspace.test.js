@@ -13,6 +13,7 @@ import {
   gitFailure,
   GITHUB_GIT_FORBIDDEN_ZH,
   isCheckoutPresent,
+  listLocalRepos,
   runGit,
   safeSegment,
   snapshotCheckout,
@@ -96,6 +97,22 @@ describe("git auth header", () => {
     assert.ok(!exists.message.includes("already exists"));
     const missing = gitFailure("remote: Repository not found.\nfatal: repository 'https://github.com/acme/nope.git/' not found");
     assert.match(missing.message, /找不到|仓库/);
+  });
+});
+
+describe("listLocalRepos", () => {
+  it("lists git checkouts under owner/repo folders", async () => {
+    const workspace = await mkdtemp(path.join(os.tmpdir(), "wenxiang-ws-list-"));
+    const dest = path.join(workspace, "acme", "widget");
+    await mkdir(dest, { recursive: true });
+    git(["init", "-b", "main"], dest);
+    const books = path.join(workspace, "books");
+    await mkdir(books, { recursive: true });
+    await writeFile(path.join(books, "skip.epub"), "not a git repo");
+    const list = await listLocalRepos(workspace);
+    assert.equal(list.length, 1);
+    assert.equal(list[0].fullName, "acme/widget");
+    assert.equal(list[0].local, true);
   });
 });
 
