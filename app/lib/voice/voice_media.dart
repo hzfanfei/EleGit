@@ -11,7 +11,26 @@ abstract class VoiceMedia {
     String codec = 'raw',
   });
   Future<void> stopPlayback();
+
+  /// No-op when nothing is playing; waits until queued playback finishes.
+  Future<void> waitForPlaybackQueue() async {}
+
   void dispose();
+}
+
+/// Boost quiet 16-bit LE PCM before playback. [gain] 1.0 = unchanged; clamps to int16.
+Uint8List amplifyPcm16(Uint8List pcm, {double gain = 1.35}) {
+  if (gain == 1.0 || pcm.length < 2) return pcm;
+  final out = Uint8List.fromList(pcm);
+  final view = ByteData.view(out.buffer, out.offsetInBytes, out.lengthInBytes);
+  for (var i = 0; i + 1 < out.length; i += 2) {
+    var sample = view.getInt16(i, Endian.little);
+    sample = (sample * gain).round();
+    if (sample > 32767) sample = 32767;
+    if (sample < -32768) sample = -32768;
+    view.setInt16(i, sample, Endian.little);
+  }
+  return out;
 }
 
 class FakeVoiceMedia implements VoiceMedia {
@@ -55,6 +74,9 @@ class FakeVoiceMedia implements VoiceMedia {
   Future<void> stopPlayback() async {
     stopPlayCalls += 1;
   }
+
+  @override
+  Future<void> waitForPlaybackQueue() async {}
 
   @override
   void dispose() {}

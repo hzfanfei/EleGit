@@ -7,6 +7,7 @@ import {
   AcpChannel,
   DEFAULT_ACP_MODEL,
   acpModelId,
+  acpVisibleTextFromUpdate,
   buildAcpPrompt,
   buildBookAcpPrompt,
   createSessionStore,
@@ -57,6 +58,32 @@ describe("selectPermissionOption", () => {
   });
 });
 
+describe("acpVisibleTextFromUpdate", () => {
+  it("forwards agent answer chunks only, not reasoning", () => {
+    assert.equal(
+      acpVisibleTextFromUpdate({
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "答案" },
+      }),
+      "答案",
+    );
+    assert.equal(
+      acpVisibleTextFromUpdate({
+        sessionUpdate: "agent_thought_chunk",
+        content: { type: "text", text: "正在读 INDEX" },
+      }),
+      "",
+    );
+    assert.equal(
+      acpVisibleTextFromUpdate({
+        sessionUpdate: "agent_message",
+        content: [{ type: "text", text: "整段" }],
+      }),
+      "整段",
+    );
+  });
+});
+
 describe("buildBookAcpPrompt", () => {
   it("includes book context and question", () => {
     const prompt = buildBookAcpPrompt({
@@ -64,9 +91,10 @@ describe("buildBookAcpPrompt", () => {
       bookContext: "Book title: 样例书\nUnpacked EPUB directory: /tmp/book",
       seedHistory: false,
     });
-    assert.match(prompt, /问书/);
+    assert.match(prompt, /问象·问书/);
     assert.match(prompt, /样例书/);
     assert.match(prompt, /主角是谁/);
+    assert.match(prompt, /本题作答/);
   });
 });
 

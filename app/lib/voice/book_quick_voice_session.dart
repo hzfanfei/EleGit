@@ -66,10 +66,9 @@ class BookQuickVoiceSession {
   String _thinkStatusLabel = '思考中…';
   String? _sessionId;
   bool _replyActive = false;
-  final List<Uint8List> _pendingVoicePcm = [];
-  int _pendingVoiceRate = 24000;
-  String _pendingVoiceFormat = 'pcm';
-  String _pendingVoiceCodec = 'raw';
+  int _voiceRate = 24000;
+  String _voiceFormat = 'pcm';
+  String _voiceCodec = 'raw';
 
   HoldToSpeakSession get hold => _hold;
 
@@ -142,37 +141,15 @@ class BookQuickVoiceSession {
     }
   }
 
-  void _clearPendingVoice() {
-    _pendingVoicePcm.clear();
-    _pendingVoiceRate = 24000;
-    _pendingVoiceFormat = 'pcm';
-    _pendingVoiceCodec = 'raw';
-  }
-
-  Future<void> _flushPendingVoice() async {
-    if (_pendingVoicePcm.isEmpty || _media == null) return;
-    final rate = _pendingVoiceRate;
-    final format = _pendingVoiceFormat;
-    final codec = _pendingVoiceCodec;
-    final total = _pendingVoicePcm.fold<int>(0, (sum, b) => sum + b.length);
-    final merged = Uint8List(total);
-    var offset = 0;
-    for (final part in _pendingVoicePcm) {
-      merged.setRange(offset, offset + part.length, part);
-      offset += part.length;
-    }
-    _clearPendingVoice();
-    await _media!.playPcm(
-      merged,
-      sampleRate: rate,
-      format: format,
-      codec: codec,
-    );
+  void _resetVoiceFormat() {
+    _voiceRate = 24000;
+    _voiceFormat = 'pcm';
+    _voiceCodec = 'raw';
   }
 
   void interruptReply() {
     api.cancelBookVoiceTurn();
-    _clearPendingVoice();
+    _resetVoiceFormat();
     unawaited(_media?.stopPlayback());
     _replyActive = false;
     if (phase == BookQuickVoicePhase.speaking || phase == BookQuickVoicePhase.thinking) {
@@ -194,7 +171,7 @@ class BookQuickVoiceSession {
     onChanged();
 
     _media ??= voiceMedia ?? DeviceVoiceMedia();
-    _clearPendingVoice();
+    _resetVoiceFormat();
     await _media!.stopPlayback();
     final place = readingPlace();
     final history = historyForVoice(place).where((m) => m.role != 'error').toList();
@@ -226,15 +203,24 @@ class BookQuickVoiceSession {
         } else if (event.type == 'audio' &&
             event.pcm != null &&
             event.pcm!.isNotEmpty) {
-          _pendingVoicePcm.add(event.pcm!);
-          _pendingVoiceRate = event.sampleRate ?? _pendingVoiceRate;
-          _pendingVoiceFormat = event.audioFormat ?? _pendingVoiceFormat;
-          _pendingVoiceCodec = event.codec ?? _pendingVoiceCodec;
+          _voiceRate = event.sampleRate ?? _voiceRate;
+          _voiceFormat = event.audioFormat ?? _voiceFormat;
+          _voiceCodec = event.codec ?? _voiceCodec;
           phase = BookQuickVoicePhase.speaking;
           onChanged();
+          unawaited(
+            _media!.playPcm(
+              event.pcm!,
+              sampleRate: _voiceRate,
+              format: _voiceFormat,
+              codec: _voiceCodec,
+            ).catchError((Object err) {
+              if (_replyActive) onError?.call('播放失败：$err');
+            }),
+          );
         } else if (event.type == 'done') {
           try {
-            await _flushPendingVoice();
+            await _media?.waitForPlaybackQueue();
           } catch (err) {
             onError?.call('播放失败：$err');
             break;

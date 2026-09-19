@@ -36,59 +36,6 @@ export function createCallMachine() {
   };
 }
 
-const FILLER_PREFIX =
-  /^(?:嗯[，,、]?|好[的]?[，,、]?|那么[，,、]?|首先[，,、]?|简单来说[，,、]?|总的来说[，,、]?|整体来说[，,、]?|一句话[，,、]?|简单说[，,、]?)/u;
-const FILLER_PREFIX2 =
-  /^(?:根据(?:书中|本书|原文|这一章|上下文)(?:的)?(?:内容)?[，,、]?|从(?:书中|本书|这一章|上下文)(?:来看|可知)[，,、]?|关于(?:你问的|这个)?问题[，,、]?|你问(?:的)?(?:这个)?[，,、]?|需要注意的是[，,、]?|值得一提的是[，,、]?|我认为[，,、]?|我的理解[是，,、]?|总结(?:来说)?[，,、]?|综上[，,、]?|分析(?:下来|之后)?[，,、]?|查(?:完|了一下|阅完)[，,、]?|看(?:完|了一下)[，,、]?|读(?:完|了一下)[，,、]?)/u;
-const FILLER_PREFIX3 =
-  /^(?:让我(?:先|来)?|我来(?:先|帮)?|我先|正在(?:查|看|读|翻|对照|检索|搜索|分析|梳理|整理|思考)|稍等[，,、]?|我需要(?:先|来)?(?:查|看|读|翻)[，,、]?)/u;
-const FILLER_MID = /[，,](?:也就是说|简单来说|总的来说|换句话说|总结来说|分析下来)[，,]/gu;
-
-/** Sentence sounds like process/thinking, not answer content. */
-export const SPOKEN_PROCESS_SENTENCE =
-  /^(?:让我|我来|我先|正在|稍等|我需要|我来帮|查(?:一下|完|阅|阅完|阅了一下)|看(?:一下|完|了一下)|读(?:一下|完|了一下)|翻(?:一下|完|了)|对照(?:一下|完|了)|检索|搜索|分析(?:完|一下|下来|之后)|梳理|理解(?:一下|之后)|整理|思考|想想|总结(?:来说|一下)|归纳(?:一下|来说)|综上|也就是说|关于(?:你问的|这个)?问题|你问(?:的)?|根据.{0,28}(?:来看|来说|可知)|从.{0,28}(?:来看|可知)|我认为|我的理解)/u;
-
-export function isSpokenProcessSentence(sentence) {
-  const p = String(sentence || "").trim();
-  if (!p) return true;
-  const stripped = stripSpokenFiller(p);
-  return (
-    SPOKEN_PROCESS_SENTENCE.test(p) ||
-    (stripped !== p && SPOKEN_PROCESS_SENTENCE.test(stripped)) ||
-    SPOKEN_PROCESS_SENTENCE.test(stripped)
-  );
-}
-
-/** Drop common spoken preamble before TTS. */
-export function stripSpokenFiller(text) {
-  let s = String(text || "").trim();
-  if (!s) return s;
-  for (let i = 0; i < 8; i += 1) {
-    const next = s
-      .replace(FILLER_PREFIX, "")
-      .replace(FILLER_PREFIX2, "")
-      .replace(FILLER_PREFIX3, "")
-      .trim();
-    if (next === s) break;
-    s = next;
-  }
-  s = s.replace(FILLER_MID, "，");
-  return s.trim();
-}
-
-export function speakableText(md) {
-  return String(md || "")
-    .replace(/```[\s\S]*?```/g, " ")
-    .replace(/`([^`]+)`/g, "$1")
-    .replace(/\*\*([^*]+)\*\*/g, "$1")
-    .replace(/__([^_]+)__/g, "$1")
-    .replace(/^#+\s+/gm, "")
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-    .replace(/[*_>#]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 export function takeSpeakable(buffer, hardLen = 72) {
   const text = String(buffer || "");
   let last = -1;
@@ -130,8 +77,7 @@ export async function runVoiceTurn({
   onAudio,
   onDone,
   maxSpeakChars = 0,
-  limitSpoken,
-  /** `stream` = TTS while tokens arrive; `final` = one TTS after answer is trimmed */
+  /** `stream` = TTS while tokens arrive; `final` = one TTS after answer completes */
   speakStrategy = "stream",
 }) {
   let pending = "";
@@ -159,15 +105,14 @@ export async function runVoiceTurn({
     if (speakStrategy === "final") return;
     if (capped && !force) return;
     const chunk = force
-      ? { speak: speakableText(pending), rest: "" }
-      : takeSpeakable(speakableText(pending), maxSpeakChars ? 32 : 72);
+      ? { speak: pending.trim(), rest: "" }
+      : takeSpeakable(pending, maxSpeakChars ? 32 : 72);
     if (!chunk.speak) {
       pending = chunk.rest || pending;
       return;
     }
     pending = chunk.rest;
-    let speak = capChunk(chunk.speak);
-    if (maxSpeakChars) speak = stripSpokenFiller(speak);
+    const speak = capChunk(chunk.speak);
     if (!speak) return;
     spokenChars += [...speak].length;
     speakQueue.push(speak);
@@ -203,11 +148,8 @@ export async function runVoiceTurn({
     if (signal?.aborted) return { engine, answer: full, cancelled: true };
     throw err;
   }
-  if (limitSpoken) full = limitSpoken(full);
   if (speakStrategy === "final" && !signal?.aborted) {
-    const toSpeak = limitSpoken
-      ? full
-      : stripSpokenFiller(speakableText(full));
+    const toSpeak = full.trim();
     if (!String(toSpeak || "").trim()) {
       const err = new Error("没有可朗读的回答内容");
       err.code = "empty_answer";

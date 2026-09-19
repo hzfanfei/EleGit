@@ -2,41 +2,26 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { buildBookAcpPrompt } from "../src/acp.js";
 import { createBookAskIterator } from "../src/book-voice-turn.js";
-import { limitSpokenChinese, spokenContentOnly } from "../src/spoken-limit.js";
 import { buildAudioSsePayload, splitTextForTts } from "../src/spoken-tts.js";
-import { runVoiceTurn, stripSpokenFiller } from "../src/voice-call.js";
+import { runVoiceTurn } from "../src/voice-call.js";
 
 describe("book spoken prompt", () => {
-  it("asks for short voice-only replies", () => {
+  it("asks for direct answers without process narration", () => {
     const prompt = buildBookAcpPrompt({
       question: "这章讲什么？",
       spokenAnswer: true,
     });
-    assert.match(prompt, /Spoken reply/);
-    assert.match(prompt, /silently/);
-    assert.match(prompt, /natural spoken Chinese/);
+    assert.match(prompt, /只输出答案正文/);
+    assert.match(prompt, /语音朗读/);
+    assert.match(prompt, /正反例/);
+    assert.match(prompt, /本题作答/);
+    assert.match(prompt, /这章讲什么/);
   });
 
-  it("limits overly long spoken text at punctuation", () => {
-    const long = "这是一段很长的回答。".repeat(8);
-    const out = limitSpokenChinese(long, { maxChars: 48 });
-    assert.ok([...out].length <= 48);
-    assert.match(out, /。$/);
-  });
-
-  it("strips spoken filler prefixes", () => {
-    const out = stripSpokenFiller("简单来说，主角在这一章离开了家乡。");
-    assert.equal(out, "主角在这一章离开了家乡。");
-  });
-
-  it("drops process sentences and keeps content", () => {
-    const out = spokenContentOnly("让我查一下章节。这一章讲的是主角离家。");
-    assert.equal(out, "这一章讲的是主角离家。");
-  });
-
-  it("drops meta preamble sentences", () => {
-    const out = spokenContentOnly("用户询问这本书的内容。这是格鲁夫的《高产出管理》。");
-    assert.equal(out, "这是格鲁夫的《高产出管理》。");
+  it("text book chat uses the same direct-answer root rules", () => {
+    const prompt = buildBookAcpPrompt({ question: "主角是谁？" });
+    assert.match(prompt, /禁止以这些开头/);
+    assert.doesNotMatch(prompt, /语音朗读/);
   });
 
   it("gzip-compresses PCM for SSE", () => {
@@ -56,6 +41,26 @@ describe("book spoken prompt", () => {
 });
 
 describe("book voice turn pipeline", () => {
+  it("streams TTS from model text as-is", async () => {
+    const spoken = [];
+    const ask = async function* () {
+      yield { type: "delta", text: "让我查一下。主角在这一章出场。" };
+      yield { type: "done", engine: "acp" };
+    };
+    await runVoiceTurn({
+      question: "q",
+      ask,
+      speakStrategy: "stream",
+      tts: async (text) => {
+        spoken.push(text);
+        return Buffer.from("x");
+      },
+      onAudio: () => {},
+    });
+    assert.ok(spoken.length >= 1);
+    assert.ok(spoken.join("").includes("让我查一下"));
+  });
+
   it("streams TTS audio from a fake ask", async () => {
     const audio = [];
     const ask = async function* () {
@@ -73,7 +78,7 @@ describe("book voice turn pipeline", () => {
     assert.match(audio.join("|"), /主角出场/);
   });
 
-  it("final speak strategy sends one TTS for cleaned answer", async () => {
+  it("final speak strategy sends one TTS for full answer", async () => {
     const spoken = [];
     const body = "让我想一下。主角出场，冲突升级。";
     const ask = async function* () {
@@ -84,7 +89,6 @@ describe("book voice turn pipeline", () => {
       question: "q",
       ask,
       speakStrategy: "final",
-      limitSpoken: spokenContentOnly,
       tts: async (text) => {
         spoken.push(text);
         return Buffer.from("x");
@@ -92,8 +96,8 @@ describe("book voice turn pipeline", () => {
       onAudio: () => {},
     });
     assert.equal(spoken.length, 1);
+    assert.match(spoken[0], /让我想一下/);
     assert.match(spoken[0], /主角出场/);
-    assert.doesNotMatch(spoken[0], /让我想一下/);
   });
 
   it("createBookAskIterator wires spoken prompts", () => {

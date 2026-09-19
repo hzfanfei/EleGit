@@ -2,6 +2,14 @@ function trim(value) {
   return String(value || "").trim();
 }
 
+function volcTtsLoudnessRate(env) {
+  const raw = trim(env.VOLC_TTS_LOUDNESS_RATE);
+  if (!raw) return 40;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return 40;
+  return Math.max(-50, Math.min(100, Math.round(n)));
+}
+
 export function resolveVoiceConfig(env = process.env) {
   const appId = trim(env.VOLC_APP_ID || env.DOUBAO_APP_ID || env.VOLCENGINE_APP_ID);
   const accessToken = trim(
@@ -64,6 +72,8 @@ function readyVolc({ appId, accessToken, apiKey, env }) {
       ttsVoice: trim(env.VOLC_TTS_VOICE) || "zh_female_vv_uranus_bigtts",
       /** v3 TTS: pcm (SSE gzip) or mp3 — set VOLC_TTS_FORMAT=mp3 to opt in */
       ttsFormat: trim(env.VOLC_TTS_FORMAT) || "pcm",
+      /** V3 loudness_rate -50..100 (0=normal, 50≈1.5×, 100=2×). V1 uses derived volume_ratio. */
+      ttsLoudnessRate: volcTtsLoudnessRate(env),
     },
     openai: null,
   };

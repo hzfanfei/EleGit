@@ -10,7 +10,7 @@ import {
 } from "./books.js";
 import { requestSignal } from "./http-signal.js";
 import { openSse, writeSse } from "./sse.js";
-import { spokenContentOnly } from "./spoken-limit.js";
+import { BOOK_VOICE_SPEAK_STRATEGY } from "./book-voice-latency.js";
 import { writeAudioToSse } from "./spoken-tts.js";
 import { runVoiceTurn } from "./voice-call.js";
 import { resolveVoiceConfig } from "./voice-config.js";
@@ -129,8 +129,7 @@ export async function handleBookVoiceTurn(
       question: message,
       signal,
       ask,
-      speakStrategy: "final",
-      limitSpoken: spokenContentOnly,
+      speakStrategy: BOOK_VOICE_SPEAK_STRATEGY,
       tts: (text, ttsSignal) => providers.tts(text, ttsSignal),
       onDelta: () => {},
       onAudio: async (buf) => {

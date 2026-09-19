@@ -232,12 +232,14 @@ export async function volcTtsV3(volc, text, signal, fetchImpl = fetch) {
     volc.ttsUrl && volc.ttsUrl.includes("/v3/")
       ? volc.ttsUrl
       : "https://openspeech.bytedance.com/api/v3/tts/unidirectional";
+  const loudness = Number.isFinite(volc.ttsLoudnessRate) ? volc.ttsLoudnessRate : 40;
   const reqParams = {
     text: spoken,
     speaker: volc.ttsVoice || "zh_female_vv_uranus_bigtts",
     audio_params: {
       format: volc.ttsFormat === "pcm" ? "pcm" : "mp3",
       sample_rate: 24000,
+      loudness_rate: loudness,
     },
   };
   if (volc.ttsModel) reqParams.model = volc.ttsModel;
@@ -299,6 +301,7 @@ export async function volcTts(volc, text, signal, fetchImpl = fetch) {
       encoding: "pcm",
       rate: 24000,
       speed_ratio: 1.05,
+      volume_ratio: 1 + (Number.isFinite(volc.ttsLoudnessRate) ? volc.ttsLoudnessRate : 40) / 100,
     },
     request: {
       reqid: randomUUID(),

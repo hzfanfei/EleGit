@@ -6,7 +6,7 @@ import { createBookAskIterator } from "../src/book-voice-turn.js";
 import { loadLocalEnv } from "../src/env.js";
 import { loadStore } from "../src/store.js";
 import { listBooks, resolveBook, ensureBookMaterialized } from "../src/books.js";
-import { speakableText, runVoiceTurn } from "../src/voice-call.js";
+import { runVoiceTurn } from "../src/voice-call.js";
 import { resolveVoiceConfig } from "../src/voice-config.js";
 import { createVoiceProviders } from "../src/voice-ws.js";
 import { volcTts } from "../src/voice-volc.js";
@@ -40,7 +40,7 @@ function pcmToWav(pcm, sampleRate = 24000) {
 
 function scoreAnswer(text) {
   const raw = String(text || "").trim();
-  const spoken = speakableText(raw);
+  const spoken = raw;
   const chars = [...spoken].length;
   const issues = [];
   if (chars > 120) issues.push("偏长");

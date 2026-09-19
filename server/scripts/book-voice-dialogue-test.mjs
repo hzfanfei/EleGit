@@ -2,8 +2,6 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadLocalEnv } from "../src/env.js";
-import { speakableText } from "../src/voice-call.js";
-
 loadLocalEnv();
 
 const base = `http://127.0.0.1:${process.env.WENXIANG_PORT || 8787}`;
@@ -56,7 +54,7 @@ function pcmToWav(pcm, sampleRate = 24000) {
 
 function scoreAnswer(text) {
   const raw = String(text || "").trim();
-  const spoken = speakableText(raw);
+  const spoken = raw;
   const chars = [...spoken].length;
   const issues = [];
   if (chars > 120) issues.push("偏长");

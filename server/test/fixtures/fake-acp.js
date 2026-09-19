@@ -64,6 +64,17 @@ rl.on("line", (line) => {
       params: {
         sessionId,
         update: {
+          sessionUpdate: "agent_thought_chunk",
+          content: { type: "text", text: `hidden-thought:${seen.length}` },
+        },
+      },
+    });
+    write({
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: {
+        sessionId,
+        update: {
           sessionUpdate: "agent_message_chunk",
           content: { type: "text", text: `${recall}:${seen.length}` },
         },

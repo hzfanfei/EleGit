@@ -1,11 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import {
-  createCallMachine,
-  pcmHasSpeech,
-  speakableText,
-  takeSpeakable,
-} from "../src/voice-call.js";
+import { createCallMachine, pcmHasSpeech, takeSpeakable } from "../src/voice-call.js";
 
 describe("call machine", () => {
   it("walks idle → connecting → listening → speaking → barge → listening", () => {
@@ -38,16 +33,7 @@ describe("call machine", () => {
   });
 });
 
-describe("speakable text", () => {
-  it("strips markdown so TTS does not read fences", () => {
-    const text = speakableText("## 最近\n**登录**已修。`main` 见 [文档](http://x)。");
-    assert.match(text, /最近/);
-    assert.match(text, /登录已修/);
-    assert.doesNotMatch(text, /#/);
-    assert.doesNotMatch(text, /\*\*/);
-    assert.doesNotMatch(text, /http/);
-  });
-
+describe("takeSpeakable", () => {
   it("releases a finished sentence and keeps the tail", () => {
     const first = takeSpeakable("仓库最近在修登录。接下来看 PR");
     assert.equal(first.speak, "仓库最近在修登录。");

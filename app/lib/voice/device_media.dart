@@ -216,7 +216,7 @@ class DeviceVoiceMedia implements VoiceMedia {
 
             contentType: AndroidContentType.speech,
 
-            usageType: AndroidUsageType.media,
+            usageType: AndroidUsageType.voiceCommunication,
 
             audioFocus: AndroidAudioFocus.gain,
 
@@ -278,6 +278,10 @@ class DeviceVoiceMedia implements VoiceMedia {
 
       outFormat = 'mp3';
 
+    }
+
+    if (outFormat == 'pcm') {
+      bytes = amplifyPcm16(bytes);
     }
 
     _queue.add(_PlayJob(bytes: bytes, format: outFormat));
@@ -399,6 +403,13 @@ class DeviceVoiceMedia implements VoiceMedia {
   }
 
 
+
+  @override
+  Future<void> waitForPlaybackQueue() async {
+    while (_playing || _queue.isNotEmpty) {
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+    }
+  }
 
   @override
 

@@ -99,6 +99,31 @@ export function buildAcpPrompt({ question, history, githubContext, seedHistory }
   return lines.join("\n");
 }
 
+/** Root instructions: model must not narrate process (read/search/thinking) in the reply. */
+export const BOOK_DIRECT_ANSWER_RULES = [
+  "You are 问象·问书. Ask mode only: read INDEX.md and chapters/*.md, then answer. Do not edit files.",
+  "Use Simplified Chinese unless the user uses another language.",
+  "【核心】只输出答案正文；检索、对照、推理过程全部在内部完成，禁止写进回复。",
+  "【开头】第一个字就要进入实质内容（情节/观点/事实/建议），禁止铺垫、承让、流程旁白、复述问题。",
+  "禁止以这些开头或起句：让我/我来/我先/正在/稍等/查完/看完/读完/分析/梳理/总结/归纳/我认为/我的理解/根据书中/从本章来看/关于你的问题/需要注意的是/这本书主要/本书讲的是（空洞总起）/好的/嗯/那么/首先/简单来说/总的来说/可以说/其实/这里。",
+  "Quote or paraphrase the book when helpful. Do not invent passages, characters, or events.",
+  "Be concise: short sentences; no markdown, no numbered lists (第一第二), no long block quotes unless the user asks.",
+];
+
+export const BOOK_SPOKEN_ANSWER_RULES = [
+  "=== 语音朗读（用户只听不说看）===",
+  "Output ONLY what should be spoken aloud after silent reading of the book files.",
+  "Natural colloquial Chinese; no lecture tone or padding.",
+];
+
+export const BOOK_ANSWER_FEW_SHOT = [
+  "=== 正反例（风格必须像「正确」）===",
+  "错：「让我查一下章节。这一章讲的是主角决定离家。」",
+  "对：「这一章里主角决定离家。」",
+  "错：「关于你的问题，根据书中内容，经理人容易踩的坑是…」",
+  "对：「经理人容易踩的坑是 micromanage，不信任下属。」",
+];
+
 export function buildBookAcpPrompt({
   question,
   history,
@@ -107,24 +132,11 @@ export function buildBookAcpPrompt({
   currentChapter,
   spokenAnswer = false,
 }) {
-  const lines = [
-    "You are 问象·问书, a local book Q&A assistant running on the user's computer.",
-    "You are in ask mode: read INDEX.md and chapter markdown under chapters/, then answer. Do not edit files.",
-    "Answer in Simplified Chinese unless the user writes in another language.",
-    "Be concise and efficient: lead with the direct answer.",
-    "Quote or paraphrase the book when helpful. Do not invent passages, characters, or events.",
-  ];
+  const lines = [...BOOK_DIRECT_ANSWER_RULES];
   if (spokenAnswer) {
-    lines.push(
-      "",
-      "=== Spoken reply (voice-only; user will not read text) ===",
-      "Read and reason silently. Output ONLY the final answer line the user should hear—never narrate steps.",
-      "Forbidden: thinking aloud, search/process narration, or meta commentary (e.g. 让我查/我来找/正在看/看完/查完/分析/梳理/总结来说/我认为从书中/根据上下文/关于你的问题/需要注意的是).",
-      "Start with the substantive fact or conclusion. No greeting, no question recap, no「首先/简单来说/总的来说/根据书中」.",
-      "No markdown, lists, numbering (第一第二), long quotes, or citations.",
-      "Answer in natural spoken Chinese: as many short sentences as needed to be clear, without padding or lecture tone.",
-    );
+    lines.push("", ...BOOK_SPOKEN_ANSWER_RULES);
   }
+  lines.push("", ...BOOK_ANSWER_FEW_SHOT);
   const chapter = String(currentChapter || "").trim();
   if (chapter) {
     lines.push(
@@ -150,8 +162,45 @@ export function buildBookAcpPrompt({
       );
     }
   }
-  lines.push("", "=== Question ===", question);
+  lines.push(
+    "",
+    "=== 本题作答（最高优先级；违反即失败）===",
+    "直接回答下列问题。不要任何前缀、过程句、元评论。第一句必须是答案内容。",
+    "",
+    "=== Question ===",
+    question,
+  );
   return lines.join("\n");
+}
+
+/** ACP session/update kinds that must never be shown to the user (internal reasoning). */
+const ACP_HIDDEN_SESSION_UPDATES = new Set([
+  "agent_thought_chunk",
+  "agent_thought",
+  "user_message_chunk",
+  "user_message",
+]);
+
+function textFromAcpContentBlock(content) {
+  if (!content) return "";
+  if (Array.isArray(content)) {
+    return content
+      .filter((b) => b?.type === "text" && b.text != null)
+      .map((b) => String(b.text))
+      .join("");
+  }
+  if (content.type === "text" && content.text != null) return String(content.text);
+  return "";
+}
+
+/** User-visible assistant text from a session/update payload (excludes reasoning channel). */
+export function acpVisibleTextFromUpdate(update) {
+  if (!update || typeof update !== "object") return "";
+  const kind = String(update.sessionUpdate || "");
+  if (ACP_HIDDEN_SESSION_UPDATES.has(kind)) return "";
+  if (kind === "agent_message_chunk") return textFromAcpContentBlock(update.content);
+  if (kind === "agent_message") return textFromAcpContentBlock(update.content);
+  return "";
 }
 
 export class AcpChannel {
@@ -358,10 +407,7 @@ export class AcpChannel {
       return;
     }
     if (msg.method === "session/update") {
-      const update = msg.params?.update;
-      const text =
-        update?.content?.text ||
-        (update?.sessionUpdate === "agent_message_chunk" ? update?.content?.text : "");
+      const text = acpVisibleTextFromUpdate(msg.params?.update);
       if (text) this.onDelta?.(text);
       return;
     }
