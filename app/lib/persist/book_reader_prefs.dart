@@ -41,7 +41,7 @@ class ReaderPalette {
           paper: Color(0xFF121110),
           ink: Color(0xFFE8E4DC),
           muted: Color(0xFF7A756C),
-          chromeFade: Color(0xFF0C0D0F),
+          chromeFade: Color(0xFF121110),
         );
     }
   }

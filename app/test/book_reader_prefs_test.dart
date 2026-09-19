@@ -20,4 +20,11 @@ void main() {
     expect(loaded.fontSize, 22);
     expect(loaded.navMode, ReaderNavMode.scroll);
   });
+
+  test('reader chrome fade matches paper in every theme', () {
+    for (final mode in ReaderThemeMode.values) {
+      final palette = ReaderPalette.forMode(mode);
+      expect(palette.chromeFade, palette.paper);
+    }
+  });
 }

@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import '../persist/book_reader_prefs.dart';
 import '../theme.dart';
 
+/// Fixed inset below the status bar; chrome overlays without shifting body text.
+const kReaderContentTopInset = 12.0;
+
 /// Reading chrome — TOC, settings, progress; fades for immersion.
 class BookReaderChrome extends StatelessWidget {
   const BookReaderChrome({
@@ -33,17 +36,17 @@ class BookReaderChrome extends StatelessWidget {
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [
-            palette.chromeFade.withValues(alpha: 0.97),
-            palette.chromeFade.withValues(alpha: 0.78),
-            Colors.transparent,
+            palette.paper.withValues(alpha: 0.94),
+            palette.paper.withValues(alpha: 0.72),
+            palette.paper.withValues(alpha: 0),
           ],
-          stops: const [0, 0.55, 1],
+          stops: const [0, 0.42, 1],
         ),
       ),
       child: SafeArea(
         bottom: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(4, 4, 4, 20),
+          padding: const EdgeInsets.fromLTRB(2, 2, 2, 10),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [

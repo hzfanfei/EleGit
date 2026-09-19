@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Local companion API for the 问象 (Wenxiang) mobile app",
   "scripts": {
-    "start": "node src/server.js",
+    "start": "node scripts/with-ngrok.mjs",
     "keep": "node scripts/keep-alive.mjs",
     "test": "node --test test/*.test.js"
   },

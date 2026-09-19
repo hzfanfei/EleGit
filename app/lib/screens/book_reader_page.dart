@@ -373,6 +373,17 @@ class _BookReaderPageState extends State<BookReaderPage> {
     SystemChrome.setSystemUIOverlayStyle(
       dark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
     );
+    if (_chromeVisible) {
+      SystemChrome.setEnabledSystemUIMode(
+        SystemUiMode.manual,
+        overlays: SystemUiOverlay.values,
+      );
+    } else {
+      SystemChrome.setEnabledSystemUIMode(
+        SystemUiMode.manual,
+        overlays: const [SystemUiOverlay.bottom],
+      );
+    }
   }
 
   void _refreshProgressLabels() {
@@ -410,6 +421,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
   void _toggleChrome() {
     setState(() => _chromeVisible = !_chromeVisible);
+    _applySystemChrome();
     _scheduleChromeHide();
   }
 
@@ -417,7 +429,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
     _chromeHide?.cancel();
     if (!_chromeVisible) return;
     _chromeHide = Timer(const Duration(seconds: 5), () {
-      if (mounted) setState(() => _chromeVisible = false);
+      if (!mounted) return;
+      setState(() => _chromeVisible = false);
+      _applySystemChrome();
     });
   }
 
@@ -490,6 +504,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
   void _showSettings() {
     _chromeHide?.cancel();
     setState(() => _chromeVisible = true);
+    _applySystemChrome();
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -506,6 +521,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
     if (manifest == null) return;
     _chromeHide?.cancel();
     setState(() => _chromeVisible = true);
+    _applySystemChrome();
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -522,11 +538,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
     ).whenComplete(_scheduleChromeHide);
   }
 
-  void _showChrome() {
-    setState(() => _chromeVisible = true);
-    _scheduleChromeHide();
-  }
-
   void _leave() {
     unawaited(_saveProgress());
     widget.onBack();
@@ -535,6 +546,10 @@ class _BookReaderPageState extends State<BookReaderPage> {
   @override
   void dispose() {
     unawaited(_saveProgress());
+    SystemChrome.setEnabledSystemUIMode(
+      SystemUiMode.manual,
+      overlays: SystemUiOverlay.values,
+    );
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.light);
     _chromeHide?.cancel();
     _saveDebounce?.cancel();
@@ -580,7 +595,8 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
     final manifest = _manifest;
     final media = MediaQuery.of(context);
-    final topContentPad = _chromeVisible ? media.padding.top + 52 : media.padding.top + 12;
+    final topContentPad =
+        (_chromeVisible ? media.padding.top : 0) + kReaderContentTopInset;
     final styleSheet = bookReaderMarkdownStyle(
       theme: Theme.of(context),
       palette: palette,
@@ -614,10 +630,13 @@ class _BookReaderPageState extends State<BookReaderPage> {
                   left: 0,
                   right: 0,
                   bottom: readerBottom,
-                  child: ColoredBox(
-                    key: const Key('book-reader-body'),
-                    color: palette.paper,
-                    child: _chapterMarkdownByIndex.isEmpty
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    onTap: _toggleChrome,
+                    child: ColoredBox(
+                      key: const Key('book-reader-body'),
+                      color: palette.paper,
+                      child: _chapterMarkdownByIndex.isEmpty
                         ? _OpeningSkeleton(
                             palette: palette,
                             title: widget.book.title,
@@ -686,6 +705,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                               );
                             },
                           ),
+                    ),
                   ),
                 ),
                 Positioned.fill(
@@ -727,22 +747,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
                     ),
                   ),
                 ),
-                if (!_chromeVisible)
-                  Positioned(
-                    top: media.padding.top + 4,
-                    right: 8,
-                    child: Material(
-                      color: palette.paper.withValues(alpha: 0.92),
-                      elevation: 1,
-                      shadowColor: Colors.black26,
-                      shape: const CircleBorder(),
-                      child: IconButton(
-                        tooltip: '菜单',
-                        icon: Icon(Icons.menu, color: palette.ink),
-                        onPressed: _showChrome,
-                      ),
-                    ),
-                  ),
                 Align(
                   alignment: Alignment.bottomCenter,
                   child: Padding(

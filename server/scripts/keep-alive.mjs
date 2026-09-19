@@ -1,11 +1,29 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadLocalEnv } from "../src/env.js";
 import { nextKeepAliveDelay, shouldRestartCompanion } from "../src/keep-alive-policy.js";
+import { ensureNgrok } from "../src/ngrok.js";
+
+loadLocalEnv();
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const delayMs = Number(process.env.WENXIANG_KEEPALIVE_DELAY_MS || 2000);
 let attempt = 0;
+let ngrokChild = null;
+
+async function ensureTunnel() {
+  const ngrok = await ensureNgrok();
+  if (ngrok.child) {
+    ngrokChild = ngrok.child;
+    ngrokChild.on("exit", () => {
+      ngrokChild = null;
+      console.error("[keep-alive] ngrok exited — will start it again with the companion");
+    });
+  }
+  if (ngrok.reason === "already") console.log("ngrok already running.");
+  else if (ngrok.started) console.log("ngrok started.");
+}
 
 function boot() {
   const child = spawn(process.execPath, ["src/server.js"], {
@@ -16,6 +34,13 @@ function boot() {
   const started = Date.now();
   child.on("exit", (code, signal) => {
     if (!shouldRestartCompanion(code, signal)) {
+      if (ngrokChild && !ngrokChild.killed) {
+        try {
+          ngrokChild.kill();
+        } catch {
+          // ignore
+        }
+      }
       process.exit(code ?? 0);
       return;
     }
@@ -25,8 +50,21 @@ function boot() {
       `[keep-alive] companion exited code=${code ?? "null"} signal=${signal || "-"} — restart in ${wait}ms`,
     );
     attempt += 1;
-    setTimeout(boot, wait);
+    setTimeout(async () => {
+      try {
+        await ensureTunnel();
+      } catch (err) {
+        console.error(`[keep-alive] ${err.message}`);
+      }
+      boot();
+    }, wait);
   });
 }
 
+try {
+  await ensureTunnel();
+} catch (err) {
+  console.error(`[keep-alive] ${err.message}`);
+  process.exit(1);
+}
 boot();
