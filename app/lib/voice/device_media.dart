@@ -308,6 +308,10 @@ class DeviceVoiceMedia implements VoiceMedia {
 
     String codec = 'raw',
 
+    String segmentCaption = '',
+
+    void Function()? onPlaybackStart,
+
   }) async {
 
     if (pcm.isEmpty) return;
@@ -336,7 +340,14 @@ class DeviceVoiceMedia implements VoiceMedia {
       bytes = amplifyPcm16(bytes);
     }
 
-    _queue.add(_PlayJob(bytes: bytes, format: outFormat));
+    _queue.add(
+      _PlayJob(
+        bytes: bytes,
+        format: outFormat,
+        segmentCaption: segmentCaption,
+        onPlaybackStart: onPlaybackStart,
+      ),
+    );
 
     await _drain();
 
@@ -349,22 +360,35 @@ class DeviceVoiceMedia implements VoiceMedia {
     if (first.format == 'mp3' || _queue.isEmpty || _queue.first.format != 'pcm') {
       return first;
     }
-    final parts = <Uint8List>[first.bytes];
-    while (_queue.isNotEmpty && _queue.first.format == 'pcm') {
-      parts.add(_queue.removeAt(0).bytes);
+    final mergedJobs = <_PlayJob>[first];
+    while (_queue.isNotEmpty &&
+        _queue.first.format == 'pcm' &&
+        _queue.first.segmentCaption == first.segmentCaption) {
+      mergedJobs.add(_queue.removeAt(0));
     }
-    if (parts.length == 1) return first;
-    final total = parts.fold<int>(0, (sum, b) => sum + b.length);
+    if (mergedJobs.length == 1) return first;
+    final total = mergedJobs.fold<int>(0, (sum, j) => sum + j.bytes.length);
     final merged = Uint8List(total);
     var offset = 0;
-    for (final part in parts) {
-      merged.setRange(offset, offset + part.length, part);
-      offset += part.length;
+    for (final job in mergedJobs) {
+      merged.setRange(offset, offset + job.bytes.length, job.bytes);
+      offset += job.bytes.length;
     }
-    return _PlayJob(bytes: merged, format: 'pcm');
+    void Function()? onStart;
+    for (final job in mergedJobs) {
+      onStart ??= job.onPlaybackStart;
+    }
+    return _PlayJob(
+      bytes: merged,
+      format: 'pcm',
+      segmentCaption: first.segmentCaption,
+      onPlaybackStart: onStart,
+    );
   }
 
   Future<void> _playJob(_PlayJob job) async {
+
+    job.onPlaybackStart?.call();
 
     await _player.stop();
 
@@ -497,13 +521,22 @@ class DeviceVoiceMedia implements VoiceMedia {
 
 class _PlayJob {
 
-  _PlayJob({required this.bytes, required this.format});
+  _PlayJob({
+    required this.bytes,
+    required this.format,
+    this.segmentCaption = '',
+    this.onPlaybackStart,
+  });
 
 
 
   final Uint8List bytes;
 
   final String format;
+
+  final String segmentCaption;
+
+  final void Function()? onPlaybackStart;
 
 }
 

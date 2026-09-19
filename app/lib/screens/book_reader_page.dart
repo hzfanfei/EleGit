@@ -814,12 +814,16 @@ class _BookReaderPageState extends State<BookReaderPage> {
                   ),
                 ),
                 Positioned(
+                  left: 8,
                   right: 0,
                   bottom: readerBottom,
-                  child: BookQuickVoiceFab(
-                    session: _quickVoice,
-                    palette: palette,
-                    enabled: _voiceReady,
+                  child: Align(
+                    alignment: Alignment.bottomRight,
+                    child: BookQuickVoiceFab(
+                      session: _quickVoice,
+                      palette: palette,
+                      enabled: _voiceReady,
+                    ),
                   ),
                 ),
                 Align(

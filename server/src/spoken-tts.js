@@ -25,10 +25,11 @@ export function splitTextForTts(text, maxChars = 320) {
   return out.filter(Boolean);
 }
 
-export async function speakTextInParts({ text, tts, onAudio, signal }) {
+export async function speakTextInParts({ text, tts, onCaption, onAudio, signal }) {
   const parts = splitTextForTts(text);
   for (const part of parts) {
     if (signal?.aborted) break;
+    onCaption?.(part);
     const audio = await tts(part, signal);
     if (signal?.aborted) break;
     if (audio?.length) await onAudio(audio);

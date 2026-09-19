@@ -166,6 +166,22 @@ class HoldToSpeakSession {
     _stt = null;
   }
 
+  /// Drop mic/STT without sending a transcript (e.g. tap-to-cancel).
+  Future<void> abortHold() async {
+    holding = false;
+    holdPending = false;
+    holdCancel = false;
+    holdLive = '';
+    holdHint = '';
+    sttBusy = false;
+    await _micSub?.cancel();
+    _micSub = null;
+    await _media?.stopMic();
+    _stt?.cancel();
+    _disposeStt();
+    onChanged();
+  }
+
   void dispose() {
     _micSub?.cancel();
     _micSub = null;

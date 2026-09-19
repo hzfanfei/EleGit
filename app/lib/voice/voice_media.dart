@@ -9,6 +9,8 @@ abstract class VoiceMedia {
     int sampleRate = 24000,
     String format = 'pcm',
     String codec = 'raw',
+    String segmentCaption = '',
+    void Function()? onPlaybackStart,
   });
   Future<void> stopPlayback();
 
@@ -87,7 +89,10 @@ class FakeVoiceMedia implements VoiceMedia {
     int sampleRate = 24000,
     String format = 'pcm',
     String codec = 'raw',
+    String segmentCaption = '',
+    void Function()? onPlaybackStart,
   }) async {
+    onPlaybackStart?.call();
     played.add(pcm);
   }
 

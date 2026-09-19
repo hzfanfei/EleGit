@@ -1009,12 +1009,16 @@ class _ChatPageState extends State<ChatPage> {
             ],
           ),
           Positioned(
+            left: 8,
             right: 0,
             bottom: MediaQuery.of(context).padding.bottom + 92,
-            child: BookQuickVoiceFab(
-              session: _quickVoice,
-              palette: _quickVoicePalette,
-              enabled: _voiceReady && !_busy && !_live && !_preparingChat,
+            child: Align(
+              alignment: Alignment.bottomRight,
+              child: BookQuickVoiceFab(
+                session: _quickVoice,
+                palette: _quickVoicePalette,
+                enabled: _voiceReady && !_busy && !_live && !_preparingChat,
+              ),
             ),
           ),
           if (_preparingChat)

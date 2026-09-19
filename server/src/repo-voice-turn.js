@@ -192,6 +192,10 @@ export async function handleRepoVoiceTurn(
       speakStrategy: BOOK_VOICE_SPEAK_STRATEGY,
       tts: (text, ttsSignal) => providers.tts(text, ttsSignal),
       onDelta: () => {},
+      onCaption: (text) => {
+        if (signal.aborted || !String(text || "").trim()) return;
+        writeSse(res, { type: "caption", text: String(text) });
+      },
       onAudio: async (buf) => {
         if (signal.aborted || !buf?.length) return;
         writeSse(res, { type: "state", phase: "speak" });

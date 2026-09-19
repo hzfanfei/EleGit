@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../persist/book_reader_prefs.dart';
 import '../voice/book_quick_voice_session.dart';
+import 'voice_caption_panel.dart';
 import 'wx_hold_to_speak.dart';
 
 /// Floating mic for book quick voice Q&A — hold to talk, no transcript UI.
@@ -38,11 +39,37 @@ class _BookQuickVoiceFabState extends State<BookQuickVoiceFab>
     duration: const Duration(milliseconds: 720),
   );
 
+  int? _pointerDownMs;
+  double? _pointerDownY;
+  bool _tapCancelArm = false;
+
+  static const _tapMaxMs = 320;
+  static const _tapMaxMove = 28.0;
+
   @override
   void dispose() {
     _pulse.dispose();
     _wave.dispose();
     super.dispose();
+  }
+
+  Future<void> _onMicPointerUp(double globalY) async {
+    final downMs = _pointerDownMs;
+    final downY = _pointerDownY;
+    final tapArm = _tapCancelArm;
+    _pointerDownMs = null;
+    _pointerDownY = null;
+    _tapCancelArm = false;
+
+    if (tapArm && downMs != null && downY != null) {
+      final elapsed = DateTime.now().millisecondsSinceEpoch - downMs;
+      if (elapsed <= _tapMaxMs && (downY - globalY).abs() <= _tapMaxMove) {
+        HapticFeedback.lightImpact();
+        await widget.session.cancelActiveFlow();
+        return;
+      }
+    }
+    await widget.session.pointerUp();
   }
 
   void _syncWave(BookQuickVoicePhase phase, bool holding) {
@@ -143,13 +170,35 @@ class _BookQuickVoiceFabState extends State<BookQuickVoiceFab>
             phase == BookQuickVoicePhase.speaking ||
             phase == BookQuickVoicePhase.thinking);
     final statusLeading = _statusLeading(phase);
+    final caption = widget.session.voiceCaption;
+    final showCaption = widget.session.showsVoiceCaption;
+    final maxCaptionW = MediaQuery.sizeOf(context).width * 0.72;
 
     return Padding(
       padding: EdgeInsets.only(right: 14, bottom: 12 + widget.bottomInset),
-      child: Row(
+      child: Column(
         mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.end,
         children: [
+          AnimatedSize(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            alignment: Alignment.bottomCenter,
+            child: showCaption
+                ? Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: VoiceCaptionPanel(
+                      text: caption,
+                      palette: widget.palette,
+                      maxWidth: maxCaptionW,
+                    ),
+                  )
+                : const SizedBox.shrink(),
+          ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
           AnimatedSize(
             duration: const Duration(milliseconds: 200),
             curve: Curves.easeOutCubic,
@@ -195,15 +244,26 @@ class _BookQuickVoiceFabState extends State<BookQuickVoiceFab>
             behavior: HitTestBehavior.opaque,
             onPointerDown: widget.enabled
                 ? (e) {
+                    _pointerDownMs = DateTime.now().millisecondsSinceEpoch;
+                    _pointerDownY = e.position.dy;
+                    _tapCancelArm = widget.session.tapToCancelActive;
+                    if (_tapCancelArm) return;
                     HapticFeedback.lightImpact();
                     unawaited(widget.session.pointerDown(e.position.dy));
                   }
                 : null,
-            onPointerMove:
-                widget.enabled ? (e) => widget.session.pointerMove(e.position.dy) : null,
-            onPointerUp: widget.enabled ? (_) => unawaited(widget.session.pointerUp()) : null,
-            onPointerCancel:
-                widget.enabled ? (_) => unawaited(widget.session.pointerUp()) : null,
+            onPointerMove: widget.enabled
+                ? (e) {
+                    if (_tapCancelArm) return;
+                    widget.session.pointerMove(e.position.dy);
+                  }
+                : null,
+            onPointerUp: widget.enabled
+                ? (e) => unawaited(_onMicPointerUp(e.position.dy))
+                : null,
+            onPointerCancel: widget.enabled
+                ? (e) => unawaited(_onMicPointerUp(e.position.dy))
+                : null,
             child: Semantics(
               button: true,
               label: label.isNotEmpty ? label : '按住快问快答',
@@ -226,6 +286,7 @@ class _BookQuickVoiceFabState extends State<BookQuickVoiceFab>
                     ),
                   ),
                   child: SizedBox(
+                    key: const Key('wx-quick-voice-mic'),
                     width: 48,
                     height: 48,
                     child: Icon(
@@ -237,6 +298,8 @@ class _BookQuickVoiceFabState extends State<BookQuickVoiceFab>
                 ),
               ),
             ),
+          ),
+            ],
           ),
         ],
       ),

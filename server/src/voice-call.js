@@ -74,6 +74,7 @@ export async function runVoiceTurn({
   tts,
   signal,
   onDelta,
+  onCaption,
   onAudio,
   onDone,
   maxSpeakChars = 0,
@@ -118,6 +119,7 @@ export async function runVoiceTurn({
     speakQueue.push(speak);
     speaking = speaking.then(async () => {
       if (signal?.aborted) return;
+      onCaption?.(speak);
       const audio = await tts(speak, signal);
       if (signal?.aborted || !audio) return;
       await onAudio?.(audio);
@@ -155,7 +157,7 @@ export async function runVoiceTurn({
       err.code = "empty_answer";
       throw err;
     }
-    await speakTextInParts({ text: toSpeak, tts, onAudio, signal });
+    await speakTextInParts({ text: toSpeak, tts, onCaption, onAudio, signal });
   }
   if (!signal?.aborted) onDone?.({ text: full, engine, final: true });
   return { engine, answer: full, cancelled: Boolean(signal?.aborted) };

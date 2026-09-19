@@ -67,9 +67,20 @@ class RepoQuickVoiceSession implements QuickVoiceFabHost {
   int _voiceRate = 24000;
   String _voiceFormat = 'pcm';
   String _voiceCodec = 'raw';
+  String _segmentCaption = '';
+  String _voiceCaption = '';
 
   @override
   HoldToSpeakSession get hold => _hold;
+
+  @override
+  String get voiceCaption => _voiceCaption;
+
+  @override
+  bool get showsVoiceCaption =>
+      _voiceCaption.isNotEmpty &&
+      phase != BookQuickVoicePhase.listening &&
+      phase != BookQuickVoicePhase.recognizing;
 
   bool get busy =>
       _replyActive ||
@@ -156,15 +167,50 @@ class RepoQuickVoiceSession implements QuickVoiceFabHost {
     _voiceCodec = 'raw';
   }
 
-  void interruptReply() {
+  void _clearCaption() {
+    _segmentCaption = '';
+    _voiceCaption = '';
+  }
+
+  void _onCaptionSegment(String text) {
+    final chunk = text.trim();
+    if (chunk.isEmpty) return;
+    _segmentCaption = chunk;
+  }
+
+  void Function()? _playbackStartForCaption(String captionAtEnqueue) {
+    if (captionAtEnqueue.isEmpty) return null;
+    return () {
+      if (!_replyActive) return;
+      _voiceCaption = captionAtEnqueue;
+      onChanged();
+    };
+  }
+
+  @override
+  bool get tapToCancelActive =>
+      !_hold.holding &&
+      !_hold.holdPending &&
+      (_replyActive ||
+          _hold.sttBusy ||
+          phase == BookQuickVoicePhase.thinking ||
+          phase == BookQuickVoicePhase.speaking ||
+          phase == BookQuickVoicePhase.recognizing);
+
+  @override
+  Future<void> cancelActiveFlow() async {
     api.cancelRepoVoiceTurn();
     _resetVoiceFormat();
+    _clearCaption();
     unawaited(_media?.stopPlayback());
+    await _hold.abortHold();
     _replyActive = false;
-    if (phase == BookQuickVoicePhase.speaking || phase == BookQuickVoicePhase.thinking) {
-      phase = BookQuickVoicePhase.idle;
-      onChanged();
-    }
+    phase = BookQuickVoicePhase.idle;
+    onChanged();
+  }
+
+  void interruptReply() {
+    unawaited(cancelActiveFlow());
   }
 
   Future<void> _onTranscript(String text) async {
@@ -175,6 +221,7 @@ class RepoQuickVoiceSession implements QuickVoiceFabHost {
       return;
     }
     _replyActive = true;
+    _clearCaption();
     phase = BookQuickVoicePhase.thinking;
     _thinkStatusLabel = '思考中…';
     onChanged();
@@ -210,9 +257,12 @@ class RepoQuickVoiceSession implements QuickVoiceFabHost {
             _thinkStatusLabel = '思考中…';
             onChanged();
           }
+        } else if (event.type == 'caption' && event.text.isNotEmpty) {
+          _onCaptionSegment(event.text);
         } else if (event.type == 'audio' &&
             event.pcm != null &&
             event.pcm!.isNotEmpty) {
+          final captionAtEnqueue = _segmentCaption;
           _voiceRate = event.sampleRate ?? _voiceRate;
           _voiceFormat = event.audioFormat ?? _voiceFormat;
           _voiceCodec = event.codec ?? _voiceCodec;
@@ -224,6 +274,8 @@ class RepoQuickVoiceSession implements QuickVoiceFabHost {
               sampleRate: _voiceRate,
               format: _voiceFormat,
               codec: _voiceCodec,
+              segmentCaption: captionAtEnqueue,
+              onPlaybackStart: _playbackStartForCaption(captionAtEnqueue),
             ).catchError((Object err) {
               if (_replyActive) onError?.call('播放失败：$err');
             }),
@@ -235,6 +287,8 @@ class RepoQuickVoiceSession implements QuickVoiceFabHost {
             onError?.call('播放失败：$err');
             break;
           }
+          _clearCaption();
+          onChanged();
           final answer = event.text.trim();
           _sessionId = event.sessionId ?? _sessionId;
           onSessionId?.call(_sessionId);
@@ -258,6 +312,7 @@ class RepoQuickVoiceSession implements QuickVoiceFabHost {
       onError?.call(err.toString());
     } finally {
       _replyActive = false;
+      _clearCaption();
       phase = BookQuickVoicePhase.idle;
       onChanged();
     }

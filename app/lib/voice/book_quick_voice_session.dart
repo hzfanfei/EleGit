@@ -21,9 +21,17 @@ abstract class QuickVoiceFabHost {
   HoldToSpeakSession get hold;
   bool get showsStatus;
   String get statusLabel;
+  /// Spoken answer lines revealed in sync with TTS chunks (may be empty).
+  String get voiceCaption;
+  bool get showsVoiceCaption;
   Future<void> pointerDown(double globalY);
   void pointerMove(double globalY);
   Future<void> pointerUp();
+
+  /// True while a quick tap should cancel (not start a new hold).
+  bool get tapToCancelActive;
+
+  Future<void> cancelActiveFlow();
 }
 
 /// Hold-to-talk book Q&A with spoken replies only (no on-screen transcript).
@@ -80,8 +88,20 @@ class BookQuickVoiceSession implements QuickVoiceFabHost {
   int _voiceRate = 24000;
   String _voiceFormat = 'pcm';
   String _voiceCodec = 'raw';
+  /// Text for the TTS part whose audio is currently being received (server: caption then audio).
+  String _segmentCaption = '';
+  String _voiceCaption = '';
 
   HoldToSpeakSession get hold => _hold;
+
+  @override
+  String get voiceCaption => _voiceCaption;
+
+  @override
+  bool get showsVoiceCaption =>
+      _voiceCaption.isNotEmpty &&
+      phase != BookQuickVoicePhase.listening &&
+      phase != BookQuickVoicePhase.recognizing;
 
   bool get busy =>
       _replyActive ||
@@ -158,15 +178,50 @@ class BookQuickVoiceSession implements QuickVoiceFabHost {
     _voiceCodec = 'raw';
   }
 
-  void interruptReply() {
+  void _clearCaption() {
+    _segmentCaption = '';
+    _voiceCaption = '';
+  }
+
+  void _onCaptionSegment(String text) {
+    final chunk = text.trim();
+    if (chunk.isEmpty) return;
+    _segmentCaption = chunk;
+  }
+
+  void Function()? _playbackStartForCaption(String captionAtEnqueue) {
+    if (captionAtEnqueue.isEmpty) return null;
+    return () {
+      if (!_replyActive) return;
+      _voiceCaption = captionAtEnqueue;
+      onChanged();
+    };
+  }
+
+  @override
+  bool get tapToCancelActive =>
+      !_hold.holding &&
+      !_hold.holdPending &&
+      (_replyActive ||
+          _hold.sttBusy ||
+          phase == BookQuickVoicePhase.thinking ||
+          phase == BookQuickVoicePhase.speaking ||
+          phase == BookQuickVoicePhase.recognizing);
+
+  @override
+  Future<void> cancelActiveFlow() async {
     api.cancelBookVoiceTurn();
     _resetVoiceFormat();
+    _clearCaption();
     unawaited(_media?.stopPlayback());
+    await _hold.abortHold();
     _replyActive = false;
-    if (phase == BookQuickVoicePhase.speaking || phase == BookQuickVoicePhase.thinking) {
-      phase = BookQuickVoicePhase.idle;
-      onChanged();
-    }
+    phase = BookQuickVoicePhase.idle;
+    onChanged();
+  }
+
+  void interruptReply() {
+    unawaited(cancelActiveFlow());
   }
 
   Future<void> _onTranscript(String text) async {
@@ -177,6 +232,7 @@ class BookQuickVoiceSession implements QuickVoiceFabHost {
       return;
     }
     _replyActive = true;
+    _clearCaption();
     phase = BookQuickVoicePhase.thinking;
     _thinkStatusLabel = '思考中…';
     onChanged();
@@ -211,9 +267,12 @@ class BookQuickVoiceSession implements QuickVoiceFabHost {
             _thinkStatusLabel = '思考中…';
             onChanged();
           }
+        } else if (event.type == 'caption' && event.text.isNotEmpty) {
+          _onCaptionSegment(event.text);
         } else if (event.type == 'audio' &&
             event.pcm != null &&
             event.pcm!.isNotEmpty) {
+          final captionAtEnqueue = _segmentCaption;
           _voiceRate = event.sampleRate ?? _voiceRate;
           _voiceFormat = event.audioFormat ?? _voiceFormat;
           _voiceCodec = event.codec ?? _voiceCodec;
@@ -225,6 +284,8 @@ class BookQuickVoiceSession implements QuickVoiceFabHost {
               sampleRate: _voiceRate,
               format: _voiceFormat,
               codec: _voiceCodec,
+              segmentCaption: captionAtEnqueue,
+              onPlaybackStart: _playbackStartForCaption(captionAtEnqueue),
             ).catchError((Object err) {
               if (_replyActive) onError?.call('播放失败：$err');
             }),
@@ -236,6 +297,8 @@ class BookQuickVoiceSession implements QuickVoiceFabHost {
             onError?.call('播放失败：$err');
             break;
           }
+          _clearCaption();
+          onChanged();
           final answer = event.text.trim();
           _sessionId = event.sessionId ?? _sessionId;
           if (answer.isNotEmpty) {
@@ -259,10 +322,14 @@ class BookQuickVoiceSession implements QuickVoiceFabHost {
       onError?.call(err.toString());
     } finally {
       _replyActive = false;
+      _clearCaption();
       phase = BookQuickVoicePhase.idle;
       onChanged();
     }
   }
+
+  @visibleForTesting
+  Future<void> runVoiceTurnForTest(String question) => _onTranscript(question);
 
   void dispose() {
     interruptReply();

@@ -22,6 +22,8 @@ class FakeWenxiangApi extends WenxiangApi {
     this.streamPace = Duration.zero,
     this.voiceReady = false,
     this.voiceHint = '还没配语音密钥。请在本机问象服务的 .env 里配置。',
+    this.bookVoiceTurnEvents,
+    this.repoVoiceTurnEvents,
   }) : super(baseUrl: 'http://127.0.0.1:8787', apiKey: 'test-key');
 
   Object? oauthThrows;
@@ -48,6 +50,10 @@ class FakeWenxiangApi extends WenxiangApi {
   int checkoutStatusCalls = 0;
   int cancelCheckoutCalls = 0;
   int cancelChatCalls = 0;
+  int cancelBookVoiceTurnCalls = 0;
+  int cancelRepoVoiceTurnCalls = 0;
+  List<ChatStreamEvent>? bookVoiceTurnEvents;
+  List<ChatStreamEvent>? repoVoiceTurnEvents;
   String? lastSessionId;
   String? lastChatMessage;
   int createSessionCalls = 0;
@@ -231,6 +237,50 @@ class FakeWenxiangApi extends WenxiangApi {
   void cancelChat() {
     cancelChatCalls += 1;
     streamThrows ??= const OperationCancelled();
+  }
+
+  @override
+  void cancelBookVoiceTurn() {
+    cancelBookVoiceTurnCalls += 1;
+  }
+
+  @override
+  void cancelRepoVoiceTurn() {
+    cancelRepoVoiceTurnCalls += 1;
+  }
+
+  @override
+  Stream<ChatStreamEvent> bookVoiceTurnStream({
+    required String bookId,
+    required String message,
+    required List<ChatMessage> history,
+    String? sessionId,
+    String? chapter,
+  }) async* {
+    for (final event in bookVoiceTurnEvents ??
+        [
+          ChatStreamEvent(type: 'caption', text: '演示回答。'),
+          ChatStreamEvent(type: 'done', text: '演示回答。', engine: 'acp'),
+        ]) {
+      yield event;
+    }
+  }
+
+  @override
+  Stream<ChatStreamEvent> repoVoiceTurnStream({
+    required String owner,
+    required String repo,
+    required String message,
+    required List<ChatMessage> history,
+    String? sessionId,
+  }) async* {
+    for (final event in repoVoiceTurnEvents ??
+        [
+          ChatStreamEvent(type: 'caption', text: '仓库回答。'),
+          ChatStreamEvent(type: 'done', text: '仓库回答。', engine: 'acp'),
+        ]) {
+      yield event;
+    }
   }
 
   @override
