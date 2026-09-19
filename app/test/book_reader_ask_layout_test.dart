@@ -73,6 +73,14 @@ void main() {
     expect(expandedPanel.height, closeTo(844 * kBookAskHalfFraction, 8));
   });
 
+  test('expanded ask height with keyboard fits in viewport', () {
+    const h = 844.0;
+    const keyboard = 320.0;
+    final layoutHeight = h - keyboard;
+    final panelH = layoutHeight * kBookAskHalfFraction;
+    expect(panelH + keyboard, lessThanOrEqualTo(h + 0.01));
+  });
+
   test('collapse reserve ignores a stale half-sheet measurement', () {
     const media = MediaQueryData(size: Size(390, 844), padding: EdgeInsets.only(bottom: 34));
     final dock = BookAskPanel.estimatedDockHeight(media);

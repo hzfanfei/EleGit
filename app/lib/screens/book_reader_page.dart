@@ -47,7 +47,7 @@ class BookReaderPage extends StatefulWidget {
   State<BookReaderPage> createState() => _BookReaderPageState();
 }
 
-class _BookReaderPageState extends State<BookReaderPage> {
+class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObserver {
   Object? _loadError;
   bool _chapterLoading = false;
   bool _loadingTail = false;
@@ -127,9 +127,11 @@ class _BookReaderPageState extends State<BookReaderPage> {
     );
     unawaited(_warmInBackground());
     unawaited(_loadVoiceStatus());
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_openBook());
       _scheduleChromeHide();
+      _applySystemChrome();
     });
   }
 
@@ -419,22 +421,21 @@ class _BookReaderPageState extends State<BookReaderPage> {
     return (chapterIndex: chapter, chapterScrollFraction: chapterFrac);
   }
 
-  void _applySystemChrome() {
+  SystemUiOverlayStyle _systemOverlayStyle() {
     final dark = _settings.theme == ReaderThemeMode.dark;
-    SystemChrome.setSystemUIOverlayStyle(
-      dark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
+    final base = dark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark;
+    return base.copyWith(
+      statusBarColor: Colors.transparent,
+      systemNavigationBarColor: Colors.transparent,
+      systemNavigationBarDividerColor: Colors.transparent,
     );
-    if (_chromeVisible) {
-      SystemChrome.setEnabledSystemUIMode(
-        SystemUiMode.manual,
-        overlays: SystemUiOverlay.values,
-      );
-    } else {
-      SystemChrome.setEnabledSystemUIMode(
-        SystemUiMode.manual,
-        overlays: const [SystemUiOverlay.bottom],
-      );
-    }
+  }
+
+  void _applySystemChrome() {
+    // Never hide/show the status-bar overlay on this page. OEM hide animation
+    // is the sliding white strip when collapsing ask + IME.
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    SystemChrome.setSystemUIOverlayStyle(_systemOverlayStyle());
   }
 
   void _refreshProgressLabels() {
@@ -514,6 +515,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
     if (_askLevel == level) return;
     HapticFeedback.selectionClick();
     if (!mounted) return;
+    if (_askLevelIsPeek(level)) {
+      FocusManager.instance.primaryFocus?.unfocus();
+    }
     final deferShellShrink =
         _askLevelIsPeek(level) && !_askLevelIsPeek(_askLevel);
     setState(() {
@@ -609,7 +613,13 @@ class _BookReaderPageState extends State<BookReaderPage> {
   }
 
   @override
+  void didChangeMetrics() {
+    if (mounted) setState(() {});
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     unawaited(_saveProgress());
     SystemChrome.setEnabledSystemUIMode(
       SystemUiMode.manual,
@@ -671,7 +681,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
     WidgetsBinding.instance.addPostFrameCallback((_) => _measureAskPanel());
 
-    return Scaffold(
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: _systemOverlayStyle(),
+      child: Scaffold(
         backgroundColor: palette.paper,
         resizeToAvoidBottomInset: false,
         body: ValueListenableBuilder<double>(
@@ -679,15 +691,26 @@ class _BookReaderPageState extends State<BookReaderPage> {
           builder: (context, sheetFraction, _) {
             final h = media.size.height;
             final keyboard = MediaQuery.viewInsetsOf(context).bottom;
+            final immersive = !_chromeVisible;
+            final askExpanded = _askShellLevel == BookAskSheetLevel.half ||
+                _askShellLevel == BookAskSheetLevel.full;
+            final layoutHeight = (h - keyboard).clamp(0.0, h);
             final fraction = sheetFraction.clamp(0.0, _askFullSheet);
             final panelH = bookReaderAskReserve(
               level: _askShellLevel,
-              viewportHeight: h,
+              viewportHeight: layoutHeight,
               estimatedDockHeight: BookAskPanel.estimatedDockHeight(media),
               estimatedHiddenHeight: BookAskPanel.estimatedHiddenHeight(media),
               measuredHeight: _askHeight,
             );
             final readerBottom = panelH + keyboard;
+            final panelHeight = switch (_askShellLevel) {
+              BookAskSheetLevel.hidden ||
+              BookAskSheetLevel.dock =>
+                BookAskPanel.estimatedHiddenHeight(media),
+              BookAskSheetLevel.half || BookAskSheetLevel.full =>
+                layoutHeight * _fractionForAskLevel(_askShellLevel),
+            };
 
             return Stack(
               children: [
@@ -826,41 +849,40 @@ class _BookReaderPageState extends State<BookReaderPage> {
                     ),
                   ),
                 ),
-                Align(
-                  alignment: Alignment.bottomCenter,
-                  child: Padding(
-                    padding: EdgeInsets.only(bottom: keyboard),
-                    child: KeyedSubtree(
-                      key: _askBoxKey,
-                      child: SizedBox(
-                          width: double.infinity,
-                          height: switch (_askShellLevel) {
-                            BookAskSheetLevel.hidden ||
-                            BookAskSheetLevel.dock =>
-                              BookAskPanel.estimatedHiddenHeight(media),
-                            BookAskSheetLevel.half || BookAskSheetLevel.full =>
-                              h * _fractionForAskLevel(_askShellLevel),
-                          },
-                          child: BookAskPanel(
-                            key: _askPanelKey,
-                            api: widget.api,
-                            book: widget.book,
-                            scrollController: _askScrollController,
-                            sheetSize: _sheetSize,
-                            hidden: _askLevel == BookAskSheetLevel.hidden ||
-                                _askLevel == BookAskSheetLevel.dock,
-                            expanded: _askLevel == BookAskSheetLevel.half ||
-                                _askLevel == BookAskSheetLevel.full,
-                            fullscreen: _askLevel == BookAskSheetLevel.full,
-                            chapterHint: _chapterHint,
-                            readingPlace: _readingPlace,
-                            memory: widget.memory,
-                            onRequestExpand: () => unawaited(_ensureAskHalf()),
-                            onRequestStepUp: () =>
-                                unawaited(_setAskLevel(stepAskSheetUp(_askLevel))),
-                            onRequestCollapse: () => unawaited(_collapseAskSheet()),
-                          ),
-                        ),
+                if (keyboard > 0 && askExpanded)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    height: keyboard,
+                    child: const ColoredBox(color: Wx.bg),
+                  ),
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: keyboard,
+                  height: panelHeight,
+                  child: KeyedSubtree(
+                    key: _askBoxKey,
+                    child: BookAskPanel(
+                      key: _askPanelKey,
+                      api: widget.api,
+                      book: widget.book,
+                      scrollController: _askScrollController,
+                      sheetSize: _sheetSize,
+                      hidden: _askLevel == BookAskSheetLevel.hidden ||
+                          _askLevel == BookAskSheetLevel.dock,
+                      expanded: _askLevel == BookAskSheetLevel.half ||
+                          _askLevel == BookAskSheetLevel.full,
+                      fullscreen: _askLevel == BookAskSheetLevel.full,
+                      readerImmersive: immersive,
+                      chapterHint: _chapterHint,
+                      readingPlace: _readingPlace,
+                      memory: widget.memory,
+                      onRequestExpand: () => unawaited(_ensureAskHalf()),
+                      onRequestStepUp: () =>
+                          unawaited(_setAskLevel(stepAskSheetUp(_askLevel))),
+                      onRequestCollapse: () => unawaited(_collapseAskSheet()),
                     ),
                   ),
                 ),
@@ -868,6 +890,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
             );
           },
         ),
+      ),
     );
   }
 }
