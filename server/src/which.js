@@ -28,19 +28,62 @@ export function resolveNodeExecutable() {
   return path.normalize(fallback);
 }
 
-export function envWithNodeOnPath(env = process.env) {
+function gitExecutableCandidates() {
+  const out = [];
+  const push = (value) => {
+    const p = String(value || "").trim();
+    if (p && !out.includes(p)) out.push(p);
+  };
+  push(process.env.WENXIANG_GIT);
+  if (process.platform === "win32") {
+    const pf = process.env.ProgramFiles || "C:\\Program Files";
+    push(path.join(pf, "Git", "cmd", "git.exe"));
+    push(path.join(pf, "Git", "bin", "git.exe"));
+    const pf86 = process.env["ProgramFiles(x86)"];
+    if (pf86) {
+      push(path.join(pf86, "Git", "cmd", "git.exe"));
+      push(path.join(pf86, "Git", "bin", "git.exe"));
+    }
+  }
+  push(whichSync("git"));
+  return out;
+}
+
+/** Absolute git binary (companion may start with a minimal PATH). */
+export function resolveGitExecutable() {
+  for (const candidate of gitExecutableCandidates()) {
+    if (existsSync(candidate)) return path.normalize(candidate);
+  }
+  const fallback = gitExecutableCandidates()[0] || "git";
+  return path.normalize(fallback);
+}
+
+function prependPathDir(env, dir) {
   const next = { ...env };
-  const node = resolveNodeExecutable();
-  if (!node) return next;
-  const dir = path.dirname(node);
+  const folder = String(dir || "").trim();
+  if (!folder) return next;
   const key = process.platform === "win32" ? "Path" : "PATH";
   const cur = String(next[key] || "");
   const parts = cur.split(path.delimiter).filter(Boolean);
   const norm = (p) => path.normalize(p).toLowerCase();
-  if (!parts.some((p) => norm(p) === norm(dir))) {
-    next[key] = cur ? `${dir}${path.delimiter}${cur}` : dir;
+  if (!parts.some((p) => norm(p) === norm(folder))) {
+    next[key] = cur ? `${folder}${path.delimiter}${cur}` : folder;
   }
   return next;
+}
+
+export function envWithToolchainOnPath(env = process.env) {
+  let next = { ...env };
+  for (const bin of [resolveNodeExecutable(), resolveGitExecutable()]) {
+    if (bin && existsSync(bin)) {
+      next = prependPathDir(next, path.dirname(bin));
+    }
+  }
+  return next;
+}
+
+export function envWithNodeOnPath(env = process.env) {
+  return envWithToolchainOnPath(env);
 }
 
 export function whichSync(bin) {
@@ -53,9 +96,17 @@ export function whichSync(bin) {
     if (exec && existsSync(exec)) return path.dirname(exec);
     return "";
   })();
+  const gitDirs =
+    process.platform === "win32"
+      ? [
+          path.join(process.env.ProgramFiles || "C:\\Program Files", "Git", "cmd"),
+          path.join(process.env.ProgramFiles || "C:\\Program Files", "Git", "bin"),
+        ]
+      : [];
   const dirs = [
     ...(process.env.PATH || "").split(path.delimiter),
     nodeDir,
+    ...gitDirs,
     path.join(process.env.APPDATA || "", "npm"),
     path.join(os.homedir(), ".local", "bin"),
     path.join(os.homedir(), "AppData", "Local", "cursor-agent"),

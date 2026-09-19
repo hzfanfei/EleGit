@@ -31,6 +31,10 @@ void main() {
 
   test('maps clone failures', () {
     expect(humanizeError(ApiException('git clone failed: Authentication failed')), contains('克隆'));
+    expect(
+      humanizeError(ApiException('spawn git ENOENT')),
+      contains('Git'),
+    );
   });
 
   test('keeps long Chinese git errors instead of rewriting them as re-login', () {

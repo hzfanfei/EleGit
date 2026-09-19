@@ -21,6 +21,9 @@ String humanizeError(Object error) {
   if (_isAuth(lower)) {
     return 'GitHub 尚未授权，或登录已失效。请重新打开 GitHub 完成授权。';
   }
+  if (_isGitMissing(lower)) {
+    return '本机未找到 Git。请安装 Git for Windows，然后重启问象服务。';
+  }
   if (_isClone(lower)) {
     return '仓库克隆失败。请稍后重试，或换一个仓库。';
   }
@@ -81,6 +84,12 @@ bool _isAuth(String lower) {
       lower.contains('forbidden') ||
       lower.contains('401') ||
       lower.contains('403');
+}
+
+bool _isGitMissing(String lower) {
+  return lower.contains('spawn git enoent') ||
+      lower.contains('git_not_found') ||
+      (lower.contains('enoent') && lower.contains('git'));
 }
 
 bool _isClone(String lower) {

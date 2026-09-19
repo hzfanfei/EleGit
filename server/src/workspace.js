@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { envWithToolchainOnPath, resolveGitExecutable } from "./which.js";
 import { mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -20,6 +21,9 @@ export const GITHUB_GIT_FORBIDDEN_ZH =
 
 export const GIT_SYNC_AUTH_ZH =
   "无法拉取更新：本机 Git 未能认证 GitHub。请在本机终端进入该仓库目录执行 git pull，或在问象里重新登录 GitHub。";
+
+export const GIT_NOT_INSTALLED_ZH =
+  "本机未找到 Git。请安装 Git for Windows，或设置环境变量 WENXIANG_GIT 指向 git.exe，然后重启问象服务。";
 
 export function gitAuthConfigArgs(token) {
   const value = String(token || "");
@@ -295,9 +299,10 @@ export function runGit(args, { cwd, token, timeoutMs = 180_000, signal } = {}) {
       reject(err);
       return;
     }
-    const env = { ...process.env, GIT_TERMINAL_PROMPT: "0" };
+    const env = { ...envWithToolchainOnPath(process.env), GIT_TERMINAL_PROMPT: "0" };
     const extra = gitAuthConfigArgs(token);
-    const child = spawn("git", [...extra, ...args], {
+    const gitExe = resolveGitExecutable();
+    const child = spawn(gitExe, [...extra, ...args], {
       cwd,
       env,
       stdio: ["ignore", "pipe", "pipe"],
@@ -331,6 +336,14 @@ export function runGit(args, { cwd, token, timeoutMs = 180_000, signal } = {}) {
       stderr += chunk.toString();
     });
     child.on("error", (err) => {
+      if (err?.code === "ENOENT") {
+        done(
+          zhGitError(GIT_NOT_INSTALLED_ZH, String(err.message || err), {
+            code: "git_not_found",
+          }),
+        );
+        return;
+      }
       done(err);
     });
     child.on("close", (code) => {
