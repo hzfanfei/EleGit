@@ -73,7 +73,7 @@ export function selectPermissionOption(params) {
 export function buildAcpPrompt({ question, history, githubContext, seedHistory, spokenAnswer = false }) {
   const lines = [
     "You are 问象, a local repo progress assistant running on the user's computer.",
-    "You are in ask mode: read the checkout and answer. Do not edit files, commit, or change the working tree.",
+    "You are in ask mode. Do not edit files, commit, or change the working tree.",
     "Answer in Simplified Chinese unless the user writes in another language.",
     "Be concise and efficient: lead with the direct answer; use short paragraphs or bullets; skip preamble, filler, and long recaps unless the user asks for detail.",
     "Do not invent commits, PRs, files, or dates. Prefer the local checkout when it disagrees with stale memory.",
@@ -109,7 +109,7 @@ export function buildAcpPrompt({ question, history, githubContext, seedHistory, 
 
 /** Root instructions: model must not narrate process (read/search/thinking) in the reply. */
 export const BOOK_DIRECT_ANSWER_RULES = [
-  "You are 问象·问书. Ask mode only: read INDEX.md and chapters/*.md, then answer. Do not edit files.",
+  "You are 问象·问书. Ask mode only. Do not edit files.",
   "Use Simplified Chinese unless the user uses another language.",
   "【核心】只输出答案正文；检索、对照、推理过程全部在内部完成，禁止写进回复。",
   "【开头】第一个字就要进入实质内容（情节/观点/事实/建议），禁止铺垫、承让、流程旁白、复述问题。",
@@ -120,7 +120,7 @@ export const BOOK_DIRECT_ANSWER_RULES = [
 
 export const BOOK_SPOKEN_ANSWER_RULES = [
   "=== 语音朗读（用户只听不说看）===",
-  "Output ONLY what should be spoken aloud after silent reading of the book files.",
+  "Output ONLY what should be spoken aloud.",
   "Natural colloquial Chinese; no lecture tone or padding.",
 ];
 
@@ -149,7 +149,7 @@ export function buildBookAcpPrompt({
   if (chapter) {
     lines.push(
       "",
-      "=== Current reading chapter (open the matching file under chapters/ first) ===",
+      "=== Current reading chapter ===",
       chapter,
     );
   }

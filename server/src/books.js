@@ -682,7 +682,7 @@ export async function ensureBookMaterialized(workspaceRoot, book) {
     `# ${parsed.title || book.title || book.id}`,
     parsed.author ? `\n作者：${parsed.author}\n` : "",
     "",
-    "问书工作区：请先读本文件，再按需打开 `chapters/` 下的章节 Markdown。",
+    "问书工作区目录。",
     "",
     "## 目录",
     ...chapterFiles.map(
@@ -1092,6 +1092,15 @@ export async function readBookFullText(materialized, { maxChars = bookTextMaxCha
   }
 }
 
+function stripIndexRetrievalGuidance(index) {
+  return String(index || "")
+    .replace(/^问书工作区：.*$/gm, "")
+    .replace(/请先读本文件[^\n]*/g, "")
+    .replace(/^Workflow:.*$/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 export async function formatBookAcpContext(book, materialized) {
   const lines = [
     `Book title: ${book.title}`,
@@ -1105,17 +1114,16 @@ export async function formatBookAcpContext(book, materialized) {
   if (book.author) lines.push(`Author: ${book.author}`);
   try {
     const indexPath = materialized.indexPath || path.join(materialized.cacheDir, "INDEX.md");
-    const index = (await readFile(indexPath, "utf8")).slice(0, 6000);
+    const index = stripIndexRetrievalGuidance(await readFile(indexPath, "utf8")).slice(0, 6000);
     if (index) {
-      lines.push("", "=== INDEX.md (read this first) ===", index);
+      lines.push("", "=== INDEX.md ===", index);
     }
   } catch {
     // no index
   }
   lines.push(
     "",
-    "Workflow: read INDEX.md, then open only the chapter files you need under chapters/.",
-    "Prefer chapters/*.md over raw HTML in extracted/. Do not edit files.",
+    "Do not edit files.",
     "Do not invent passages that are not in the book files.",
   );
   return lines.join("\n");

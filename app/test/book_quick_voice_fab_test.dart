@@ -88,6 +88,53 @@ void main() {
 
     expect(find.byKey(const Key('wx-voice-caption')), findsOneWidget);
     expect(find.text('正在读这一句。'), findsOneWidget);
+    expect(find.byKey(const Key('wx-wait-ms')), findsNothing);
+  });
+
+  testWidgets('shows a ticking ms timer above the status chip while waiting', (tester) async {
+    const palette = ReaderPalette(
+      paper: Color(0xFFF7F4EE),
+      ink: Color(0xFF2C2824),
+      muted: Color(0xFF7A7368),
+      chromeFade: Color(0xFFF7F4EE),
+    );
+    final api = FakeWenxiangApi();
+    final session = _MockQuickVoiceSession(
+      HoldToSpeakSession(
+        api: api,
+        onChanged: () {},
+        onTranscript: (_) {},
+        onError: (_) {},
+      ),
+    )
+      ..phase = BookQuickVoicePhase.thinking
+      ..statusLabel = '思考中…'
+      ..showsVoiceCaption = false
+      ..voiceCaption = ''
+      ..tapToCancelActive = false;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Align(
+            alignment: Alignment.bottomRight,
+            child: BookQuickVoiceFab(
+              session: session,
+              palette: palette,
+              enabled: true,
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(find.byKey(const Key('wx-wait-ms')), findsOneWidget);
+    final first = tester.widget<Text>(find.byKey(const Key('wx-wait-ms-text'))).data;
+    await tester.pump(const Duration(milliseconds: 80));
+    final second = tester.widget<Text>(find.byKey(const Key('wx-wait-ms-text'))).data;
+    expect(first, isNotEmpty);
+    expect(second, isNotEmpty);
+    expect(second, isNot(first));
   });
 
   testWidgets('tap mic cancels active flow', (tester) async {

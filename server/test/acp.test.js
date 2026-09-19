@@ -96,6 +96,22 @@ describe("buildBookAcpPrompt", () => {
     assert.match(prompt, /主角是谁/);
     assert.match(prompt, /本题作答/);
   });
+
+  it("does not tell the agent how to search files", () => {
+    const book = buildBookAcpPrompt({
+      question: "这本书讲啥",
+      bookContext: "Book title: 样例书",
+      currentChapter: "第三章",
+    });
+    assert.doesNotMatch(book, /read INDEX\.md/i);
+    assert.doesNotMatch(book, /open the matching file/i);
+    assert.doesNotMatch(book, /chapters\/\*\.md, then answer/i);
+    const repo = buildAcpPrompt({
+      question: "最近在做什么",
+      githubContext: "Repository: hzfanfei/fwechat",
+    });
+    assert.doesNotMatch(repo, /read the checkout and answer/i);
+  });
 });
 
 describe("buildAcpPrompt", () => {

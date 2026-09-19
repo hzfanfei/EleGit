@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show FontFeature;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -140,6 +141,15 @@ class _BookQuickVoiceFabState extends State<BookQuickVoiceFab>
     return null;
   }
 
+  bool _showWaitMs(BookQuickVoicePhase phase) {
+    final hold = widget.session.hold;
+    if (hold.holding && phase == BookQuickVoicePhase.listening) return false;
+    return phase == BookQuickVoicePhase.recognizing ||
+        phase == BookQuickVoicePhase.thinking ||
+        hold.sttBusy ||
+        hold.holdPending;
+  }
+
   IconData _micIcon(BookQuickVoicePhase phase) {
     switch (phase) {
       case BookQuickVoicePhase.speaking:
@@ -206,7 +216,19 @@ class _BookQuickVoiceFabState extends State<BookQuickVoiceFab>
             child: showStatus && label.isNotEmpty
                 ? Padding(
                     padding: const EdgeInsets.only(right: 10),
-                    child: Material(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        if (_showWaitMs(phase))
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 4, right: 2),
+                            child: WaitMsTicker(
+                              key: const Key('wx-wait-ms'),
+                              color: widget.palette.ink.withValues(alpha: 0.55),
+                            ),
+                          ),
+                        Material(
                       elevation: 2,
                       shadowColor: Colors.black26,
                       color: widget.palette.paper.withValues(alpha: 0.96),
@@ -236,6 +258,8 @@ class _BookQuickVoiceFabState extends State<BookQuickVoiceFab>
                           ],
                         ),
                       ),
+                        ),
+                      ],
                     ),
                   )
                 : const SizedBox.shrink(),
@@ -302,6 +326,52 @@ class _BookQuickVoiceFabState extends State<BookQuickVoiceFab>
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Live elapsed wait time (milliseconds precision) above the status chip.
+class WaitMsTicker extends StatefulWidget {
+  const WaitMsTicker({super.key, required this.color});
+
+  final Color color;
+
+  @override
+  State<WaitMsTicker> createState() => _WaitMsTickerState();
+}
+
+class _WaitMsTickerState extends State<WaitMsTicker> {
+  final Stopwatch _watch = Stopwatch()..start();
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(milliseconds: 32), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final seconds = _watch.elapsedMilliseconds / 1000;
+    return Text(
+      '${seconds.toStringAsFixed(3)}s',
+      key: const Key('wx-wait-ms-text'),
+      style: TextStyle(
+        fontSize: 10,
+        height: 1,
+        fontFeatures: const [FontFeature.tabularFigures()],
+        fontWeight: FontWeight.w600,
+        letterSpacing: 0.15,
+        color: widget.color,
       ),
     );
   }
