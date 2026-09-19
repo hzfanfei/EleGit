@@ -7,6 +7,7 @@ import {
   AcpChannel,
   DEFAULT_ACP_MODEL,
   acpModelId,
+  acpPromptTimeoutMs,
   acpVisibleTextFromUpdate,
   applyAcpEnginePreference,
   sanitizeAcpUserVisibleText,
@@ -28,6 +29,13 @@ describe("sanitizeAcpEngine", () => {
     assert.equal(applyAcpEnginePreference("cursor"), "cursor");
     assert.equal(process.env.WENXIANG_ACP_ENGINE, "cursor");
     applyAcpEnginePreference("claude");
+  });
+});
+
+describe("acpPromptTimeoutMs", () => {
+  it("defaults to 15 minutes", () => {
+    assert.equal(acpPromptTimeoutMs({}), 15 * 60 * 1000);
+    assert.equal(acpPromptTimeoutMs({ WENXIANG_ACP_PROMPT_TIMEOUT_MS: "600000" }), 600_000);
   });
 });
 

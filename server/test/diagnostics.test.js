@@ -14,7 +14,11 @@ describe("diagnostics", () => {
       assert.equal(typeof result.ok, "boolean");
       assert.ok(existsSync(path.join(root, ".diagnostics-probe")));
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      try {
+        rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+      } catch {
+        // Windows may still hold handles briefly after ACP probe; ignore teardown EPERM.
+      }
     }
   });
 

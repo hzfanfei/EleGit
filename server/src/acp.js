@@ -13,7 +13,14 @@ const CURSOR_ACP_CANDIDATES = [
 ];
 
 const CLAUDE_DEFAULT_MODEL = "MiniMax-M3";
-const STREAM_IDLE_MS = Number(process.env.WENXIANG_ACP_STREAM_IDLE_MS || 2500);
+const DEFAULT_ACP_PROMPT_TIMEOUT_MS = 15 * 60 * 1000;
+
+export function acpPromptTimeoutMs(env = process.env) {
+  const raw = String(env.WENXIANG_ACP_PROMPT_TIMEOUT_MS ?? "").trim();
+  if (!raw) return DEFAULT_ACP_PROMPT_TIMEOUT_MS;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_ACP_PROMPT_TIMEOUT_MS;
+}
 
 const WRITE_TOOL = /edit|write|delete|move|apply_patch|overwrite|commit/i;
 
@@ -449,7 +456,7 @@ export class AcpChannel {
     }
   }
 
-  async prompt(text, { onDelta, timeoutMs = 180_000 } = {}) {
+  async prompt(text, { onDelta, timeoutMs = acpPromptTimeoutMs() } = {}) {
     if (!this.alive) await this.start();
     this._touch();
     try {
@@ -472,45 +479,25 @@ export class AcpChannel {
     }
   }
 
-  async _promptClaudeStream(text, { onDelta, timeoutMs = 180_000 }) {
-    this._lastDeltaAt = 0;
-    this._usageAt = 0;
+  async _promptClaudeStream(text, { onDelta, timeoutMs = acpPromptTimeoutMs() }) {
     this.onDelta = (chunk) => {
       this._lastDeltaAt = Date.now();
       onDelta?.(chunk);
     };
-    const started = Date.now();
-    const promptTask = this.request(
-      "session/prompt",
-      {
-        sessionId: this.sessionId,
-        prompt: [{ type: "text", text }],
-      },
-      timeoutMs + 60_000,
-    ).catch(() => ({ stopReason: "background" }));
-
-    await new Promise((resolve) => {
-      const timer = setInterval(() => {
-        if (this._usageAt > 0) {
-          clearInterval(timer);
-          resolve();
-          return;
-        }
-        if (this._lastDeltaAt > 0 && Date.now() - this._lastDeltaAt >= STREAM_IDLE_MS) {
-          clearInterval(timer);
-          resolve();
-          return;
-        }
-        if (Date.now() - started >= timeoutMs) {
-          clearInterval(timer);
-          resolve();
-        }
-      }, 100);
-    });
-
-    this.interruptPrompt();
-    await Promise.race([promptTask, new Promise((r) => setTimeout(r, 500))]);
-    return { stopReason: "end_turn" };
+    try {
+      // Wait for session/prompt to finish. Do not cancel on short SSE idle: Claude Code
+      // often goes silent for seconds while listing/reading files during code review.
+      return await this.request(
+        "session/prompt",
+        {
+          sessionId: this.sessionId,
+          prompt: [{ type: "text", text }],
+        },
+        timeoutMs,
+      );
+    } finally {
+      this.onDelta = null;
+    }
   }
 
   interruptPrompt() {
