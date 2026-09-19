@@ -483,7 +483,10 @@ class DeviceVoiceMedia implements VoiceMedia {
   @override
   Future<void> waitForPlaybackQueue() async {
     while (_playing || _queue.isNotEmpty) {
-      await Future<void>.delayed(const Duration(milliseconds: 25));
+      if (!_playing && _queue.isNotEmpty) {
+        unawaited(_drain());
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 20));
     }
   }
 

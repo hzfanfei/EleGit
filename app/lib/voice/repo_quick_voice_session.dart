@@ -281,14 +281,6 @@ class RepoQuickVoiceSession implements QuickVoiceFabHost {
             }),
           );
         } else if (event.type == 'done') {
-          try {
-            await _media?.waitForPlaybackQueue();
-          } catch (err) {
-            onError?.call('播放失败：$err');
-            break;
-          }
-          _clearCaption();
-          onChanged();
           final answer = event.text.trim();
           _sessionId = event.sessionId ?? _sessionId;
           onSessionId?.call(_sessionId);
@@ -311,6 +303,15 @@ class RepoQuickVoiceSession implements QuickVoiceFabHost {
     } catch (err) {
       onError?.call(err.toString());
     } finally {
+      if (_replyActive) {
+        phase = BookQuickVoicePhase.speaking;
+        onChanged();
+        try {
+          await _media?.waitForPlaybackQueue();
+        } catch (err) {
+          onError?.call('播放失败：$err');
+        }
+      }
       _replyActive = false;
       _clearCaption();
       phase = BookQuickVoicePhase.idle;
