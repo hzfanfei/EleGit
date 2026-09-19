@@ -189,7 +189,7 @@ class _BookChatPageState extends State<BookChatPage> {
                   return Padding(
                     padding: const EdgeInsets.only(bottom: 8),
                     child: Text(
-                      '从书的内容问起。ACP 会读本机解压后的 EPUB 缓存。',
+                      '从书的内容问起，回答依据本机书稿。',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Wx.faint),
                     ),
                   );

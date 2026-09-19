@@ -45,7 +45,7 @@ void main() {
   });
 
   test('repo chat labels stay the same', () {
-    expect(askLivePhaseLabel('connect'), '连接 Agent…');
+    expect(askLivePhaseLabel('connect'), '正在连接…');
     expect(askLivePhaseLabel('repo'), '读仓库、整理上下文…');
     expect(askLivePhaseLabel('generate'), '生成回答…');
   });

@@ -1048,7 +1048,7 @@ class _EmptyChat extends StatelessWidget {
         Text('从进度问起。', style: Theme.of(context).textTheme.headlineMedium),
         const SizedBox(height: 8),
         Text(
-          '有本机 Agent 就直接问；没有则用本地进度。不编造。',
+          '连上本机问象后可直接问；否则会按本地进度简要回答。不编造。',
           style: Theme.of(context).textTheme.bodyMedium,
         ),
         const SizedBox(height: 28),
@@ -1340,7 +1340,7 @@ String _livePhaseLabel(String phase) {
       return '生成回答…';
     case 'connect':
     default:
-      return '连接 Agent…';
+      return '正在连接…';
   }
 }
 
@@ -1631,7 +1631,7 @@ class _Composer extends StatelessWidget {
                                   ? '正在准备对话…'
                                   : busy
                                       ? '生成中，可先写下一条'
-                                      : '问进度，像在 Cursor 里一样',
+                                      : '问这个仓库的进度',
                               filled: true,
                               fillColor: Wx.surface,
                             ),

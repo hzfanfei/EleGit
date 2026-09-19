@@ -19,7 +19,7 @@ String askLivePhaseLabel(String phase, {bool book = false}) {
       return '生成回答…';
     case 'connect':
     default:
-      return '连接 Agent…';
+      return '正在连接…';
   }
 }
 

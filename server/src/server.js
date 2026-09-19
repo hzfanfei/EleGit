@@ -2,7 +2,13 @@ import express from "express";
 import cors from "cors";
 import { corsOptions } from "./cors.js";
 import { loadLocalEnv } from "./env.js";
-import { buildBookAcpPrompt, createSessionStore, detectCursorEngine } from "./acp.js";
+import {
+  applyAcpEnginePreference,
+  buildBookAcpPrompt,
+  createSessionStore,
+  detectCursorEngine,
+  sanitizeAcpEngine,
+} from "./acp.js";
 import { handleBookVoiceTurn } from "./book-voice-turn.js";
 import { handleRepoVoiceTurn } from "./repo-voice-turn.js";
 import { streamAnswer, synthesizeBookAnswer } from "./ask.js";
@@ -35,6 +41,7 @@ import {
 } from "./voice-config.js";
 import { attachSttGateway } from "./voice-stt-ws.js";
 import { attachVoiceGateway, isVoiceCallEnabled } from "./voice-ws.js";
+import { runDiagnosticsProbe } from "./diagnostics.js";
 import {
   checkoutPath,
   detectDefaultBranch,
@@ -69,6 +76,13 @@ const PORT = Number(process.env.WENXIANG_PORT || 8787);
 const BIND = process.env.WENXIANG_BIND || "0.0.0.0";
 
 const store = await loadStore();
+const savedAcpEngine =
+  sanitizeAcpEngine(store.config.acpEngine) ||
+  sanitizeAcpEngine(process.env.WENXIANG_ACP_ENGINE) ||
+  "claude";
+store.config.acpEngine = savedAcpEngine;
+applyAcpEnginePreference(savedAcpEngine);
+
 const sessions = createSessionStore();
 const bookSessions = createSessionStore();
 const oauth = createOAuthSessions();
@@ -206,6 +220,7 @@ app.get("/v1/status", (_req, res) => {
       mode: cursor?.mode || null,
       model: cursor?.model || null,
       transport: cursor?.transport || null,
+      preference: store.config.acpEngine || "claude",
       fallback: "local-progress",
     },
     voice: publicVoiceStatus(withTtsVoice(resolveVoiceConfig(), store.config.ttsVoice)),
@@ -651,6 +666,42 @@ app.put("/v1/voice/tts-voice", async (req, res) => {
   store.config.ttsVoice = ttsVoice;
   await store.save();
   res.json({ ttsVoice });
+});
+
+app.post("/v1/diagnostics/probe", async (req, res) => {
+  try {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const result = await runDiagnosticsProbe({
+      workspaceRoot: store.config.workspaceRoot,
+      ttsVoice: sanitizeTtsVoice(body.ttsVoice) || store.config.ttsVoice,
+      askCli: body.askCli !== false,
+      askModel: body.askModel !== false,
+      voiceTts: body.voiceTts !== false,
+      voiceStt: body.voiceStt !== false,
+      signal: requestSignal(req, res),
+    });
+    res.json(result);
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.put("/v1/settings/ask-engine", async (req, res) => {
+  const engine = sanitizeAcpEngine(req.body?.engine ?? req.body?.acpEngine);
+  if (!engine) {
+    res.status(400).json({ error: "engine must be claude or cursor" });
+    return;
+  }
+  store.config.acpEngine = engine;
+  applyAcpEnginePreference(engine);
+  await store.save();
+  await Promise.all([sessions.resetAllChannels(), bookSessions.resetAllChannels()]);
+  const active = detectCursorEngine();
+  res.json({
+    engine,
+    available: Boolean(active),
+    activeEngine: active?.id || null,
+  });
 });
 
 app.post("/v1/books/voice-turn", async (req, res) => {

@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 
 import '../models.dart';
+import '../models/diagnostics.dart';
 import '../utils/async_gate.dart';
 
 class ApiException implements Exception {
@@ -182,6 +183,33 @@ class WenxiangApi {
         .timeout(const Duration(seconds: 12));
     if (res.statusCode >= 400) {
       await _json(res, fallback: '保存音色失败');
+    }
+  }
+
+  Future<DiagnosticsProbeResult> runDiagnosticsProbe({String? ttsVoice}) async {
+    final res = await http
+        .post(
+          _uri('/v1/diagnostics/probe'),
+          headers: _headers,
+          body: jsonEncode({
+            if (ttsVoice != null && ttsVoice.isNotEmpty) 'ttsVoice': ttsVoice,
+          }),
+        )
+        .timeout(const Duration(minutes: 3));
+    final body = await _json(res, fallback: '通路检测失败');
+    return DiagnosticsProbeResult.fromJson(body);
+  }
+
+  Future<void> setAskEngine(String engine) async {
+    final res = await http
+        .put(
+          _uri('/v1/settings/ask-engine'),
+          headers: _headers,
+          body: jsonEncode({'engine': engine}),
+        )
+        .timeout(const Duration(seconds: 20));
+    if (res.statusCode >= 400) {
+      await _json(res, fallback: '保存问答方式失败');
     }
   }
 

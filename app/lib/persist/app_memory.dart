@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../copy/ask_engine.dart';
 import '../models.dart';
 import '../voice/volc_tts_voices.dart';
 import 'book_chat_store.dart';
@@ -17,6 +18,7 @@ class AppMemory {
   static const recentReposKey = 'wx.recentRepos';
   static const voiceHoldTipDismissedKey = 'wx.voiceHoldTipDismissed';
   static const ttsVoiceKey = 'wx.ttsVoice';
+  static const askEngineKey = 'wx.askEngine';
 
   static String chatsKey(String fullName) => 'wx.chats.$fullName';
   static String bookChatsKey(String bookId) => 'wx.bookChats.$bookId';
@@ -26,6 +28,12 @@ class AppMemory {
   Future<void> dismissVoiceHoldTip() => prefs.setBool(voiceHoldTipDismissedKey, true);
 
   String ttsVoice() => resolveVolcTtsVoice(prefs.getString(ttsVoiceKey)).id;
+
+  AskEngineChoice askEngine() => parseAskEngineChoice(prefs.getString(askEngineKey));
+
+  Future<void> saveAskEngine(AskEngineChoice choice) {
+    return prefs.setString(askEngineKey, askEngineChoiceId(choice));
+  }
 
   Future<void> saveTtsVoice(String voice) {
     final id = sanitizeVolcTtsVoice(voice);

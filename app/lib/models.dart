@@ -10,6 +10,7 @@ class ServerStatus {
     required this.deviceFlowReady,
     required this.cursorAvailable,
     required this.cursorEngine,
+    required this.askEnginePreference,
     required this.tunnelUrl,
     required this.tunnelRunning,
     required this.tunnelError,
@@ -27,6 +28,7 @@ class ServerStatus {
   final bool deviceFlowReady;
   final bool cursorAvailable;
   final String cursorEngine;
+  final String askEnginePreference;
   final String tunnelUrl;
   final bool tunnelRunning;
   final String tunnelError;
@@ -57,6 +59,7 @@ class ServerStatus {
       cursorAvailable: cursor['available'] == true,
       cursorEngine: (cursor['engine'] ?? cursor['fallback'] ?? 'local-progress')
           .toString(),
+      askEnginePreference: (cursor['preference'] ?? 'claude').toString(),
       tunnelUrl: (tunnel['publicUrl'] ?? '').toString(),
       tunnelRunning: tunnel['running'] == true,
       tunnelError: (tunnel['error'] ?? '').toString(),

@@ -1,5 +1,6 @@
 import 'package:wenxiang/api/wenxiang_api.dart';
 import 'package:wenxiang/models.dart';
+import 'package:wenxiang/models/diagnostics.dart';
 
 class FakeWenxiangApi extends WenxiangApi {
   FakeWenxiangApi({
@@ -60,6 +61,7 @@ class FakeWenxiangApi extends WenxiangApi {
   String? lastBookTtsVoice;
   String? lastRepoTtsVoice;
   String? lastSetTtsVoice;
+  String? lastSetAskEngine;
   int createSessionCalls = 0;
   final List<ChatSession> sessions = [
     ChatSession(
@@ -75,8 +77,25 @@ class FakeWenxiangApi extends WenxiangApi {
   Future<void> ping() async {}
 
   @override
+  Future<void> setAskEngine(String engine) async {
+    lastSetAskEngine = engine;
+  }
+
+  @override
   Future<void> setTtsVoice(String ttsVoice) async {
     lastSetTtsVoice = ttsVoice;
+  }
+
+  @override
+  Future<DiagnosticsProbeResult> runDiagnosticsProbe({String? ttsVoice}) async {
+    return DiagnosticsProbeResult(
+      ok: true,
+      at: DateTime.now().toUtc().toIso8601String(),
+      askCli: DiagnosticsStep(ok: true, ms: 40),
+      askModel: DiagnosticsStep(ok: true, ms: 900, snippet: '通'),
+      voiceTts: DiagnosticsVoiceTtsStep(ok: voiceReady, ms: 120, bytes: voiceReady ? 480 : 0),
+      voiceStt: DiagnosticsVoiceSttStep(ok: voiceReady, ms: 80),
+    );
   }
 
   List<BookItem> booksResult;
@@ -149,6 +168,7 @@ class FakeWenxiangApi extends WenxiangApi {
       deviceFlowReady: false,
       cursorAvailable: false,
       cursorEngine: 'local-progress',
+      askEnginePreference: 'claude',
       tunnelUrl: '',
       tunnelRunning: false,
       tunnelError: '',

@@ -35,7 +35,7 @@ void main() {
 
     expect(find.text('octo/demo'), findsWidgets);
     expect(find.textContaining('从进度问起'), findsOneWidget);
-    expect(find.textContaining('有本机 Agent'), findsOneWidget);
+    expect(find.textContaining('连上本机问象'), findsOneWidget);
     expect(find.text('这个仓库最近在做什么？'), findsOneWidget);
     expect(find.text('README 里怎么写的？'), findsOneWidget);
     expect(find.textContaining('检出'), findsNothing);
@@ -69,12 +69,12 @@ void main() {
     await tester.pump();
 
     expect(find.textContaining('void main'), findsNothing);
-    expect(find.textContaining('连接 Agent'), findsOneWidget);
+    expect(find.textContaining('正在连接'), findsOneWidget);
     expect(find.text('你问'), findsOneWidget);
     expect(find.text('问象'), findsWidgets);
 
     await tester.pump(const Duration(milliseconds: 45));
-    expect(find.textContaining('连接 Agent'), findsOneWidget);
+    expect(find.textContaining('正在连接'), findsOneWidget);
     expect(find.text('最近'), findsNothing);
 
     await tester.pump(const Duration(milliseconds: 45));
@@ -235,7 +235,7 @@ void main() {
     await tester.pump();
 
     expect(find.byTooltip('发送'), findsOneWidget);
-    expect(find.textContaining('连接 Agent'), findsNothing);
+    expect(find.textContaining('正在连接'), findsNothing);
     expect(find.textContaining('生成回答'), findsNothing);
     expect(find.textContaining('Exception'), findsNothing);
   });

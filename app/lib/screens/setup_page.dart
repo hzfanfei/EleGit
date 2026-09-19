@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api/wenxiang_api.dart';
+import '../copy/ask_engine.dart';
 import '../models.dart';
 
 class SetupPage extends StatefulWidget {
@@ -194,8 +195,8 @@ class _StatusCard extends StatelessWidget {
               Text('工作区：${status.workspaceRoot}'),
             Text(
               status.cursorAvailable
-                  ? '问答引擎：Cursor（${status.cursorEngine}）'
-                  : '问答引擎：本地 GitHub 进度适配器',
+                  ? '智能问答：已就绪（${askEngineChoiceLabel(parseAskEngineChoice(status.askEnginePreference))}）'
+                  : '智能问答：仅本地进度摘要',
             ),
             Text(
               status.tunnelRunning

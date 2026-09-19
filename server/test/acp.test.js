@@ -8,14 +8,27 @@ import {
   DEFAULT_ACP_MODEL,
   acpModelId,
   acpVisibleTextFromUpdate,
+  applyAcpEnginePreference,
   buildAcpPrompt,
   buildBookAcpPrompt,
   createSessionStore,
+  sanitizeAcpEngine,
   selectPermissionOption,
 } from "../src/acp.js";
 import { whichSync } from "../src/which.js";
 
 const fakeAcp = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures", "fake-acp.js");
+
+describe("sanitizeAcpEngine", () => {
+  it("accepts claude and cursor only", () => {
+    assert.equal(sanitizeAcpEngine("claude"), "claude");
+    assert.equal(sanitizeAcpEngine("Cursor"), "cursor");
+    assert.equal(sanitizeAcpEngine("other"), null);
+    assert.equal(applyAcpEnginePreference("cursor"), "cursor");
+    assert.equal(process.env.WENXIANG_ACP_ENGINE, "cursor");
+    applyAcpEnginePreference("claude");
+  });
+});
 
 describe("acpModelId", () => {
   it("defaults to composer-2.5-fast for cursor engine", () => {

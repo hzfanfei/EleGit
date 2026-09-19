@@ -19,8 +19,20 @@ const WRITE_TOOL = /edit|write|delete|move|apply_patch|overwrite|commit/i;
 
 export const DEFAULT_ACP_MODEL = "composer-2.5-fast";
 
+export function sanitizeAcpEngine(raw) {
+  const value = String(raw || "").trim().toLowerCase();
+  if (value === "claude" || value === "cursor") return value;
+  return null;
+}
+
+export function applyAcpEnginePreference(engine) {
+  const value = sanitizeAcpEngine(engine) || "claude";
+  process.env.WENXIANG_ACP_ENGINE = value;
+  return value;
+}
+
 export function acpEnginePreference() {
-  return String(process.env.WENXIANG_ACP_ENGINE || "claude").trim().toLowerCase();
+  return sanitizeAcpEngine(process.env.WENXIANG_ACP_ENGINE) || "claude";
 }
 
 export function acpModelId() {
@@ -845,5 +857,25 @@ export function createSessionStore({
     return warmRepo(session.owner, session.repo, cwd);
   }
 
-  return { list, create, close, resolveForChat, prompt, cancel, warm, warmRepo, publicView };
+  async function resetAllChannels() {
+    for (const entry of repoChannels.values()) {
+      if (entry.channel) await entry.channel.close().catch(() => {});
+      entry.channel = null;
+      entry.warmPromise = null;
+      entry.promptingSessionId = null;
+    }
+  }
+
+  return {
+    list,
+    create,
+    close,
+    resolveForChat,
+    prompt,
+    cancel,
+    warm,
+    warmRepo,
+    resetAllChannels,
+    publicView,
+  };
 }
