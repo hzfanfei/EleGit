@@ -111,11 +111,11 @@ describe("streamAnswer", () => {
 });
 
 describe("detectCursorEngine", () => {
-  it("reports acp when a CLI exists, otherwise null", () => {
+  it("reports an ACP engine when a CLI exists, otherwise null", () => {
     const engine = detectCursorEngine();
     if (engine) {
-      assert.equal(engine.id, "acp");
-      assert.equal(engine.mode, "ask");
+      assert.ok(["claude-acp", "cursor-acp", "acp"].includes(engine.id));
+      assert.ok(["ask", "plan"].includes(engine.mode));
       assert.equal(engine.transport, "stdio");
     } else {
       assert.equal(engine, null);

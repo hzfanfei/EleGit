@@ -215,7 +215,7 @@ export async function* streamAnswer({
       yield { type: "done", engine: "acp", answer: full, sessionId: session.id };
       return;
     }
-    const fallback = `${synthesize({ question, progress, context, local, bookContext })}\n\n（本机探测到 Cursor ACP，但调用失败：${fail?.message || "empty output"}。已回退到本地进度适配器。）`;
+    const fallback = `${synthesize({ question, progress, context, local, bookContext })}\n\n（本机 ACP 调用失败：${fail?.message || "empty output"}。已回退到本地进度适配器。）`;
     yield { type: "start", engine: "local-progress" };
     yield* prefixDeltas(fallback, opts);
     if (signal?.aborted) return;

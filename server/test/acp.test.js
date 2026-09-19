@@ -18,17 +18,24 @@ import { whichSync } from "../src/which.js";
 const fakeAcp = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures", "fake-acp.js");
 
 describe("acpModelId", () => {
-  it("defaults to composer-2.5-fast", () => {
+  it("defaults to composer-2.5-fast for cursor engine", () => {
     const prev = process.env.WENXIANG_CURSOR_MODEL;
     const prev2 = process.env.CURSOR_MODEL;
+    const prevEngine = process.env.WENXIANG_ACP_ENGINE;
+    const prevAcpModel = process.env.WENXIANG_ACP_MODEL;
     delete process.env.WENXIANG_CURSOR_MODEL;
     delete process.env.CURSOR_MODEL;
+    delete process.env.WENXIANG_ACP_MODEL;
+    process.env.WENXIANG_ACP_ENGINE = "cursor";
     try {
       assert.equal(acpModelId(), "composer-2.5-fast");
       assert.equal(DEFAULT_ACP_MODEL, "composer-2.5-fast");
     } finally {
       if (prev !== undefined) process.env.WENXIANG_CURSOR_MODEL = prev;
       if (prev2 !== undefined) process.env.CURSOR_MODEL = prev2;
+      if (prevEngine !== undefined) process.env.WENXIANG_ACP_ENGINE = prevEngine;
+      else delete process.env.WENXIANG_ACP_ENGINE;
+      if (prevAcpModel !== undefined) process.env.WENXIANG_ACP_MODEL = prevAcpModel;
     }
   });
 });

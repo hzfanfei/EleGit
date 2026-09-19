@@ -1,43 +1,94 @@
+import { readFileSync, existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import os from "node:os";
+import path from "node:path";
 import readline from "node:readline";
 import { whichSync } from "./which.js";
 
-const ACP_CANDIDATES = [
+const CURSOR_ACP_CANDIDATES = [
   { bin: "agent", args: ["acp"] },
   { bin: "cursor-agent", args: ["acp"] },
   { bin: "cursor", args: ["agent", "acp"] },
 ];
 
+const CLAUDE_DEFAULT_MODEL = "MiniMax-M3";
+const STREAM_IDLE_MS = Number(process.env.WENXIANG_ACP_STREAM_IDLE_MS || 2500);
+
 const WRITE_TOOL = /edit|write|delete|move|apply_patch|overwrite|commit/i;
 
 export const DEFAULT_ACP_MODEL = "composer-2.5-fast";
 
+export function acpEnginePreference() {
+  return String(process.env.WENXIANG_ACP_ENGINE || "claude").trim().toLowerCase();
+}
+
 export function acpModelId() {
-  const raw = String(process.env.WENXIANG_CURSOR_MODEL || process.env.CURSOR_MODEL || DEFAULT_ACP_MODEL).trim();
-  return raw || DEFAULT_ACP_MODEL;
+  const engine = acpEnginePreference();
+  const raw = String(
+    process.env.WENXIANG_ACP_MODEL ||
+      process.env.WENXIANG_CLAUDE_MODEL ||
+      (engine === "claude" ? CLAUDE_DEFAULT_MODEL : "") ||
+      process.env.WENXIANG_CURSOR_MODEL ||
+      process.env.CURSOR_MODEL ||
+      (engine === "claude" ? CLAUDE_DEFAULT_MODEL : DEFAULT_ACP_MODEL),
+  ).trim();
+  return raw || (engine === "claude" ? CLAUDE_DEFAULT_MODEL : DEFAULT_ACP_MODEL);
 }
 
 function modelArgs() {
   return ["--model", acpModelId()];
 }
 
-export function resolveAgentCommand() {
-  for (const candidate of ACP_CANDIDATES) {
+function claudeAgentAcpScriptPath() {
+  const npmRoot = path.join(process.env.APPDATA || "", "npm", "node_modules");
+  const candidates = [
+    path.join(npmRoot, "@agentclientprotocol", "claude-agent-acp", "dist", "index.js"),
+    path.join(npmRoot, "@zed-industries", "claude-agent-acp", "dist", "index.js"),
+  ];
+  return candidates.find((script) => existsSync(script)) || "";
+}
+
+export function resolveClaudeAgentCommand() {
+  const script = claudeAgentAcpScriptPath();
+  if (!script) return null;
+  return {
+    id: "claude-acp",
+    bin: "claude-agent-acp",
+    path: process.execPath,
+    args: [script],
+    mode: "plan",
+    model: acpModelId(),
+    transport: "stdio",
+    provider: "claude",
+  };
+}
+
+export function resolveCursorAgentCommand() {
+  for (const candidate of CURSOR_ACP_CANDIDATES) {
     const resolved = whichSync(candidate.bin);
     if (resolved) {
       return {
-        id: "acp",
+        id: "cursor-acp",
         bin: candidate.bin,
         path: resolved,
         args: [...authArgs(), ...modelArgs(), ...candidate.args],
         mode: "ask",
         model: acpModelId(),
         transport: "stdio",
+        provider: "cursor",
       };
     }
   }
   return null;
+}
+
+export function resolveAgentCommand() {
+  const pref = acpEnginePreference();
+  const claude = resolveClaudeAgentCommand();
+  const cursor = resolveCursorAgentCommand();
+  if (pref === "cursor") return cursor || claude;
+  return claude || cursor;
 }
 
 function authArgs() {
@@ -211,6 +262,26 @@ export function acpVisibleTextFromUpdate(update) {
   return "";
 }
 
+function readTextUnderCwd(cwd, rawPath) {
+  const abs = path.resolve(cwd, String(rawPath || ""));
+  const root = path.resolve(cwd);
+  if (abs !== root && !abs.startsWith(`${root}${path.sep}`)) {
+    throw new Error("path outside workspace cwd");
+  }
+  return { content: readFileSync(abs, "utf8") };
+}
+
+function claudeClaudeCodeExecutable() {
+  const home = os.homedir();
+  for (const candidate of [
+    path.join(home, ".local", "bin", "claude.exe"),
+    path.join(home, ".local", "bin", "claude"),
+  ]) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return "";
+}
+
 export class AcpChannel {
   constructor({ command, cwd, spawnImpl = spawn, idleMs = 15 * 60 * 1000 } = {}) {
     this.command = command;
@@ -224,6 +295,12 @@ export class AcpChannel {
     this.alive = false;
     this.idleTimer = null;
     this.onDelta = null;
+    this._lastDeltaAt = 0;
+    this._usageAt = 0;
+  }
+
+  isClaudeProvider() {
+    return this.command?.provider === "claude";
   }
 
   async start() {
@@ -231,12 +308,17 @@ export class AcpChannel {
     const file = this.command.path;
     const args = this.command.args;
     const useShell = process.platform === "win32" && /\.(cmd|bat)$/i.test(file);
+    const env = { ...process.env };
+    if (this.isClaudeProvider()) {
+      const claudeExe = claudeClaudeCodeExecutable();
+      if (claudeExe) env.CLAUDE_CODE_EXECUTABLE = claudeExe;
+    }
     this.child = this.spawnImpl(file, args, {
       cwd: this.cwd,
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
       shell: useShell,
-      env: { ...process.env },
+      env,
     });
     this.child.on("error", (err) => this._failAll(err));
     this.child.on("exit", () => this._dead());
@@ -251,9 +333,12 @@ export class AcpChannel {
       const init = await this.request("initialize", {
         protocolVersion: 1,
         clientCapabilities: {
-          fs: { readTextFile: false, writeTextFile: false },
+          fs: {
+            readTextFile: this.isClaudeProvider(),
+            writeTextFile: false,
+          },
           terminal: false,
-          _meta: { parameterizedModelPicker: true },
+          _meta: { parameterizedModelPicker: !this.isClaudeProvider() },
         },
         clientInfo: { name: "wenxiang", version: "0.1.0" },
       });
@@ -265,21 +350,43 @@ export class AcpChannel {
           // Pre-authenticated CLI login is enough.
         }
       }
-      const created = await this.request("session/new", {
-        cwd: this.cwd,
-        mcpServers: [],
-      });
+      const created = await this.request(
+        "session/new",
+        this.isClaudeProvider()
+          ? {
+              cwd: this.cwd,
+              mcpServers: [],
+              _meta: {
+                claudeCode: {
+                  options: {
+                    model: this.command?.model || acpModelId(),
+                    permissionMode: "plan",
+                    allowDangerouslySkipPermissions: true,
+                    settingSources: ["user"],
+                  },
+                },
+              },
+            }
+          : {
+              cwd: this.cwd,
+              mcpServers: [],
+            },
+        60_000,
+      );
       this.sessionId = created?.sessionId || created?.session_id || "";
       if (!this.sessionId) throw new Error("ACP session/new did not return sessionId");
       const modes = created?.modes?.availableModes || init?.agentCapabilities?.sessionCapabilities?.modes?.availableModes || [];
-      if (modes.some((m) => (m.id || m.modeId) === "ask")) {
+      const modeOrder = this.isClaudeProvider() ? ["ask", "plan", "dontAsk"] : ["ask"];
+      for (const modeId of modeOrder) {
+        if (!modes.some((m) => (m.id || m.modeId) === modeId)) continue;
         try {
           await this.request("session/set_mode", {
             sessionId: this.sessionId,
-            modeId: "ask",
+            modeId,
           });
+          break;
         } catch {
-          // Stay on the default mode; write tools are still rejected.
+          // Try the next mode alias.
         }
       }
       await this._applyModel(created);
@@ -294,9 +401,12 @@ export class AcpChannel {
 
   async prompt(text, { onDelta, timeoutMs = 180_000 } = {}) {
     if (!this.alive) await this.start();
-    this.onDelta = onDelta;
     this._touch();
     try {
+      if (this.isClaudeProvider()) {
+        return await this._promptClaudeStream(text, { onDelta, timeoutMs });
+      }
+      this.onDelta = onDelta;
       const result = await this.request(
         "session/prompt",
         {
@@ -309,6 +419,62 @@ export class AcpChannel {
     } finally {
       this.onDelta = null;
       this._touch();
+    }
+  }
+
+  async _promptClaudeStream(text, { onDelta, timeoutMs = 180_000 }) {
+    this._lastDeltaAt = 0;
+    this._usageAt = 0;
+    this.onDelta = (chunk) => {
+      this._lastDeltaAt = Date.now();
+      onDelta?.(chunk);
+    };
+    const started = Date.now();
+    const promptTask = this.request(
+      "session/prompt",
+      {
+        sessionId: this.sessionId,
+        prompt: [{ type: "text", text }],
+      },
+      timeoutMs + 60_000,
+    ).catch(() => ({ stopReason: "background" }));
+
+    await new Promise((resolve) => {
+      const timer = setInterval(() => {
+        if (this._usageAt > 0) {
+          clearInterval(timer);
+          resolve();
+          return;
+        }
+        if (this._lastDeltaAt > 0 && Date.now() - this._lastDeltaAt >= STREAM_IDLE_MS) {
+          clearInterval(timer);
+          resolve();
+          return;
+        }
+        if (Date.now() - started >= timeoutMs) {
+          clearInterval(timer);
+          resolve();
+        }
+      }, 100);
+    });
+
+    this.interruptPrompt();
+    await Promise.race([promptTask, new Promise((r) => setTimeout(r, 500))]);
+    return { stopReason: "end_turn" };
+  }
+
+  interruptPrompt() {
+    if (!this.child?.stdin || !this.sessionId) return;
+    try {
+      this.child.stdin.write(
+        `${JSON.stringify({
+          jsonrpc: "2.0",
+          method: "session/cancel",
+          params: { sessionId: this.sessionId },
+        })}\n`,
+      );
+    } catch {
+      // Best-effort; channel stays alive for the next turn.
     }
   }
 
@@ -415,8 +581,24 @@ export class AcpChannel {
       return;
     }
     if (msg.method === "session/update") {
-      const text = acpVisibleTextFromUpdate(msg.params?.update);
+      const update = msg.params?.update || {};
+      if (update.sessionUpdate === "usage_update" && this._lastDeltaAt > 0) {
+        this._usageAt = Date.now();
+      }
+      const text = acpVisibleTextFromUpdate(update);
       if (text) this.onDelta?.(text);
+      return;
+    }
+    if (msg.method === "fs/read_text_file") {
+      try {
+        this.respond(msg.id, readTextUnderCwd(this.cwd, msg.params?.path));
+      } catch (err) {
+        this.respond(msg.id, { error: String(err.message || err) });
+      }
+      return;
+    }
+    if (msg.method === "fs/write_text_file") {
+      this.respond(msg.id, { error: "write disabled in ask mode" });
       return;
     }
     if (msg.method === "session/request_permission") {
@@ -605,7 +787,7 @@ export function createSessionStore({
   async function prompt(session, { question, history, githubContext, bookContext, cwd, onDelta, buildPrompt }) {
     const command = resolveCommand();
     if (!command) {
-      const err = new Error("Cursor ACP CLI not found");
+      const err = new Error("ACP agent not found");
       err.code = "acp_missing";
       throw err;
     }
