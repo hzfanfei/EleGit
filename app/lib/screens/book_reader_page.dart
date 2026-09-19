@@ -17,6 +17,7 @@ import '../utils/book_markdown_markup.dart';
 import '../utils/book_reader_markdown_style.dart';
 import '../utils/book_reader_prefetch.dart';
 import '../voice/book_quick_voice_session.dart';
+import '../voice/volc_tts_voices.dart';
 import '../widgets/book_ask_panel.dart';
 import '../widgets/book_quick_voice_fab.dart';
 import '../widgets/book_reader_chrome.dart';
@@ -97,6 +98,7 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
       api: widget.api,
       bookId: widget.book.id,
       chapterHint: _chapterHint,
+      resolveTtsVoice: () => widget.memory?.ttsVoice() ?? kDefaultVolcTtsVoice,
       readingPlace: () => _readingPlace.value,
       historyForVoice: (place) =>
           _askPanelKey.currentState?.chatHistoryForVoice(place) ?? const [],

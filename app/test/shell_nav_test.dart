@@ -8,6 +8,8 @@ import 'package:wenxiang/theme.dart';
 
 import 'support/fake_api.dart';
 
+ThemeData _theme() => wenxiangTheme().copyWith(splashFactory: NoSplash.splashFactory);
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -22,7 +24,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        theme: wenxiangTheme(),
+        theme: _theme(),
         home: ShellPage(api: FakeWenxiangApi(), memory: store),
       ),
     );
@@ -42,7 +44,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        theme: wenxiangTheme(),
+        theme: _theme(),
         home: ShellPage(api: api, memory: store),
       ),
     );
@@ -83,7 +85,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        theme: wenxiangTheme(),
+        theme: _theme(),
         home: ShellPage(api: api, memory: store),
       ),
     );
@@ -103,7 +105,7 @@ void main() {
     final store = await memory();
     await tester.pumpWidget(
       MaterialApp(
-        theme: wenxiangTheme(),
+        theme: _theme(),
         home: ShellPage(
           api: FakeWenxiangApi(githubConnected: false),
           memory: store,
@@ -124,7 +126,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        theme: wenxiangTheme(),
+        theme: _theme(),
         home: ShellPage(api: api, memory: store),
       ),
     );
@@ -139,5 +141,66 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('搜索仓库名'), findsOneWidget);
     expect(api.startOAuthCalls, 0);
+  });
+
+  testWidgets('back on home does not leave the app', (tester) async {
+    final store = await memory();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: _theme(),
+        home: ShellPage(api: FakeWenxiangApi(), memory: store),
+      ),
+    );
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(find.text('搜索仓库名'), findsOneWidget);
+
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text('搜索仓库名'), findsOneWidget);
+    expect(find.byType(ShellPage), findsOneWidget);
+  });
+
+  testWidgets('edge swipes go back and never exit from home', (tester) async {
+    final store = await memory();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: _theme(),
+        home: ShellPage(api: FakeWenxiangApi(), memory: store),
+      ),
+    );
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('demo').first);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 80));
+    expect(find.textContaining('从进度问起'), findsOneWidget);
+
+    final left = await tester.startGesture(const Offset(8, 360));
+    await left.moveBy(const Offset(90, 0));
+    await left.up();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 80));
+    expect(find.text('搜索仓库名'), findsOneWidget);
+
+    await tester.tap(find.text('demo').first, warnIfMissed: false);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 80));
+    final size = tester.getSize(find.byType(ShellPage));
+    final right = await tester.startGesture(Offset(size.width - 8, 360));
+    await right.moveBy(const Offset(-90, 0));
+    await right.up();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 80));
+    expect(find.text('搜索仓库名'), findsOneWidget);
+
+    final stay = await tester.startGesture(const Offset(8, 360));
+    await stay.moveBy(const Offset(90, 0));
+    await stay.up();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 80));
+    expect(find.byType(ShellPage), findsOneWidget);
+    expect(find.text('搜索仓库名'), findsOneWidget);
   });
 }

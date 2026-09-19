@@ -68,6 +68,37 @@ void main() {
     session.dispose();
   });
 
+  test('passes selected TTS voice on book and repo voice turns', () async {
+    final api = FakeWenxiangApi();
+    final book = BookQuickVoiceSession(
+      api: api,
+      bookId: 'b',
+      chapterHint: '',
+      onChanged: () {},
+      readingPlace: () => const BookReadingPlace(chapter: '第一章'),
+      historyForVoice: (_) => const [],
+      voiceMedia: FakeVoiceMedia(),
+      resolveTtsVoice: () => 'zh_male_m191_uranus_bigtts',
+    );
+    await book.runVoiceTurnForTest('问题');
+    expect(api.lastBookTtsVoice, 'zh_male_m191_uranus_bigtts');
+    book.dispose();
+
+    final repo = RepoQuickVoiceSession(
+      api: api,
+      owner: 'o',
+      repo: 'r',
+      onChanged: () {},
+      historyForVoice: () => const [],
+      resolveSessionId: () => null,
+      voiceMedia: FakeVoiceMedia(),
+      resolveTtsVoice: () => 'zh_female_xiaohe_uranus_bigtts',
+    );
+    await repo.runVoiceTurnForTest('问题');
+    expect(api.lastRepoTtsVoice, 'zh_female_xiaohe_uranus_bigtts');
+    repo.dispose();
+  });
+
   test('bookVoiceTurnStream reveals caption on audio events', () async {
     final api = FakeWenxiangApi(
       bookVoiceTurnEvents: [
@@ -190,7 +221,9 @@ class _GatedBookVoiceApi extends FakeWenxiangApi {
     required List<ChatMessage> history,
     String? sessionId,
     String? chapter,
+    String? ttsVoice,
   }) async* {
+    lastBookTtsVoice = ttsVoice;
     yield ChatStreamEvent(type: 'caption', text: '第一段。');
     yield ChatStreamEvent(type: 'audio', pcm: Uint8List.fromList([0, 1, 0, 1]));
     await gate.future;
@@ -216,7 +249,9 @@ class _GatedRepoVoiceApi extends FakeWenxiangApi {
     required String message,
     required List<ChatMessage> history,
     String? sessionId,
+    String? ttsVoice,
   }) async* {
+    lastRepoTtsVoice = ttsVoice;
     yield ChatStreamEvent(type: 'caption', text: '仓库一句。');
     yield ChatStreamEvent(type: 'audio', pcm: Uint8List.fromList([0, 3, 0, 3]));
     await gate.future;

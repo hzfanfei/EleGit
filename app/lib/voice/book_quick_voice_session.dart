@@ -47,6 +47,7 @@ class BookQuickVoiceSession implements QuickVoiceFabHost {
     this.sttClient,
     this.voiceMedia,
     this.onError,
+    this.resolveTtsVoice,
   }) {
     _hold = HoldToSpeakSession(
       api: api,
@@ -78,6 +79,7 @@ class BookQuickVoiceSession implements QuickVoiceFabHost {
     String? sessionId,
   })? onTurnRecorded;
   final void Function(String message)? onError;
+  final String Function()? resolveTtsVoice;
 
   late final HoldToSpeakSession _hold;
   VoiceMedia? _media;
@@ -148,8 +150,10 @@ class BookQuickVoiceSession implements QuickVoiceFabHost {
   }
 
   Future<void> pointerDown(double globalY) async {
-    if (_hold.sttBusy) return;
-    if (busy) interruptReply();
+    if (_hold.sttBusy || busy || _hold.holding || _hold.holdPending) {
+      await cancelActiveFlow();
+    }
+    if (_disposed) return;
     phase = BookQuickVoicePhase.listening;
     onChanged();
     await _hold.beginHold(globalY);
@@ -251,6 +255,7 @@ class BookQuickVoiceSession implements QuickVoiceFabHost {
         history: history,
         sessionId: _sessionId,
         chapter: chapterHint,
+        ttsVoice: resolveTtsVoice?.call(),
       )) {
         if (!_replyActive) break;
         if (event.type == 'meta') {

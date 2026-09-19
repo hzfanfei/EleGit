@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models.dart';
+import '../voice/volc_tts_voices.dart';
 import 'book_chat_store.dart';
 
 /// Local-only place memory. Never stores tokens, API keys, or OAuth secrets.
@@ -15,6 +16,7 @@ class AppMemory {
   static const githubLoginKey = 'wx.githubLogin';
   static const recentReposKey = 'wx.recentRepos';
   static const voiceHoldTipDismissedKey = 'wx.voiceHoldTipDismissed';
+  static const ttsVoiceKey = 'wx.ttsVoice';
 
   static String chatsKey(String fullName) => 'wx.chats.$fullName';
   static String bookChatsKey(String bookId) => 'wx.bookChats.$bookId';
@@ -22,6 +24,13 @@ class AppMemory {
   bool voiceHoldTipDismissed() => prefs.getBool(voiceHoldTipDismissedKey) ?? false;
 
   Future<void> dismissVoiceHoldTip() => prefs.setBool(voiceHoldTipDismissedKey, true);
+
+  String ttsVoice() => resolveVolcTtsVoice(prefs.getString(ttsVoiceKey)).id;
+
+  Future<void> saveTtsVoice(String voice) {
+    final id = sanitizeVolcTtsVoice(voice);
+    return prefs.setString(ttsVoiceKey, id.isEmpty ? kDefaultVolcTtsVoice : id);
+  }
 
   RepoItem? lastRepo() {
     final raw = prefs.getString(lastRepoKey);

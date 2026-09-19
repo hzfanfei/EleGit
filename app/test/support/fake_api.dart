@@ -24,6 +24,7 @@ class FakeWenxiangApi extends WenxiangApi {
     this.voiceHint = '还没配语音密钥。请在本机问象服务的 .env 里配置。',
     this.bookVoiceTurnEvents,
     this.repoVoiceTurnEvents,
+    this.booksResult = const [],
   }) : super(baseUrl: 'http://127.0.0.1:8787', apiKey: 'test-key');
 
   Object? oauthThrows;
@@ -56,6 +57,9 @@ class FakeWenxiangApi extends WenxiangApi {
   List<ChatStreamEvent>? repoVoiceTurnEvents;
   String? lastSessionId;
   String? lastChatMessage;
+  String? lastBookTtsVoice;
+  String? lastRepoTtsVoice;
+  String? lastSetTtsVoice;
   int createSessionCalls = 0;
   final List<ChatSession> sessions = [
     ChatSession(
@@ -70,7 +74,12 @@ class FakeWenxiangApi extends WenxiangApi {
   @override
   Future<void> ping() async {}
 
-  List<BookItem> booksResult = const [];
+  @override
+  Future<void> setTtsVoice(String ttsVoice) async {
+    lastSetTtsVoice = ttsVoice;
+  }
+
+  List<BookItem> booksResult;
 
   @override
   Future<List<BookItem>> listBooks() async => booksResult;
@@ -256,7 +265,9 @@ class FakeWenxiangApi extends WenxiangApi {
     required List<ChatMessage> history,
     String? sessionId,
     String? chapter,
+    String? ttsVoice,
   }) async* {
+    lastBookTtsVoice = ttsVoice;
     for (final event in bookVoiceTurnEvents ??
         [
           ChatStreamEvent(type: 'caption', text: '演示回答。'),
@@ -273,7 +284,9 @@ class FakeWenxiangApi extends WenxiangApi {
     required String message,
     required List<ChatMessage> history,
     String? sessionId,
+    String? ttsVoice,
   }) async* {
+    lastRepoTtsVoice = ttsVoice;
     for (final event in repoVoiceTurnEvents ??
         [
           ChatStreamEvent(type: 'caption', text: '仓库回答。'),

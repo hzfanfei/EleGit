@@ -32,6 +32,8 @@ class _MockQuickVoiceSession implements QuickVoiceFabHost {
   bool tapToCancelActive = true;
 
   int cancelCalls = 0;
+  int pointerDownCalls = 0;
+  int pointerUpCalls = 0;
 
   @override
   Future<void> cancelActiveFlow() async {
@@ -42,13 +44,19 @@ class _MockQuickVoiceSession implements QuickVoiceFabHost {
   }
 
   @override
-  Future<void> pointerDown(double globalY) async {}
+  Future<void> pointerDown(double globalY) async {
+    pointerDownCalls += 1;
+    tapToCancelActive = false;
+    phase = BookQuickVoicePhase.listening;
+  }
 
   @override
   void pointerMove(double globalY) {}
 
   @override
-  Future<void> pointerUp() async {}
+  Future<void> pointerUp() async {
+    pointerUpCalls += 1;
+  }
 }
 
 void main() {
@@ -179,5 +187,49 @@ void main() {
     await tester.pump();
 
     expect(session.cancelCalls, 1);
+    expect(session.pointerDownCalls, 0);
+  });
+
+  testWidgets('long-press while answering interrupts and starts a new hold', (tester) async {
+    const palette = ReaderPalette(
+      paper: Color(0xFFF7F4EE),
+      ink: Color(0xFF2C2824),
+      muted: Color(0xFF7A7368),
+      chromeFade: Color(0xFFF7F4EE),
+    );
+    final api = FakeWenxiangApi();
+    final session = _MockQuickVoiceSession(
+      HoldToSpeakSession(
+        api: api,
+        onChanged: () {},
+        onTranscript: (_) {},
+        onError: (_) {},
+      ),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Align(
+            alignment: Alignment.bottomRight,
+            child: BookQuickVoiceFab(
+              session: session,
+              palette: palette,
+              enabled: true,
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final center = tester.getCenter(find.byKey(const Key('wx-quick-voice-mic')));
+    final gesture = await tester.startGesture(center);
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(session.pointerDownCalls, 1);
+    expect(session.cancelCalls, 0);
+    await gesture.up();
+    await tester.pump();
+    expect(session.pointerUpCalls, 1);
+    expect(session.cancelCalls, 0);
   });
 }

@@ -172,6 +172,19 @@ class WenxiangApi {
     }
   }
 
+  Future<void> setTtsVoice(String ttsVoice) async {
+    final res = await http
+        .put(
+          _uri('/v1/voice/tts-voice'),
+          headers: _headers,
+          body: jsonEncode({'ttsVoice': ttsVoice}),
+        )
+        .timeout(const Duration(seconds: 12));
+    if (res.statusCode >= 400) {
+      await _json(res, fallback: '保存音色失败');
+    }
+  }
+
   Future<ServerStatus> status() async {
     final res = await http
         .get(_uri('/v1/status'), headers: _headers)
@@ -435,6 +448,7 @@ class WenxiangApi {
     required List<ChatMessage> history,
     String? sessionId,
     String? chapter,
+    String? ttsVoice,
   }) async* {
     final client = http.Client();
     _bookVoiceCancelled = false;
@@ -450,6 +464,7 @@ class WenxiangApi {
           'message': message,
           if (sessionId != null && sessionId.isNotEmpty) 'sessionId': sessionId,
           if (chapter != null && chapter.isNotEmpty) 'chapter': chapter,
+          if (ttsVoice != null && ttsVoice.isNotEmpty) 'ttsVoice': ttsVoice,
           'history': history
               .map((m) => {'role': m.role, 'content': m.content})
               .toList(),
@@ -495,6 +510,7 @@ class WenxiangApi {
     required String message,
     required List<ChatMessage> history,
     String? sessionId,
+    String? ttsVoice,
   }) async* {
     final client = http.Client();
     _repoVoiceCancelled = false;
@@ -510,6 +526,7 @@ class WenxiangApi {
           'repo': repo,
           'message': message,
           if (sessionId != null && sessionId.isNotEmpty) 'sessionId': sessionId,
+          if (ttsVoice != null && ttsVoice.isNotEmpty) 'ttsVoice': ttsVoice,
           'history': history
               .map((m) => {'role': m.role, 'content': m.content})
               .toList(),

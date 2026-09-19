@@ -8,10 +8,12 @@ import '../models.dart';
 import '../persist/app_memory.dart';
 import '../theme.dart';
 import '../widgets/wx_chrome.dart';
+import '../widgets/wx_edge_back.dart';
 import 'book_reader_page.dart';
 import 'books_page.dart';
 import 'chat_page.dart';
 import 'repos_page.dart';
+import 'settings_page.dart';
 
 enum AppStep { boot, repos, books, chat, bookRead }
 
@@ -128,6 +130,14 @@ class ShellPageState extends State<ShellPage> {
     setState(() => _step = AppStep.books);
   }
 
+  void _openSettings() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => SettingsPage(api: _api, memory: _memory),
+      ),
+    );
+  }
+
   void _backFromBooks() {
     setState(() => _step = AppStep.repos);
   }
@@ -230,6 +240,7 @@ class ShellPageState extends State<ShellPage> {
           onAuthorized: _onAuthorized,
           onOpen: _openRepo,
           onOpenBooks: _openBooks,
+          onOpenSettings: _openSettings,
         )),
       ),
       if (_step == AppStep.books)
@@ -241,6 +252,7 @@ class ShellPageState extends State<ShellPage> {
             onBack: _backFromBooks,
             onRead: _openBookRead,
             opening: _bookOpening,
+            onOpenSettings: _openSettings,
           )),
         ),
       if (_step == AppStep.bookRead && _book != null)
@@ -273,24 +285,29 @@ class ShellPageState extends State<ShellPage> {
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: _step == AppStep.boot || _step == AppStep.repos || _step == AppStep.books,
+      canPop: false,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
         _handlePop();
       },
-      child: SizedBox.expand(
-        child: Navigator(
-          pages: _pages(),
-          onDidRemovePage: (page) {
-            final name = page.name;
-            if (name == 'bookRead' && _step == AppStep.bookRead) {
-              _backFromBookRead();
-            } else if (name == 'books' && _step == AppStep.books) {
-              _backFromBooks();
-            } else if (name == 'chat' && _step == AppStep.chat) {
-              _backFromChat();
-            }
-          },
+      child: WxEdgeBack(
+        onBack: () {
+          _handlePop();
+        },
+        child: SizedBox.expand(
+          child: Navigator(
+            pages: _pages(),
+            onDidRemovePage: (page) {
+              final name = page.name;
+              if (name == 'bookRead' && _step == AppStep.bookRead) {
+                _backFromBookRead();
+              } else if (name == 'books' && _step == AppStep.books) {
+                _backFromBooks();
+              } else if (name == 'chat' && _step == AppStep.chat) {
+                _backFromChat();
+              }
+            },
+          ),
         ),
       ),
     );

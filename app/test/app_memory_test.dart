@@ -55,6 +55,16 @@ void main() {
     expect(raw, isNot(contains('x-access-token')));
   });
 
+  test('persists TTS voice and defaults to 小何 2.0', () async {
+    SharedPreferences.setMockInitialValues({});
+    final memory = AppMemory(await SharedPreferences.getInstance());
+    expect(memory.ttsVoice(), 'zh_female_xiaohe_uranus_bigtts');
+    await memory.saveTtsVoice('zh_male_m191_uranus_bigtts');
+    expect(memory.ttsVoice(), 'zh_male_m191_uranus_bigtts');
+    await memory.saveTtsVoice(' not a voice ');
+    expect(memory.ttsVoice(), 'zh_female_xiaohe_uranus_bigtts');
+  });
+
   test('keeps last-used repo at the front of recent repos', () async {
     SharedPreferences.setMockInitialValues({});
     final memory = AppMemory(await SharedPreferences.getInstance());

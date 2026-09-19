@@ -13,6 +13,7 @@ import '../persist/book_reader_prefs.dart';
 import '../theme.dart';
 import '../voice/device_media.dart';
 import '../voice/repo_quick_voice_session.dart';
+import '../voice/volc_tts_voices.dart';
 import '../voice/voice_client.dart';
 import '../voice/voice_media.dart';
 import '../copy/voice_stt_copy.dart';
@@ -121,6 +122,7 @@ class _ChatPageState extends State<ChatPage> {
       api: widget.api,
       owner: widget.repo.owner,
       repo: widget.repo.name,
+      resolveTtsVoice: () => widget.memory?.ttsVoice() ?? kDefaultVolcTtsVoice,
       sttClient: widget.sttClient,
       voiceMedia: widget.voiceMedia,
       onChanged: () {

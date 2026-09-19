@@ -13,7 +13,7 @@ import { openSse, writeSse } from "./sse.js";
 import { BOOK_VOICE_SPEAK_STRATEGY } from "./book-voice-latency.js";
 import { writeAudioToSse } from "./spoken-tts.js";
 import { runVoiceTurn } from "./voice-call.js";
-import { resolveVoiceConfig } from "./voice-config.js";
+import { resolveTurnTtsVoice, resolveVoiceConfig, withTtsVoice } from "./voice-config.js";
 import { createVoiceProviders } from "./voice-ws.js";
 
 export function createBookAskIterator({
@@ -74,7 +74,10 @@ export async function handleBookVoiceTurn(
     return;
   }
 
-  const voiceConfig = resolveConfig();
+  const voiceConfig = withTtsVoice(
+    resolveConfig(),
+    resolveTurnTtsVoice(req.body?.ttsVoice, store?.config?.ttsVoice),
+  );
   const providers = createProviders(voiceConfig);
   if (!voiceConfig.ready || !providers.tts) {
     res.status(503).json({

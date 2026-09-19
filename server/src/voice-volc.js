@@ -236,7 +236,7 @@ export async function volcTtsV3(volc, text, signal, fetchImpl = fetch) {
   const loudness = Number.isFinite(volc.ttsLoudnessRate) ? volc.ttsLoudnessRate : 75;
   const reqParams = {
     text: spoken,
-    speaker: volc.ttsVoice || "zh_female_vv_uranus_bigtts",
+    speaker: volc.ttsVoice || "zh_female_xiaohe_uranus_bigtts",
     audio_params: {
       format: volc.ttsFormat === "pcm" ? "pcm" : "mp3",
       sample_rate: 24000,
@@ -305,7 +305,7 @@ export async function volcTts(volc, text, signal, fetchImpl = fetch) {
     },
     user: { uid: "wenxiang" },
     audio: {
-      voice_type: volc.ttsVoice || "zh_female_vv_uranus_bigtts",
+      voice_type: volc.ttsVoice || "zh_female_xiaohe_uranus_bigtts",
       encoding: "pcm",
       rate: 24000,
       speed_ratio: 1.05,

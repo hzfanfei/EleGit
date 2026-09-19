@@ -1,3 +1,11 @@
+import {
+  DEFAULT_VOLC_TTS_VOICE,
+  VOLC_TTS_VOICES,
+  sanitizeTtsVoice,
+} from "./volc-tts-voices.js";
+
+export { DEFAULT_VOLC_TTS_VOICE, VOLC_TTS_VOICES, sanitizeTtsVoice };
+
 function trim(value) {
   return String(value || "").trim();
 }
@@ -69,7 +77,7 @@ function readyVolc({ appId, accessToken, apiKey, env }) {
           ? "https://openspeech.bytedance.com/api/v3/tts/unidirectional"
           : "https://openspeech.bytedance.com/api/v1/tts"),
       ttsCluster: trim(env.VOLC_TTS_CLUSTER) || "volcano_tts",
-      ttsVoice: trim(env.VOLC_TTS_VOICE) || "zh_female_vv_uranus_bigtts",
+      ttsVoice: sanitizeTtsVoice(env.VOLC_TTS_VOICE) || DEFAULT_VOLC_TTS_VOICE,
       /** v3 TTS: pcm (SSE gzip) or mp3 — set VOLC_TTS_FORMAT=mp3 to opt in */
       ttsFormat: trim(env.VOLC_TTS_FORMAT) || "pcm",
       /** V3 loudness_rate -50..100 (0=normal, 50≈1.5×, 100=2×). V1 uses derived volume_ratio. */
@@ -79,9 +87,27 @@ function readyVolc({ appId, accessToken, apiKey, env }) {
   };
 }
 
+export function resolveTurnTtsVoice(requested, stored) {
+  return sanitizeTtsVoice(requested) || sanitizeTtsVoice(stored) || "";
+}
+
+export function withTtsVoice(config, rawVoice) {
+  const voice = sanitizeTtsVoice(rawVoice);
+  if (!voice || !config) return config;
+  if (config.volc) {
+    return { ...config, volc: { ...config.volc, ttsVoice: voice } };
+  }
+  if (config.openai) {
+    return { ...config, openai: { ...config.openai, ttsVoice: voice } };
+  }
+  return config;
+}
+
 export function publicVoiceStatus(config = resolveVoiceConfig()) {
   return {
     ready: Boolean(config.ready),
     hint: config.ready ? "" : config.hint || "还没配语音密钥。请在本机问象服务的 .env 里配置。",
+    ttsVoice: config.volc?.ttsVoice || DEFAULT_VOLC_TTS_VOICE,
+    voices: VOLC_TTS_VOICES,
   };
 }

@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { publicVoiceStatus, resolveVoiceConfig } from "../src/voice-config.js";
+import {
+  DEFAULT_VOLC_TTS_VOICE,
+  publicVoiceStatus,
+  resolveVoiceConfig,
+  resolveTurnTtsVoice,
+  sanitizeTtsVoice,
+  withTtsVoice,
+} from "../src/voice-config.js";
 
 describe("resolveVoiceConfig", () => {
   it("is not ready and hints in Chinese when no voice keys exist", () => {
@@ -52,5 +59,50 @@ describe("resolveVoiceConfig", () => {
     assert.equal(cfg.provider, "openai");
     assert.equal(cfg.openai.apiKey, "sk-test");
     assert.equal(cfg.openai.realtimeModel, "gpt-4o-realtime-preview");
+  });
+
+  it("defaults Volcengine TTS to 小何 2.0", () => {
+    assert.equal(DEFAULT_VOLC_TTS_VOICE, "zh_female_xiaohe_uranus_bigtts");
+    const cfg = resolveVoiceConfig({ VOLC_API_KEY: "ak-only" });
+    assert.equal(cfg.volc.ttsVoice, "zh_female_xiaohe_uranus_bigtts");
+    const pub = publicVoiceStatus(cfg);
+    assert.equal(pub.ttsVoice, "zh_female_xiaohe_uranus_bigtts");
+    assert.ok(pub.voices.some((v) => v.id === "zh_female_xiaohe_uranus_bigtts" && v.name.includes("小何")));
+  });
+
+  it("keeps an explicit VOLC_TTS_VOICE", () => {
+    const cfg = resolveVoiceConfig({
+      VOLC_API_KEY: "ak-only",
+      VOLC_TTS_VOICE: " zh_male_m191_uranus_bigtts ",
+    });
+    assert.equal(cfg.volc.ttsVoice, "zh_male_m191_uranus_bigtts");
+    assert.equal(publicVoiceStatus(cfg).ttsVoice, "zh_male_m191_uranus_bigtts");
+  });
+});
+
+describe("tts voice override", () => {
+  it("accepts official speaker ids and rejects junk", () => {
+    assert.equal(sanitizeTtsVoice("zh_female_xiaohe_uranus_bigtts"), "zh_female_xiaohe_uranus_bigtts");
+    assert.equal(sanitizeTtsVoice("  zh_male_m191_uranus_bigtts "), "zh_male_m191_uranus_bigtts");
+    assert.equal(sanitizeTtsVoice(""), "");
+    assert.equal(sanitizeTtsVoice("http://evil"), "");
+    assert.equal(sanitizeTtsVoice("zh female"), "");
+  });
+
+  it("overrides the Volcengine speaker for one turn without mutating the base config", () => {
+    const cfg = resolveVoiceConfig({ VOLC_API_KEY: "ak-only" });
+    const next = withTtsVoice(cfg, "zh_male_m191_uranus_bigtts");
+    assert.equal(next.volc.ttsVoice, "zh_male_m191_uranus_bigtts");
+    assert.equal(cfg.volc.ttsVoice, "zh_female_xiaohe_uranus_bigtts");
+    assert.equal(withTtsVoice(cfg, "not a voice").volc.ttsVoice, "zh_female_xiaohe_uranus_bigtts");
+  });
+
+  it("prefers the request voice, then the saved setting", () => {
+    assert.equal(
+      resolveTurnTtsVoice("zh_male_m191_uranus_bigtts", "zh_female_vv_uranus_bigtts"),
+      "zh_male_m191_uranus_bigtts",
+    );
+    assert.equal(resolveTurnTtsVoice("", "zh_female_vv_uranus_bigtts"), "zh_female_vv_uranus_bigtts");
+    assert.equal(resolveTurnTtsVoice("not a voice", ""), "");
   });
 });

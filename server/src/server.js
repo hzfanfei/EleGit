@@ -27,7 +27,12 @@ import { isCancelled, requestSignal } from "./http-signal.js";
 import { loadStore } from "./store.js";
 import { createTunnelHealth } from "./tunnel-health.js";
 import { createTunnelManager } from "./tunnel.js";
-import { publicVoiceStatus, resolveVoiceConfig } from "./voice-config.js";
+import {
+  publicVoiceStatus,
+  resolveVoiceConfig,
+  sanitizeTtsVoice,
+  withTtsVoice,
+} from "./voice-config.js";
 import { attachSttGateway } from "./voice-stt-ws.js";
 import { attachVoiceGateway, isVoiceCallEnabled } from "./voice-ws.js";
 import {
@@ -203,7 +208,7 @@ app.get("/v1/status", (_req, res) => {
       transport: cursor?.transport || null,
       fallback: "local-progress",
     },
-    voice: publicVoiceStatus(resolveVoiceConfig()),
+    voice: publicVoiceStatus(withTtsVoice(resolveVoiceConfig(), store.config.ttsVoice)),
     books: (() => {
       const acp = detectCursorEngine();
       return {
@@ -635,6 +640,17 @@ app.delete("/v1/books/:bookId/sessions/:id", async (req, res) => {
   } catch (err) {
     sendError(res, err);
   }
+});
+
+app.put("/v1/voice/tts-voice", async (req, res) => {
+  const ttsVoice = sanitizeTtsVoice(req.body?.ttsVoice);
+  if (!ttsVoice) {
+    res.status(400).json({ error: "ttsVoice is required" });
+    return;
+  }
+  store.config.ttsVoice = ttsVoice;
+  await store.save();
+  res.json({ ttsVoice });
 });
 
 app.post("/v1/books/voice-turn", async (req, res) => {

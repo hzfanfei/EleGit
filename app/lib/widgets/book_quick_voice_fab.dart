@@ -43,21 +43,35 @@ class _BookQuickVoiceFabState extends State<BookQuickVoiceFab>
   int? _pointerDownMs;
   double? _pointerDownY;
   bool _tapCancelArm = false;
+  bool _fingerDown = false;
+  Timer? _promoteHold;
 
   static const _tapMaxMs = 320;
   static const _tapMaxMove = 28.0;
 
   @override
   void dispose() {
+    _promoteHold?.cancel();
     _pulse.dispose();
     _wave.dispose();
     super.dispose();
+  }
+
+  Future<void> _startHold(double globalY) async {
+    HapticFeedback.lightImpact();
+    await widget.session.pointerDown(globalY);
+    if (!mounted || !_fingerDown) {
+      await widget.session.pointerUp();
+    }
   }
 
   Future<void> _onMicPointerUp(double globalY) async {
     final downMs = _pointerDownMs;
     final downY = _pointerDownY;
     final tapArm = _tapCancelArm;
+    _promoteHold?.cancel();
+    _promoteHold = null;
+    _fingerDown = false;
     _pointerDownMs = null;
     _pointerDownY = null;
     _tapCancelArm = false;
@@ -270,10 +284,18 @@ class _BookQuickVoiceFabState extends State<BookQuickVoiceFab>
                 ? (e) {
                     _pointerDownMs = DateTime.now().millisecondsSinceEpoch;
                     _pointerDownY = e.position.dy;
+                    _fingerDown = true;
                     _tapCancelArm = widget.session.tapToCancelActive;
-                    if (_tapCancelArm) return;
-                    HapticFeedback.lightImpact();
-                    unawaited(widget.session.pointerDown(e.position.dy));
+                    if (_tapCancelArm) {
+                      _promoteHold?.cancel();
+                      _promoteHold = Timer(const Duration(milliseconds: _tapMaxMs), () {
+                        if (!mounted || !_fingerDown) return;
+                        _tapCancelArm = false;
+                        unawaited(_startHold(_pointerDownY ?? e.position.dy));
+                      });
+                      return;
+                    }
+                    unawaited(_startHold(e.position.dy));
                   }
                 : null,
             onPointerMove: widget.enabled

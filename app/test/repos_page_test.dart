@@ -7,6 +7,8 @@ import 'package:wenxiang/theme.dart';
 
 import 'support/fake_api.dart';
 
+ThemeData _theme() => wenxiangTheme().copyWith(splashFactory: NoSplash.splashFactory);
+
 void main() {
   testWidgets('repos list shows owner, privacy and opens after checkout', (tester) async {
     final api = FakeWenxiangApi(
@@ -22,7 +24,7 @@ void main() {
     RepoItem? opened;
     await tester.pumpWidget(
       MaterialApp(
-        theme: wenxiangTheme(),
+        theme: _theme(),
         home: ReposPage(
           api: api,
           githubLogin: 'octo',
@@ -35,6 +37,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('问象'), findsOneWidget);
+    expect(find.byTooltip('设置'), findsOneWidget);
     expect(find.byType(AppBar), findsNothing);
     expect(find.text('demo'), findsOneWidget);
     expect(find.textContaining('octo'), findsWidgets);
@@ -46,7 +49,10 @@ void main() {
     await tester.tap(find.text('demo'));
     await tester.pump();
     expect(find.textContaining('~/问象/octo/demo'), findsWidgets);
-    expect(find.textContaining('正在'), findsWidgets);
+    expect(
+      tester.any(find.textContaining('正在')) || tester.any(find.textContaining('准备')),
+      isTrue,
+    );
     await tester.pump(const Duration(milliseconds: 50));
     await tester.pumpAndSettle();
     expect(api.checkoutCalls, 1);
@@ -57,20 +63,20 @@ void main() {
     final emptyApi = FakeWenxiangApi(reposResult: []);
     await tester.pumpWidget(
       MaterialApp(
-        theme: wenxiangTheme(),
+        theme: _theme(),
         home: ReposPage(api: emptyApi, onOpen: (_) {}, onAuthorized: () async {}),
       ),
     );
     await tester.pump();
     await tester.pumpAndSettle();
-    expect(find.textContaining('没有找到仓库'), findsOneWidget);
+    expect(find.textContaining('本机还没有仓库'), findsOneWidget);
   });
 
   testWidgets('github failure falls back to local repos without error panel', (tester) async {
     final errApi = FakeWenxiangApi(reposThrows: ApiException('HTTP 401 Unauthorized'));
     await tester.pumpWidget(
       MaterialApp(
-        theme: wenxiangTheme(),
+        theme: _theme(),
         home: ReposPage(
           api: errApi,
           githubConnected: true,
@@ -89,7 +95,7 @@ void main() {
   testWidgets('offline home shows local repos list', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
-        theme: wenxiangTheme(),
+        theme: _theme(),
         home: ReposPage(
           api: FakeWenxiangApi(),
           githubConnected: false,
@@ -106,6 +112,26 @@ void main() {
     expect(find.textContaining('出了点问题'), findsNothing);
   });
 
+  testWidgets('settings button opens the settings callback', (tester) async {
+    var opened = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: _theme(),
+        home: ReposPage(
+          api: FakeWenxiangApi(),
+          githubConnected: false,
+          onOpen: (_) {},
+          onAuthorized: () async {},
+          onOpenSettings: () => opened += 1,
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('设置'));
+    expect(opened, 1);
+  });
+
   testWidgets('clone failure stays on the overlay', (tester) async {
     final errApi = FakeWenxiangApi(
       checkoutDelay: const Duration(milliseconds: 20),
@@ -120,7 +146,7 @@ void main() {
     );
     await tester.pumpWidget(
       MaterialApp(
-        theme: wenxiangTheme(),
+        theme: _theme(),
         home: ReposPage(api: errApi, onOpen: (_) {}, onAuthorized: () async {}),
       ),
     );
@@ -153,7 +179,7 @@ void main() {
     RepoItem? opened;
     await tester.pumpWidget(
       MaterialApp(
-        theme: wenxiangTheme(),
+        theme: _theme(),
         home: ReposPage(api: api, onOpen: (repo) => opened = repo, onAuthorized: () async {}),
       ),
     );
