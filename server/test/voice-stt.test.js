@@ -5,6 +5,7 @@ import { WebSocket } from "ws";
 import {
   adoptSttFinal,
   attachSttGateway,
+  commitSttPartial,
   composeSttDisplay,
   createSttSession,
   isSttUpgrade,
@@ -80,6 +81,39 @@ describe("voice stt websocket", () => {
     adoptSttFinal(segments, "第二句还在说");
     partial = "";
     assert.equal(composeSttDisplay(segments, partial), "第一句话。第二句还在说");
+  });
+
+  it("done text keeps earlier utterance when only the last gets a provider final", async () => {
+    const out = [];
+    const wired = createSttSession({
+      config: { ready: true, provider: "volc", volc: {} },
+      send: (msg) => out.push(msg),
+      createProviders: (_config, hooks) => ({
+        asr: {
+          async start() {},
+          push() {},
+          async finalize() {
+            hooks.onPartial?.("第一句话。");
+            hooks.onFinal?.("第二句话。");
+          },
+          stop() {},
+        },
+        tts: null,
+      }),
+    });
+    await wired.start();
+    wired.onPcm(Buffer.from([0, 0]));
+    await wired.stop();
+    const done = out.find((msg) => msg.type === "done");
+    assert.match(done?.text || "", /第一句话/);
+    assert.match(done?.text || "", /第二句话/);
+  });
+
+  it("commitSttPartial preserves partial before a new final chunk", () => {
+    const segments = [];
+    commitSttPartial(segments, "第一句话。");
+    adoptSttFinal(segments, "第二句话。");
+    assert.equal(composeSttDisplay(segments, ""), "第一句话。第二句话。");
   });
 
   it("returns done text from a fake ASR on stop", async () => {

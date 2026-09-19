@@ -22,6 +22,13 @@ export function composeSttDisplay(segments, partial) {
   return head + tail;
 }
 
+/** Commit in-flight partial before a provider final or session stop (multi-utterance hold-to-talk). */
+export function commitSttPartial(segments, partial) {
+  const pending = String(partial || "").trim();
+  if (!pending) return;
+  adoptSttFinal(segments, pending);
+}
+
 export function adoptSttFinal(segments, finalChunk) {
   const seg = String(finalChunk || "").trim();
   if (!seg) return;
@@ -94,6 +101,7 @@ export function createSttSession({
           if (display) emit({ type: "caption", role: "user", text: display, final: false });
         },
         onFinal: (text) => {
+          commitSttPartial(segments, partial);
           adoptSttFinal(segments, text);
           partial = "";
           const display = composeSttDisplay(segments, partial);
@@ -141,6 +149,8 @@ export function createSttSession({
           }
         }
         await new Promise((resolve) => setTimeout(resolve, 120));
+        commitSttPartial(segments, partial);
+        partial = "";
         const text = composeSttDisplay(segments, partial).trim();
         emit({ type: "done", text });
         cleanup();
