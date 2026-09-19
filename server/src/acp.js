@@ -70,7 +70,7 @@ export function selectPermissionOption(params) {
   return options[0]?.optionId || wanted;
 }
 
-export function buildAcpPrompt({ question, history, githubContext, seedHistory }) {
+export function buildAcpPrompt({ question, history, githubContext, seedHistory, spokenAnswer = false }) {
   const lines = [
     "You are 问象, a local repo progress assistant running on the user's computer.",
     "You are in ask mode: read the checkout and answer. Do not edit files, commit, or change the working tree.",
@@ -78,6 +78,14 @@ export function buildAcpPrompt({ question, history, githubContext, seedHistory }
     "Be concise and efficient: lead with the direct answer; use short paragraphs or bullets; skip preamble, filler, and long recaps unless the user asks for detail.",
     "Do not invent commits, PRs, files, or dates. Prefer the local checkout when it disagrees with stale memory.",
   ];
+  if (spokenAnswer) {
+    lines.push(
+      "",
+      "【核心】只输出答案正文；读盘与推理在内部完成，禁止过程旁白与复述问题。",
+      "第一个字就要进入实质内容；禁止让我/正在/查完/分析/梳理/好的/首先/简单来说 等开头。",
+      ...BOOK_SPOKEN_ANSWER_RULES,
+    );
+  }
   if (githubContext) {
     lines.push("", "=== GitHub facts (not always in the working tree) ===", githubContext);
   }

@@ -18,14 +18,35 @@ abstract class VoiceMedia {
   void dispose();
 }
 
-/// Boost quiet 16-bit LE PCM before playback. [gain] 1.0 = unchanged; clamps to int16.
-Uint8List amplifyPcm16(Uint8List pcm, {double gain = 1.35}) {
-  if (gain == 1.0 || pcm.length < 2) return pcm;
+/// Boost quiet 16-bit LE PCM before playback. Clamps to int16.
+///
+/// By default peak-normalizes toward [targetPeak] of full scale (good for quiet TTS).
+/// Pass [gain] to force a fixed multiplier (tests / overrides).
+Uint8List amplifyPcm16(
+  Uint8List pcm, {
+  double? gain,
+  double targetPeak = 0.98,
+  double minGain = 1.75,
+  double maxGain = 3.5,
+}) {
+  if (pcm.length < 2) return pcm;
   final out = Uint8List.fromList(pcm);
   final view = ByteData.view(out.buffer, out.offsetInBytes, out.lengthInBytes);
+
+  var peak = 1;
+  for (var i = 0; i + 1 < out.length; i += 2) {
+    final abs = view.getInt16(i, Endian.little).abs();
+    if (abs > peak) peak = abs;
+  }
+  if (peak == 0) return out;
+
+  final effectiveGain = gain ??
+      (32767.0 * targetPeak / peak).clamp(minGain, maxGain).toDouble();
+  if (effectiveGain == 1.0) return out;
+
   for (var i = 0; i + 1 < out.length; i += 2) {
     var sample = view.getInt16(i, Endian.little);
-    sample = (sample * gain).round();
+    sample = (sample * effectiveGain).round();
     if (sample > 32767) sample = 32767;
     if (sample < -32768) sample = -32768;
     view.setInt16(i, sample, Endian.little);

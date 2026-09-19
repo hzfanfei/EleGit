@@ -38,7 +38,7 @@ class CallPage extends StatefulWidget {
 }
 
 class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin {
-  late final VoiceMedia _media = widget.media ?? DeviceVoiceMedia();
+  late final VoiceMedia _media = widget.media ?? DeviceVoiceMedia(telephonyCapture: true);
   VoiceCallClient? _client;
   StreamSubscription<VoiceEvent>? _sub;
   StreamSubscription<Uint8List>? _micSub;

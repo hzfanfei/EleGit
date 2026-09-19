@@ -14,17 +14,21 @@ import 'package:record/record.dart';
 
 
 
+import 'android_media_audio.dart';
 import 'voice_media.dart';
 
 
 
 class DeviceVoiceMedia implements VoiceMedia {
 
-  DeviceVoiceMedia() {
+  /// Full-duplex phone call uses telephony capture; quick-voice STT uses normal mic + media playback.
+  DeviceVoiceMedia({this.telephonyCapture = false}) {
 
     unawaited(_player.setReleaseMode(ReleaseMode.stop));
 
   }
+
+  final bool telephonyCapture;
 
 
 
@@ -64,11 +68,19 @@ class DeviceVoiceMedia implements VoiceMedia {
 
       try {
 
-        await _prepareCallAudio();
+        if (Platform.isIOS || telephonyCapture) {
+
+          await _prepareCallAudio();
+
+        } else {
+
+          await AndroidMediaAudio.resetToMediaPlayback();
+
+        }
 
         final stream = await _recorder.startStream(
 
-          const RecordConfig(
+          RecordConfig(
 
             encoder: AudioEncoder.pcm16bits,
 
@@ -80,15 +92,29 @@ class DeviceVoiceMedia implements VoiceMedia {
 
             noiseSuppress: true,
 
-            androidConfig: AndroidRecordConfig(
+            androidConfig: telephonyCapture
 
-              audioSource: AndroidAudioSource.voiceCommunication,
+                ? const AndroidRecordConfig(
 
-              speakerphone: true,
+                    audioSource: AndroidAudioSource.voiceCommunication,
 
-              audioManagerMode: AudioManagerMode.modeInCommunication,
+                    speakerphone: true,
 
-            ),
+                    audioManagerMode: AudioManagerMode.modeInCommunication,
+
+                  )
+
+                : const AndroidRecordConfig(
+
+                    audioSource: AndroidAudioSource.mic,
+
+                    speakerphone: false,
+
+                    manageBluetooth: false,
+
+                    audioManagerMode: AudioManagerMode.modeNormal,
+
+                  ),
 
           ),
 
@@ -125,6 +151,22 @@ class DeviceVoiceMedia implements VoiceMedia {
       await _recorder.stop();
 
     }
+
+    await _exitTelephonyRoute();
+
+  }
+
+
+
+  Future<void> _exitTelephonyRoute() async {
+
+    if (Platform.isAndroid && !telephonyCapture) {
+
+      await AndroidMediaAudio.resetToMediaPlayback();
+
+    }
+
+    await _preparePlaybackAudio();
 
   }
 
@@ -204,19 +246,27 @@ class DeviceVoiceMedia implements VoiceMedia {
 
     try {
 
+      if (Platform.isAndroid && !telephonyCapture) {
+
+        await AndroidMediaAudio.resetToMediaPlayback();
+
+      }
+
       await AudioPlayer.global.setAudioContext(
 
         AudioContext(
 
           android: AudioContextAndroid(
 
-            isSpeakerphoneOn: true,
+            isSpeakerphoneOn: telephonyCapture,
+
+            audioMode: AndroidAudioMode.normal,
 
             stayAwake: true,
 
-            contentType: AndroidContentType.speech,
+            contentType: AndroidContentType.music,
 
-            usageType: AndroidUsageType.voiceCommunication,
+            usageType: AndroidUsageType.media,
 
             audioFocus: AndroidAudioFocus.gain,
 
@@ -261,6 +311,8 @@ class DeviceVoiceMedia implements VoiceMedia {
   }) async {
 
     if (pcm.isEmpty) return;
+
+    await _preparePlaybackAudio();
 
     _outRate = sampleRate;
 

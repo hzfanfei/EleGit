@@ -115,9 +115,11 @@ class WenxiangApi {
   http.Client? _checkoutClient;
   http.Client? _chatClient;
   http.Client? _bookVoiceClient;
+  http.Client? _repoVoiceClient;
   bool _checkoutCancelled = false;
   bool _chatCancelled = false;
   bool _bookVoiceCancelled = false;
+  bool _repoVoiceCancelled = false;
 
   void cancelCheckout() {
     _checkoutCancelled = true;
@@ -135,6 +137,12 @@ class WenxiangApi {
     _bookVoiceCancelled = true;
     _bookVoiceClient?.close();
     _bookVoiceClient = null;
+  }
+
+  void cancelRepoVoiceTurn() {
+    _repoVoiceCancelled = true;
+    _repoVoiceClient?.close();
+    _repoVoiceClient = null;
   }
 
   Future<Map<String, dynamic>> _json(
@@ -477,6 +485,66 @@ class WenxiangApi {
       rethrow;
     } finally {
       if (identical(_bookVoiceClient, client)) _bookVoiceClient = null;
+      client.close();
+    }
+  }
+
+  Stream<ChatStreamEvent> repoVoiceTurnStream({
+    required String owner,
+    required String repo,
+    required String message,
+    required List<ChatMessage> history,
+    String? sessionId,
+  }) async* {
+    final client = http.Client();
+    _repoVoiceCancelled = false;
+    _repoVoiceClient = client;
+    try {
+      final request = http.Request('POST', _uri('/v1/chat/voice-turn'))
+        ..headers.addAll({
+          ..._headers,
+          'Accept': 'text/event-stream',
+        })
+        ..body = jsonEncode({
+          'owner': owner,
+          'repo': repo,
+          'message': message,
+          if (sessionId != null && sessionId.isNotEmpty) 'sessionId': sessionId,
+          'history': history
+              .map((m) => {'role': m.role, 'content': m.content})
+              .toList(),
+        });
+      final res = await client.send(request).timeout(const Duration(minutes: 4));
+      if (res.statusCode >= 400) {
+        final raw = await res.stream.bytesToString();
+        String error = '快问快答失败';
+        try {
+          error = (jsonDecode(raw)['error'] ?? error).toString();
+        } catch (_) {}
+        throw ApiException(error);
+      }
+      var buffer = '';
+      await for (final chunk in res.stream.transform(utf8.decoder)) {
+        if (_repoVoiceCancelled) throw const OperationCancelled();
+        buffer += chunk;
+        final parts = buffer.split('\n\n');
+        buffer = parts.removeLast();
+        for (final part in parts) {
+          final event = ChatStreamEvent.fromSse(part);
+          if (event != null) yield event;
+        }
+      }
+      if (buffer.trim().isNotEmpty) {
+        final event = ChatStreamEvent.fromSse(buffer);
+        if (event != null) yield event;
+      }
+    } catch (err) {
+      if (_repoVoiceCancelled || err is OperationCancelled) {
+        throw const OperationCancelled();
+      }
+      rethrow;
+    } finally {
+      if (identical(_repoVoiceClient, client)) _repoVoiceClient = null;
       client.close();
     }
   }

@@ -1,40 +1,26 @@
 import 'dart:async';
 
-import 'dart:typed_data';
-
 import 'package:flutter/foundation.dart';
 
 import '../api/wenxiang_api.dart';
 import '../copy/voice_stt_copy.dart';
 import '../models.dart';
-import '../persist/book_chat_store.dart';
+import 'book_quick_voice_session.dart';
 import 'device_media.dart';
 import 'hold_to_speak_session.dart';
 import 'voice_media.dart';
 import 'voice_stt_client.dart';
 
-enum BookQuickVoicePhase { idle, listening, recognizing, thinking, speaking }
-
-/// Shared surface for [BookQuickVoiceFab] (book + repo quick voice).
-abstract class QuickVoiceFabHost {
-  BookQuickVoicePhase get phase;
-  HoldToSpeakSession get hold;
-  bool get showsStatus;
-  String get statusLabel;
-  Future<void> pointerDown(double globalY);
-  void pointerMove(double globalY);
-  Future<void> pointerUp();
-}
-
-/// Hold-to-talk book Q&A with spoken replies only (no on-screen transcript).
-class BookQuickVoiceSession implements QuickVoiceFabHost {
-  BookQuickVoiceSession({
+/// Hold-to-talk repo Q&A with spoken replies only (same UX as book quick voice).
+class RepoQuickVoiceSession implements QuickVoiceFabHost {
+  RepoQuickVoiceSession({
     required this.api,
-    required this.bookId,
-    required this.chapterHint,
+    required this.owner,
+    required this.repo,
     required this.onChanged,
-    required this.readingPlace,
     required this.historyForVoice,
+    required this.resolveSessionId,
+    this.onSessionId,
     this.onTurnRecorded,
     this.sttClient,
     this.voiceMedia,
@@ -55,15 +41,15 @@ class BookQuickVoiceSession implements QuickVoiceFabHost {
   }
 
   final WenxiangApi api;
-  final String bookId;
-  String chapterHint;
+  final String owner;
+  final String repo;
   final VoiceSttClient? sttClient;
   final VoiceMedia? voiceMedia;
   final VoidCallback onChanged;
-  final BookReadingPlace Function() readingPlace;
-  final List<ChatMessage> Function(BookReadingPlace place) historyForVoice;
+  final List<ChatMessage> Function() historyForVoice;
+  final String? Function() resolveSessionId;
+  final void Function(String? id)? onSessionId;
   final Future<void> Function({
-    required BookReadingPlace place,
     required String question,
     required String answer,
     String? engine,
@@ -73,6 +59,7 @@ class BookQuickVoiceSession implements QuickVoiceFabHost {
 
   late final HoldToSpeakSession _hold;
   VoiceMedia? _media;
+  @override
   BookQuickVoicePhase phase = BookQuickVoicePhase.idle;
   String _thinkStatusLabel = '思考中…';
   String? _sessionId;
@@ -81,6 +68,7 @@ class BookQuickVoiceSession implements QuickVoiceFabHost {
   String _voiceFormat = 'pcm';
   String _voiceCodec = 'raw';
 
+  @override
   HoldToSpeakSession get hold => _hold;
 
   bool get busy =>
@@ -88,12 +76,14 @@ class BookQuickVoiceSession implements QuickVoiceFabHost {
       phase == BookQuickVoicePhase.thinking ||
       phase == BookQuickVoicePhase.speaking;
 
+  @override
   bool get showsStatus =>
       phase != BookQuickVoicePhase.idle ||
       _hold.holding ||
       _hold.holdPending ||
       _hold.sttBusy;
 
+  @override
   String get statusLabel {
     final hold = _hold;
     if (hold.holding && hold.holdCancel) return '松开取消';
@@ -114,6 +104,11 @@ class BookQuickVoiceSession implements QuickVoiceFabHost {
   }
 
   void _handleHoldChanged() {
+    if (_replyActive &&
+        (phase == BookQuickVoicePhase.thinking || phase == BookQuickVoicePhase.speaking) &&
+        _hold.holding) {
+      interruptReply();
+    }
     if (_hold.holding) {
       phase = BookQuickVoicePhase.listening;
     } else if (_hold.sttBusy) {
@@ -126,6 +121,7 @@ class BookQuickVoiceSession implements QuickVoiceFabHost {
     onChanged();
   }
 
+  @override
   Future<void> pointerDown(double globalY) async {
     if (_hold.sttBusy) return;
     if (busy) interruptReply();
@@ -134,8 +130,10 @@ class BookQuickVoiceSession implements QuickVoiceFabHost {
     await _hold.beginHold(globalY);
   }
 
+  @override
   void pointerMove(double globalY) => _hold.moveHold(globalY);
 
+  @override
   Future<void> pointerUp() async {
     if (_hold.holding || _hold.holdPending) {
       phase = BookQuickVoicePhase.recognizing;
@@ -159,7 +157,7 @@ class BookQuickVoiceSession implements QuickVoiceFabHost {
   }
 
   void interruptReply() {
-    api.cancelBookVoiceTurn();
+    api.cancelRepoVoiceTurn();
     _resetVoiceFormat();
     unawaited(_media?.stopPlayback());
     _replyActive = false;
@@ -184,19 +182,20 @@ class BookQuickVoiceSession implements QuickVoiceFabHost {
     _media ??= voiceMedia ?? DeviceVoiceMedia();
     _resetVoiceFormat();
     await _media!.stopPlayback();
-    final place = readingPlace();
-    final history = historyForVoice(place).where((m) => m.role != 'error').toList();
+    final history = historyForVoice().where((m) => m.role != 'error').toList();
+    final sid = _sessionId ?? resolveSessionId();
     try {
-      await for (final event in api.bookVoiceTurnStream(
-        bookId: bookId,
+      await for (final event in api.repoVoiceTurnStream(
+        owner: owner,
+        repo: repo,
         message: question,
         history: history,
-        sessionId: _sessionId,
-        chapter: chapterHint,
+        sessionId: sid,
       )) {
         if (!_replyActive) break;
         if (event.type == 'meta') {
           _sessionId = event.sessionId ?? _sessionId;
+          onSessionId?.call(_sessionId);
         } else if (event.type == 'state') {
           final serverPhase = event.phase?.trim() ?? '';
           if (serverPhase == 'speak') {
@@ -238,9 +237,9 @@ class BookQuickVoiceSession implements QuickVoiceFabHost {
           }
           final answer = event.text.trim();
           _sessionId = event.sessionId ?? _sessionId;
+          onSessionId?.call(_sessionId);
           if (answer.isNotEmpty) {
             await onTurnRecorded?.call(
-              place: place,
               question: question,
               answer: answer,
               engine: event.engine,

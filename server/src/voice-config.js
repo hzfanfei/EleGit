@@ -4,9 +4,9 @@ function trim(value) {
 
 function volcTtsLoudnessRate(env) {
   const raw = trim(env.VOLC_TTS_LOUDNESS_RATE);
-  if (!raw) return 40;
+  if (!raw) return 75;
   const n = Number(raw);
-  if (!Number.isFinite(n)) return 40;
+  if (!Number.isFinite(n)) return 75;
   return Math.max(-50, Math.min(100, Math.round(n)));
 }
 

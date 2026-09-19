@@ -1,5 +1,31 @@
 package cn.wenxiang.wenxiang
 
+import android.media.AudioManager
 import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.MethodChannel
 
-class MainActivity : FlutterActivity()
+class MainActivity : FlutterActivity() {
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "cn.wenxiang.wenxiang/audio_route",
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "resetToMediaPlayback" -> {
+                    val am = getSystemService(AUDIO_SERVICE) as AudioManager
+                    try {
+                        am.stopBluetoothSco()
+                        am.isBluetoothScoOn = false
+                    } catch (_: Exception) {
+                    }
+                    am.mode = AudioManager.MODE_NORMAL
+                    am.isSpeakerphoneOn = false
+                    result.success(null)
+                }
+                else -> result.notImplemented()
+            }
+        }
+    }
+}

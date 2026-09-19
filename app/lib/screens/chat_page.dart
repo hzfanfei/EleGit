@@ -9,12 +9,15 @@ import '../copy/errors.dart';
 import '../copy/time.dart';
 import '../models.dart';
 import '../persist/app_memory.dart';
+import '../persist/book_reader_prefs.dart';
 import '../theme.dart';
 import '../voice/device_media.dart';
+import '../voice/repo_quick_voice_session.dart';
 import '../voice/voice_client.dart';
 import '../voice/voice_media.dart';
 import '../copy/voice_stt_copy.dart';
 import '../voice/voice_stt_client.dart';
+import '../widgets/book_quick_voice_fab.dart';
 import '../widgets/wx_chrome.dart';
 import '../widgets/wx_hold_to_speak.dart';
 import '../widgets/wx_rich_text.dart';
@@ -43,6 +46,13 @@ class ChatPage extends StatefulWidget {
 }
 
 class _ChatPageState extends State<ChatPage> {
+  static const _quickVoicePalette = ReaderPalette(
+    paper: Wx.raised,
+    ink: Wx.text,
+    muted: Wx.muted,
+    chromeFade: Wx.bg,
+  );
+
   static const _suggestions = [
     '这个仓库最近在做什么？',
     'README 里怎么写的？',
@@ -84,6 +94,7 @@ class _ChatPageState extends State<ChatPage> {
   bool _pendingNewBelow = false;
   bool _autoFollowing = false;
   bool _preparingChat = true;
+  late final RepoQuickVoiceSession _quickVoice;
 
   static const _scrollBottomThreshold = 80.0;
 
@@ -104,6 +115,42 @@ class _ChatPageState extends State<ChatPage> {
     _typewriter = WxTypewriterStream(
       onReveal: () {
         if (mounted && _live) _followTypewriterTail();
+      },
+    );
+    _quickVoice = RepoQuickVoiceSession(
+      api: widget.api,
+      owner: widget.repo.owner,
+      repo: widget.repo.name,
+      sttClient: widget.sttClient,
+      voiceMedia: widget.voiceMedia,
+      onChanged: () {
+        if (mounted) setState(() {});
+      },
+      historyForVoice: () => _messages,
+      resolveSessionId: () => _sessionId,
+      onSessionId: _rememberSessionId,
+      onTurnRecorded: ({
+        required String question,
+        required String answer,
+        String? engine,
+        String? sessionId,
+      }) async {
+        if (!mounted) return;
+        setState(() {
+          _messages.addAll([
+            ChatMessage(role: 'user', content: question, via: 'voice'),
+            ChatMessage(role: 'assistant', content: answer, engine: engine, via: 'voice'),
+          ]);
+        });
+        if (sessionId != null && sessionId.isNotEmpty) {
+          _rememberSessionId(sessionId);
+        }
+        await _persist();
+        _jumpToLatest(force: true);
+      },
+      onError: (message) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
       },
     );
     _restoreLocal();
@@ -836,6 +883,7 @@ class _ChatPageState extends State<ChatPage> {
   @override
   void dispose() {
     if (_busy) widget.api.cancelChat();
+    _quickVoice.dispose();
     _disposeStt();
     _micSub?.cancel();
     _media?.dispose();
@@ -959,6 +1007,15 @@ class _ChatPageState extends State<ChatPage> {
             onStop: _stop,
           ),
             ],
+          ),
+          Positioned(
+            right: 0,
+            bottom: MediaQuery.of(context).padding.bottom + 92,
+            child: BookQuickVoiceFab(
+              session: _quickVoice,
+              palette: _quickVoicePalette,
+              enabled: _voiceReady && !_busy && !_live && !_preparingChat,
+            ),
           ),
           if (_preparingChat)
             const ColoredBox(

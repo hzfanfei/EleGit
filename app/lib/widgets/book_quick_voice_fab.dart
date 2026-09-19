@@ -17,7 +17,7 @@ class BookQuickVoiceFab extends StatefulWidget {
     this.bottomInset = 0,
   });
 
-  final BookQuickVoiceSession session;
+  final QuickVoiceFabHost session;
   final ReaderPalette palette;
   final bool enabled;
   final double bottomInset;
