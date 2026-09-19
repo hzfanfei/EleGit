@@ -13,6 +13,7 @@ void main() {
     expect(humanizeSttEvent(code: 'unconfigured'), contains('还没配语音密钥'));
     expect(humanizeSttEvent(code: 'asr_resource'), contains('资源'));
     expect(humanizeSttEvent(code: 'empty'), contains('没听清'));
+    expect(humanizeSttEvent(code: 'empty_answer'), contains('没有可朗读'));
   });
 
   test('humanizeSttConnectionError maps auth and network', () {

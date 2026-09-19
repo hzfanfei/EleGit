@@ -1,10 +1,38 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../persist/book_reader_prefs.dart';
 import '../theme.dart';
 
 /// Fixed inset below the status bar; chrome overlays without shifting body text.
 const kReaderContentTopInset = 12.0;
+
+/// List padding under the reader chrome. Uses [MediaQueryData.viewPadding]
+/// so an open IME cannot zero [MediaQueryData.padding.top] and drop text
+/// into the status-bar region.
+double bookReaderTopContentPad({
+  required bool chromeVisible,
+  required MediaQueryData media,
+}) {
+  final statusInset = chromeVisible ? media.viewPadding.top : 0.0;
+  return statusInset + kReaderContentTopInset;
+}
+
+/// Status / nav bar style for the reader. Paper-colored status bar + no
+/// contrast scrim: OEM IME / immersive transitions otherwise flash a white
+/// strip on sepia and light paper.
+SystemUiOverlayStyle bookReaderSystemOverlayStyle(ReaderSettings settings) {
+  final dark = settings.theme == ReaderThemeMode.dark;
+  final paper = settings.palette.paper;
+  final base = dark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark;
+  return base.copyWith(
+    statusBarColor: paper,
+    systemNavigationBarColor: Colors.transparent,
+    systemNavigationBarDividerColor: Colors.transparent,
+    systemStatusBarContrastEnforced: false,
+    systemNavigationBarContrastEnforced: false,
+  );
+}
 
 /// Reading chrome — TOC, settings, progress; fades for immersion.
 class BookReaderChrome extends StatelessWidget {
@@ -45,6 +73,7 @@ class BookReaderChrome extends StatelessWidget {
       ),
       child: SafeArea(
         bottom: false,
+        minimum: EdgeInsets.only(top: MediaQuery.viewPaddingOf(context).top),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(2, 2, 2, 10),
           child: Column(

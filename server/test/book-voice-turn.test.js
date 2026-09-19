@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { buildBookAcpPrompt } from "../src/acp.js";
 import { createBookAskIterator } from "../src/book-voice-turn.js";
-import { buildAudioSsePayload, splitTextForTts } from "../src/spoken-tts.js";
+import { buildAudioSsePayload, isSpeakableTtsText, splitTextForTts } from "../src/spoken-tts.js";
 import { runVoiceTurn } from "../src/voice-call.js";
 
 describe("book spoken prompt", () => {
@@ -37,6 +37,13 @@ describe("book spoken prompt", () => {
     const parts = splitTextForTts(long);
     assert.ok(parts.length > 1);
     for (const p of parts) assert.ok([...p].length <= 320);
+  });
+
+  it("treats punctuation-only text as unreadable for TTS", () => {
+    assert.equal(isSpeakableTtsText("……"), false);
+    assert.equal(isSpeakableTtsText("***"), false);
+    assert.equal(isSpeakableTtsText("你好。"), true);
+    assert.equal(isSpeakableTtsText("OK"), true);
   });
 });
 
@@ -98,6 +105,56 @@ describe("book voice turn pipeline", () => {
     assert.equal(spoken.length, 1);
     assert.match(spoken[0], /让我想一下/);
     assert.match(spoken[0], /主角出场/);
+  });
+
+  it("skips punctuation-only TTS and does not crash on No readable text", async () => {
+    const spoken = [];
+    const ask = async function* () {
+      yield { type: "delta", text: "……" };
+      yield { type: "delta", text: "***" };
+      yield { type: "done", engine: "acp" };
+    };
+    await assert.rejects(
+      () =>
+        runVoiceTurn({
+          question: "q",
+          ask,
+          speakStrategy: "stream",
+          tts: async (text) => {
+            spoken.push(text);
+            const err = new Error("No readable text");
+            throw err;
+          },
+          onAudio: () => {},
+        }),
+      (err) => err.code === "empty_answer",
+    );
+    assert.equal(spoken.length, 0);
+  });
+
+  it("swallows No readable text on a junk clause and still speaks the rest", async () => {
+    const spoken = [];
+    const audio = [];
+    const ask = async function* () {
+      yield { type: "delta", text: "第一句。" };
+      yield { type: "delta", text: "第二句。" };
+      yield { type: "done", engine: "acp" };
+    };
+    await runVoiceTurn({
+      question: "q",
+      ask,
+      speakStrategy: "stream",
+      tts: async (text) => {
+        spoken.push(text);
+        if (text.includes("第一")) {
+          throw new Error("No readable text");
+        }
+        return Buffer.from("x");
+      },
+      onAudio: (buf) => audio.push(buf),
+    });
+    assert.deepEqual(spoken, ["第一句。", "第二句。"]);
+    assert.equal(audio.length, 1);
   });
 
   it("createBookAskIterator wires spoken prompts", () => {

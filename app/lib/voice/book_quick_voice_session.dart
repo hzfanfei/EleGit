@@ -81,6 +81,7 @@ class BookQuickVoiceSession implements QuickVoiceFabHost {
 
   late final HoldToSpeakSession _hold;
   VoiceMedia? _media;
+  bool _disposed = false;
   BookQuickVoicePhase phase = BookQuickVoicePhase.idle;
   String _thinkStatusLabel = '思考中…';
   String? _sessionId;
@@ -192,7 +193,7 @@ class BookQuickVoiceSession implements QuickVoiceFabHost {
   void Function()? _playbackStartForCaption(String captionAtEnqueue) {
     if (captionAtEnqueue.isEmpty) return null;
     return () {
-      if (!_replyActive) return;
+      if (_disposed || !_replyActive) return;
       _voiceCaption = captionAtEnqueue;
       onChanged();
     };
@@ -210,14 +211,15 @@ class BookQuickVoiceSession implements QuickVoiceFabHost {
 
   @override
   Future<void> cancelActiveFlow() async {
+    if (_disposed) return;
+    _replyActive = false;
     api.cancelBookVoiceTurn();
     _resetVoiceFormat();
     _clearCaption();
-    unawaited(_media?.stopPlayback());
-    await _hold.abortHold();
-    _replyActive = false;
     phase = BookQuickVoicePhase.idle;
     onChanged();
+    await _media?.stopPlayback();
+    await _hold.abortHold();
   }
 
   void interruptReply() {
@@ -313,19 +315,21 @@ class BookQuickVoiceSession implements QuickVoiceFabHost {
     } catch (err) {
       onError?.call(err.toString());
     } finally {
-      if (_replyActive) {
+      if (_replyActive && !_disposed) {
         phase = BookQuickVoicePhase.speaking;
         onChanged();
         try {
           await _media?.waitForPlaybackQueue();
         } catch (err) {
-          onError?.call('播放失败：$err');
+          if (!_disposed) onError?.call('播放失败：$err');
         }
       }
       _replyActive = false;
-      _clearCaption();
-      phase = BookQuickVoicePhase.idle;
-      onChanged();
+      if (!_disposed) {
+        _clearCaption();
+        phase = BookQuickVoicePhase.idle;
+        onChanged();
+      }
     }
   }
 
@@ -333,7 +337,13 @@ class BookQuickVoiceSession implements QuickVoiceFabHost {
   Future<void> runVoiceTurnForTest(String question) => _onTranscript(question);
 
   void dispose() {
-    interruptReply();
+    if (_disposed) return;
+    _disposed = true;
+    _replyActive = false;
+    api.cancelBookVoiceTurn();
+    _resetVoiceFormat();
+    _clearCaption();
+    unawaited(_media?.stopPlayback());
     _hold.dispose();
     _media?.dispose();
   }

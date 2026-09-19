@@ -1,5 +1,17 @@
 import { gzipSync } from "node:zlib";
 
+/** Letters or digits in any language — punctuation/markdown-only text crashes Volc TTS. */
+const SPEAKABLE_RE = /[\p{L}\p{N}]/u;
+
+export function isSpeakableTtsText(text) {
+  return SPEAKABLE_RE.test(String(text || ""));
+}
+
+export function isUnreadableTtsError(err) {
+  const msg = String(err?.message || err || "");
+  return /no readable text|no valid text/i.test(msg);
+}
+
 /** Split long spoken text into TTS-sized pieces (prefer sentence boundaries). */
 export function splitTextForTts(text, maxChars = 320) {
   const s = String(text || "").trim();
@@ -29,8 +41,16 @@ export async function speakTextInParts({ text, tts, onCaption, onAudio, signal }
   const parts = splitTextForTts(text);
   for (const part of parts) {
     if (signal?.aborted) break;
+    if (!isSpeakableTtsText(part)) continue;
     onCaption?.(part);
-    const audio = await tts(part, signal);
+    let audio;
+    try {
+      audio = await tts(part, signal);
+    } catch (err) {
+      if (signal?.aborted) break;
+      if (isUnreadableTtsError(err)) continue;
+      throw err;
+    }
     if (signal?.aborted) break;
     if (audio?.length) await onAudio(audio);
   }

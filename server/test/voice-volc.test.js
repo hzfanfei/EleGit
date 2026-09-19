@@ -9,6 +9,7 @@ import {
   volcAsrHeaders,
   volcHeader,
   volcTts,
+  volcTtsV3,
 } from "../src/voice-volc.js";
 
 describe("volc binary frames", () => {
@@ -73,5 +74,32 @@ describe("volc TTS", () => {
       },
     );
     assert.deepEqual(audio, pcm);
+  });
+
+  it("skips unreadable text and does not throw No readable text from v3", async () => {
+    const empty = await volcTtsV3(
+      { ttsResourceId: "seed-tts-2.0", ttsVoice: "zh_female_vv_uranus_bigtts" },
+      "……",
+      undefined,
+      async () => {
+        throw new Error("should not call TTS for punctuation-only text");
+      },
+    );
+    assert.equal(empty.length, 0);
+
+    const audio = await volcTtsV3(
+      { ttsResourceId: "seed-tts-2.0", ttsVoice: "zh_female_vv_uranus_bigtts" },
+      "你好。",
+      undefined,
+      async () => ({
+        ok: true,
+        body: {
+          async *[Symbol.asyncIterator]() {
+            yield Buffer.from(JSON.stringify({ code: 3001, message: "No readable text" }));
+          },
+        },
+      }),
+    );
+    assert.equal(audio.length, 0);
   });
 });

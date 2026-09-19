@@ -22,6 +22,7 @@ class MainActivity : FlutterActivity() {
                     }
                     am.mode = AudioManager.MODE_NORMAL
                     am.isSpeakerphoneOn = false
+                    volumeControlStream = AudioManager.STREAM_MUSIC
                     result.success(null)
                 }
                 else -> result.notImplemented()

@@ -40,6 +40,10 @@ class DeviceVoiceMedia implements VoiceMedia {
 
   bool _playing = false;
 
+  int _pendingPlayCalls = 0;
+
+  Completer<void>? _currentPlay;
+
   int _outRate = 24000;
 
 
@@ -316,6 +320,10 @@ class DeviceVoiceMedia implements VoiceMedia {
 
     if (pcm.isEmpty) return;
 
+    _pendingPlayCalls += 1;
+
+    try {
+
     await _preparePlaybackAudio();
 
     _outRate = sampleRate;
@@ -350,6 +358,12 @@ class DeviceVoiceMedia implements VoiceMedia {
     );
 
     await _drain();
+
+    } finally {
+
+      _pendingPlayCalls -= 1;
+
+    }
 
   }
 
@@ -400,6 +414,8 @@ class DeviceVoiceMedia implements VoiceMedia {
 
     final completer = Completer<void>();
 
+    _currentPlay = completer;
+
     late final StreamSubscription<PlayerState> sub;
 
     sub = _player.onPlayerStateChanged.listen((state) {
@@ -442,6 +458,8 @@ class DeviceVoiceMedia implements VoiceMedia {
 
       await sub.cancel();
 
+      if (identical(_currentPlay, completer)) _currentPlay = null;
+
     }
 
   }
@@ -482,7 +500,7 @@ class DeviceVoiceMedia implements VoiceMedia {
 
   @override
   Future<void> waitForPlaybackQueue() async {
-    while (_playing || _queue.isNotEmpty) {
+    while (_playing || _queue.isNotEmpty || _pendingPlayCalls > 0) {
       if (!_playing && _queue.isNotEmpty) {
         unawaited(_drain());
       }
@@ -496,9 +514,11 @@ class DeviceVoiceMedia implements VoiceMedia {
 
     _queue.clear();
 
-    await _player.stop();
+    final play = _currentPlay;
 
-    _playing = false;
+    if (play != null && !play.isCompleted) play.complete();
+
+    await _player.stop();
 
   }
 

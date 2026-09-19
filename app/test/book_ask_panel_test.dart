@@ -20,6 +20,16 @@ void main() {
     expect(BookAskPanel.estimatedHiddenHeight(media), closeTo(8 + 11 + 34, 0.1));
   });
 
+  test('hidden peek keeps home-indicator height while the keyboard is open', () {
+    const ime = MediaQueryData(
+      size: Size(390, 844),
+      padding: EdgeInsets.only(top: 47),
+      viewPadding: EdgeInsets.only(top: 47, bottom: 34),
+      viewInsets: EdgeInsets.only(bottom: 320),
+    );
+    expect(BookAskPanel.estimatedHiddenHeight(ime), closeTo(8 + 11 + 34, 0.1));
+  });
+
   testWidgets('hidden ask panel is only a bottom peek handle', (tester) async {
     const media = MediaQueryData(size: Size(390, 844), padding: EdgeInsets.only(bottom: 34));
     final sheetSize = ValueNotifier<double>(0);
@@ -117,7 +127,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
 
     await tester.enterText(find.byType(TextField), '墙纸象征什么');
-    await tester.tap(find.byTooltip('发送'));
+    await tester.testTextInput.receiveAction(TextInputAction.send);
     await tester.pump();
 
     expect(find.text('正在连接问书…'), findsWidgets);
@@ -159,7 +169,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        theme: wenxiangTheme(),
+        theme: wenxiangTheme().copyWith(splashFactory: NoSplash.splashFactory),
         home: MediaQuery(
           data: const MediaQueryData(size: Size(390, 844), padding: EdgeInsets.only(bottom: 34)),
           child: Scaffold(

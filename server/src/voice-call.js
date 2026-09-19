@@ -1,4 +1,4 @@
-import { speakTextInParts } from "./spoken-tts.js";
+import { isSpeakableTtsText, isUnreadableTtsError, speakTextInParts } from "./spoken-tts.js";
 
 const SPEAK_PUNCT = /[。！？!?；;\n]/;
 
@@ -86,8 +86,30 @@ export async function runVoiceTurn({
   let engine = "local-progress";
   const speakQueue = [];
   let speaking = Promise.resolve();
+  let speakFail = null;
   let spokenChars = 0;
   let capped = false;
+  let emittedAudio = false;
+
+  const playAudio = async (buf) => {
+    if (!buf?.length) return;
+    emittedAudio = true;
+    await onAudio?.(buf);
+  };
+
+  const speakOne = async (speak) => {
+    if (signal?.aborted || speakFail) return;
+    if (!isSpeakableTtsText(speak)) return;
+    onCaption?.(speak);
+    try {
+      const audio = await tts(speak, signal);
+      if (signal?.aborted || !audio?.length) return;
+      await playAudio(audio);
+    } catch (err) {
+      if (signal?.aborted || isUnreadableTtsError(err)) return;
+      speakFail = err;
+    }
+  };
 
   const capChunk = (piece) => {
     if (!maxSpeakChars || !piece) return piece;
@@ -117,12 +139,8 @@ export async function runVoiceTurn({
     if (!speak) return;
     spokenChars += [...speak].length;
     speakQueue.push(speak);
-    speaking = speaking.then(async () => {
-      if (signal?.aborted) return;
-      onCaption?.(speak);
-      const audio = await tts(speak, signal);
-      if (signal?.aborted || !audio) return;
-      await onAudio?.(audio);
+    speaking = speaking.then(() => speakOne(speak)).catch((err) => {
+      speakFail = speakFail || err;
     });
   };
 
@@ -146,18 +164,18 @@ export async function runVoiceTurn({
   if (speakStrategy !== "final" && !signal?.aborted) flush(true);
   try {
     await speaking;
+    if (speakFail) throw speakFail;
   } catch (err) {
     if (signal?.aborted) return { engine, answer: full, cancelled: true };
     throw err;
   }
   if (speakStrategy === "final" && !signal?.aborted) {
-    const toSpeak = full.trim();
-    if (!String(toSpeak || "").trim()) {
-      const err = new Error("没有可朗读的回答内容");
-      err.code = "empty_answer";
-      throw err;
-    }
-    await speakTextInParts({ text: toSpeak, tts, onCaption, onAudio, signal });
+    await speakTextInParts({ text: full, tts, onCaption, onAudio: playAudio, signal });
+  }
+  if (!signal?.aborted && !emittedAudio) {
+    const err = new Error("没有可朗读的回答内容");
+    err.code = "empty_answer";
+    throw err;
   }
   if (!signal?.aborted) onDone?.({ text: full, engine, final: true });
   return { engine, answer: full, cancelled: Boolean(signal?.aborted) };

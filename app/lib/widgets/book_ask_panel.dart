@@ -51,6 +51,15 @@ BookAskSheetLevel stepAskSheetDown(BookAskSheetLevel level) {
 const kBookAskHalfFraction = 3 / 4;
 const kBookAskFullFraction = 1.0;
 
+double askBottomSafeInset(MediaQueryData media) {
+  final view = media.viewPadding.bottom;
+  return view > 0 ? view : media.padding.bottom;
+}
+
+double _askBottomSafeInset(BuildContext context) {
+  return askBottomSafeInset(MediaQuery.of(context));
+}
+
 /// Space the reader must reserve for the ask sheet.
 /// Ignores a leftover expanded measurement after collapsing to dock.
 double bookReaderAskReserve({
@@ -90,7 +99,6 @@ class BookAskPanel extends StatefulWidget {
     this.expanded,
     this.hidden = false,
     this.fullscreen = false,
-    this.readerImmersive = false,
     this.chapterHint = '',
     this.readingPlace,
     this.memory,
@@ -109,7 +117,6 @@ class BookAskPanel extends StatefulWidget {
   final bool? expanded;
   final bool hidden;
   final bool fullscreen;
-  final bool readerImmersive;
   final String chapterHint;
   final ValueNotifier<BookReadingPlace>? readingPlace;
   final AppMemory? memory;
@@ -140,7 +147,7 @@ class BookAskPanel extends StatefulWidget {
 
   /// Hidden peek: handle + home-indicator inset so the user can pull it back.
   static double estimatedHiddenHeight(MediaQueryData media) {
-    return 8 + 11 + media.padding.bottom;
+    return 8 + 11 + askBottomSafeInset(media);
   }
 
   @override
@@ -726,10 +733,7 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
                         children: [
                           SizedBox(
                             height: widget.fullscreen
-                                ? (widget.readerImmersive
-                                        ? MediaQuery.viewPaddingOf(context).top
-                                        : MediaQuery.paddingOf(context).top) +
-                                    6
+                                ? MediaQuery.viewPaddingOf(context).top + 6
                                 : 10,
                           ),
                           _DragHandle(expanded: true, fullscreen: widget.fullscreen),
@@ -850,7 +854,7 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
                         8 +
                             (MediaQuery.viewInsetsOf(context).bottom > 0
                                 ? 0
-                                : MediaQuery.paddingOf(context).bottom),
+                                : _askBottomSafeInset(context)),
                       ),
                       child: _ComposerIsland(
                         voiceInputMode: _voiceInputMode,

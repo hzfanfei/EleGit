@@ -128,6 +128,7 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
     unawaited(_warmInBackground());
     unawaited(_loadVoiceStatus());
     WidgetsBinding.instance.addObserver(this);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_openBook());
       _scheduleChromeHide();
@@ -421,20 +422,11 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
     return (chapterIndex: chapter, chapterScrollFraction: chapterFrac);
   }
 
-  SystemUiOverlayStyle _systemOverlayStyle() {
-    final dark = _settings.theme == ReaderThemeMode.dark;
-    final base = dark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark;
-    return base.copyWith(
-      statusBarColor: Colors.transparent,
-      systemNavigationBarColor: Colors.transparent,
-      systemNavigationBarDividerColor: Colors.transparent,
-    );
-  }
+  SystemUiOverlayStyle _systemOverlayStyle() => bookReaderSystemOverlayStyle(_settings);
 
   void _applySystemChrome() {
-    // Never hide/show the status-bar overlay on this page. OEM hide animation
-    // is the sliding white strip when collapsing ask + IME.
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    // Overlay style only. Re-entering edgeToEdge on chrome hide / IME
+    // collapse is the OEM sliding white status-bar animation.
     SystemChrome.setSystemUIOverlayStyle(_systemOverlayStyle());
   }
 
@@ -572,6 +564,7 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
 
   void _showSettings() {
     _chromeHide?.cancel();
+    FocusManager.instance.primaryFocus?.unfocus();
     setState(() => _chromeVisible = true);
     _applySystemChrome();
     showModalBottomSheet<void>(
@@ -589,6 +582,7 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
     final manifest = _manifest;
     if (manifest == null) return;
     _chromeHide?.cancel();
+    FocusManager.instance.primaryFocus?.unfocus();
     setState(() => _chromeVisible = true);
     _applySystemChrome();
     showModalBottomSheet<void>(
@@ -671,8 +665,10 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
 
     final manifest = _manifest;
     final media = MediaQuery.of(context);
-    final topContentPad =
-        (_chromeVisible ? media.padding.top : 0) + kReaderContentTopInset;
+    final topContentPad = bookReaderTopContentPad(
+      chromeVisible: _chromeVisible,
+      media: media,
+    );
     final styleSheet = bookReaderMarkdownStyle(
       theme: Theme.of(context),
       palette: palette,
@@ -691,7 +687,6 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
           builder: (context, sheetFraction, _) {
             final h = media.size.height;
             final keyboard = MediaQuery.viewInsetsOf(context).bottom;
-            final immersive = !_chromeVisible;
             final askExpanded = _askShellLevel == BookAskSheetLevel.half ||
                 _askShellLevel == BookAskSheetLevel.full;
             final layoutHeight = (h - keyboard).clamp(0.0, h);
@@ -836,26 +831,27 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
                     ),
                   ),
                 ),
-                Positioned(
-                  left: 8,
-                  right: 0,
-                  bottom: readerBottom,
-                  child: Align(
-                    alignment: Alignment.bottomRight,
-                    child: BookQuickVoiceFab(
-                      session: _quickVoice,
-                      palette: palette,
-                      enabled: _voiceReady,
+                if (h - readerBottom >= 160)
+                  Positioned(
+                    left: 8,
+                    right: 0,
+                    bottom: readerBottom,
+                    child: Align(
+                      alignment: Alignment.bottomRight,
+                      child: BookQuickVoiceFab(
+                        session: _quickVoice,
+                        palette: palette,
+                        enabled: _voiceReady,
+                      ),
                     ),
                   ),
-                ),
-                if (keyboard > 0 && askExpanded)
+                if (keyboard > 0)
                   Positioned(
                     left: 0,
                     right: 0,
                     bottom: 0,
                     height: keyboard,
-                    child: const ColoredBox(color: Wx.bg),
+                    child: ColoredBox(color: askExpanded ? Wx.bg : palette.paper),
                   ),
                 Positioned(
                   left: 0,
@@ -875,7 +871,6 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
                       expanded: _askLevel == BookAskSheetLevel.half ||
                           _askLevel == BookAskSheetLevel.full,
                       fullscreen: _askLevel == BookAskSheetLevel.full,
-                      readerImmersive: immersive,
                       chapterHint: _chapterHint,
                       readingPlace: _readingPlace,
                       memory: widget.memory,

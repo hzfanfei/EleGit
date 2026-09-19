@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { gunzipSync, gzipSync } from "node:zlib";
 import { WebSocket } from "ws";
+import { isSpeakableTtsText, isUnreadableTtsError } from "./spoken-tts.js";
 
 export function volcHeader({ type, flags = 0, serialization = 0, compression = 0 }) {
   const buf = Buffer.alloc(4);
@@ -227,7 +228,7 @@ export function extractVolcTtsJsonObjects(buffer) {
 
 export async function volcTtsV3(volc, text, signal, fetchImpl = fetch) {
   const spoken = String(text || "").trim();
-  if (!spoken) return Buffer.alloc(0);
+  if (!isSpeakableTtsText(spoken)) return Buffer.alloc(0);
   const url =
     volc.ttsUrl && volc.ttsUrl.includes("/v3/")
       ? volc.ttsUrl
@@ -267,6 +268,7 @@ export async function volcTtsV3(volc, text, signal, fetchImpl = fetch) {
     pending = parsed.rest;
     for (const event of parsed.events) {
       if (event?.code && event.code !== 0 && event.code !== 20000000) {
+        if (isUnreadableTtsError({ message: event.message })) continue;
         const err = new Error(event.message || "tts v3 stream error");
         err.code = event.code;
         throw err;
@@ -277,6 +279,12 @@ export async function volcTtsV3(volc, text, signal, fetchImpl = fetch) {
   if (pending.trim()) {
     const parsed = extractVolcTtsJsonObjects(pending);
     for (const event of parsed.events) {
+      if (event?.code && event.code !== 0 && event.code !== 20000000) {
+        if (isUnreadableTtsError({ message: event.message })) continue;
+        const err = new Error(event.message || "tts v3 stream error");
+        err.code = event.code;
+        throw err;
+      }
       if (event?.data) chunks.push(Buffer.from(event.data, "base64"));
     }
   }
@@ -288,7 +296,7 @@ export async function volcTts(volc, text, signal, fetchImpl = fetch) {
     return volcTtsV3(volc, text, signal, fetchImpl);
   }
   const spoken = String(text || "").trim();
-  if (!spoken) return Buffer.alloc(0);
+  if (!isSpeakableTtsText(spoken)) return Buffer.alloc(0);
   const body = {
     app: {
       appid: volc.appId || "",
