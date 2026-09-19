@@ -37,7 +37,6 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('问象'), findsOneWidget);
-    expect(find.byTooltip('设置'), findsOneWidget);
     expect(find.byType(AppBar), findsNothing);
     expect(find.text('demo'), findsOneWidget);
     expect(find.textContaining('octo'), findsWidgets);
@@ -112,7 +111,7 @@ void main() {
     expect(find.textContaining('出了点问题'), findsNothing);
   });
 
-  testWidgets('settings button opens the settings callback', (tester) async {
+  testWidgets('home brand opens settings and has no extra settings button', (tester) async {
     var opened = 0;
     await tester.pumpWidget(
       MaterialApp(
@@ -128,6 +127,7 @@ void main() {
     );
     await tester.pump();
     await tester.pumpAndSettle();
+    expect(find.text('设置'), findsNothing);
     await tester.tap(find.byTooltip('设置'));
     expect(opened, 1);
   });

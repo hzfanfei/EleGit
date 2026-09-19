@@ -11,14 +11,12 @@ class BooksPage extends StatefulWidget {
     required this.onBack,
     required this.onRead,
     this.opening = false,
-    this.onOpenSettings,
   });
 
   final WenxiangApi api;
   final VoidCallback onBack;
   final Future<void> Function(BookItem book, {bool expandAsk}) onRead;
   final bool opening;
-  final VoidCallback? onOpenSettings;
 
   @override
   State<BooksPage> createState() => _BooksPageState();
@@ -71,12 +69,6 @@ class _BooksPageState extends State<BooksPage> {
             onBack: widget.onBack,
             backTooltip: '返回问仓',
             trailing: [
-              if (widget.onOpenSettings != null)
-                IconButton(
-                  tooltip: '设置',
-                  onPressed: widget.onOpenSettings,
-                  icon: const Icon(Icons.settings_outlined, size: 20),
-                ),
               IconButton(
                 tooltip: '刷新',
                 onPressed: _loading ? null : _load,

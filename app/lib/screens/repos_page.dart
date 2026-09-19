@@ -219,14 +219,8 @@ class ReposPageState extends State<ReposPage> {
             showMark: true,
             title: '问象',
             subtitle: subtitle,
+            onBrandTap: blocked ? null : widget.onOpenSettings,
             trailing: [
-              Tooltip(
-                message: '设置',
-                child: TextButton(
-                  onPressed: blocked ? null : widget.onOpenSettings,
-                  child: const Text('设置'),
-                ),
-              ),
               if (widget.onOpenBooks != null)
                 TextButton(
                   onPressed: blocked ? null : widget.onOpenBooks,

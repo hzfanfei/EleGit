@@ -252,7 +252,6 @@ class ShellPageState extends State<ShellPage> {
             onBack: _backFromBooks,
             onRead: _openBookRead,
             opening: _bookOpening,
-            onOpenSettings: _openSettings,
           )),
         ),
       if (_step == AppStep.bookRead && _book != null)

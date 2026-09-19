@@ -63,6 +63,8 @@ class WxPageHeader extends StatelessWidget {
     this.backEnabled = true,
     this.backTooltip = '返回',
     this.showMark = false,
+    this.onBrandTap,
+    this.brandTooltip = '设置',
     required this.title,
     this.subtitle,
     this.trailing,
@@ -72,6 +74,8 @@ class WxPageHeader extends StatelessWidget {
   final bool backEnabled;
   final String backTooltip;
   final bool showMark;
+  final VoidCallback? onBrandTap;
+  final String brandTooltip;
   final String title;
   final String? subtitle;
   final List<Widget>? trailing;
@@ -95,34 +99,78 @@ class WxPageHeader extends StatelessWidget {
                 )
               else if (!showMark)
                 const SizedBox(width: Wx.inset),
-              if (showMark)
-                Padding(
-                  padding: EdgeInsets.only(left: onBack == null ? Wx.inset : 0, right: 10),
-                  child: const WxMark(size: 22),
-                ),
               Expanded(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    if (hasSubtitle)
-                      Text(
-                        subtitle!,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.labelSmall,
-                      ),
-                  ],
+                child: _BrandTitle(
+                  showMark: showMark,
+                  padMark: onBack == null,
+                  title: title,
+                  subtitle: hasSubtitle ? subtitle : null,
+                  onTap: onBrandTap,
+                  tooltip: brandTooltip,
                 ),
               ),
               ...?trailing,
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _BrandTitle extends StatelessWidget {
+  const _BrandTitle({
+    required this.showMark,
+    required this.padMark,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+    required this.tooltip,
+  });
+
+  final bool showMark;
+  final bool padMark;
+  final String title;
+  final String? subtitle;
+  final VoidCallback? onTap;
+  final String tooltip;
+
+  @override
+  Widget build(BuildContext context) {
+    final row = Row(
+      children: [
+        if (showMark)
+          Padding(
+            padding: EdgeInsets.only(left: padMark ? Wx.inset : 0, right: 10),
+            child: const WxMark(size: 22),
+          ),
+        Expanded(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              if (subtitle != null && subtitle!.isNotEmpty)
+                Text(
+                  subtitle!,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelSmall,
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+    if (onTap == null) return row;
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        child: row,
       ),
     );
   }
