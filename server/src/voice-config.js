@@ -53,9 +53,17 @@ function readyVolc({ appId, accessToken, apiKey, env }) {
       apiKey,
       asrResourceId: trim(env.VOLC_ASR_RESOURCE_ID) || "volc.bigasr.sauc.duration",
       asrUrl: trim(env.VOLC_ASR_URL) || "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel",
-      ttsUrl: trim(env.VOLC_TTS_URL) || "https://openspeech.bytedance.com/api/v1/tts",
+      ttsResourceId: trim(env.VOLC_TTS_RESOURCE_ID),
+      ttsModel: trim(env.VOLC_TTS_MODEL),
+      ttsUrl:
+        trim(env.VOLC_TTS_URL) ||
+        (trim(env.VOLC_TTS_RESOURCE_ID)
+          ? "https://openspeech.bytedance.com/api/v3/tts/unidirectional"
+          : "https://openspeech.bytedance.com/api/v1/tts"),
       ttsCluster: trim(env.VOLC_TTS_CLUSTER) || "volcano_tts",
       ttsVoice: trim(env.VOLC_TTS_VOICE) || "zh_female_vv_uranus_bigtts",
+      /** v3 TTS: pcm (SSE gzip) or mp3 — set VOLC_TTS_FORMAT=mp3 to opt in */
+      ttsFormat: trim(env.VOLC_TTS_FORMAT) || "pcm",
     },
     openai: null,
   };

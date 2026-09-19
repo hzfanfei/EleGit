@@ -16,6 +16,13 @@ String humanizeSttEvent({String? code, String? hint}) {
       return '语音识别暂时不可用。请稍后重试。';
     case 'empty':
       return '没听清，请按住再说一次。';
+    case 'empty_answer':
+      return '没有可朗读的内容，请换个问法再试。';
+    case 'tts_failed':
+    case 'turn_failed':
+      return hint != null && _readableChinese(hint.trim())
+          ? hint.trim()
+          : '快问快答失败，请稍后重试。';
     default:
       return '识别失败。请稍后重试。';
   }

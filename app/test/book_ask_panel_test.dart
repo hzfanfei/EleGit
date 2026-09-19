@@ -20,33 +20,38 @@ void main() {
     expect(BookAskPanel.estimatedHiddenHeight(media), closeTo(8 + 11 + 34, 0.1));
   });
 
-  testWidgets('collapsed ask panel has no leftover filler below the input', (tester) async {
-    final sheetSize = ValueNotifier<double>(0.16);
+  testWidgets('hidden ask panel is only a bottom peek handle', (tester) async {
+    const media = MediaQueryData(size: Size(390, 844), padding: EdgeInsets.only(bottom: 34));
+    final sheetSize = ValueNotifier<double>(0);
     addTearDown(sheetSize.dispose);
 
     await tester.pumpWidget(
       MaterialApp(
         theme: wenxiangTheme(),
         home: MediaQuery(
-          data: const MediaQueryData(size: Size(390, 844), padding: EdgeInsets.only(bottom: 34)),
+          data: media,
           child: Scaffold(
             body: Align(
               alignment: Alignment.bottomCenter,
-              child: BookAskPanel(
-                api: FakeWenxiangApi(),
-                book: BookItem(
-                  id: 'demo',
-                  filename: 'demo.epub',
-                  title: '演示书',
-                  author: '作者',
-                  language: 'zh',
-                  size: 1000,
-                  modifiedAt: '2026-09-15T00:00:00Z',
-                  hasCover: false,
+              child: SizedBox(
+                height: BookAskPanel.estimatedHiddenHeight(media),
+                child: BookAskPanel(
+                  api: FakeWenxiangApi(),
+                  book: BookItem(
+                    id: 'demo',
+                    filename: 'demo.epub',
+                    title: '演示书',
+                    author: '作者',
+                    language: 'zh',
+                    size: 1000,
+                    modifiedAt: '2026-09-15T00:00:00Z',
+                    hasCover: false,
+                  ),
+                  scrollController: ScrollController(),
+                  sheetSize: sheetSize,
+                  hidden: true,
+                  expanded: false,
                 ),
-                scrollController: ScrollController(),
-                sheetSize: sheetSize,
-                expanded: false,
               ),
             ),
           ),
@@ -54,18 +59,11 @@ void main() {
       ),
     );
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 50));
 
     final panel = tester.getSize(find.byType(BookAskPanel));
-    expect(panel.height, lessThan(200));
-    expect(panel.height, closeTo(BookAskPanel.estimatedDockHeight(
-      const MediaQueryData(size: Size(390, 844), padding: EdgeInsets.only(bottom: 34)),
-    ), 16));
-    expect(find.text('问这段内容…'), findsOneWidget);
-    expect(find.byType(CustomScrollView), findsNothing);
-    final field = tester.getRect(find.byType(TextField));
-    final panelRect = tester.getRect(find.byType(BookAskPanel));
-    expect(panelRect.bottom - field.bottom, lessThan(55));
+    expect(panel.height, closeTo(BookAskPanel.estimatedHiddenHeight(media), 1));
+    expect(find.text('问这段内容…'), findsNothing);
+    expect(find.byType(TextField), findsNothing);
   });
 
   testWidgets('waiting ask shows intermediate book phases before the first token', (tester) async {

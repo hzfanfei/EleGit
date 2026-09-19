@@ -4,7 +4,12 @@ abstract class VoiceMedia {
   Future<bool> requestMic();
   Stream<Uint8List> startMic();
   Future<void> stopMic();
-  Future<void> playPcm(Uint8List pcm, {int sampleRate = 24000});
+  Future<void> playPcm(
+    Uint8List pcm, {
+    int sampleRate = 24000,
+    String format = 'pcm',
+    String codec = 'raw',
+  });
   Future<void> stopPlayback();
   void dispose();
 }
@@ -37,7 +42,12 @@ class FakeVoiceMedia implements VoiceMedia {
   }
 
   @override
-  Future<void> playPcm(Uint8List pcm, {int sampleRate = 24000}) async {
+  Future<void> playPcm(
+    Uint8List pcm, {
+    int sampleRate = 24000,
+    String format = 'pcm',
+    String codec = 'raw',
+  }) async {
     played.add(pcm);
   }
 

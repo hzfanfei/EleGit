@@ -12,7 +12,7 @@ import 'support/fake_api.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('reader dock hugs the input and leaves no empty sheet band', (tester) async {
+  testWidgets('reader ask sheet starts hidden with a bottom peek handle', (tester) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -56,19 +56,27 @@ void main() {
     expect(find.text('正文。'), findsOneWidget);
     expect(find.byType(BookAskPanel), findsOneWidget);
 
-    final panel = tester.getRect(find.byType(BookAskPanel));
-    expect(panel.height, lessThan(200));
-    expect(panel.bottom, closeTo(844, 0.5));
+    final hiddenPanel = tester.getRect(find.byType(BookAskPanel));
+    final hiddenH = BookAskPanel.estimatedHiddenHeight(
+      const MediaQueryData(size: Size(390, 844), padding: EdgeInsets.only(bottom: 34)),
+    );
+    expect(hiddenPanel.height, closeTo(hiddenH, 1));
+    expect(hiddenPanel.bottom, closeTo(844, 0.5));
+    expect(find.text('问这段内容…'), findsNothing);
 
-    final field = tester.getRect(find.byType(TextField));
-    expect(panel.bottom - field.bottom, lessThan(55));
-    expect(panel.top, greaterThan(844 - 200));
+    await tester.tapAt(Offset(hiddenPanel.center.dx, hiddenPanel.top + 12));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 320));
+
+    expect(find.text('问这段内容…'), findsOneWidget);
+    final expandedPanel = tester.getRect(find.byType(BookAskPanel));
+    expect(expandedPanel.height, closeTo(844 * kBookAskHalfFraction, 8));
   });
 
   test('collapse reserve ignores a stale half-sheet measurement', () {
     const media = MediaQueryData(size: Size(390, 844), padding: EdgeInsets.only(bottom: 34));
     final dock = BookAskPanel.estimatedDockHeight(media);
-    final staleHalf = 844 * 0.45;
+    final staleHalf = 844 * kBookAskHalfFraction;
 
     expect(
       bookReaderAskReserve(
@@ -86,7 +94,7 @@ void main() {
         estimatedDockHeight: dock,
         measuredHeight: 0,
       ),
-      844 * 0.45,
+      844 * kBookAskHalfFraction,
     );
     expect(
       bookReaderAskReserve(
@@ -151,37 +159,30 @@ void main() {
     await tester.pump(const Duration(milliseconds: 80));
     await tester.pump(const Duration(milliseconds: 300));
 
+    final expandedPanel = tester.getRect(find.byType(BookAskPanel));
+    expect(expandedPanel.height, closeTo(844 * kBookAskHalfFraction, 12));
+
     final expandedBook = tester.getRect(find.byKey(const Key('book-reader-body')));
     expect(expandedBook.bottom, lessThan(844 - 250));
 
     final panel = tester.getRect(find.byType(BookAskPanel));
     await tester.tapAt(Offset(panel.center.dx, panel.top + 18));
     await tester.pump();
-
-    final collapsedBook = tester.getRect(find.byKey(const Key('book-reader-body')));
-    expect(collapsedBook.bottom, greaterThan(844 - 220));
-
-    final dockedPanel = tester.getRect(find.byType(BookAskPanel));
-    await tester.flingFrom(
-      Offset(dockedPanel.center.dx, dockedPanel.top + 10),
-      const Offset(0, 80),
-      800,
-    );
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 80));
+    await tester.pump(const Duration(milliseconds: 320));
 
     final hiddenBook = tester.getRect(find.byKey(const Key('book-reader-body')));
-    expect(hiddenBook.bottom, greaterThan(collapsedBook.bottom + 20));
+    expect(hiddenBook.bottom, greaterThan(expandedBook.bottom + 20));
     expect(find.text('问这段内容…'), findsNothing);
 
-    final hiddenPanel = tester.getRect(find.byType(BookAskPanel));
-    await tester.tapAt(Offset(hiddenPanel.center.dx, hiddenPanel.top + 12));
+    final peek = tester.getRect(find.byType(BookAskPanel));
+    await tester.tapAt(Offset(peek.center.dx, peek.top + 12));
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 80));
+    await tester.pump(const Duration(milliseconds: 320));
 
     expect(find.text('问这段内容…'), findsOneWidget);
-    final restoredBook = tester.getRect(find.byKey(const Key('book-reader-body')));
-    expect(restoredBook.bottom, lessThan(hiddenBook.bottom - 20));
+    final halfPanel = tester.getRect(find.byType(BookAskPanel));
+    expect(halfPanel.height, closeTo(844 * kBookAskHalfFraction, 12));
   });
 
   testWidgets('opening a book stays on the paper, not a blank 正在打开 page', (tester) async {

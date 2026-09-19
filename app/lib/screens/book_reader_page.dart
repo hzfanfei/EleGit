@@ -16,7 +16,9 @@ import '../theme.dart';
 import '../utils/book_markdown_markup.dart';
 import '../utils/book_reader_markdown_style.dart';
 import '../utils/book_reader_prefetch.dart';
+import '../voice/book_quick_voice_session.dart';
 import '../widgets/book_ask_panel.dart';
+import '../widgets/book_quick_voice_fab.dart';
 import '../widgets/book_reader_chrome.dart';
 import '../widgets/book_reader_navigation.dart';
 import '../widgets/book_reader_settings_sheet.dart';
@@ -59,12 +61,14 @@ class _BookReaderPageState extends State<BookReaderPage> {
   bool _chromeVisible = true;
   Timer? _chromeHide;
   Timer? _saveDebounce;
-  final _sheetSize = ValueNotifier<double>(0.16);
+  final _sheetSize = ValueNotifier<double>(0);
   final _readingPlace = ValueNotifier(const BookReadingPlace());
   final _scrollController = ScrollController();
   final _askScrollController = ScrollController();
   final _askBoxKey = GlobalKey();
-  BookAskSheetLevel _askLevel = BookAskSheetLevel.dock;
+  final _askPanelKey = GlobalKey<BookAskPanelState>();
+  BookAskSheetLevel _askLevel = BookAskSheetLevel.hidden;
+  BookAskSheetLevel _askShellLevel = BookAskSheetLevel.hidden;
   double _askHeight = 0;
   BookReadingProgress? _progress;
   BookReaderPrefs? _readerPrefs;
@@ -74,20 +78,55 @@ class _BookReaderPageState extends State<BookReaderPage> {
   String _openingHint = '正在读取目录…';
   double _bookProgress = 0;
   double _scrollFraction = 0;
+  late final BookQuickVoiceSession _quickVoice;
+  bool _voiceReady = false;
 
-  static const _dockSheet = 0.16;
   static const _askExpandedSheet = kBookAskHalfFraction;
   static const _askFullSheet = kBookAskFullFraction;
 
   @override
   void initState() {
     super.initState();
-    _askLevel = widget.expandAsk ? BookAskSheetLevel.half : BookAskSheetLevel.dock;
+    _askLevel = widget.expandAsk ? BookAskSheetLevel.half : BookAskSheetLevel.hidden;
+    _askShellLevel = _askLevel;
     _sheetSize.value = _fractionForAskLevel(_askLevel);
     _scrollController.addListener(_onScroll);
     _hydratePrefs(widget.prefs);
     _chapterHint = widget.book.author.isEmpty ? '阅读' : widget.book.author;
+    _quickVoice = BookQuickVoiceSession(
+      api: widget.api,
+      bookId: widget.book.id,
+      chapterHint: _chapterHint,
+      readingPlace: () => _readingPlace.value,
+      historyForVoice: (place) =>
+          _askPanelKey.currentState?.chatHistoryForVoice(place) ?? const [],
+      onTurnRecorded: ({
+        required place,
+        required question,
+        required answer,
+        engine,
+        sessionId,
+      }) async {
+        await _askPanelKey.currentState?.recordVoiceTurn(
+          place: place,
+          question: question,
+          answer: answer,
+          engine: engine,
+          sessionId: sessionId,
+        );
+      },
+      onChanged: () {
+        if (mounted) setState(() {});
+      },
+      onError: (message) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(message)),
+        );
+      },
+    );
     unawaited(_warmInBackground());
+    unawaited(_loadVoiceStatus());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_openBook());
       _scheduleChromeHide();
@@ -98,6 +137,17 @@ class _BookReaderPageState extends State<BookReaderPage> {
     try {
       await widget.api.warmBookSession(widget.book.id);
     } catch (_) {}
+  }
+
+  Future<void> _loadVoiceStatus() async {
+    try {
+      final status = await widget.api.status();
+      if (!mounted) return;
+      setState(() => _voiceReady = status.voiceReady);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _voiceReady = false);
+    }
   }
 
   void _hydratePrefs(SharedPreferences? prefs) {
@@ -180,6 +230,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
     if (manifest == null || index < 0 || index >= manifest.chapters.length) return;
     final title = manifest.chapters[index].title.trim();
     _chapterHint = title.isEmpty ? '第 ${index + 1} 章' : title;
+    _quickVoice.chapterHint = _chapterHint;
   }
 
   Future<String?> _fetchChapterMarkdown(int index) async {
@@ -448,7 +499,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
       case BookAskSheetLevel.hidden:
         return 0;
       case BookAskSheetLevel.dock:
-        return _dockSheet;
+        return 0;
       case BookAskSheetLevel.half:
         return _askExpandedSheet;
       case BookAskSheetLevel.full:
@@ -456,15 +507,29 @@ class _BookReaderPageState extends State<BookReaderPage> {
     }
   }
 
+  bool _askLevelIsPeek(BookAskSheetLevel level) =>
+      level == BookAskSheetLevel.hidden || level == BookAskSheetLevel.dock;
+
   Future<void> _setAskLevel(BookAskSheetLevel level) async {
     if (_askLevel == level) return;
     HapticFeedback.selectionClick();
     if (!mounted) return;
+    final deferShellShrink =
+        _askLevelIsPeek(level) && !_askLevelIsPeek(_askLevel);
     setState(() {
       _askLevel = level;
       _askHeight = 0;
       _sheetSize.value = _fractionForAskLevel(level);
+      if (!deferShellShrink) {
+        _askShellLevel = level;
+      }
     });
+    if (deferShellShrink) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || _askLevel != level) return;
+        setState(() => _askShellLevel = level);
+      });
+    }
   }
 
   Future<void> _collapseAskSheet() => _setAskLevel(stepAskSheetDown(_askLevel));
@@ -551,6 +616,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
       overlays: SystemUiOverlay.values,
     );
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.light);
+    _quickVoice.dispose();
     _chromeHide?.cancel();
     _saveDebounce?.cancel();
     _scrollController.dispose();
@@ -561,8 +627,8 @@ class _BookReaderPageState extends State<BookReaderPage> {
   }
 
   double _scrimOpacity(double size) {
-    if (size <= _dockSheet) return 0;
-    final t = (size - _dockSheet) / (_askFullSheet - _dockSheet);
+    if (size <= 0.08) return 0;
+    final t = (size / _askFullSheet).clamp(0.0, 1.0);
     return (t * 0.42).clamp(0.0, 0.42);
   }
 
@@ -615,7 +681,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
             final keyboard = MediaQuery.viewInsetsOf(context).bottom;
             final fraction = sheetFraction.clamp(0.0, _askFullSheet);
             final panelH = bookReaderAskReserve(
-              level: _askLevel,
+              level: _askShellLevel,
               viewportHeight: h,
               estimatedDockHeight: BookAskPanel.estimatedDockHeight(media),
               estimatedHiddenHeight: BookAskPanel.estimatedHiddenHeight(media),
@@ -747,33 +813,40 @@ class _BookReaderPageState extends State<BookReaderPage> {
                     ),
                   ),
                 ),
+                Positioned(
+                  right: 0,
+                  bottom: readerBottom,
+                  child: BookQuickVoiceFab(
+                    session: _quickVoice,
+                    palette: palette,
+                    enabled: _voiceReady,
+                  ),
+                ),
                 Align(
                   alignment: Alignment.bottomCenter,
                   child: Padding(
                     padding: EdgeInsets.only(bottom: keyboard),
                     child: KeyedSubtree(
                       key: _askBoxKey,
-                      child: AnimatedSize(
-                        duration: const Duration(milliseconds: 280),
-                        curve: Curves.easeOutCubic,
-                        alignment: Alignment.bottomCenter,
-                        child: SizedBox(
+                      child: SizedBox(
                           width: double.infinity,
-                          height: switch (_askLevel) {
-                            BookAskSheetLevel.hidden =>
+                          height: switch (_askShellLevel) {
+                            BookAskSheetLevel.hidden ||
+                            BookAskSheetLevel.dock =>
                               BookAskPanel.estimatedHiddenHeight(media),
-                            BookAskSheetLevel.dock => null,
                             BookAskSheetLevel.half || BookAskSheetLevel.full =>
-                              h * _fractionForAskLevel(_askLevel),
+                              h * _fractionForAskLevel(_askShellLevel),
                           },
                           child: BookAskPanel(
+                            key: _askPanelKey,
                             api: widget.api,
                             book: widget.book,
                             scrollController: _askScrollController,
                             sheetSize: _sheetSize,
-                            hidden: _askLevel == BookAskSheetLevel.hidden,
-                            expanded: _askLevel != BookAskSheetLevel.dock &&
-                                _askLevel != BookAskSheetLevel.hidden,
+                            hidden: _askLevel == BookAskSheetLevel.hidden ||
+                                _askLevel == BookAskSheetLevel.dock,
+                            expanded: _askLevel == BookAskSheetLevel.half ||
+                                _askLevel == BookAskSheetLevel.full,
                             fullscreen: _askLevel == BookAskSheetLevel.full,
                             chapterHint: _chapterHint,
                             readingPlace: _readingPlace,
@@ -784,7 +857,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
                             onRequestCollapse: () => unawaited(_collapseAskSheet()),
                           ),
                         ),
-                      ),
                     ),
                   ),
                 ),
@@ -814,11 +886,12 @@ class _OpeningSkeleton extends StatelessWidget {
     final bar = palette.ink.withValues(alpha: 0.08);
     return Padding(
       padding: padding,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
             style: TextStyle(
               fontSize: 22,
               fontWeight: FontWeight.w700,
@@ -846,7 +919,8 @@ class _OpeningSkeleton extends StatelessWidget {
                 ),
               ),
             ),
-        ],
+          ],
+        ),
       ),
     );
   }

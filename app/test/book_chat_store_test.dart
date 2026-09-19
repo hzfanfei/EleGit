@@ -62,6 +62,36 @@ void main() {
     expect(store.anchors.containsKey(id), isFalse);
   });
 
+  test('ChatMessage via voice round-trips in store json', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final memory = AppMemory(prefs);
+    const bookId = 'voice_book';
+    const place = BookReadingPlace(chapter: '第三章');
+    final id = bookAnchorId(place);
+    final store = BookChatStore(
+      sessionId: 's1',
+      activeAnchorId: id,
+      anchors: {
+        id: BookAnchorChat(
+          id: id,
+          place: place,
+          updatedAt: '2026-01-01T00:00:00Z',
+          messages: [
+            ChatMessage(role: 'user', content: '这章啥意思', via: 'voice'),
+            ChatMessage(role: 'assistant', content: '讲经理人输出', via: 'voice'),
+          ],
+        ),
+      },
+    );
+    await memory.saveBookChats(bookId, store);
+    final loaded = memory.loadBookChats(bookId);
+    final msgs = loaded.messagesForAnchor(id);
+    expect(msgs.length, 2);
+    expect(msgs.first.via, 'voice');
+    expect(msgs.last.content, contains('经理人'));
+  });
+
   test('listAllBookQaTurns spans chapters', () {
     var store = BookChatStore.empty();
     store = store.upsertAnchorMessages(

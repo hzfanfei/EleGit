@@ -3,6 +3,7 @@ import cors from "cors";
 import { corsOptions } from "./cors.js";
 import { loadLocalEnv } from "./env.js";
 import { buildBookAcpPrompt, createSessionStore, detectCursorEngine } from "./acp.js";
+import { handleBookVoiceTurn } from "./book-voice-turn.js";
 import { streamAnswer, synthesizeBookAnswer } from "./ask.js";
 import { openSse, writeSse } from "./sse.js";
 import {
@@ -630,6 +631,14 @@ app.delete("/v1/books/:bookId/sessions/:id", async (req, res) => {
   try {
     const owner = bookSessionOwner();
     res.json(await bookSessions.close(owner, req.params.bookId, req.params.id));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.post("/v1/books/voice-turn", async (req, res) => {
+  try {
+    await handleBookVoiceTurn(req, res, { store, bookSessions });
   } catch (err) {
     sendError(res, err);
   }

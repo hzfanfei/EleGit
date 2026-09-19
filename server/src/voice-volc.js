@@ -182,7 +182,109 @@ export function createVolcAsr({
   };
 }
 
+export function volcTtsHeaders(volc) {
+  const headers = {
+    "Content-Type": "application/json",
+    "X-Api-Resource-Id": volc.ttsResourceId || "seed-tts-2.0",
+    "X-Api-Request-Id": randomUUID(),
+  };
+  if (volc.apiKey) headers["X-Api-Key"] = volc.apiKey;
+  if (volc.appId) headers["X-Api-App-Key"] = volc.appId;
+  if (volc.accessToken) headers["X-Api-Access-Key"] = volc.accessToken;
+  return headers;
+}
+
+export function extractVolcTtsJsonObjects(buffer) {
+  const events = [];
+  let rest = String(buffer || "");
+  while (rest.length) {
+    rest = rest.trimStart();
+    if (!rest.startsWith("{")) break;
+    let depth = 0;
+    let end = -1;
+    for (let i = 0; i < rest.length; i += 1) {
+      const ch = rest[i];
+      if (ch === "{") depth += 1;
+      else if (ch === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          end = i + 1;
+          break;
+        }
+      }
+    }
+    if (end <= 0) break;
+    const slice = rest.slice(0, end);
+    rest = rest.slice(end);
+    try {
+      events.push(JSON.parse(slice));
+    } catch {
+      break;
+    }
+  }
+  return { events, rest };
+}
+
+export async function volcTtsV3(volc, text, signal, fetchImpl = fetch) {
+  const spoken = String(text || "").trim();
+  if (!spoken) return Buffer.alloc(0);
+  const url =
+    volc.ttsUrl && volc.ttsUrl.includes("/v3/")
+      ? volc.ttsUrl
+      : "https://openspeech.bytedance.com/api/v3/tts/unidirectional";
+  const reqParams = {
+    text: spoken,
+    speaker: volc.ttsVoice || "zh_female_vv_uranus_bigtts",
+    audio_params: {
+      format: volc.ttsFormat === "pcm" ? "pcm" : "mp3",
+      sample_rate: 24000,
+    },
+  };
+  if (volc.ttsModel) reqParams.model = volc.ttsModel;
+  const res = await fetchImpl(url, {
+    method: "POST",
+    headers: volcTtsHeaders(volc),
+    body: JSON.stringify({
+      user: { uid: "wenxiang" },
+      req_params: reqParams,
+    }),
+    signal,
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    const err = new Error(`tts v3 failed (${res.status})`);
+    err.status = res.status;
+    err.detail = detail.slice(0, 500);
+    throw err;
+  }
+  const chunks = [];
+  let pending = "";
+  for await (const piece of res.body) {
+    pending += Buffer.from(piece).toString("utf8");
+    const parsed = extractVolcTtsJsonObjects(pending);
+    pending = parsed.rest;
+    for (const event of parsed.events) {
+      if (event?.code && event.code !== 0 && event.code !== 20000000) {
+        const err = new Error(event.message || "tts v3 stream error");
+        err.code = event.code;
+        throw err;
+      }
+      if (event?.data) chunks.push(Buffer.from(event.data, "base64"));
+    }
+  }
+  if (pending.trim()) {
+    const parsed = extractVolcTtsJsonObjects(pending);
+    for (const event of parsed.events) {
+      if (event?.data) chunks.push(Buffer.from(event.data, "base64"));
+    }
+  }
+  return Buffer.concat(chunks);
+}
+
 export async function volcTts(volc, text, signal, fetchImpl = fetch) {
+  if (volc.ttsResourceId) {
+    return volcTtsV3(volc, text, signal, fetchImpl);
+  }
   const spoken = String(text || "").trim();
   if (!spoken) return Buffer.alloc(0);
   const body = {

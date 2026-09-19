@@ -26,7 +26,6 @@ enum BookAskSheetLevel { hidden, dock, half, full }
 BookAskSheetLevel stepAskSheetUp(BookAskSheetLevel level) {
   switch (level) {
     case BookAskSheetLevel.hidden:
-      return BookAskSheetLevel.dock;
     case BookAskSheetLevel.dock:
       return BookAskSheetLevel.half;
     case BookAskSheetLevel.half:
@@ -41,15 +40,15 @@ BookAskSheetLevel stepAskSheetDown(BookAskSheetLevel level) {
     case BookAskSheetLevel.full:
       return BookAskSheetLevel.half;
     case BookAskSheetLevel.half:
-      return BookAskSheetLevel.dock;
-    case BookAskSheetLevel.dock:
       return BookAskSheetLevel.hidden;
+    case BookAskSheetLevel.dock:
     case BookAskSheetLevel.hidden:
       return BookAskSheetLevel.hidden;
   }
 }
 
-const kBookAskHalfFraction = 0.45;
+/// Expanded ask sheet (~2/3 viewport).
+const kBookAskHalfFraction = 2 / 3;
 const kBookAskFullFraction = 1.0;
 
 /// Space the reader must reserve for the ask sheet.
@@ -87,7 +86,7 @@ class BookAskPanel extends StatefulWidget {
     required this.scrollController,
     required this.sheetSize,
     this.sheetController,
-    this.sheetSnaps = const [0.18, 0.45],
+    this.sheetSnaps = const [0.0, kBookAskHalfFraction, kBookAskFullFraction],
     this.expanded,
     this.hidden = false,
     this.fullscreen = false,
@@ -117,8 +116,8 @@ class BookAskPanel extends StatefulWidget {
   final VoidCallback? onRequestStepUp;
   final VoidCallback? onRequestCollapse;
 
-  /// Between dock (~0.18) and expanded (~0.45).
-  static const collapsedThreshold = 0.31;
+  /// Between hidden and two-thirds expanded.
+  static const collapsedThreshold = 0.34;
 
   /// Tight dock: handle + title + composer + home-indicator inset.
   static double estimatedDockHeight(
@@ -266,6 +265,50 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
       anchors: _store.anchors,
     );
     await widget.memory?.saveBookChats(widget.book.id, _store);
+  }
+
+  /// Chat history for quick-voice API context (current anchor or stored chapter).
+  List<ChatMessage> chatHistoryForVoice(BookReadingPlace place) {
+    final anchorId = bookAnchorId(place);
+    if (anchorId == _anchorId) {
+      return _messages.where((m) => m.role != 'error').toList();
+    }
+    return _store.messagesForAnchor(anchorId).where((m) => m.role != 'error').toList();
+  }
+
+  /// Persist a completed quick-voice turn into the same store as typed Q&A.
+  Future<void> recordVoiceTurn({
+    required BookReadingPlace place,
+    required String question,
+    required String answer,
+    String? engine,
+    String? sessionId,
+  }) async {
+    final anchorId = bookAnchorId(place);
+    final base = anchorId == _anchorId
+        ? List<ChatMessage>.from(_messages)
+        : List<ChatMessage>.from(_store.messagesForAnchor(anchorId));
+    base.addAll([
+      ChatMessage(role: 'user', content: question, via: 'voice'),
+      ChatMessage(role: 'assistant', content: answer, engine: engine, via: 'voice'),
+    ]);
+    _store = _store.upsertAnchorMessages(
+      anchorId: anchorId,
+      place: place,
+      messages: base,
+    );
+    if (sessionId != null && sessionId.isNotEmpty) {
+      _sessionId = sessionId;
+    }
+    if (anchorId == _anchorId) {
+      _messages
+        ..clear()
+        ..addAll(base);
+      _peekAnswer = answer;
+      _place = place;
+    }
+    await _persistStore();
+    if (mounted) setState(() {});
   }
 
   void _onSheetSize() {
@@ -656,21 +699,23 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
               ),
             ],
           ),
-          child: widget.hidden
+          child: (widget.hidden || !expanded)
               ? SizedBox.expand(
                   child: _sheetChrome(
                     tapToExpand: true,
-                    child: const Align(
+                    child: Align(
                       alignment: Alignment.topCenter,
                       child: Padding(
-                        padding: EdgeInsets.only(top: 8),
-                        child: _DragHandle(expanded: false, hidden: true),
+                        padding: const EdgeInsets.only(top: 8),
+                        child: _DragHandle(
+                          expanded: false,
+                          hidden: widget.hidden,
+                        ),
                       ),
                     ),
                   ),
                 )
-              : expanded
-              ? Column(
+              : Column(
                   children: [
                     _sheetChrome(
                       child: Column(
@@ -774,90 +819,11 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
                                       ? () =>
                                           unawaited(_confirmDeleteTurn(_turnAtChapterIndex(msgIndex)))
                                       : null,
-                                  child: WxReadableText(msg.content),
+                                  child: _MessageBody(message: msg),
                                 );
                               },
                             ),
                     ),
-                    if (showLive)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(Wx.inset, 0, Wx.inset, 6),
-                        child: WxHoldLiveChip(
-                          text: _hold.holdLive,
-                          recognizing: _hold.sttBusy,
-                        ),
-                      ),
-                    Padding(
-                      padding: EdgeInsets.fromLTRB(
-                        14,
-                        0,
-                        14,
-                        8 + MediaQuery.paddingOf(context).bottom,
-                      ),
-                      child: _ComposerIsland(
-                        voiceInputMode: _voiceInputMode,
-                        voiceReady: _voiceReady,
-                        busy: _busy,
-                        hold: _hold,
-                        input: _input,
-                        onToggleVoice: _toggleVoice,
-                        onSend: () => _send(),
-                        onStop: () => widget.api.cancelChat(),
-                      ),
-                    ),
-                  ],
-                )
-              : Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _sheetChrome(
-                      tapToExpand: true,
-                      child: Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const _DragHandle(expanded: false),
-                            _AskHeaderRow(
-                              theme: theme,
-                              expanded: false,
-                              place: _place,
-                              live: _live || _busy,
-                              hasPeek: hasPeek,
-                              showAllScope: false,
-                              onAllScope: () => _setScope(BookAskScope.all),
-                              onExpandAnswer: _expandForAnswer,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    if (hasPeek)
-                      GestureDetector(
-                        onTap: _expandForAnswer,
-                        child: Padding(
-                          padding: const EdgeInsets.fromLTRB(Wx.inset, 0, Wx.inset, 6),
-                          child: ValueListenableBuilder<String>(
-                            valueListenable: _livePhase,
-                            builder: (_, phase, __) {
-                              final peek = _live
-                                  ? (_peekAnswer?.trim().isNotEmpty == true
-                                      ? _peekAnswer!
-                                      : askLivePhaseLabel(phase, book: true))
-                                  : _peekAnswer!;
-                              return Text(
-                                peek,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: Wx.muted,
-                                  height: 1.35,
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                      ),
                     if (showLive)
                       Padding(
                         padding: const EdgeInsets.fromLTRB(Wx.inset, 0, Wx.inset, 6),
@@ -1360,6 +1326,43 @@ class _ScopeChip extends StatelessWidget {
   }
 }
 
+class _MessageBody extends StatelessWidget {
+  const _MessageBody({required this.message});
+
+  final ChatMessage message;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final voice = message.via == 'voice';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (voice)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.mic_none_rounded, size: 13, color: Wx.muted),
+                const SizedBox(width: 4),
+                Text(
+                  '快问快答',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: Wx.muted,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        WxReadableText(message.content),
+      ],
+    );
+  }
+}
+
 class _ChapterMessageRow extends StatelessWidget {
   const _ChapterMessageRow({
     required this.message,
@@ -1516,12 +1519,15 @@ class _QaTurnCardState extends State<_QaTurnCard> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        _AskBubble(role: 'user', child: WxReadableText(turn.user.content)),
+                        _AskBubble(
+                          role: 'user',
+                          child: _MessageBody(message: turn.user),
+                        ),
                         if (_open)
                           for (final reply in turn.replies)
                             _AskBubble(
                               role: reply.role,
-                              child: WxReadableText(reply.content),
+                              child: _MessageBody(message: reply),
                             )
                         else if (turn.replies.isNotEmpty)
                           Padding(

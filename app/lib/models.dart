@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 class ServerStatus {
   ServerStatus({
@@ -152,18 +153,22 @@ class ChatMessage {
     required this.content,
     this.engine,
     this.streaming = false,
+    this.via,
   });
 
   final String role;
   String content;
   String? engine;
   bool streaming;
+  /// `voice` for quick-voice turns; null for typed chat.
+  final String? via;
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) {
     return ChatMessage(
       role: (json['role'] ?? '').toString(),
       content: (json['content'] ?? '').toString(),
       engine: json['engine']?.toString(),
+      via: json['via']?.toString(),
     );
   }
 
@@ -171,6 +176,7 @@ class ChatMessage {
         'role': role,
         'content': content,
         if (engine != null && engine!.isNotEmpty) 'engine': engine,
+        if (via != null && via!.isNotEmpty) 'via': via,
       };
 }
 
@@ -182,6 +188,12 @@ class ChatStreamEvent {
     this.error,
     this.sessionId,
     this.phase,
+    this.code,
+    this.hint,
+    this.pcm,
+    this.sampleRate,
+    this.audioFormat,
+    this.codec,
   });
 
   final String type;
@@ -190,6 +202,14 @@ class ChatStreamEvent {
   final String? error;
   final String? sessionId;
   final String? phase;
+  final String? code;
+  final String? hint;
+  final Uint8List? pcm;
+  final int? sampleRate;
+  /// `pcm` or `mp3` (book voice SSE).
+  final String? audioFormat;
+  /// `gzip` when PCM payload is compressed.
+  final String? codec;
 
   static ChatStreamEvent? fromSse(String raw) {
     final lines = raw.split('\n');
@@ -201,6 +221,14 @@ class ChatStreamEvent {
     try {
       final json = jsonDecode(data);
       if (json is! Map) return null;
+      Uint8List? pcm;
+      final pcmRaw = json['pcm'];
+      final audioRaw = json['audio'];
+      if (pcmRaw is String && pcmRaw.isNotEmpty) {
+        pcm = base64Decode(pcmRaw);
+      } else if (audioRaw is String && audioRaw.isNotEmpty) {
+        pcm = base64Decode(audioRaw);
+      }
       return ChatStreamEvent(
         type: (json['type'] ?? '').toString(),
         text: (json['text'] ?? json['answer'] ?? '').toString(),
@@ -208,6 +236,12 @@ class ChatStreamEvent {
         error: json['error']?.toString(),
         sessionId: json['sessionId']?.toString(),
         phase: json['phase']?.toString(),
+        code: json['code']?.toString(),
+        hint: json['hint']?.toString(),
+        pcm: pcm,
+        sampleRate: json['rate'] is int ? json['rate'] as int : int.tryParse('${json['rate']}'),
+        audioFormat: json['format']?.toString(),
+        codec: json['codec']?.toString(),
       );
     } catch (_) {
       return null;

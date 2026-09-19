@@ -99,14 +99,32 @@ export function buildAcpPrompt({ question, history, githubContext, seedHistory }
   return lines.join("\n");
 }
 
-export function buildBookAcpPrompt({ question, history, bookContext, seedHistory, currentChapter }) {
+export function buildBookAcpPrompt({
+  question,
+  history,
+  bookContext,
+  seedHistory,
+  currentChapter,
+  spokenAnswer = false,
+}) {
   const lines = [
     "You are 问象·问书, a local book Q&A assistant running on the user's computer.",
     "You are in ask mode: read INDEX.md and chapter markdown under chapters/, then answer. Do not edit files.",
     "Answer in Simplified Chinese unless the user writes in another language.",
-    "Be concise and efficient: lead with the direct answer; use short paragraphs or bullets.",
+    "Be concise and efficient: lead with the direct answer.",
     "Quote or paraphrase the book when helpful. Do not invent passages, characters, or events.",
   ];
+  if (spokenAnswer) {
+    lines.push(
+      "",
+      "=== Spoken reply (voice-only; user will not read text) ===",
+      "Read and reason silently. Output ONLY the final answer line the user should hear—never narrate steps.",
+      "Forbidden: thinking aloud, search/process narration, or meta commentary (e.g. 让我查/我来找/正在看/看完/查完/分析/梳理/总结来说/我认为从书中/根据上下文/关于你的问题/需要注意的是).",
+      "Start with the substantive fact or conclusion. No greeting, no question recap, no「首先/简单来说/总的来说/根据书中」.",
+      "No markdown, lists, numbering (第一第二), long quotes, or citations.",
+      "Answer in natural spoken Chinese: as many short sentences as needed to be clear, without padding or lecture tone.",
+    );
+  }
   const chapter = String(currentChapter || "").trim();
   if (chapter) {
     lines.push(

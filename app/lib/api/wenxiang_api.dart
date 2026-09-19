@@ -114,8 +114,10 @@ class WenxiangApi {
 
   http.Client? _checkoutClient;
   http.Client? _chatClient;
+  http.Client? _bookVoiceClient;
   bool _checkoutCancelled = false;
   bool _chatCancelled = false;
+  bool _bookVoiceCancelled = false;
 
   void cancelCheckout() {
     _checkoutCancelled = true;
@@ -127,6 +129,12 @@ class WenxiangApi {
     _chatCancelled = true;
     _chatClient?.close();
     _chatClient = null;
+  }
+
+  void cancelBookVoiceTurn() {
+    _bookVoiceCancelled = true;
+    _bookVoiceClient?.close();
+    _bookVoiceClient = null;
   }
 
   Future<Map<String, dynamic>> _json(
@@ -410,6 +418,66 @@ class WenxiangApi {
         .timeout(const Duration(seconds: 45));
     if (res.statusCode >= 400) {
       await _json(res, fallback: '书籍预热失败');
+    }
+  }
+
+  Stream<ChatStreamEvent> bookVoiceTurnStream({
+    required String bookId,
+    required String message,
+    required List<ChatMessage> history,
+    String? sessionId,
+    String? chapter,
+  }) async* {
+    final client = http.Client();
+    _bookVoiceCancelled = false;
+    _bookVoiceClient = client;
+    try {
+      final request = http.Request('POST', _uri('/v1/books/voice-turn'))
+        ..headers.addAll({
+          ..._headers,
+          'Accept': 'text/event-stream',
+        })
+        ..body = jsonEncode({
+          'bookId': bookId,
+          'message': message,
+          if (sessionId != null && sessionId.isNotEmpty) 'sessionId': sessionId,
+          if (chapter != null && chapter.isNotEmpty) 'chapter': chapter,
+          'history': history
+              .map((m) => {'role': m.role, 'content': m.content})
+              .toList(),
+        });
+      final res = await client.send(request).timeout(const Duration(minutes: 4));
+      if (res.statusCode >= 400) {
+        final raw = await res.stream.bytesToString();
+        String error = '快问快答失败';
+        try {
+          error = (jsonDecode(raw)['error'] ?? error).toString();
+        } catch (_) {}
+        throw ApiException(error);
+      }
+      var buffer = '';
+      await for (final chunk in res.stream.transform(utf8.decoder)) {
+        if (_bookVoiceCancelled) throw const OperationCancelled();
+        buffer += chunk;
+        final parts = buffer.split('\n\n');
+        buffer = parts.removeLast();
+        for (final part in parts) {
+          final event = ChatStreamEvent.fromSse(part);
+          if (event != null) yield event;
+        }
+      }
+      if (buffer.trim().isNotEmpty) {
+        final event = ChatStreamEvent.fromSse(buffer);
+        if (event != null) yield event;
+      }
+    } catch (err) {
+      if (_bookVoiceCancelled || err is OperationCancelled) {
+        throw const OperationCancelled();
+      }
+      rethrow;
+    } finally {
+      if (identical(_bookVoiceClient, client)) _bookVoiceClient = null;
+      client.close();
     }
   }
 
