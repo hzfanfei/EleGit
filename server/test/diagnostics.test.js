@@ -1,8 +1,23 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { probeVoiceTts, runDiagnosticsProbe } from "../src/diagnostics.js";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { probeAskCli, probeVoiceTts, runDiagnosticsProbe } from "../src/diagnostics.js";
 
 describe("diagnostics", () => {
+  it("creates probe cwd under workspace before ACP spawn", async () => {
+    const root = path.join(os.tmpdir(), `wenxiang-probe-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    try {
+      const result = await probeAskCli({ cwd: root });
+      assert.equal(typeof result.ok, "boolean");
+      assert.ok(existsSync(path.join(root, ".diagnostics-probe")));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("reports voice not configured without keys", async () => {
     const prev = { ...process.env };
     for (const key of [

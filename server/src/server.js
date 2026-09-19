@@ -69,8 +69,10 @@ import {
   resolveBook,
   resolveBookCacheAssetPath,
 } from "./books.js";
+import { envWithNodeOnPath, resolveNodeExecutable } from "./which.js";
 
 loadLocalEnv();
+process.env = envWithNodeOnPath(process.env);
 
 const PORT = Number(process.env.WENXIANG_PORT || 8787);
 const BIND = process.env.WENXIANG_BIND || "0.0.0.0";
@@ -998,6 +1000,7 @@ const httpServer = app.listen(PORT, BIND, () => {
       ? `GitHub OAuth ready. Register callback(s):\n  ${callbacks.join("\n  ")}`
       : "GitHub OAuth not configured — copy .env.example to .env at the repo root and fill GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET",
   );
+  console.log(`Node executable: ${resolveNodeExecutable()}`);
   const cursor = detectCursorEngine();
   console.log(
     cursor

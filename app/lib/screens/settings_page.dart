@@ -279,9 +279,8 @@ class _ProbeResultCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final style = Theme.of(context).textTheme.bodySmall;
     return Material(
-      color: Wx.surface,
+      color: Wx.raised,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: const BorderSide(color: Wx.hairline),
@@ -294,7 +293,8 @@ class _ProbeResultCard extends StatelessWidget {
             Text(
               result.ok ? '全部通过' : '部分未通过',
               style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    color: result.ok ? Wx.accent : Wx.danger,
+                    color: result.ok ? Wx.ok : Wx.danger,
+                    fontWeight: FontWeight.w600,
                   ),
             ),
             const SizedBox(height: 10),
@@ -302,25 +302,21 @@ class _ProbeResultCard extends StatelessWidget {
               label: '问答助手',
               ok: result.askCli?.ok == true,
               detail: _stepDetail(result.askCli),
-              style: style,
             ),
             _ProbeLine(
               label: '模型回复',
               ok: result.askModel?.ok == true,
               detail: _modelDetail(result.askModel),
-              style: style,
             ),
             _ProbeLine(
               label: '语音合成',
               ok: result.voiceTts?.ok == true,
               detail: _ttsDetail(result.voiceTts),
-              style: style,
             ),
             _ProbeLine(
               label: '语音识别',
               ok: result.voiceStt?.ok == true,
               detail: _sttDetail(result.voiceStt),
-              style: style,
             ),
           ],
         ),
@@ -359,33 +355,42 @@ class _ProbeLine extends StatelessWidget {
     required this.label,
     required this.ok,
     required this.detail,
-    required this.style,
   });
 
   final String label;
   final bool ok;
   final String detail;
-  final TextStyle? style;
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context).textTheme;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: 10),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Icon(
             ok ? Icons.check_circle_rounded : Icons.error_outline_rounded,
             size: 18,
-            color: ok ? Wx.accent : Wx.danger,
+            color: ok ? Wx.ok : Wx.danger,
           ),
           const SizedBox(width: 8),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(label, style: Theme.of(context).textTheme.labelLarge),
-                Text(detail, style: style?.copyWith(color: Wx.muted)),
+                Text(
+                  label,
+                  style: theme.titleSmall?.copyWith(color: Wx.text, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  detail,
+                  style: theme.bodySmall?.copyWith(
+                    color: ok ? Wx.muted : Wx.text,
+                    height: 1.45,
+                  ),
+                ),
               ],
             ),
           ),

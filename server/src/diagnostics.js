@@ -1,3 +1,4 @@
+import { mkdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { AcpChannel, acpEnginePreference, detectCursorEngine } from "./acp.js";
@@ -9,6 +10,24 @@ const TTS_PROBE_TEXT = "通";
 
 function msSince(start) {
   return Date.now() - start;
+}
+
+function humanizeProbeError(err) {
+  const msg = String(err || "").trim();
+  if (!msg) return "检测失败";
+  if (/enoent/i.test(msg) && /node(\.exe)?/i.test(msg)) {
+    return "问答助手启动失败（常见原因：问象工作区目录不存在）。请确认本机工作区路径有效并已创建，然后重试。";
+  }
+  return msg;
+}
+
+function probeCwd(workspaceRoot) {
+  if (workspaceRoot) {
+    const dir = path.join(String(workspaceRoot), ".diagnostics-probe");
+    mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+  return os.tmpdir();
 }
 
 export async function probeAskCli({ cwd } = {}) {
@@ -23,7 +42,7 @@ export async function probeAskCli({ cwd } = {}) {
       error: "未找到本机问答助手（Claude Code 或 Cursor Agent）",
     };
   }
-  const root = String(cwd || os.tmpdir()).trim();
+  const root = probeCwd(cwd);
   const channel = new AcpChannel({ command, cwd: root, idleMs: 60_000 });
   try {
     await channel.start();
@@ -39,7 +58,7 @@ export async function probeAskCli({ cwd } = {}) {
       ms: msSince(started),
       preference: acpEnginePreference(),
       engine: command.id,
-      error: String(err.message || err),
+      error: humanizeProbeError(err.message || err),
     };
   } finally {
     await channel.close().catch(() => {});
@@ -56,7 +75,7 @@ export async function probeAskModel({ cwd } = {}) {
       error: "未找到本机问答助手",
     };
   }
-  const root = String(cwd || os.tmpdir()).trim();
+  const root = probeCwd(cwd);
   const channel = new AcpChannel({ command, cwd: root, idleMs: 60_000 });
   let snippet = "";
   try {
@@ -79,7 +98,7 @@ export async function probeAskModel({ cwd } = {}) {
       ok: false,
       ms: msSince(started),
       snippet: snippet.slice(0, 8),
-      error: String(err.message || err),
+      error: humanizeProbeError(err.message || err),
     };
   } finally {
     await channel.close().catch(() => {});
@@ -186,7 +205,7 @@ export async function runDiagnosticsProbe({
   voiceStt = true,
   signal,
 } = {}) {
-  const cwd = workspaceRoot ? path.join(String(workspaceRoot), ".diagnostics-probe") : os.tmpdir();
+  const cwd = probeCwd(workspaceRoot);
   const out = { at: new Date().toISOString() };
   if (askCli) out.askCli = await probeAskCli({ cwd });
   if (askModel) out.askModel = await probeAskModel({ cwd });

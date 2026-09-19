@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
-import { whichSync } from "./which.js";
+import { envWithNodeOnPath, resolveNodeExecutable, whichSync } from "./which.js";
 
 const CURSOR_ACP_CANDIDATES = [
   { bin: "agent", args: ["acp"] },
@@ -67,7 +67,7 @@ export function resolveClaudeAgentCommand() {
   return {
     id: "claude-acp",
     bin: "claude-agent-acp",
-    path: process.execPath,
+    path: resolveNodeExecutable(),
     args: [script],
     mode: "plan",
     model: acpModelId(),
@@ -353,10 +353,15 @@ export class AcpChannel {
     const file = this.command.path;
     const args = this.command.args;
     const useShell = process.platform === "win32" && /\.(cmd|bat)$/i.test(file);
-    const env = { ...process.env };
+    let env = envWithNodeOnPath(process.env);
     if (this.isClaudeProvider()) {
       const claudeExe = claudeClaudeCodeExecutable();
       if (claudeExe) env.CLAUDE_CODE_EXECUTABLE = claudeExe;
+      const nodeExe = resolveNodeExecutable();
+      if (nodeExe) {
+        env.NODE = nodeExe;
+        env.npm_node_execpath = nodeExe;
+      }
     }
     this.child = this.spawnImpl(file, args, {
       cwd: this.cwd,

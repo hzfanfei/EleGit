@@ -2,12 +2,15 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadLocalEnv } from "../src/env.js";
+import { envWithNodeOnPath, resolveNodeExecutable } from "../src/which.js";
 import { nextKeepAliveDelay, shouldRestartCompanion } from "../src/keep-alive-policy.js";
 import { ensureNgrok } from "../src/ngrok.js";
 
 loadLocalEnv();
+process.env = envWithNodeOnPath(process.env);
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
+const nodeExe = resolveNodeExecutable();
 const delayMs = Number(process.env.WENXIANG_KEEPALIVE_DELAY_MS || 2000);
 let attempt = 0;
 let ngrokChild = null;
@@ -26,10 +29,10 @@ async function ensureTunnel() {
 }
 
 function boot() {
-  const child = spawn(process.execPath, ["src/server.js"], {
+  const child = spawn(nodeExe, ["src/server.js"], {
     cwd: root,
     stdio: "inherit",
-    env: process.env,
+    env: envWithNodeOnPath(process.env),
   });
   const started = Date.now();
   child.on("exit", (code, signal) => {
