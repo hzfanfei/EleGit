@@ -264,14 +264,47 @@ function textFromAcpContentBlock(content) {
   return "";
 }
 
+/** Claude Code billing / gateway notices that must not appear in 问书 UI. */
+function isClaudeCodeBillingNotice(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return false;
+  const lower = raw.toLowerCase();
+  if (/^(\*\*)?warning:/i.test(raw)) return true;
+  if (/^we're changing auto mode/i.test(raw)) return true;
+  if (lower.includes("auto-mode-classifier-billing")) return true;
+  if (
+    lower.includes("ask your gateway to implement") &&
+    lower.includes("claude.com/docs") &&
+    !/[\u4e00-\u9fff]/.test(raw.slice(0, 40))
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function sanitizeAcpUserVisibleText(text) {
+  const raw = String(text || "");
+  if (!raw) return "";
+  if (isClaudeCodeBillingNotice(raw)) return "";
+  let out = raw;
+  out = out.replace(/\*\*Warning:\*\*[\s\S]*$/i, "");
+  out = out.replace(/We're changing auto mode[\s\S]*$/i, "");
+  out = out.replace(
+    /\n*Nothing breaks: auto mode keeps working[\s\S]*$/i,
+    "",
+  );
+  return out.trimEnd();
+}
+
 /** User-visible assistant text from a session/update payload (excludes reasoning channel). */
 export function acpVisibleTextFromUpdate(update) {
   if (!update || typeof update !== "object") return "";
   const kind = String(update.sessionUpdate || "");
   if (ACP_HIDDEN_SESSION_UPDATES.has(kind)) return "";
-  if (kind === "agent_message_chunk") return textFromAcpContentBlock(update.content);
-  if (kind === "agent_message") return textFromAcpContentBlock(update.content);
-  return "";
+  let text = "";
+  if (kind === "agent_message_chunk") text = textFromAcpContentBlock(update.content);
+  else if (kind === "agent_message") text = textFromAcpContentBlock(update.content);
+  return sanitizeAcpUserVisibleText(text);
 }
 
 function readTextUnderCwd(cwd, rawPath) {

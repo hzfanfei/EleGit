@@ -9,6 +9,7 @@ import {
   acpModelId,
   acpVisibleTextFromUpdate,
   applyAcpEnginePreference,
+  sanitizeAcpUserVisibleText,
   buildAcpPrompt,
   buildBookAcpPrompt,
   createSessionStore,
@@ -100,6 +101,26 @@ describe("acpVisibleTextFromUpdate", () => {
         content: [{ type: "text", text: "整段" }],
       }),
       "整段",
+    );
+  });
+
+  it("drops Claude Code auto-mode billing notices", () => {
+    const notice =
+      "We're changing auto mode to no longer charge for classifier requests in Claude Code. " +
+      "However, this session isn't eligible because your requests go through api.minimaxi.com. " +
+      "To fix it and access the new version of auto mode, ask your gateway to implement: " +
+      "https://code.claude.com/docs/en/auto-mode-classifier-billing";
+    assert.equal(sanitizeAcpUserVisibleText(notice), "");
+    assert.equal(
+      acpVisibleTextFromUpdate({
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: notice },
+      }),
+      "",
+    );
+    assert.equal(
+      sanitizeAcpUserVisibleText("正文。\n\nWe're changing auto mode to no longer charge for classifier requests."),
+      "正文。",
     );
   });
 });
