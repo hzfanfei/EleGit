@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node scripts/with-ngrok.mjs",
     "keep": "node scripts/keep-alive.mjs",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "probe:tts-latency": "node scripts/probe-tts-latency.mjs"
   },
   "engines": {
     "node": ">=20"

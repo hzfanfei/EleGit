@@ -4,6 +4,8 @@ import { streamAnswer } from "./ask.js";
 import { publicVoiceStatus, resolveVoiceConfig } from "./voice-config.js";
 import { createVoiceSession } from "./voice-session.js";
 import { createOpenAiAsr, openAiTts } from "./voice-openai.js";
+import { cosyvoiceTts } from "./cosyvoice-tts.js";
+import { createFunasrAsr } from "./funasr-asr.js";
 import { createVolcAsr, volcTts } from "./voice-volc.js";
 import { formatLocalContext } from "./workspace.js";
 
@@ -52,28 +54,54 @@ export function createDefaultAsk() {
   };
 }
 
-export function createVoiceProviders(config, hooks = {}) {
+function resolveAsr(config, hooks) {
+  if (config?.asrProvider === "funasr" && config.funasr?.enabled) {
+    return createFunasrAsr({
+      funasr: config.funasr,
+      pushToTalk: hooks.pushToTalk === true,
+      onPartial: hooks.onPartial,
+      onFinal: hooks.onFinal,
+      onError: (detail) => hooks.onAsrError?.({ message: detail?.message, err: detail }),
+    });
+  }
   if (config?.provider === "volc" && config.volc) {
-    return {
-      asr: createVolcAsr({
-        volc: config.volc,
-        onPartial: hooks.onPartial,
-        onFinal: hooks.onFinal,
-        onError: (detail) => hooks.onAsrError?.({ message: detail?.message, err: detail }),
-      }),
-      tts: (text, signal) => volcTts(config.volc, text, signal),
-    };
+    return createVolcAsr({
+      volc: config.volc,
+      onPartial: hooks.onPartial,
+      onFinal: hooks.onFinal,
+      onError: (detail) => hooks.onAsrError?.({ message: detail?.message, err: detail }),
+    });
   }
   if (config?.provider === "openai" && config.openai) {
+    return createOpenAiAsr({
+      openai: config.openai,
+      pushToTalk: hooks.pushToTalk === true,
+      onPartial: hooks.onPartial,
+      onFinal: hooks.onFinal,
+      onSpeechStart: hooks.onSpeechStart,
+    });
+  }
+  return null;
+}
+
+function resolveTtsFn(config) {
+  if (config?.ttsProvider === "cosyvoice" && config.cosyvoice?.enabled) {
+    return (text, signal) => cosyvoiceTts(config.cosyvoice, text, signal);
+  }
+  if (config?.provider === "volc" && config.volc) {
+    return (text, signal) => volcTts(config.volc, text, signal);
+  }
+  if (config?.provider === "openai" && config.openai) {
+    return (text, signal) => openAiTts(config.openai, text, signal);
+  }
+  return null;
+}
+
+export function createVoiceProviders(config, hooks = {}) {
+  if (config?.ready && (config.provider === "volc" || config.provider === "openai")) {
     return {
-      asr: createOpenAiAsr({
-        openai: config.openai,
-        pushToTalk: hooks.pushToTalk === true,
-        onPartial: hooks.onPartial,
-        onFinal: hooks.onFinal,
-        onSpeechStart: hooks.onSpeechStart,
-      }),
-      tts: (text, signal) => openAiTts(config.openai, text, signal),
+      asr: resolveAsr(config, hooks),
+      tts: resolveTtsFn(config),
     };
   }
   return { asr: null, tts: null };

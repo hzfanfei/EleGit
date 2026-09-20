@@ -10,6 +10,26 @@ function trim(value) {
   return String(value || "").trim();
 }
 
+function ttsProviderFromEnv(env) {
+  const raw = trim(env.WENXIANG_TTS_PROVIDER).toLowerCase();
+  if (raw === "cosyvoice" || raw === "local") return "cosyvoice";
+  const flag = trim(env.WENXIANG_COSYVOICE_TTS).toLowerCase();
+  if (flag === "1" || flag === "true" || flag === "yes" || trim(env.COSYVOICE_TTS_ENABLED) === "1") {
+    return "cosyvoice";
+  }
+  return "volc";
+}
+
+function asrProviderFromEnv(env) {
+  const raw = trim(env.WENXIANG_ASR_PROVIDER).toLowerCase();
+  if (raw === "funasr" || raw === "local") return "funasr";
+  const flag = trim(env.WENXIANG_FUNASR_ASR).toLowerCase();
+  if (flag === "1" || flag === "true" || flag === "yes" || trim(env.FUNASR_ASR_ENABLED) === "1") {
+    return "funasr";
+  }
+  return "volc";
+}
+
 function volcTtsLoudnessRate(env) {
   const raw = trim(env.VOLC_TTS_LOUDNESS_RATE);
   if (!raw) return 75;
@@ -59,9 +79,15 @@ export function resolveVoiceConfig(env = process.env) {
 }
 
 function readyVolc({ appId, accessToken, apiKey, env }) {
+  const ttsProvider = ttsProviderFromEnv(env);
+  const asrProvider = asrProviderFromEnv(env);
   return {
     ready: true,
     provider: "volc",
+    ttsProvider,
+    asrProvider,
+    cosyvoice: ttsProvider === "cosyvoice" ? { enabled: true } : null,
+    funasr: asrProvider === "funasr" ? { enabled: true } : null,
     hint: "",
     volc: {
       appId,
@@ -104,9 +130,15 @@ export function withTtsVoice(config, rawVoice) {
 }
 
 export function publicVoiceStatus(config = resolveVoiceConfig()) {
+  const ttsProvider = config.ttsProvider || "volc";
+  const asrProvider = config.asrProvider || "volc";
   return {
     ready: Boolean(config.ready),
     hint: config.ready ? "" : config.hint || "还没配语音密钥。请在本机问象服务的 .env 里配置。",
+    asrProvider,
+    asrEngine: asrProvider === "funasr" ? "FunASR-Paraformer" : "volc",
+    ttsProvider,
+    ttsEngine: ttsProvider === "cosyvoice" ? "Fun-CosyVoice3" : "volc",
     ttsVoice: config.volc?.ttsVoice || DEFAULT_VOLC_TTS_VOICE,
     voices: VOLC_TTS_VOICES,
   };

@@ -4,9 +4,12 @@ import path from "node:path";
 import { AcpChannel, acpEnginePreference, detectCursorEngine } from "./acp.js";
 import { createVoiceProviders } from "./voice-ws.js";
 import { resolveVoiceConfig, withTtsVoice } from "./voice-config.js";
+import { volcTtsV3StreamLatency } from "./voice-volc.js";
 
 const ASK_MODEL_PROMPT = "仅回复一个字：通";
 const TTS_PROBE_TEXT = "通";
+/** Same sentence as tools/local-voice CosyVoice latency bench for apples-to-apples TTFT. */
+export const TTS_LATENCY_PROBE_TEXT = "你好，这是问象本地语音合成测试。";
 
 function msSince(start) {
   return Date.now() - start;
@@ -140,6 +143,71 @@ export async function probeVoiceTts({ ttsVoice, signal } = {}) {
       ok: false,
       ms: msSince(started),
       provider: config.provider,
+      error: String(err.message || err),
+    };
+  }
+}
+
+export async function probeVoiceTtsLatency({ ttsVoice, text, runs = 2, signal } = {}) {
+  const probeText = String(text || TTS_LATENCY_PROBE_TEXT).trim();
+  const config = withTtsVoice(resolveVoiceConfig(), ttsVoice);
+  if (!config.ready) {
+    return {
+      ok: false,
+      provider: config.provider,
+      error: config.hint || "语音未配置",
+      text: probeText,
+      runs: [],
+    };
+  }
+  const useVolcStream = config.provider === "volc" && config.volc?.ttsResourceId;
+  const { tts } = createVoiceProviders(config);
+  const outRuns = [];
+  try {
+    for (let i = 0; i < Math.max(1, runs); i += 1) {
+      if (useVolcStream) {
+        const row = await volcTtsV3StreamLatency(config.volc, probeText, signal);
+        outRuns.push({
+          utterance: i + 1,
+          textLen: probeText.length,
+          ...row,
+        });
+      } else {
+        const started = Date.now();
+        const audio = await tts(probeText, signal);
+        const totalMs = msSince(started);
+        outRuns.push({
+          utterance: i + 1,
+          textLen: probeText.length,
+          ok: (audio?.length ?? 0) > 0,
+          ttftMs: totalMs,
+          responseMs: totalMs,
+          totalMs,
+          pcmBytes: audio?.length ?? 0,
+          streamChunks: 1,
+          sampleRate: 24000,
+          note: "buffered (non-v3 stream)",
+        });
+      }
+    }
+    return {
+      ok: outRuns.every((r) => r.ok),
+      provider: config.provider,
+      ttsVoice: config.volc?.ttsVoice || config.openai?.ttsVoice,
+      text: probeText,
+      stream: Boolean(useVolcStream),
+      runs: outRuns,
+      notes: {
+        ttftMs: "POST start → first non-empty PCM chunk (v3 unidirectional stream)",
+        responseMs: "POST start → HTTP response headers ready",
+      },
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      provider: config.provider,
+      text: probeText,
+      runs: outRuns,
       error: String(err.message || err),
     };
   }

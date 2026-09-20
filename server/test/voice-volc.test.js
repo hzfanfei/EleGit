@@ -10,6 +10,7 @@ import {
   volcHeader,
   volcTts,
   volcTtsV3,
+  volcTtsV3StreamLatency,
 } from "../src/voice-volc.js";
 
 describe("volc binary frames", () => {
@@ -101,5 +102,27 @@ describe("volc TTS", () => {
       }),
     );
     assert.equal(audio.length, 0);
+  });
+
+  it("reports TTFT on v3 stream chunks", async () => {
+    const pcm = Buffer.from("abcd");
+    const report = await volcTtsV3StreamLatency(
+      { ttsResourceId: "seed-tts-2.0", ttsVoice: "zh_female_vv_uranus_bigtts" },
+      "你好。",
+      undefined,
+      async () => ({
+        ok: true,
+        body: {
+          async *[Symbol.asyncIterator]() {
+            yield Buffer.from(JSON.stringify({ code: 0, data: pcm.toString("base64") }));
+          },
+        },
+      }),
+    );
+    assert.equal(report.ok, true);
+    assert.equal(report.pcmBytes, 4);
+    assert.equal(report.streamChunks, 1);
+    assert.ok(report.ttftMs >= 0);
+    assert.ok(report.totalMs >= report.ttftMs);
   });
 });

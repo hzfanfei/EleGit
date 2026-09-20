@@ -1,3 +1,4 @@
+import { createServer } from "node:http";
 import express from "express";
 import cors from "cors";
 import { corsOptions } from "./cors.js";
@@ -39,6 +40,8 @@ import {
   sanitizeTtsVoice,
   withTtsVoice,
 } from "./voice-config.js";
+import { ensureCosyVoiceTtsWorker, shutdownCosyVoiceTtsWorker } from "./cosyvoice-tts.js";
+import { ensureFunasrAsrWorker, shutdownFunasrAsrWorker } from "./funasr-asr.js";
 import { attachSttGateway } from "./voice-stt-ws.js";
 import { attachVoiceGateway, isVoiceCallEnabled } from "./voice-ws.js";
 import { runDiagnosticsProbe } from "./diagnostics.js";
@@ -981,7 +984,37 @@ app.post("/v1/tunnel/stop", (_req, res) => {
   res.json(tunnel.stop());
 });
 
-const httpServer = app.listen(PORT, BIND, () => {
+const httpServer = createServer(app);
+
+attachVoiceGateway(httpServer, {
+  getApiKey: () => store.config.apiKey,
+  checkoutRepo: (owner, repo, signal) => checkoutRepo(owner, repo, signal, { fast: true }),
+  sessions,
+});
+attachSttGateway(httpServer, {
+  getApiKey: () => store.config.apiKey,
+});
+
+async function startCompanion() {
+  const voiceCfg = resolveVoiceConfig();
+  if (voiceCfg.asrProvider === "funasr") {
+    console.log("Preloading FunASR worker (Paraformer)...");
+    const layout = await ensureFunasrAsrWorker(process.env);
+    const h = layout.health || {};
+    console.log(
+      `FunASR ready: device=${h.device || "?"} load_ms=${h.load_ms ?? "?"} @ ${layout.baseUrl}`,
+    );
+  }
+  if (voiceCfg.ttsProvider === "cosyvoice") {
+    console.log("Preloading CosyVoice TTS worker (Fun-CosyVoice3)...");
+    const layout = await ensureCosyVoiceTtsWorker(process.env);
+    const h = layout.health || {};
+    console.log(
+      `CosyVoice TTS ready: device=${h.device || "?"} load_ms=${h.load_ms ?? "?"} @ ${layout.baseUrl}`,
+    );
+  }
+
+  httpServer.listen(PORT, BIND, () => {
   const lans = lanUrls(PORT);
   const callbacks = suggestedCallbackUrls({
     lanUrls: lans,
@@ -1011,18 +1044,33 @@ const httpServer = app.listen(PORT, BIND, () => {
   const voice = publicVoiceStatus(resolveVoiceConfig());
   console.log(voice.ready ? "Voice STT: ready" : "Voice STT: 还没配语音密钥");
   console.log(
+    voice.asrProvider === "funasr"
+      ? "Voice ASR: FunASR (local, preloaded)"
+      : "Voice ASR: Volcengine",
+  );
+  console.log(
+    voice.ttsProvider === "cosyvoice"
+      ? "Voice TTS: CosyVoice3 (local, preloaded)"
+      : "Voice TTS: Volcengine",
+  );
+  console.log(
     isVoiceCallEnabled()
       ? "Voice call (/v1/voice): enabled"
       : "Voice call (/v1/voice): disabled (set WENXIANG_VOICE_CALL_ENABLED=true to debug)",
   );
   tunnelHealth.start();
+  });
+}
+
+startCompanion().catch((err) => {
+  console.error(err);
+  process.exit(1);
 });
 
-attachVoiceGateway(httpServer, {
-  getApiKey: () => store.config.apiKey,
-  checkoutRepo: (owner, repo, signal) => checkoutRepo(owner, repo, signal, { fast: true }),
-  sessions,
-});
-attachSttGateway(httpServer, {
-  getApiKey: () => store.config.apiKey,
-});
+function shutdownVoiceWorkers() {
+  shutdownFunasrAsrWorker();
+  shutdownCosyVoiceTtsWorker();
+}
+
+process.on("SIGINT", () => shutdownVoiceWorkers());
+process.on("SIGTERM", () => shutdownVoiceWorkers());

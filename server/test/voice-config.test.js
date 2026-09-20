@@ -70,6 +70,30 @@ describe("resolveVoiceConfig", () => {
     assert.ok(pub.voices.some((v) => v.id === "zh_female_xiaohe_uranus_bigtts" && v.name.includes("小何")));
   });
 
+  it("uses CosyVoice for TTS when WENXIANG_TTS_PROVIDER=cosyvoice", () => {
+    const cfg = resolveVoiceConfig({
+      VOLC_API_KEY: "ak-only",
+      WENXIANG_TTS_PROVIDER: "cosyvoice",
+    });
+    assert.equal(cfg.ttsProvider, "cosyvoice");
+    assert.equal(cfg.cosyvoice?.enabled, true);
+    const pub = publicVoiceStatus(cfg);
+    assert.equal(pub.ttsProvider, "cosyvoice");
+    assert.equal(pub.ttsEngine, "Fun-CosyVoice3");
+  });
+
+  it("uses FunASR for ASR when WENXIANG_ASR_PROVIDER=funasr", () => {
+    const cfg = resolveVoiceConfig({
+      VOLC_API_KEY: "ak-only",
+      WENXIANG_ASR_PROVIDER: "funasr",
+    });
+    assert.equal(cfg.asrProvider, "funasr");
+    assert.equal(cfg.funasr?.enabled, true);
+    const pub = publicVoiceStatus(cfg);
+    assert.equal(pub.asrProvider, "funasr");
+    assert.equal(pub.asrEngine, "FunASR-Paraformer");
+  });
+
   it("keeps an explicit VOLC_TTS_VOICE", () => {
     const cfg = resolveVoiceConfig({
       VOLC_API_KEY: "ak-only",

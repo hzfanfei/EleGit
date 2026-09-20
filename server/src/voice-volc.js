@@ -226,9 +226,7 @@ export function extractVolcTtsJsonObjects(buffer) {
   return { events, rest };
 }
 
-export async function volcTtsV3(volc, text, signal, fetchImpl = fetch) {
-  const spoken = String(text || "").trim();
-  if (!isSpeakableTtsText(spoken)) return Buffer.alloc(0);
+function volcTtsV3Request(volc, spoken) {
   const url =
     volc.ttsUrl && volc.ttsUrl.includes("/v3/")
       ? volc.ttsUrl
@@ -244,23 +242,20 @@ export async function volcTtsV3(volc, text, signal, fetchImpl = fetch) {
     },
   };
   if (volc.ttsModel) reqParams.model = volc.ttsModel;
-  const res = await fetchImpl(url, {
-    method: "POST",
-    headers: volcTtsHeaders(volc),
-    body: JSON.stringify({
-      user: { uid: "wenxiang" },
-      req_params: reqParams,
-    }),
-    signal,
-  });
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    const err = new Error(`tts v3 failed (${res.status})`);
-    err.status = res.status;
-    err.detail = detail.slice(0, 500);
-    throw err;
-  }
-  const chunks = [];
+  return {
+    url,
+    init: {
+      method: "POST",
+      headers: volcTtsHeaders(volc),
+      body: JSON.stringify({
+        user: { uid: "wenxiang" },
+        req_params: reqParams,
+      }),
+    },
+  };
+}
+
+async function* volcTtsV3AudioChunksFromResponse(res) {
   let pending = "";
   for await (const piece of res.body) {
     pending += Buffer.from(piece).toString("utf8");
@@ -273,7 +268,7 @@ export async function volcTtsV3(volc, text, signal, fetchImpl = fetch) {
         err.code = event.code;
         throw err;
       }
-      if (event?.data) chunks.push(Buffer.from(event.data, "base64"));
+      if (event?.data) yield Buffer.from(event.data, "base64");
     }
   }
   if (pending.trim()) {
@@ -285,8 +280,77 @@ export async function volcTtsV3(volc, text, signal, fetchImpl = fetch) {
         err.code = event.code;
         throw err;
       }
-      if (event?.data) chunks.push(Buffer.from(event.data, "base64"));
+      if (event?.data) yield Buffer.from(event.data, "base64");
     }
+  }
+}
+
+export async function* volcTtsV3Stream(volc, text, signal, fetchImpl = fetch) {
+  const spoken = String(text || "").trim();
+  if (!isSpeakableTtsText(spoken)) return;
+  const { url, init } = volcTtsV3Request(volc, spoken);
+  const res = await fetchImpl(url, { ...init, signal });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    const err = new Error(`tts v3 failed (${res.status})`);
+    err.status = res.status;
+    err.detail = detail.slice(0, 500);
+    throw err;
+  }
+  yield* volcTtsV3AudioChunksFromResponse(res);
+}
+
+export async function volcTtsV3StreamLatency(volc, text, signal, fetchImpl = fetch) {
+  const started = Date.now();
+  let ttftMs = null;
+  let responseMs = null;
+  let pcmBytes = 0;
+  let streamChunks = 0;
+  const spoken = String(text || "").trim();
+  if (!isSpeakableTtsText(spoken)) {
+    return {
+      ok: false,
+      ttftMs: 0,
+      responseMs: 0,
+      totalMs: 0,
+      pcmBytes: 0,
+      streamChunks: 0,
+      sampleRate: 24000,
+      error: "empty text",
+    };
+  }
+  const { url, init } = volcTtsV3Request(volc, spoken);
+  const res = await fetchImpl(url, { ...init, signal });
+  responseMs = Date.now() - started;
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    const err = new Error(`tts v3 failed (${res.status})`);
+    err.status = res.status;
+    err.detail = detail.slice(0, 500);
+    throw err;
+  }
+  for await (const chunk of volcTtsV3AudioChunksFromResponse(res)) {
+    if (!chunk.length) continue;
+    streamChunks += 1;
+    pcmBytes += chunk.length;
+    if (ttftMs === null) ttftMs = Date.now() - started;
+  }
+  const totalMs = Date.now() - started;
+  return {
+    ok: pcmBytes > 0,
+    ttftMs: ttftMs ?? totalMs,
+    responseMs,
+    totalMs,
+    pcmBytes,
+    streamChunks,
+    sampleRate: 24000,
+  };
+}
+
+export async function volcTtsV3(volc, text, signal, fetchImpl = fetch) {
+  const chunks = [];
+  for await (const chunk of volcTtsV3Stream(volc, text, signal, fetchImpl)) {
+    chunks.push(chunk);
   }
   return Buffer.concat(chunks);
 }

@@ -1,0 +1,9 @@
+# Local FunASR + CosyVoice bench (not wired to 问象 companion).
+# Install PyTorch CUDA separately first (see setup.ps1).
+funasr>=1.2.0
+modelscope>=1.20.0
+soundfile>=0.12.1
+numpy>=1.26.0
+scipy>=1.11.0
+librosa>=0.10.0
+requests>=2.31.0
