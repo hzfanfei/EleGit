@@ -8,6 +8,8 @@ import '../copy/ask_engine.dart';
 import '../models/diagnostics.dart';
 import '../persist/app_memory.dart';
 import '../theme.dart';
+import '../voice/cosyvoice_tts_voices.dart';
+import '../voice/tts_voice_catalog.dart';
 import '../voice/volc_tts_voices.dart';
 import '../widgets/wx_chrome.dart';
 import '../widgets/wx_edge_back.dart';
@@ -26,6 +28,7 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   AppMemory? _memory;
   late String _voiceId;
+  VoiceServiceProfile _voiceProfile = const VoiceServiceProfile();
   late AskEngineChoice _askEngine;
   bool _saving = false;
   bool _savingAskEngine = false;
@@ -47,9 +50,31 @@ class _SettingsPageState extends State<SettingsPage> {
       });
     } else {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) unawaited(_alignAskEngineWithServer());
+        if (mounted) {
+          unawaited(_alignAskEngineWithServer());
+          unawaited(_loadVoiceProfile());
+        }
       });
     }
+  }
+
+  Future<void> _loadVoiceProfile() async {
+    if (widget.api == null) return;
+    try {
+      final status = await widget.api!.status();
+      if (!mounted) return;
+      final profile = status.voiceProfile;
+      final resolved = profile.resolveVoice(_memory?.ttsVoice() ?? profile.ttsVoice);
+      setState(() {
+        _voiceProfile = profile;
+        _voiceId = profile.voices.any((v) => v.id == resolved.id)
+            ? resolved.id
+            : profile.ttsVoice;
+      });
+      if (_memory != null && _voiceId != _memory!.ttsVoice()) {
+        await _memory!.saveTtsVoice(_voiceId);
+      }
+    } catch (_) {}
   }
 
   Future<void> _loadMemory() async {
@@ -62,6 +87,7 @@ class _SettingsPageState extends State<SettingsPage> {
         _askEngine = _memory!.askEngine();
       });
       unawaited(_alignAskEngineWithServer());
+      unawaited(_loadVoiceProfile());
     } catch (_) {}
   }
 
@@ -116,7 +142,7 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  Future<void> _select(VolcTtsVoice voice) async {
+  Future<void> _selectVoice(TtsVoiceOption voice) async {
     setState(() {
       _voiceId = voice.id;
       _saveError = null;
@@ -136,7 +162,11 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final current = resolveVolcTtsVoice(_voiceId);
+    final current = _voiceProfile.resolveVoice(_voiceId);
+    final voiceGroups = _voiceProfile.voiceGroups();
+    final defaultVoiceId = _voiceProfile.usesCosyvoiceTts
+        ? kDefaultCosyvoiceTtsVoice
+        : kDefaultVolcTtsVoice;
     return WxEdgeBack(
       onBack: widget.onBack ?? () => Navigator.of(context).maybePop(),
       child: Scaffold(
@@ -144,7 +174,8 @@ class _SettingsPageState extends State<SettingsPage> {
         children: [
           WxPageHeader(
             title: '设置',
-            subtitle: '问答 · ${askEngineChoiceLabel(_askEngine)} · 语音 · ${current.name}',
+            subtitle:
+                '问答 · ${askEngineChoiceLabel(_askEngine)} · ${voiceEngineSummary(_voiceProfile)} · ${current.name}',
             onBack: widget.onBack ?? () => Navigator.of(context).maybePop(),
             backTooltip: '返回',
           ),
@@ -195,9 +226,18 @@ class _SettingsPageState extends State<SettingsPage> {
                 Text('语音音色', style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 6),
                 Text(
-                  '快问快答立刻用这个音色。当前 ${current.name}。',
+                  _voiceProfile.usesCosyvoiceTts
+                      ? '快问快答使用本机 ${_voiceProfile.ttsEngine} 合成（${voiceEngineSummary(_voiceProfile)}）。当前 ${current.name}。'
+                      : '快问快答使用火山引擎音色。当前 ${current.name}。',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.muted),
                 ),
+                if (_voiceProfile.usesCosyvoiceTts) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    '本地音色在 companion 启动时预载；更换 prompt 需改 .env 后重启服务。',
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.faint),
+                  ),
+                ],
                 if (_saving) ...[
                   const SizedBox(height: 10),
                   Text('正在同步到本机服务…', style: Theme.of(context).textTheme.labelSmall),
@@ -210,7 +250,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                 ],
                 const SizedBox(height: 16),
-                for (final group in volcTtsVoiceGroups) ...[
+                for (final group in voiceGroups) ...[
                   Padding(
                     padding: const EdgeInsets.only(top: 8, bottom: 8),
                     child: Text(
@@ -232,7 +272,8 @@ class _SettingsPageState extends State<SettingsPage> {
                           _VoiceTile(
                             voice: group.value[i],
                             selected: group.value[i].id == _voiceId,
-                            onTap: () => _select(group.value[i]),
+                            defaultVoiceId: defaultVoiceId,
+                            onTap: () => _selectVoice(group.value[i]),
                           ),
                         ],
                       ],
@@ -447,16 +488,18 @@ class _VoiceTile extends StatelessWidget {
   const _VoiceTile({
     required this.voice,
     required this.selected,
+    required this.defaultVoiceId,
     required this.onTap,
   });
 
-  final VolcTtsVoice voice;
+  final TtsVoiceOption voice;
   final bool selected;
+  final String defaultVoiceId;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final isDefault = voice.id == kDefaultVolcTtsVoice;
+    final isDefault = voice.id == defaultVoiceId;
     return InkWell(
       splashFactory: NoSplash.splashFactory,
       overlayColor: const WidgetStatePropertyAll(Colors.transparent),

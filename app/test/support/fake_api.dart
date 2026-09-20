@@ -1,6 +1,9 @@
 import 'package:wenxiang/api/wenxiang_api.dart';
 import 'package:wenxiang/models.dart';
 import 'package:wenxiang/models/diagnostics.dart';
+import 'package:wenxiang/voice/cosyvoice_tts_voices.dart';
+import 'package:wenxiang/voice/tts_voice_catalog.dart';
+import 'package:wenxiang/voice/volc_tts_voices.dart';
 
 class FakeWenxiangApi extends WenxiangApi {
   FakeWenxiangApi({
@@ -23,6 +26,7 @@ class FakeWenxiangApi extends WenxiangApi {
     this.streamPace = Duration.zero,
     this.voiceReady = false,
     this.voiceHint = '还没配语音密钥。请在本机问象服务的 .env 里配置。',
+    this.voiceTtsProvider = 'volc',
     this.bookVoiceTurnEvents,
     this.repoVoiceTurnEvents,
     this.booksResult = const [],
@@ -47,6 +51,7 @@ class FakeWenxiangApi extends WenxiangApi {
   Duration streamPace;
   bool voiceReady;
   String voiceHint;
+  String voiceTtsProvider;
   int startOAuthCalls = 0;
   int checkoutCalls = 0;
   int checkoutStatusCalls = 0;
@@ -158,6 +163,37 @@ class FakeWenxiangApi extends WenxiangApi {
     String? sessionId,
   }) async {}
 
+  VoiceServiceProfile _voiceProfileForFake() {
+    if (voiceTtsProvider == 'cosyvoice') {
+      return VoiceServiceProfile(
+        ready: voiceReady,
+        hint: voiceReady ? '' : voiceHint,
+        ttsProvider: 'cosyvoice',
+        ttsEngine: 'Fun-CosyVoice3',
+        asrProvider: 'funasr',
+        asrEngine: 'FunASR-Paraformer',
+        ttsVoice: kDefaultCosyvoiceTtsVoice,
+        voices: kCosyvoiceTtsVoices
+            .map(
+              (v) => TtsVoiceOption(id: v.id, name: v.name, scene: v.scene),
+            )
+            .toList(),
+      );
+    }
+    return VoiceServiceProfile(
+      ready: voiceReady,
+      hint: voiceReady ? '' : voiceHint,
+      ttsProvider: 'volc',
+      ttsEngine: 'volc',
+      asrProvider: 'volc',
+      asrEngine: 'volc',
+      ttsVoice: kDefaultVolcTtsVoice,
+      voices: kVolcTtsVoices
+          .map((v) => TtsVoiceOption(id: v.id, name: v.name, scene: v.scene))
+          .toList(),
+    );
+  }
+
   @override
   Future<ServerStatus> status() async {
     return ServerStatus(
@@ -176,6 +212,7 @@ class FakeWenxiangApi extends WenxiangApi {
       workspaceRoot: '/home/fei/问象',
       voiceReady: voiceReady,
       voiceHint: voiceReady ? '' : voiceHint,
+      voiceProfile: _voiceProfileForFake(),
     );
   }
 

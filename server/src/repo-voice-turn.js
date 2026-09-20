@@ -126,9 +126,10 @@ export async function handleRepoVoiceTurn(
     return;
   }
 
+  const baseVoiceConfig = resolveConfig();
   const voiceConfig = withTtsVoice(
-    resolveConfig(),
-    resolveTurnTtsVoice(req.body?.ttsVoice, store?.config?.ttsVoice),
+    baseVoiceConfig,
+    resolveTurnTtsVoice(req.body?.ttsVoice, store?.config?.ttsVoice, baseVoiceConfig),
   );
   const providers = createProviders(voiceConfig);
   if (!voiceConfig.ready || !providers.tts) {

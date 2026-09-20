@@ -36,6 +36,23 @@ void main() {
     expect(api.lastSetTtsVoice, 'zh_male_m191_uranus_bigtts');
   });
 
+  testWidgets('settings page lists CosyVoice when server uses local TTS', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final memory = AppMemory(await SharedPreferences.getInstance());
+    final api = FakeWenxiangApi(voiceReady: true, voiceTtsProvider: 'cosyvoice');
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme().copyWith(splashFactory: NoSplash.splashFactory),
+        home: SettingsPage(api: api, memory: memory),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('CosyVoice3'), findsWidgets);
+    expect(find.text('问象默认'), findsOneWidget);
+    expect(find.textContaining('小何'), findsNothing);
+  });
+
   testWidgets('settings page saves ask engine choice', (tester) async {
     SharedPreferences.setMockInitialValues({});
     final memory = AppMemory(await SharedPreferences.getInstance());

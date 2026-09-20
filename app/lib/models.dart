@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'voice/tts_voice_catalog.dart';
+
 class ServerStatus {
   ServerStatus({
     required this.githubConnected,
@@ -18,6 +20,7 @@ class ServerStatus {
     required this.workspaceRoot,
     this.voiceReady = false,
     this.voiceHint = '还没配语音密钥。请在本机问象服务的 .env 里配置。',
+    this.voiceProfile = const VoiceServiceProfile(),
     this.publicReachable,
   });
 
@@ -36,6 +39,7 @@ class ServerStatus {
   final String workspaceRoot;
   final bool voiceReady;
   final String voiceHint;
+  final VoiceServiceProfile voiceProfile;
   final bool? publicReachable;
 
   factory ServerStatus.fromJson(Map<String, dynamic> json) {
@@ -69,6 +73,7 @@ class ServerStatus {
       voiceHint: voice['ready'] == true
           ? ''
           : (voice['hint'] ?? '还没配语音密钥。请在本机问象服务的 .env 里配置。').toString(),
+      voiceProfile: VoiceServiceProfile.fromStatusJson(voice),
       publicReachable: reachable == true ? true : reachable == false ? false : null,
     );
   }

@@ -36,6 +36,7 @@ import { createTunnelHealth } from "./tunnel-health.js";
 import { createTunnelManager } from "./tunnel.js";
 import {
   publicVoiceStatus,
+  resolveTtsVoiceId,
   resolveVoiceConfig,
   sanitizeTtsVoice,
   withTtsVoice,
@@ -663,7 +664,8 @@ app.delete("/v1/books/:bookId/sessions/:id", async (req, res) => {
 });
 
 app.put("/v1/voice/tts-voice", async (req, res) => {
-  const ttsVoice = sanitizeTtsVoice(req.body?.ttsVoice);
+  const voiceCfg = resolveVoiceConfig();
+  const ttsVoice = resolveTtsVoiceId(voiceCfg, req.body?.ttsVoice);
   if (!ttsVoice) {
     res.status(400).json({ error: "ttsVoice is required" });
     return;
@@ -678,7 +680,9 @@ app.post("/v1/diagnostics/probe", async (req, res) => {
     const body = req.body && typeof req.body === "object" ? req.body : {};
     const result = await runDiagnosticsProbe({
       workspaceRoot: store.config.workspaceRoot,
-      ttsVoice: sanitizeTtsVoice(body.ttsVoice) || store.config.ttsVoice,
+      ttsVoice:
+        resolveTtsVoiceId(resolveVoiceConfig(), body.ttsVoice) ||
+        resolveTtsVoiceId(resolveVoiceConfig(), store.config.ttsVoice),
       askCli: body.askCli !== false,
       askModel: body.askModel !== false,
       voiceTts: body.voiceTts !== false,

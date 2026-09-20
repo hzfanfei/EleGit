@@ -1,10 +1,21 @@
 import {
+  COSYVOICE_TTS_VOICES,
+  DEFAULT_COSYVOICE_TTS_VOICE,
+  isCosyvoiceTtsVoice,
+} from "./cosyvoice-tts-voices.js";
+import {
   DEFAULT_VOLC_TTS_VOICE,
   VOLC_TTS_VOICES,
   sanitizeTtsVoice,
 } from "./volc-tts-voices.js";
 
-export { DEFAULT_VOLC_TTS_VOICE, VOLC_TTS_VOICES, sanitizeTtsVoice };
+export {
+  COSYVOICE_TTS_VOICES,
+  DEFAULT_COSYVOICE_TTS_VOICE,
+  DEFAULT_VOLC_TTS_VOICE,
+  VOLC_TTS_VOICES,
+  sanitizeTtsVoice,
+};
 
 function trim(value) {
   return String(value || "").trim();
@@ -113,25 +124,52 @@ function readyVolc({ appId, accessToken, apiKey, env }) {
   };
 }
 
-export function resolveTurnTtsVoice(requested, stored) {
-  return sanitizeTtsVoice(requested) || sanitizeTtsVoice(stored) || "";
+function defaultTtsVoiceForConfig(config) {
+  const ttsProvider = config?.ttsProvider || "volc";
+  if (ttsProvider === "cosyvoice") return DEFAULT_COSYVOICE_TTS_VOICE;
+  if (config?.provider === "openai") return config.openai?.ttsVoice || "alloy";
+  return DEFAULT_VOLC_TTS_VOICE;
+}
+
+export function resolveTtsVoiceId(config, rawVoice) {
+  const voice = sanitizeTtsVoice(rawVoice);
+  if (!voice || !config) return "";
+  const ttsProvider = config.ttsProvider || "volc";
+  if (ttsProvider === "cosyvoice") {
+    return isCosyvoiceTtsVoice(voice) ? voice : DEFAULT_COSYVOICE_TTS_VOICE;
+  }
+  if (config.provider === "openai") return voice;
+  return VOLC_TTS_VOICES.some((row) => row.id === voice) ? voice : voice;
+}
+
+export function resolveTurnTtsVoice(requested, stored, config = resolveVoiceConfig()) {
+  return resolveTtsVoiceId(config, requested) || resolveTtsVoiceId(config, stored) || "";
 }
 
 export function withTtsVoice(config, rawVoice) {
-  const voice = sanitizeTtsVoice(rawVoice);
+  const voice = resolveTtsVoiceId(config, rawVoice);
   if (!voice || !config) return config;
+  const next = { ...config, ttsVoice: voice };
   if (config.volc) {
-    return { ...config, volc: { ...config.volc, ttsVoice: voice } };
+    next.volc = { ...config.volc, ttsVoice: voice };
+  }
+  if (config.cosyvoice) {
+    next.cosyvoice = { ...config.cosyvoice, ttsVoice: voice };
   }
   if (config.openai) {
-    return { ...config, openai: { ...config.openai, ttsVoice: voice } };
+    next.openai = { ...config.openai, ttsVoice: voice };
   }
-  return config;
+  return next;
 }
 
 export function publicVoiceStatus(config = resolveVoiceConfig()) {
   const ttsProvider = config.ttsProvider || "volc";
   const asrProvider = config.asrProvider || "volc";
+  const voices = ttsProvider === "cosyvoice" ? COSYVOICE_TTS_VOICES : VOLC_TTS_VOICES;
+  const stored = config.ttsVoice || config.cosyvoice?.ttsVoice || config.volc?.ttsVoice;
+  const ttsVoice = stored
+    ? resolveTtsVoiceId(config, stored)
+    : defaultTtsVoiceForConfig(config);
   return {
     ready: Boolean(config.ready),
     hint: config.ready ? "" : config.hint || "还没配语音密钥。请在本机问象服务的 .env 里配置。",
@@ -139,7 +177,7 @@ export function publicVoiceStatus(config = resolveVoiceConfig()) {
     asrEngine: asrProvider === "funasr" ? "FunASR-Paraformer" : "volc",
     ttsProvider,
     ttsEngine: ttsProvider === "cosyvoice" ? "Fun-CosyVoice3" : "volc",
-    ttsVoice: config.volc?.ttsVoice || DEFAULT_VOLC_TTS_VOICE,
-    voices: VOLC_TTS_VOICES,
+    ttsVoice,
+    voices,
   };
 }
