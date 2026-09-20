@@ -108,7 +108,16 @@ class FakeVoiceMedia implements VoiceMedia {
   void dispose() {}
 }
 
+/// Truncate trailing byte so 16-bit PCM sample pairs are complete.
+Uint8List normalizePcm16Length(Uint8List pcm) {
+  if (pcm.length < 2) return Uint8List(0);
+  if (pcm.length.isOdd) return Uint8List.sublistView(pcm, 0, pcm.length - 1);
+  return pcm;
+}
+
 Uint8List pcm16ToWav(Uint8List pcm, {int sampleRate = 24000, int channels = 1}) {
+  pcm = normalizePcm16Length(pcm);
+  if (pcm.isEmpty) return Uint8List(0);
   final byteRate = sampleRate * channels * 2;
   final data = ByteData(44 + pcm.length);
   final bytes = data.buffer.asUint8List();

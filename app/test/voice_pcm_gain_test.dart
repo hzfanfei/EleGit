@@ -24,4 +24,9 @@ void main() {
     final outView = ByteData.view(out.buffer);
     expect(outView.getInt16(0, Endian.little).abs(), greaterThan(800));
   });
+
+  test('normalizePcm16Length drops trailing byte', () {
+    expect(normalizePcm16Length(Uint8List.fromList([1, 2, 3])).length, 2);
+    expect(normalizePcm16Length(Uint8List(1)).length, 0);
+  });
 }

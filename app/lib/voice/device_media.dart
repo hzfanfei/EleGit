@@ -8,6 +8,8 @@ import 'dart:typed_data';
 
 import 'package:audioplayers/audioplayers.dart';
 
+import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'package:record/record.dart';
@@ -401,67 +403,78 @@ class DeviceVoiceMedia implements VoiceMedia {
   }
 
   Future<void> _playJob(_PlayJob job) async {
-
     job.onPlaybackStart?.call();
 
-    await _player.stop();
-
-    await _player.setVolume(1);
-
-    await _player.setPlayerMode(PlayerMode.mediaPlayer);
-
-
-
     final completer = Completer<void>();
-
     _currentPlay = completer;
 
     late final StreamSubscription<PlayerState> sub;
-
     sub = _player.onPlayerStateChanged.listen((state) {
-
       if (state == PlayerState.completed) {
-
         unawaited(sub.cancel());
-
         if (!completer.isCompleted) completer.complete();
-
       }
-
     });
 
-
-
     try {
-
       if (job.format == 'mp3') {
-
-        await _player.play(
-
+        if (job.bytes.length < 16) return;
+        await _playSourceWithRetry(
           BytesSource(job.bytes, mimeType: 'audio/mpeg'),
-
         );
-
       } else {
-
-        await _player.play(
-
-          BytesSource(pcm16ToWav(job.bytes, sampleRate: _outRate)),
-
+        final pcm = normalizePcm16Length(job.bytes);
+        if (pcm.length < 4) return;
+        final wav = pcm16ToWav(pcm, sampleRate: _outRate);
+        if (wav.length < 48) return;
+        await _playSourceWithRetry(
+          BytesSource(wav, mimeType: 'audio/wav'),
+          fileFallbackBytes: Platform.isAndroid ? wav : null,
         );
-
       }
-
       await completer.future.timeout(const Duration(minutes: 3));
-
+    } catch (_) {
+      if (completer.isCompleted) return;
+      rethrow;
     } finally {
-
       await sub.cancel();
-
       if (identical(_currentPlay, completer)) _currentPlay = null;
-
     }
+  }
 
+  /// Android MediaPlayer sometimes rejects back-to-back [BytesSource] after [stop].
+  Future<void> _playSourceWithRetry(
+    Source source, {
+    Uint8List? fileFallbackBytes,
+  }) async {
+    Object? lastError;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        await _player.stop();
+        if (Platform.isAndroid) {
+          await Future<void>.delayed(Duration(milliseconds: 40 * (attempt + 1)));
+        }
+        await _player.setVolume(1);
+        await _player.setPlayerMode(PlayerMode.mediaPlayer);
+        Source active = source;
+        if (attempt > 0 && fileFallbackBytes != null && fileFallbackBytes.isNotEmpty) {
+          final dir = await getTemporaryDirectory();
+          final file = File(
+            '${dir.path}/wx_tts_${DateTime.now().microsecondsSinceEpoch}.wav',
+          );
+          await file.writeAsBytes(fileFallbackBytes, flush: true);
+          active = DeviceFileSource(file.path);
+        }
+        await _player.play(active);
+        return;
+      } on PlatformException catch (err) {
+        lastError = err;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+    if (lastError != null) throw lastError!;
+    throw StateError('playback failed');
   }
 
 
