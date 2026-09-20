@@ -1,0 +1,47 @@
+{
+  "voices": [
+    {
+      "id": "wenxiang_default",
+      "name": "清亮女声",
+      "scene": "中文 · 官方参考",
+      "prompt_text": "You are a helpful assistant.<|endofprompt|>希望你以后能够做的比我还好呦。",
+      "prompt_wav": "CosyVoice/asset/zero_shot_prompt.wav"
+    },
+    {
+      "id": "zh_xiaoxiao",
+      "name": "晓晓",
+      "scene": "中文 · 女声",
+      "prompt_text": "You are a helpful assistant.<|endofprompt|>你好，我是晓晓，这是一段自然清晰的中文女声参考。",
+      "prompt_wav": "voices/prompts/zh_xiaoxiao.wav",
+      "edge_voice": "zh-CN-XiaoxiaoNeural",
+      "edge_line": "你好，我是晓晓，这是一段自然清晰的中文女声参考。"
+    },
+    {
+      "id": "zh_xiaoyi",
+      "name": "晓伊",
+      "scene": "中文 · 女声",
+      "prompt_text": "You are a helpful assistant.<|endofprompt|>大家好，我是晓伊，语气亲切，适合日常讲解。",
+      "prompt_wav": "voices/prompts/zh_xiaoyi.wav",
+      "edge_voice": "zh-CN-XiaoyiNeural",
+      "edge_line": "大家好，我是晓伊，语气亲切，适合日常讲解。"
+    },
+    {
+      "id": "zh_yunxi",
+      "name": "云希",
+      "scene": "中文 · 男声",
+      "prompt_text": "You are a helpful assistant.<|endofprompt|>你好，我是云希，这是偏低沉的中文男声参考。",
+      "prompt_wav": "voices/prompts/zh_yunxi.wav",
+      "edge_voice": "zh-CN-YunxiNeural",
+      "edge_line": "你好，我是云希，这是偏低沉的中文男声参考。"
+    },
+    {
+      "id": "zh_yunjian",
+      "name": "云健",
+      "scene": "中文 · 男声",
+      "prompt_text": "You are a helpful assistant.<|endofprompt|>大家好，我是云健，吐字清楚，适合朗读旁白。",
+      "prompt_wav": "voices/prompts/zh_yunjian.wav",
+      "edge_voice": "zh-CN-YunjianNeural",
+      "edge_line": "大家好，我是云健，吐字清楚，适合朗读旁白。"
+    }
+  ]
+}

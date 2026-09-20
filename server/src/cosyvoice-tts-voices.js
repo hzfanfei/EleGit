@@ -1,15 +1,18 @@
-/** Local Fun-CosyVoice3 speakers (companion preloads zero-shot cache at startup). */
-export const DEFAULT_COSYVOICE_TTS_VOICE = "wenxiang_default";
+import {
+  defaultCosyvoiceVoiceId,
+  loadCosyvoiceVoiceCatalog,
+} from "./load-cosyvoice-voices.js";
 
-export const COSYVOICE_TTS_VOICES = [
-  {
-    id: "wenxiang_default",
-    name: "问象默认",
-    scene: "Fun-CosyVoice3 · 本地",
-  },
-];
+export const DEFAULT_COSYVOICE_TTS_VOICE = defaultCosyvoiceVoiceId();
+
+export function getCosyvoiceTtsVoices() {
+  return loadCosyvoiceVoiceCatalog().voices;
+}
+
+/** @deprecated use getCosyvoiceTtsVoices() */
+export const COSYVOICE_TTS_VOICES = getCosyvoiceTtsVoices();
 
 export function isCosyvoiceTtsVoice(id) {
   const voice = String(id || "").trim();
-  return COSYVOICE_TTS_VOICES.some((row) => row.id === voice);
+  return getCosyvoiceTtsVoices().some((row) => row.id === voice);
 }

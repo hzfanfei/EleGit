@@ -45,7 +45,7 @@ import { ensureCosyVoiceTtsWorker, shutdownCosyVoiceTtsWorker } from "./cosyvoic
 import { ensureFunasrAsrWorker, shutdownFunasrAsrWorker } from "./funasr-asr.js";
 import { attachSttGateway } from "./voice-stt-ws.js";
 import { attachVoiceGateway, isVoiceCallEnabled } from "./voice-ws.js";
-import { runDiagnosticsProbe } from "./diagnostics.js";
+import { runDiagnosticsProbe, synthesizeVoicePreview } from "./diagnostics.js";
 import {
   checkoutPath,
   detectDefaultBranch,
@@ -673,6 +673,31 @@ app.put("/v1/voice/tts-voice", async (req, res) => {
   store.config.ttsVoice = ttsVoice;
   await store.save();
   res.json({ ttsVoice });
+});
+
+app.post("/v1/voice/tts-preview", async (req, res) => {
+  try {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const voiceCfg = resolveVoiceConfig();
+    const ttsVoice = resolveTtsVoiceId(voiceCfg, body.ttsVoice);
+    if (!ttsVoice) {
+      res.status(400).json({ error: "ttsVoice is required" });
+      return;
+    }
+    const { pcm, sampleRate } = await synthesizeVoicePreview({
+      ttsVoice,
+      text: body.text,
+      signal: requestSignal(req, res),
+    });
+    res.setHeader("Content-Type", "application/octet-stream");
+    res.setHeader("X-Sample-Rate", String(sampleRate));
+    res.send(pcm);
+  } catch (err) {
+    if (isCancelled(err)) {
+      return;
+    }
+    sendError(res, err);
+  }
 });
 
 app.post("/v1/diagnostics/probe", async (req, res) => {

@@ -102,6 +102,7 @@ export async function ensureCosyVoiceTtsWorker(env = process.env) {
   const health = await waitForHealth(layout.baseUrl);
   workerReady = true;
   layout.health = health;
+  layout.defaultSpkId = health?.default_spk || layout.spkId;
   activeLayout = layout;
   return layout;
 }
@@ -119,10 +120,14 @@ export async function cosyvoiceTts(cosy, text, signal, fetchImpl = fetch) {
   const spoken = String(text || "").trim();
   if (!spoken) return Buffer.alloc(0);
   const base = cosy?.baseUrl || activeLayout?.baseUrl || resolveCosyVoiceLayout().baseUrl;
+  const spkId =
+    trim(cosy?.ttsVoice || cosy?.spkId) ||
+    trim(activeLayout?.defaultSpkId) ||
+    trim(resolveCosyVoiceLayout().spkId);
   const res = await fetchImpl(`${base.replace(/\/$/, "")}/v1/tts`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text: spoken }),
+    body: JSON.stringify({ text: spoken, spk_id: spkId || undefined }),
     signal,
   });
   if (!res.ok) {

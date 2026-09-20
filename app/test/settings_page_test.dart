@@ -49,7 +49,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('CosyVoice3'), findsWidgets);
-    expect(find.text('问象默认'), findsOneWidget);
+    expect(find.text('晓晓'), findsOneWidget);
+    expect(find.text('云希'), findsOneWidget);
     expect(find.textContaining('小何'), findsNothing);
   });
 

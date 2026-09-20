@@ -9,6 +9,7 @@ import '../models/diagnostics.dart';
 import '../persist/app_memory.dart';
 import '../theme.dart';
 import '../voice/cosyvoice_tts_voices.dart';
+import '../voice/device_media.dart';
 import '../voice/tts_voice_catalog.dart';
 import '../voice/volc_tts_voices.dart';
 import '../widgets/wx_chrome.dart';
@@ -37,6 +38,10 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _probing = false;
   DiagnosticsProbeResult? _probeResult;
   String? _probeError;
+  final DeviceVoiceMedia _previewMedia = DeviceVoiceMedia();
+  String? _previewVoiceId;
+  bool _previewLoading = false;
+  String? _previewError;
 
   @override
   void initState() {
@@ -160,6 +165,36 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
+  Future<void> _previewVoice(TtsVoiceOption voice) async {
+    if (widget.api == null || _previewLoading) return;
+    setState(() {
+      _previewVoiceId = voice.id;
+      _previewLoading = true;
+      _previewError = null;
+    });
+    try {
+      await _previewMedia.stopPlayback();
+      final preview = await widget.api!.previewTtsVoice(voice.id);
+      if (!mounted) return;
+      await _previewMedia.playPcm(preview.pcm, sampleRate: preview.sampleRate);
+    } catch (err) {
+      if (mounted) setState(() => _previewError = err.toString());
+    } finally {
+      if (mounted) {
+        setState(() {
+          _previewLoading = false;
+          _previewVoiceId = null;
+        });
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _previewMedia.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final current = _voiceProfile.resolveVoice(_voiceId);
@@ -234,7 +269,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 if (_voiceProfile.usesCosyvoiceTts) ...[
                   const SizedBox(height: 6),
                   Text(
-                    '本地音色在 companion 启动时预载；更换 prompt 需改 .env 后重启服务。',
+                    '以下为 CosyVoice 中文 zero-shot 音色，companion 启动时会一并预载；切换后快问立即生效。',
                     style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.faint),
                   ),
                 ],
@@ -246,6 +281,13 @@ class _SettingsPageState extends State<SettingsPage> {
                   const SizedBox(height: 10),
                   Text(
                     '已记在手机上，但还没同步到本机服务。$_saveError',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.danger),
+                  ),
+                ],
+                if (_previewError != null) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    '试听失败：$_previewError',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.danger),
                   ),
                 ],
@@ -274,6 +316,12 @@ class _SettingsPageState extends State<SettingsPage> {
                             selected: group.value[i].id == _voiceId,
                             defaultVoiceId: defaultVoiceId,
                             onTap: () => _selectVoice(group.value[i]),
+                            onPreview: widget.api == null
+                                ? null
+                                : () => unawaited(_previewVoice(group.value[i])),
+                            previewLoading:
+                                _previewLoading && _previewVoiceId == group.value[i].id,
+                            previewDisabled: widget.api == null || _previewLoading,
                           ),
                         ],
                       ],
@@ -490,25 +538,31 @@ class _VoiceTile extends StatelessWidget {
     required this.selected,
     required this.defaultVoiceId,
     required this.onTap,
+    this.onPreview,
+    this.previewLoading = false,
+    this.previewDisabled = false,
   });
 
   final TtsVoiceOption voice;
   final bool selected;
   final String defaultVoiceId;
   final VoidCallback onTap;
+  final VoidCallback? onPreview;
+  final bool previewLoading;
+  final bool previewDisabled;
 
   @override
   Widget build(BuildContext context) {
     final isDefault = voice.id == defaultVoiceId;
-    return InkWell(
-      splashFactory: NoSplash.splashFactory,
-      overlayColor: const WidgetStatePropertyAll(Colors.transparent),
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-        child: Row(
-          children: [
-            Expanded(
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      child: Row(
+        children: [
+          Expanded(
+            child: InkWell(
+              splashFactory: NoSplash.splashFactory,
+              overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+              onTap: onTap,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -521,9 +575,24 @@ class _VoiceTile extends StatelessWidget {
                 ],
               ),
             ),
-            if (selected) const Icon(Icons.check_rounded, color: Wx.accent, size: 20),
-          ],
-        ),
+          ),
+          if (onPreview != null)
+            IconButton(
+              onPressed: previewDisabled && !previewLoading ? null : onPreview,
+              tooltip: '试听',
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+              icon: previewLoading
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Icon(Icons.volume_up_rounded, size: 22, color: Wx.muted),
+            ),
+          if (selected) const Icon(Icons.check_rounded, color: Wx.accent, size: 20),
+        ],
       ),
     );
   }

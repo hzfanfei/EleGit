@@ -15,6 +15,7 @@ if (-not (Test-Path $Py)) {
 & $Py -m pip install HyperPyYAML conformer inflect x-transformers openai-whisper onnxruntime==1.18.0 pydantic==2.7.0 wetext pyworld
 & $Py -m pip install modelscope==1.20.0 omegaconf hydra-core diffusers==0.29.0 lightning==2.2.4
 & $Py -m pip install gdown==5.1.0 rich==13.7.1 matplotlib==3.7.5 onnx==1.16.0 "protobuf==4.25" wget torchmetrics rootutils pyarrow==18.1.0
+& $Py -m pip install edge-tts
 
 $Cosy = Join-Path $Root "CosyVoice"
 if (-not (Test-Path $Cosy)) {
@@ -23,6 +24,8 @@ if (-not (Test-Path $Cosy)) {
 Push-Location $Cosy
 git submodule update --init --recursive --depth 1
 Pop-Location
+
+& $Py (Join-Path $Root "ensure_cosyvoice_prompts.py")
 
 Write-Host "CosyVoice venv ready."
 Write-Host "  CosyVoice2: .\.venv-cosyvoice\Scripts\python.exe test_cosyvoice.py"

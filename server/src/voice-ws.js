@@ -86,7 +86,12 @@ function resolveAsr(config, hooks) {
 
 function resolveTtsFn(config) {
   if (config?.ttsProvider === "cosyvoice" && config.cosyvoice?.enabled) {
-    return (text, signal) => cosyvoiceTts(config.cosyvoice, text, signal);
+    return (text, signal) =>
+      cosyvoiceTts(
+        { ...config.cosyvoice, ttsVoice: config.ttsVoice || config.cosyvoice?.ttsVoice },
+        text,
+        signal,
+      );
   }
   if (config?.provider === "volc" && config.volc) {
     return (text, signal) => volcTts(config.volc, text, signal);

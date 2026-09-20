@@ -8,6 +8,8 @@ import { volcTtsV3StreamLatency } from "./voice-volc.js";
 
 const ASK_MODEL_PROMPT = "仅回复一个字：通";
 const TTS_PROBE_TEXT = "通";
+/** Short phrase for in-app voice preview in settings. */
+export const TTS_PREVIEW_TEXT = "你好，这是音色试听。";
 /** Same sentence as tools/local-voice CosyVoice latency bench for apples-to-apples TTFT. */
 export const TTS_LATENCY_PROBE_TEXT = "你好，这是问象本地语音合成测试。";
 
@@ -106,6 +108,27 @@ export async function probeAskModel({ cwd } = {}) {
   } finally {
     await channel.close().catch(() => {});
   }
+}
+
+export async function synthesizeVoicePreview({ ttsVoice, text, signal } = {}) {
+  const spoken = String(text || TTS_PREVIEW_TEXT).trim().slice(0, 120);
+  if (!spoken) {
+    throw new Error("text is empty");
+  }
+  const config = withTtsVoice(resolveVoiceConfig(), ttsVoice);
+  if (!config.ready) {
+    throw new Error(config.hint || "语音未配置");
+  }
+  const { tts } = createVoiceProviders(config);
+  if (!tts) {
+    throw new Error("TTS 不可用");
+  }
+  const audio = await tts(spoken, signal);
+  const bytes = audio?.length ?? 0;
+  if (bytes <= 0) {
+    throw new Error("合成结果为空");
+  }
+  return { pcm: audio, sampleRate: 24000 };
 }
 
 export async function probeVoiceTts({ ttsVoice, signal } = {}) {

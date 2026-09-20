@@ -81,7 +81,8 @@ describe("resolveVoiceConfig", () => {
     assert.equal(pub.ttsProvider, "cosyvoice");
     assert.equal(pub.ttsEngine, "Fun-CosyVoice3");
     assert.equal(pub.ttsVoice, "wenxiang_default");
-    assert.ok(pub.voices.every((v) => v.id === "wenxiang_default" || v.name.includes("问象")));
+    assert.ok(pub.voices.length >= 5);
+    assert.ok(pub.voices.some((v) => v.id === "zh_xiaoxiao"));
     assert.ok(!pub.voices.some((v) => v.id.includes("xiaohe")));
   });
 

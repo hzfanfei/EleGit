@@ -12,12 +12,13 @@ class CosyvoiceTtsVoice {
 
 const kDefaultCosyvoiceTtsVoice = 'wenxiang_default';
 
+/// Fallback when /v1/status has not loaded yet (keep in sync with cosyvoice_voices.json).
 const kCosyvoiceTtsVoices = <CosyvoiceTtsVoice>[
-  CosyvoiceTtsVoice(
-    id: 'wenxiang_default',
-    name: '问象默认',
-    scene: 'Fun-CosyVoice3 · 本地',
-  ),
+  CosyvoiceTtsVoice(id: 'wenxiang_default', name: '清亮女声', scene: '中文 · 官方参考'),
+  CosyvoiceTtsVoice(id: 'zh_xiaoxiao', name: '晓晓', scene: '中文 · 女声'),
+  CosyvoiceTtsVoice(id: 'zh_xiaoyi', name: '晓伊', scene: '中文 · 女声'),
+  CosyvoiceTtsVoice(id: 'zh_yunxi', name: '云希', scene: '中文 · 男声'),
+  CosyvoiceTtsVoice(id: 'zh_yunjian', name: '云健', scene: '中文 · 男声'),
 ];
 
 CosyvoiceTtsVoice resolveCosyvoiceTtsVoice(String? raw) {

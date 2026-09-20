@@ -1,6 +1,6 @@
 import {
-  COSYVOICE_TTS_VOICES,
   DEFAULT_COSYVOICE_TTS_VOICE,
+  getCosyvoiceTtsVoices,
   isCosyvoiceTtsVoice,
 } from "./cosyvoice-tts-voices.js";
 import {
@@ -10,10 +10,10 @@ import {
 } from "./volc-tts-voices.js";
 
 export {
-  COSYVOICE_TTS_VOICES,
   DEFAULT_COSYVOICE_TTS_VOICE,
   DEFAULT_VOLC_TTS_VOICE,
   VOLC_TTS_VOICES,
+  getCosyvoiceTtsVoices,
   sanitizeTtsVoice,
 };
 
@@ -165,7 +165,7 @@ export function withTtsVoice(config, rawVoice) {
 export function publicVoiceStatus(config = resolveVoiceConfig()) {
   const ttsProvider = config.ttsProvider || "volc";
   const asrProvider = config.asrProvider || "volc";
-  const voices = ttsProvider === "cosyvoice" ? COSYVOICE_TTS_VOICES : VOLC_TTS_VOICES;
+  const voices = ttsProvider === "cosyvoice" ? getCosyvoiceTtsVoices() : VOLC_TTS_VOICES;
   const stored = config.ttsVoice || config.cosyvoice?.ttsVoice || config.volc?.ttsVoice;
   const ttsVoice = stored
     ? resolveTtsVoiceId(config, stored)

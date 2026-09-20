@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:wenxiang/api/wenxiang_api.dart';
 import 'package:wenxiang/models.dart';
 import 'package:wenxiang/models/diagnostics.dart';
@@ -89,6 +91,17 @@ class FakeWenxiangApi extends WenxiangApi {
   @override
   Future<void> setTtsVoice(String ttsVoice) async {
     lastSetTtsVoice = ttsVoice;
+  }
+
+  String? lastPreviewTtsVoice;
+
+  @override
+  Future<TtsVoicePreview> previewTtsVoice(String ttsVoice, {String? text}) async {
+    lastPreviewTtsVoice = ttsVoice;
+    if (!voiceReady) {
+      throw ApiException('语音未就绪');
+    }
+    return TtsVoicePreview(pcm: Uint8List(480), sampleRate: 24000);
   }
 
   @override

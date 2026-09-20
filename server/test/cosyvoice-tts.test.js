@@ -6,12 +6,14 @@ describe("cosyvoiceTts", () => {
   it("POSTs text and returns PCM buffer", async () => {
     const pcm = Buffer.from("abcd");
     const out = await cosyvoiceTts(
-      { baseUrl: "http://127.0.0.1:9" },
+      { baseUrl: "http://127.0.0.1:9", ttsVoice: "zh_xiaoxiao" },
       "你好",
       undefined,
       async (url, opts) => {
         assert.equal(url, "http://127.0.0.1:9/v1/tts");
-        assert.equal(JSON.parse(opts.body).text, "你好");
+        const body = JSON.parse(opts.body);
+        assert.equal(body.text, "你好");
+        assert.equal(body.spk_id, "zh_xiaoxiao");
         return {
           ok: true,
           arrayBuffer: async () => {

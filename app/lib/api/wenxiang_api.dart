@@ -186,6 +186,26 @@ class WenxiangApi {
     }
   }
 
+  /// Synthesizes a short preview phrase for [ttsVoice]; PCM at 24 kHz unless header says otherwise.
+  Future<TtsVoicePreview> previewTtsVoice(String ttsVoice, {String? text}) async {
+    final res = await http
+        .post(
+          _uri('/v1/voice/tts-preview'),
+          headers: _headers,
+          body: jsonEncode({
+            'ttsVoice': ttsVoice,
+            if (text != null && text.isNotEmpty) 'text': text,
+          }),
+        )
+        .timeout(const Duration(seconds: 90));
+    if (res.statusCode >= 400) {
+      await _json(res, fallback: '音色试听失败');
+    }
+    final rateHeader = res.headers['x-sample-rate'];
+    final sampleRate = int.tryParse(rateHeader ?? '') ?? 24000;
+    return TtsVoicePreview(pcm: res.bodyBytes, sampleRate: sampleRate);
+  }
+
   Future<DiagnosticsProbeResult> runDiagnosticsProbe({String? ttsVoice}) async {
     final res = await http
         .post(
@@ -746,4 +766,11 @@ class WenxiangApi {
         .timeout(const Duration(seconds: 15));
     return _json(res, fallback: '停止隧道失败');
   }
+}
+
+class TtsVoicePreview {
+  const TtsVoicePreview({required this.pcm, required this.sampleRate});
+
+  final Uint8List pcm;
+  final int sampleRate;
 }

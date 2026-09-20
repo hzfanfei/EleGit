@@ -44,6 +44,7 @@ tools/local-voice/.venv/
 tools/local-voice/.venv-cosyvoice/
 tools/local-voice/CosyVoice/
 tools/local-voice/output/
+tools/local-voice/voices/prompts/
 tools/local-voice/__pycache__/
 server/test-output/
 
