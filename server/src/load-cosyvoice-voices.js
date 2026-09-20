@@ -25,5 +25,5 @@ export function loadCosyvoiceVoiceCatalog() {
 
 export function defaultCosyvoiceVoiceId() {
   const { voices } = loadCosyvoiceVoiceCatalog();
-  return voices[0]?.id || "wenxiang_default";
+  return voices[0]?.id || "zh_female_xiaohe_uranus_bigtts";
 }

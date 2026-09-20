@@ -80,10 +80,9 @@ describe("resolveVoiceConfig", () => {
     const pub = publicVoiceStatus(cfg);
     assert.equal(pub.ttsProvider, "cosyvoice");
     assert.equal(pub.ttsEngine, "Fun-CosyVoice3");
-    assert.equal(pub.ttsVoice, "wenxiang_default");
-    assert.ok(pub.voices.length >= 5);
-    assert.ok(pub.voices.some((v) => v.id === "zh_xiaoxiao"));
-    assert.ok(!pub.voices.some((v) => v.id.includes("xiaohe")));
+    assert.equal(pub.ttsVoice, "zh_female_xiaohe_uranus_bigtts");
+    assert.ok(pub.voices.length >= 20);
+    assert.ok(pub.voices.some((v) => v.id === "zh_female_xiaohe_uranus_bigtts" && v.name.includes("小何")));
   });
 
   it("uses FunASR for ASR when WENXIANG_ASR_PROVIDER=funasr", () => {

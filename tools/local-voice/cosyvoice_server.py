@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parent
 COSY = ROOT / "CosyVoice"
 CATALOG = ROOT / "cosyvoice_voices.json"
 DEFAULT_MODEL = "FunAudioLLM/Fun-CosyVoice3-0.5B-2512"
-DEFAULT_SPK = "wenxiang_default"
+DEFAULT_SPK = "zh_female_xiaohe_uranus_bigtts"
 
 _state: dict[str, Any] = {"ready": False, "error": None, "device": "cpu", "load_ms": 0}
 _cosy = None
@@ -37,7 +37,7 @@ def _init_model() -> None:
 
     from ensure_cosyvoice_prompts import ensure_all
 
-    ensure_all(ROOT)
+    ensure_all(ROOT, auto_generate=False)
 
     sys.path.insert(0, str(COSY))
     sys.path.insert(0, str(COSY / "third_party" / "Matcha-TTS"))

@@ -49,9 +49,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('CosyVoice3'), findsWidgets);
-    expect(find.text('晓晓'), findsOneWidget);
-    expect(find.text('云希'), findsOneWidget);
-    expect(find.textContaining('小何'), findsNothing);
+    expect(find.textContaining('小何'), findsOneWidget);
+    expect(find.textContaining('云舟'), findsOneWidget);
   });
 
   testWidgets('settings page saves ask engine choice', (tester) async {

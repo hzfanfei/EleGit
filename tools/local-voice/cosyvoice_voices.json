@@ -1,47 +1,212 @@
 {
   "voices": [
     {
-      "id": "wenxiang_default",
-      "name": "清亮女声",
-      "scene": "中文 · 官方参考",
-      "prompt_text": "You are a helpful assistant.<|endofprompt|>希望你以后能够做的比我还好呦。",
-      "prompt_wav": "CosyVoice/asset/zero_shot_prompt.wav"
+      "id": "zh_female_xiaohe_uranus_bigtts",
+      "name": "小何 2.0",
+      "scene": "通用",
+      "prompt_text": "You are a helpful assistant.<|endofprompt|>你好，我是小何，这是问象 CosyVoice 的参考语音。",
+      "prompt_wav": "voices/prompts/zh_female_xiaohe_uranus_bigtts.wav",
+      "volc_speaker": "zh_female_xiaohe_uranus_bigtts"
     },
     {
-      "id": "zh_xiaoxiao",
-      "name": "晓晓",
-      "scene": "中文 · 女声",
-      "prompt_text": "You are a helpful assistant.<|endofprompt|>你好，我是晓晓，这是一段自然清晰的中文女声参考。",
-      "prompt_wav": "voices/prompts/zh_xiaoxiao.wav",
-      "edge_voice": "zh-CN-XiaoxiaoNeural",
-      "edge_line": "你好，我是晓晓，这是一段自然清晰的中文女声参考。"
+      "id": "zh_female_vv_uranus_bigtts",
+      "name": "Vivi 2.0",
+      "scene": "通用",
+      "prompt_text": "You are a helpful assistant.<|endofprompt|>你好，我是Vivi，这是问象 CosyVoice 的参考语音。",
+      "prompt_wav": "voices/prompts/zh_female_vv_uranus_bigtts.wav",
+      "volc_speaker": "zh_female_vv_uranus_bigtts"
     },
     {
-      "id": "zh_xiaoyi",
-      "name": "晓伊",
-      "scene": "中文 · 女声",
-      "prompt_text": "You are a helpful assistant.<|endofprompt|>大家好，我是晓伊，语气亲切，适合日常讲解。",
-      "prompt_wav": "voices/prompts/zh_xiaoyi.wav",
-      "edge_voice": "zh-CN-XiaoyiNeural",
-      "edge_line": "大家好，我是晓伊，语气亲切，适合日常讲解。"
+      "id": "zh_male_m191_uranus_bigtts",
+      "name": "云舟 2.0",
+      "scene": "通用",
+      "prompt_text": "You are a helpful assistant.<|endofprompt|>你好，我是云舟，这是问象 CosyVoice 的参考语音。",
+      "prompt_wav": "voices/prompts/zh_male_m191_uranus_bigtts.wav",
+      "volc_speaker": "zh_male_m191_uranus_bigtts"
     },
     {
-      "id": "zh_yunxi",
-      "name": "云希",
-      "scene": "中文 · 男声",
-      "prompt_text": "You are a helpful assistant.<|endofprompt|>你好，我是云希，这是偏低沉的中文男声参考。",
-      "prompt_wav": "voices/prompts/zh_yunxi.wav",
-      "edge_voice": "zh-CN-YunxiNeural",
-      "edge_line": "你好，我是云希，这是偏低沉的中文男声参考。"
+      "id": "zh_male_taocheng_uranus_bigtts",
+      "name": "小天 2.0",
+      "scene": "通用",
+      "prompt_text": "You are a helpful assistant.<|endofprompt|>你好，我是小天，这是问象 CosyVoice 的参考语音。",
+      "prompt_wav": "voices/prompts/zh_male_taocheng_uranus_bigtts.wav",
+      "volc_speaker": "zh_male_taocheng_uranus_bigtts"
     },
     {
-      "id": "zh_yunjian",
-      "name": "云健",
-      "scene": "中文 · 男声",
-      "prompt_text": "You are a helpful assistant.<|endofprompt|>大家好，我是云健，吐字清楚，适合朗读旁白。",
-      "prompt_wav": "voices/prompts/zh_yunjian.wav",
-      "edge_voice": "zh-CN-YunjianNeural",
-      "edge_line": "大家好，我是云健，吐字清楚，适合朗读旁白。"
+      "id": "zh_male_liufei_uranus_bigtts",
+      "name": "刘飞 2.0",
+      "scene": "通用",
+      "prompt_text": "You are a helpful assistant.<|endofprompt|>你好，我是刘飞，这是问象 CosyVoice 的参考语音。",
+      "prompt_wav": "voices/prompts/zh_male_liufei_uranus_bigtts.wav",
+      "volc_speaker": "zh_male_liufei_uranus_bigtts"
+    },
+    {
+      "id": "zh_female_sophie_uranus_bigtts",
+      "name": "魅力苏菲 2.0",
+      "scene": "通用",
+      "prompt_text": "You are a helpful assistant.<|endofprompt|>你好，我是魅力苏菲，这是问象 CosyVoice 的参考语音。",
+      "prompt_wav": "voices/prompts/zh_female_sophie_uranus_bigtts.wav",
+      "volc_speaker": "zh_female_sophie_uranus_bigtts"
+    },
+    {
+      "id": "zh_female_qingxinnvsheng_uranus_bigtts",
+      "name": "清新女声 2.0",
+      "scene": "通用",
+      "prompt_text": "You are a helpful assistant.<|endofprompt|>你好，我是清新女声，这是问象 CosyVoice 的参考语音。",
+      "prompt_wav": "voices/prompts/zh_female_qingxinnvsheng_uranus_bigtts.wav",
+      "volc_speaker": "zh_female_qingxinnvsheng_uranus_bigtts"
+    },
+    {
+      "id": "zh_female_tianmeixiaoyuan_uranus_bigtts",
+      "name": "甜美小源 2.0",
+      "scene": "通用",
+      "prompt_text": "You are a helpful assistant.<|endofprompt|>你好，我是甜美小源，这是问象 CosyVoice 的参考语音。",
+      "prompt_wav": "voices/prompts/zh_female_tianmeixiaoyuan_uranus_bigtts.wav",
+      "volc_speaker": "zh_female_tianmeixiaoyuan_uranus_bigtts"
+    },
+    {
+      "id": "zh_female_tianmeitaozi_uranus_bigtts",
+      "name": "甜美桃子 2.0",
+      "scene": "通用",
+      "prompt_text": "You are a helpful assistant.<|endofprompt|>你好，我是甜美桃子，这是问象 CosyVoice 的参考语音。",
+      "prompt_wav": "voices/prompts/zh_female_tianmeitaozi_uranus_bigtts.wav",
+      "volc_speaker": "zh_female_tianmeitaozi_uranus_bigtts"
+    },
+    {
+      "id": "zh_female_shuangkuaisisi_uranus_bigtts",
+      "name": "爽快思思 2.0",
+      "scene": "通用",
+      "prompt_text": "You are a helpful assistant.<|endofprompt|>你好，我是爽快思思，这是问象 CosyVoice 的参考语音。",
+      "prompt_wav": "voices/prompts/zh_female_shuangkuaisisi_uranus_bigtts.wav",
+      "volc_speaker": "zh_female_shuangkuaisisi_uranus_bigtts"
+    },
+    {
+      "id": "zh_female_linjianvhai_uranus_bigtts",
+      "name": "邻家女孩 2.0",
+      "scene": "通用",
+      "prompt_text": "You are a helpful assistant.<|endofprompt|>你好，我是邻家女孩，这是问象 CosyVoice 的参考语音。",
+      "prompt_wav": "voices/prompts/zh_female_linjianvhai_uranus_bigtts.wav",
+      "volc_speaker": "zh_female_linjianvhai_uranus_bigtts"
+    },
+    {
+      "id": "zh_male_shaonianzixin_uranus_bigtts",
+      "name": "少年梓辛 2.0",
+      "scene": "通用",
+      "prompt_text": "You are a helpful assistant.<|endofprompt|>你好，我是少年梓辛，这是问象 CosyVoice 的参考语音。",
+      "prompt_wav": "voices/prompts/zh_male_shaonianzixin_uranus_bigtts.wav",
+      "volc_speaker": "zh_male_shaonianzixin_uranus_bigtts"
+    },
+    {
+      "id": "zh_female_wenroumama_uranus_bigtts",
+      "name": "温柔妈妈 2.0",
+      "scene": "通用",
+      "prompt_text": "You are a helpful assistant.<|endofprompt|>你好，我是温柔妈妈，这是问象 CosyVoice 的参考语音。",
+      "prompt_wav": "voices/prompts/zh_female_wenroumama_uranus_bigtts.wav",
+      "volc_speaker": "zh_female_wenroumama_uranus_bigtts"
+    },
+    {
+      "id": "zh_male_jieshuoxiaoming_uranus_bigtts",
+      "name": "解说小明 2.0",
+      "scene": "通用",
+      "prompt_text": "You are a helpful assistant.<|endofprompt|>你好，我是解说小明，这是问象 CosyVoice 的参考语音。",
+      "prompt_wav": "voices/prompts/zh_male_jieshuoxiaoming_uranus_bigtts.wav",
+      "volc_speaker": "zh_male_jieshuoxiaoming_uranus_bigtts"
+    },
+    {
+      "id": "zh_male_linjiananhai_uranus_bigtts",
+      "name": "邻家男孩 2.0",
+      "scene": "通用",
+      "prompt_text": "You are a helpful assistant.<|endofprompt|>你好，我是邻家男孩，这是问象 CosyVoice 的参考语音。",
+      "prompt_wav": "voices/prompts/zh_male_linjiananhai_uranus_bigtts.wav",
+      "volc_speaker": "zh_male_linjiananhai_uranus_bigtts"
+    },
+    {
+      "id": "zh_male_ruyaqingnian_uranus_bigtts",
+      "name": "儒雅青年 2.0",
+      "scene": "通用",
+      "prompt_text": "You are a helpful assistant.<|endofprompt|>你好，我是儒雅青年，这是问象 CosyVoice 的参考语音。",
+      "prompt_wav": "voices/prompts/zh_male_ruyaqingnian_uranus_bigtts.wav",
+      "volc_speaker": "zh_male_ruyaqingnian_uranus_bigtts"
+    },
+    {
+      "id": "zh_female_gaolengyujie_uranus_bigtts",
+      "name": "高冷御姐 2.0",
+      "scene": "通用",
+      "prompt_text": "You are a helpful assistant.<|endofprompt|>你好，我是高冷御姐，这是问象 CosyVoice 的参考语音。",
+      "prompt_wav": "voices/prompts/zh_female_gaolengyujie_uranus_bigtts.wav",
+      "volc_speaker": "zh_female_gaolengyujie_uranus_bigtts"
+    },
+    {
+      "id": "zh_female_wenroushunv_uranus_bigtts",
+      "name": "温柔淑女 2.0",
+      "scene": "通用",
+      "prompt_text": "You are a helpful assistant.<|endofprompt|>你好，我是温柔淑女，这是问象 CosyVoice 的参考语音。",
+      "prompt_wav": "voices/prompts/zh_female_wenroushunv_uranus_bigtts.wav",
+      "volc_speaker": "zh_female_wenroushunv_uranus_bigtts"
+    },
+    {
+      "id": "zh_female_tiexinnvsheng_uranus_bigtts",
+      "name": "贴心女声 2.0",
+      "scene": "通用",
+      "prompt_text": "You are a helpful assistant.<|endofprompt|>你好，我是贴心女声，这是问象 CosyVoice 的参考语音。",
+      "prompt_wav": "voices/prompts/zh_female_tiexinnvsheng_uranus_bigtts.wav",
+      "volc_speaker": "zh_female_tiexinnvsheng_uranus_bigtts"
+    },
+    {
+      "id": "zh_female_zhixingnv_uranus_bigtts",
+      "name": "知性女声 2.0",
+      "scene": "通用",
+      "prompt_text": "You are a helpful assistant.<|endofprompt|>你好，我是知性女声，这是问象 CosyVoice 的参考语音。",
+      "prompt_wav": "voices/prompts/zh_female_zhixingnv_uranus_bigtts.wav",
+      "volc_speaker": "zh_female_zhixingnv_uranus_bigtts"
+    },
+    {
+      "id": "zh_female_wenrouxiaoya_uranus_bigtts",
+      "name": "温柔小雅 2.0",
+      "scene": "通用",
+      "prompt_text": "You are a helpful assistant.<|endofprompt|>你好，我是温柔小雅，这是问象 CosyVoice 的参考语音。",
+      "prompt_wav": "voices/prompts/zh_female_wenrouxiaoya_uranus_bigtts.wav",
+      "volc_speaker": "zh_female_wenrouxiaoya_uranus_bigtts"
+    },
+    {
+      "id": "zh_male_shenyeboke_uranus_bigtts",
+      "name": "深夜播客 2.0",
+      "scene": "通用",
+      "prompt_text": "You are a helpful assistant.<|endofprompt|>你好，我是深夜播客，这是问象 CosyVoice 的参考语音。",
+      "prompt_wav": "voices/prompts/zh_male_shenyeboke_uranus_bigtts.wav",
+      "volc_speaker": "zh_male_shenyeboke_uranus_bigtts"
+    },
+    {
+      "id": "zh_female_kefunvsheng_uranus_bigtts",
+      "name": "暖阳女声 2.0",
+      "scene": "客服",
+      "prompt_text": "You are a helpful assistant.<|endofprompt|>你好，我是暖阳女声，这是问象 CosyVoice 的参考语音。",
+      "prompt_wav": "voices/prompts/zh_female_kefunvsheng_uranus_bigtts.wav",
+      "volc_speaker": "zh_female_kefunvsheng_uranus_bigtts"
+    },
+    {
+      "id": "zh_female_xiaoxue_uranus_bigtts",
+      "name": "儿童绘本 2.0",
+      "scene": "有声阅读",
+      "prompt_text": "You are a helpful assistant.<|endofprompt|>你好，我是儿童绘本，这是问象 CosyVoice 的参考语音。",
+      "prompt_wav": "voices/prompts/zh_female_xiaoxue_uranus_bigtts.wav",
+      "volc_speaker": "zh_female_xiaoxue_uranus_bigtts"
+    },
+    {
+      "id": "zh_female_liuchangnv_uranus_bigtts",
+      "name": "流畅女声 2.0",
+      "scene": "有声阅读",
+      "prompt_text": "You are a helpful assistant.<|endofprompt|>你好，我是流畅女声，这是问象 CosyVoice 的参考语音。",
+      "prompt_wav": "voices/prompts/zh_female_liuchangnv_uranus_bigtts.wav",
+      "volc_speaker": "zh_female_liuchangnv_uranus_bigtts"
+    },
+    {
+      "id": "zh_male_baqiqingshu_uranus_bigtts",
+      "name": "霸气青叔 2.0",
+      "scene": "有声阅读",
+      "prompt_text": "You are a helpful assistant.<|endofprompt|>你好，我是霸气青叔，这是问象 CosyVoice 的参考语音。",
+      "prompt_wav": "voices/prompts/zh_male_baqiqingshu_uranus_bigtts.wav",
+      "volc_speaker": "zh_male_baqiqingshu_uranus_bigtts"
     }
   ]
 }

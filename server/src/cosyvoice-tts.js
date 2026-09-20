@@ -35,7 +35,7 @@ export function resolveCosyVoiceLayout(env = process.env) {
     bind,
     baseUrl,
     modelId: trim(env.COSYVOICE_MODEL_ID) || "FunAudioLLM/Fun-CosyVoice3-0.5B-2512",
-    spkId: trim(env.COSYVOICE_SPK_ID) || "wenxiang_default",
+    spkId: trim(env.COSYVOICE_SPK_ID) || "zh_female_xiaohe_uranus_bigtts",
   };
 }
 
