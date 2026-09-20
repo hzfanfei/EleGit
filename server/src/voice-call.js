@@ -102,7 +102,10 @@ export async function runVoiceTurn({
     if (!isSpeakableTtsText(speak)) return;
     onCaption?.(speak);
     try {
-      const audio = await tts(speak, signal);
+      let audio = await tts(speak, signal);
+      if (!audio?.length && !signal?.aborted) {
+        audio = await tts(speak, signal);
+      }
       if (signal?.aborted || !audio?.length) return;
       await playAudio(audio);
     } catch (err) {

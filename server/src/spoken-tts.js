@@ -46,6 +46,9 @@ export async function speakTextInParts({ text, tts, onCaption, onAudio, signal }
     let audio;
     try {
       audio = await tts(part, signal);
+      if (!audio?.length && !signal?.aborted) {
+        audio = await tts(part, signal);
+      }
     } catch (err) {
       if (signal?.aborted) break;
       if (isUnreadableTtsError(err)) continue;

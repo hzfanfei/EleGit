@@ -402,43 +402,42 @@ class DeviceVoiceMedia implements VoiceMedia {
     );
   }
 
-  Future<void> _playJob(_PlayJob job) async {
+  Future<void> _playJob(_PlayJob job, {required bool leadingStop}) async {
     job.onPlaybackStart?.call();
 
-    final completer = Completer<void>();
-    _currentPlay = completer;
-
-    late final StreamSubscription<PlayerState> sub;
-    sub = _player.onPlayerStateChanged.listen((state) {
-      if (state == PlayerState.completed) {
-        unawaited(sub.cancel());
-        if (!completer.isCompleted) completer.complete();
-      }
-    });
+    final cancel = Completer<void>();
+    _currentPlay = cancel;
 
     try {
       if (job.format == 'mp3') {
-        if (job.bytes.length < 16) return;
+        if (job.bytes.isEmpty) return;
         await _playSourceWithRetry(
           BytesSource(job.bytes, mimeType: 'audio/mpeg'),
+          leadingStop: leadingStop,
         );
       } else {
         final pcm = normalizePcm16Length(job.bytes);
-        if (pcm.length < 4) return;
+        if (pcm.isEmpty) return;
         final wav = pcm16ToWav(pcm, sampleRate: _outRate);
-        if (wav.length < 48) return;
+        if (wav.isEmpty) return;
         await _playSourceWithRetry(
           BytesSource(wav, mimeType: 'audio/wav'),
           fileFallbackBytes: Platform.isAndroid ? wav : null,
+          leadingStop: leadingStop,
         );
       }
-      await completer.future.timeout(const Duration(minutes: 3));
+      await Future.any([
+        _player.onPlayerComplete.first,
+        cancel.future,
+      ]).timeout(const Duration(minutes: 3));
+    } on TimeoutException {
+      if (cancel.isCompleted) return;
+      rethrow;
     } catch (_) {
-      if (completer.isCompleted) return;
+      if (cancel.isCompleted) return;
       rethrow;
     } finally {
-      await sub.cancel();
-      if (identical(_currentPlay, completer)) _currentPlay = null;
+      if (identical(_currentPlay, cancel)) _currentPlay = null;
     }
   }
 
@@ -446,13 +445,16 @@ class DeviceVoiceMedia implements VoiceMedia {
   Future<void> _playSourceWithRetry(
     Source source, {
     Uint8List? fileFallbackBytes,
+    required bool leadingStop,
   }) async {
     Object? lastError;
     for (var attempt = 0; attempt < 3; attempt++) {
       try {
-        await _player.stop();
-        if (Platform.isAndroid) {
-          await Future<void>.delayed(Duration(milliseconds: 40 * (attempt + 1)));
+        if (leadingStop || attempt > 0) {
+          await _player.stop();
+          if (Platform.isAndroid) {
+            await Future<void>.delayed(Duration(milliseconds: 40 * (attempt + 1)));
+          }
         }
         await _player.setVolume(1);
         await _player.setPlayerMode(PlayerMode.mediaPlayer);
@@ -489,10 +491,10 @@ class DeviceVoiceMedia implements VoiceMedia {
 
       await _preparePlaybackAudio();
 
+      var leadingStop = true;
       while (_queue.isNotEmpty) {
-
-        await _playJob(_takeNextJob());
-
+        await _playJob(_takeNextJob(), leadingStop: leadingStop);
+        leadingStop = false;
       }
 
     } finally {
