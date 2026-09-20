@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../persist/book_reader_prefs.dart';
 
-/// One-line (or few-line) subtitle for the TTS chunk currently playing.
+/// Subtitle for the TTS chunk currently playing (one speak segment from the server).
 class VoiceCaptionPanel extends StatelessWidget {
   const VoiceCaptionPanel({
     super.key,
@@ -29,8 +29,8 @@ class VoiceCaptionPanel extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           child: Text(
             text,
-            maxLines: 4,
-            overflow: TextOverflow.ellipsis,
+            maxLines: 12,
+            overflow: TextOverflow.clip,
             style: TextStyle(
               fontSize: 13.5,
               height: 1.45,
