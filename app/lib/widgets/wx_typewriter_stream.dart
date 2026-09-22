@@ -38,7 +38,15 @@ class WxTypewriterStream {
 
   void push(String chunk) {
     if (chunk.isEmpty) return;
+    final firstAfterIdle = _shown == 0 && _pending.isEmpty;
     _pending += chunk;
+    if (firstAfterIdle) {
+      final len = _pending.characters.length;
+      final step = len <= 3 ? len : 3;
+      _shown = step;
+      visible.value = _pending.characters.take(_shown).toString();
+      onReveal?.call();
+    }
     _ensureTimer();
   }
 
