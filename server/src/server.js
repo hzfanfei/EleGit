@@ -721,21 +721,26 @@ app.post("/v1/diagnostics/probe", async (req, res) => {
 });
 
 app.put("/v1/settings/ask-engine", async (req, res) => {
-  const engine = sanitizeAcpEngine(req.body?.engine ?? req.body?.acpEngine);
-  if (!engine) {
-    res.status(400).json({ error: "engine must be claude or cursor" });
-    return;
+  try {
+    const engine = sanitizeAcpEngine(req.body?.engine ?? req.body?.acpEngine);
+    if (!engine) {
+      res.status(400).json({ error: "engine must be claude or cursor" });
+      return;
+    }
+    store.config.acpEngine = engine;
+    applyAcpEnginePreference(engine);
+    await store.save();
+    await Promise.all([sessions.resetAllChannels(), bookSessions.resetAllChannels()]);
+    const active = detectCursorEngine();
+    res.json({
+      engine,
+      available: Boolean(active),
+      activeEngine: active?.provider || active?.id || null,
+      model: active?.model || null,
+    });
+  } catch (err) {
+    sendError(res, err);
   }
-  store.config.acpEngine = engine;
-  applyAcpEnginePreference(engine);
-  await store.save();
-  await Promise.all([sessions.resetAllChannels(), bookSessions.resetAllChannels()]);
-  const active = detectCursorEngine();
-  res.json({
-    engine,
-    available: Boolean(active),
-    activeEngine: active?.id || null,
-  });
 });
 
 app.post("/v1/books/voice-turn", async (req, res) => {

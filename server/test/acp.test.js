@@ -16,12 +16,26 @@ import {
   buildBookAcpPrompt,
   createSessionStore,
   sanitizeAcpEngine,
+  pickCursorVersionName,
   preferredAcpModeIds,
   selectPermissionOption,
 } from "../src/acp.js";
 import { whichSync } from "../src/which.js";
 
 const fakeAcp = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures", "fake-acp.js");
+
+describe("pickCursorVersionName", () => {
+  it("uses the newest dated build and skips names the launcher ignores", () => {
+    assert.equal(
+      pickCursorVersionName([
+        "2026.05.24-dda726e",
+        "2026.06.19-20-24-33-653a7fb",
+        "2026.04.30-4edb302",
+      ]),
+      "2026.05.24-dda726e",
+    );
+  });
+});
 
 describe("sanitizeAcpEngine", () => {
   it("accepts claude and cursor only", () => {

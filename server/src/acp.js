@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, writeFileSync, existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import os from "node:os";
@@ -83,7 +83,68 @@ export function resolveClaudeAgentCommand() {
   };
 }
 
+export function pickCursorVersionName(names) {
+  const matched = names.filter((name) => /^\d{4}\.\d{1,2}\.\d{1,2}-[a-f0-9]+$/.test(name));
+  matched.sort((a, b) => cursorVersionDate(b) - cursorVersionDate(a));
+  return matched[0] || "";
+}
+
+function cursorVersionDate(name) {
+  const match = /^(\d{4})\.(\d{1,2})\.(\d{1,2})-/.exec(name);
+  if (!match) return 0;
+  return Number(match[1] + match[2].padStart(2, "0") + match[3].padStart(2, "0"));
+}
+
+function cursorInstallDirs() {
+  return [
+    path.join(process.env.LOCALAPPDATA || "", "cursor-agent"),
+    path.join(os.homedir(), "AppData", "Local", "cursor-agent"),
+    path.join(os.homedir(), ".local", "share", "cursor-agent"),
+  ].filter(Boolean);
+}
+
+function resolveCursorNodeLaunch() {
+  for (const root of cursorInstallDirs()) {
+    if (!root || !existsSync(root)) continue;
+    const directNode = path.join(root, "node.exe");
+    const directIndex = path.join(root, "index.js");
+    if (existsSync(directNode) && existsSync(directIndex)) {
+      return { node: directNode, index: directIndex };
+    }
+    const versionsDir = path.join(root, "versions");
+    if (!existsSync(versionsDir)) continue;
+    let names = [];
+    try {
+      names = readdirSync(versionsDir, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name);
+    } catch {
+      continue;
+    }
+    const version = pickCursorVersionName(names);
+    if (!version) continue;
+    const node = path.join(versionsDir, version, "node.exe");
+    const index = path.join(versionsDir, version, "index.js");
+    if (existsSync(node) && existsSync(index)) return { node, index };
+  }
+  return null;
+}
+
 export function resolveCursorAgentCommand() {
+  const launch = resolveCursorNodeLaunch();
+  const model = acpModelId();
+  if (launch) {
+    return {
+      id: "cursor-acp",
+      bin: "agent",
+      path: launch.node,
+      args: [launch.index, ...authArgs(), ...modelArgs(), "acp"],
+      mode: "ask",
+      model,
+      transport: "stdio",
+      provider: "cursor",
+    };
+  }
   for (const candidate of CURSOR_ACP_CANDIDATES) {
     const resolved = whichSync(candidate.bin);
     if (resolved) {
@@ -93,7 +154,7 @@ export function resolveCursorAgentCommand() {
         path: resolved,
         args: [...authArgs(), ...modelArgs(), ...candidate.args],
         mode: "ask",
-        model: acpModelId(),
+        model,
         transport: "stdio",
         provider: "cursor",
       };
@@ -617,7 +678,16 @@ export class AcpChannel {
     clearTimeout(this.idleTimer);
     this._failAll(new Error("ACP channel closed"));
     if (this.child && !this.child.killed) {
-      this.child.kill("SIGTERM");
+      const pid = this.child.pid;
+      if (process.platform === "win32" && pid) {
+        spawn("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+      } else {
+        try {
+          this.child.kill("SIGTERM");
+        } catch {
+          // Already gone.
+        }
+      }
     }
     this.child = null;
     this.sessionId = "";

@@ -152,8 +152,14 @@ class WenxiangApi {
   }) async {
     Map<String, dynamic> body = {};
     if (res.body.isNotEmpty) {
-      final decoded = jsonDecode(res.body);
-      if (decoded is Map<String, dynamic>) body = decoded;
+      try {
+        final decoded = jsonDecode(res.body);
+        if (decoded is Map<String, dynamic>) body = decoded;
+      } catch (_) {
+        if (res.statusCode >= 400) {
+          throw ApiException('$fallback（HTTP ${res.statusCode}）');
+        }
+      }
     }
     if (res.statusCode >= 400) {
       throw ApiException((body['error'] ?? fallback).toString());
