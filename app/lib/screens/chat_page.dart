@@ -474,9 +474,9 @@ class _ChatPageState extends State<ChatPage> {
         return;
       }
       final seconds = DateTime.now().difference(sentAt).inSeconds;
-      if (seconds >= 2) {
+      if (seconds >= 4) {
         _setLivePhase('generate');
-      } else if (seconds >= 0.6 && _livePhase.value == 'connect') {
+      } else if (seconds >= 1.5 && _livePhase.value == 'connect') {
         _setLivePhase('repo');
       }
     });
@@ -1337,7 +1337,7 @@ String _livePhaseLabel(String phase) {
     case 'repo':
       return '读仓库、整理上下文…';
     case 'generate':
-      return '正在想…';
+      return '生成回答…';
     case 'connect':
     default:
       return '正在连接…';

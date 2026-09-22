@@ -58,15 +58,17 @@ export async function resolveRepoChatRuntime({
   const destGuess = checkoutPath(store.config.workspaceRoot, owner, repo);
   const present = isCheckoutPresent(store.config.workspaceRoot, owner, repo);
   const token = githubToken?.() || "";
+  const warmPromise =
+    present && detectCursorEngine()
+      ? sessions.warmRepo(owner, repo, destGuess).catch(() => {})
+      : Promise.resolve();
 
   let progress;
   let dest;
   let local;
   if (present) {
-    if (detectCursorEngine()) {
-      sessions.warmRepo(owner, repo, destGuess).catch(() => {});
-    }
-    const localSnap = await snapshotCheckoutLite(destGuess);
+    const snapPromise = snapshotCheckoutLite(destGuess);
+    const [, localSnap] = await Promise.all([warmPromise, snapPromise]);
     if (localSnap?.present) {
       dest = destGuess;
       local = localSnap;
@@ -85,10 +87,6 @@ export async function resolveRepoChatRuntime({
       }
     }
   } else {
-    const warmPromise =
-      detectCursorEngine()
-        ? sessions.warmRepo(owner, repo, destGuess).catch(() => {})
-        : Promise.resolve();
     ({ progress, dest, local } = await Promise.all([
       checkoutRepo(owner, repo, signal, { fast: true }),
       warmPromise,
