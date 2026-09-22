@@ -876,6 +876,7 @@ app.post("/v1/chat", requireGithub, async (req, res) => {
     const message = String(req.body?.message || "").trim();
     const sessionId = String(req.body?.sessionId || "").trim();
     const history = Array.isArray(req.body?.history) ? req.body.history : [];
+    const agentMode = req.body?.agentMode === true;
     if (!owner || !repo || !message) {
       res.status(400).json({ error: "owner, repo, and message are required" });
       return;
@@ -955,6 +956,7 @@ app.post("/v1/chat", requireGithub, async (req, res) => {
       session,
       sessions,
       signal,
+      agentMode,
     })) {
       if (signal.aborted) break;
       if (event.type === "done") {

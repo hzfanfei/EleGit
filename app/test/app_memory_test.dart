@@ -65,6 +65,18 @@ void main() {
     expect(memory.ttsVoice(), 'zh_female_xiaohe_uranus_bigtts');
   });
 
+  test('agent mode is stored per repo and defaults off', () async {
+    SharedPreferences.setMockInitialValues({});
+    final memory = AppMemory(await SharedPreferences.getInstance());
+    expect(memory.agentModeFor('octo/demo'), isFalse);
+    expect(memory.agentModeFor('octo/widget'), isFalse);
+    await memory.saveAgentMode('octo/demo', true);
+    expect(memory.agentModeFor('octo/demo'), isTrue);
+    expect(memory.agentModeFor('octo/widget'), isFalse);
+    await memory.saveAgentMode('octo/demo', false);
+    expect(memory.agentModeFor('octo/demo'), isFalse);
+  });
+
   test('keeps last-used repo at the front of recent repos', () async {
     SharedPreferences.setMockInitialValues({});
     final memory = AppMemory(await SharedPreferences.getInstance());

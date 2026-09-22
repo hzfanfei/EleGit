@@ -29,4 +29,27 @@ describe("repo voice turn", () => {
     });
     assert.equal(typeof ask, "function");
   });
+
+  it("forwards agent mode into the spoken ask", async () => {
+    let seen = false;
+    const ask = createRepoAskIterator({
+      progress: { repo: { fullName: "o/r" }, commits: [], pulls: [], issues: [] },
+      context: "ctx",
+      githubContext: "gh",
+      local: { present: true, path: "/tmp/r" },
+      session: { id: "s1", owner: "o", repo: "r", turns: 0 },
+      sessions: {
+        prompt: async (_session, opts) => {
+          seen = opts.agentMode === true;
+        },
+      },
+      history: [],
+      signal: new AbortController().signal,
+      agentMode: true,
+    });
+    const events = [];
+    for await (const event of ask("把标题改掉")) events.push(event.type);
+    assert.equal(seen, true);
+    assert.equal(events[0], "start");
+  });
 });

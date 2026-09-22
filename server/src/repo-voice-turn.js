@@ -25,6 +25,7 @@ export function createRepoAskIterator({
   sessions,
   history,
   signal,
+  agentMode = false,
 }) {
   return async function* ask(question, askSignal) {
     const mergedSignal = askSignal || signal;
@@ -37,6 +38,7 @@ export function createRepoAskIterator({
       local,
       session,
       sessions,
+      agentMode,
       buildPrompt: (opts) => buildAcpPrompt({ ...opts, spokenAnswer: true }),
       signal: mergedSignal,
     });
@@ -120,6 +122,7 @@ export async function handleRepoVoiceTurn(
   const message = String(req.body?.message || "").trim();
   const sessionId = String(req.body?.sessionId || "").trim();
   const history = Array.isArray(req.body?.history) ? req.body.history : [];
+  const agentMode = req.body?.agentMode === true;
 
   if (!owner || !repo || !message) {
     res.status(400).json({ error: "owner, repo, and message are required" });
@@ -187,6 +190,7 @@ export async function handleRepoVoiceTurn(
       sessions,
       history,
       signal,
+      agentMode,
     });
 
     await runVoiceTurn({

@@ -22,6 +22,14 @@ class AppMemory {
 
   static String chatsKey(String fullName) => 'wx.chats.$fullName';
   static String bookChatsKey(String bookId) => 'wx.bookChats.$bookId';
+  static String agentModeKey(String fullName) => 'wx.agentMode.$fullName';
+
+  bool agentModeFor(String fullName) => prefs.getBool(agentModeKey(fullName)) ?? false;
+
+  Future<void> saveAgentMode(String fullName, bool enabled) {
+    if (!enabled) return prefs.remove(agentModeKey(fullName));
+    return prefs.setBool(agentModeKey(fullName), true);
+  }
 
   bool voiceHoldTipDismissed() => prefs.getBool(voiceHoldTipDismissedKey) ?? false;
 

@@ -355,6 +355,7 @@ class FakeWenxiangApi extends WenxiangApi {
     required List<ChatMessage> history,
     String? sessionId,
     String? ttsVoice,
+    bool agentMode = false,
   }) async* {
     lastRepoTtsVoice = ttsVoice;
     for (final event in repoVoiceTurnEvents ??

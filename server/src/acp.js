@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import os from "node:os";
@@ -124,8 +124,25 @@ export function detectCursorEngine() {
   return resolveAgentCommand();
 }
 
-export function selectPermissionOption(params) {
+export function preferredAcpModeIds(agentMode, isClaude) {
+  if (agentMode) {
+    const claude = ["bypassPermissions", "acceptEdits", "dontAsk", "agent", "default"];
+    const cursor = ["agent", "code", "default", "bypassPermissions", "acceptEdits", "dontAsk"];
+    return isClaude ? claude : cursor;
+  }
+  return ["ask", "plan"];
+}
+
+export function selectPermissionOption(params, { agentMode = false } = {}) {
   const options = Array.isArray(params?.options) ? params.options : [];
+  if (agentMode) {
+    const id = (opt) => String(opt.optionId || opt.id || "");
+    const always = options.find((opt) => /allow/i.test(id(opt)) && /always/i.test(id(opt)));
+    if (always) return id(always);
+    const allow = options.find((opt) => /allow/i.test(id(opt)) && !/reject|deny/i.test(id(opt)));
+    if (allow) return id(allow);
+    return "allow-always";
+  }
   const hint = `${params?.toolCall?.kind || ""} ${params?.toolCall?.title || ""}`;
   const reject = WRITE_TOOL.test(hint);
   const wanted = reject ? "reject-once" : "allow-once";
@@ -140,10 +157,19 @@ export function selectPermissionOption(params) {
   return options[0]?.optionId || wanted;
 }
 
-export function buildAcpPrompt({ question, history, githubContext, seedHistory, spokenAnswer = false }) {
+export function buildAcpPrompt({
+  question,
+  history,
+  githubContext,
+  seedHistory,
+  spokenAnswer = false,
+  agentMode = false,
+}) {
   const lines = [
     "You are 问象, a local repo progress assistant running on the user's computer.",
-    "You are in ask mode. Do not edit files, commit, or change the working tree.",
+    agentMode
+      ? "You are in agent mode for this repository only. Edit files in this checkout when that is what the user asked for. Do not change other projects or global settings. Permissions for this checkout are already granted; do not stop to ask."
+      : "You are in ask mode. Do not edit files, commit, or change the working tree.",
     "Answer in Simplified Chinese unless the user writes in another language.",
     "Be concise and efficient: lead with the direct answer; use short paragraphs or bullets; skip preamble, filler, and long recaps unless the user asks for detail.",
     "Do not invent commits, PRs, files, or dates. Prefer the local checkout when it disagrees with stale memory.",
@@ -314,13 +340,24 @@ export function acpVisibleTextFromUpdate(update) {
   return sanitizeAcpUserVisibleText(text);
 }
 
-function readTextUnderCwd(cwd, rawPath) {
+function resolveUnderCwd(cwd, rawPath) {
   const abs = path.resolve(cwd, String(rawPath || ""));
   const root = path.resolve(cwd);
   if (abs !== root && !abs.startsWith(`${root}${path.sep}`)) {
     throw new Error("path outside workspace cwd");
   }
-  return { content: readFileSync(abs, "utf8") };
+  return abs;
+}
+
+function readTextUnderCwd(cwd, rawPath) {
+  return { content: readFileSync(resolveUnderCwd(cwd, rawPath), "utf8") };
+}
+
+function writeTextUnderCwd(cwd, rawPath, content) {
+  const abs = resolveUnderCwd(cwd, rawPath);
+  mkdirSync(path.dirname(abs), { recursive: true });
+  writeFileSync(abs, String(content ?? ""), "utf8");
+  return {};
 }
 
 function claudeClaudeCodeExecutable() {
@@ -340,6 +377,8 @@ export class AcpChannel {
     this.cwd = cwd;
     this.spawnImpl = spawnImpl;
     this.idleMs = idleMs;
+    this.agentMode = false;
+    this.availableModes = [];
     this.child = null;
     this.sessionId = "";
     this.nextId = 1;
@@ -392,7 +431,7 @@ export class AcpChannel {
         clientCapabilities: {
           fs: {
             readTextFile: this.isClaudeProvider(),
-            writeTextFile: false,
+            writeTextFile: this.isClaudeProvider(),
           },
           terminal: false,
           _meta: { parameterizedModelPicker: !this.isClaudeProvider() },
@@ -432,20 +471,11 @@ export class AcpChannel {
       );
       this.sessionId = created?.sessionId || created?.session_id || "";
       if (!this.sessionId) throw new Error("ACP session/new did not return sessionId");
-      const modes = created?.modes?.availableModes || init?.agentCapabilities?.sessionCapabilities?.modes?.availableModes || [];
-      const modeOrder = this.isClaudeProvider() ? ["ask", "plan", "dontAsk"] : ["ask"];
-      for (const modeId of modeOrder) {
-        if (!modes.some((m) => (m.id || m.modeId) === modeId)) continue;
-        try {
-          await this.request("session/set_mode", {
-            sessionId: this.sessionId,
-            modeId,
-          });
-          break;
-        } catch {
-          // Try the next mode alias.
-        }
-      }
+      this.availableModes =
+        created?.modes?.availableModes ||
+        init?.agentCapabilities?.sessionCapabilities?.modes?.availableModes ||
+        [];
+      await this.applySessionMode();
       await this._applyModel(created);
       this.alive = true;
       this._touch();
@@ -453,6 +483,32 @@ export class AcpChannel {
     } catch (err) {
       await this.close();
       throw err;
+    }
+  }
+
+  async applySessionMode() {
+    if (!this.sessionId) return;
+    const order = preferredAcpModeIds(this.agentMode, this.isClaudeProvider());
+    const advertised = this.availableModes
+      .map((m) => String(m.id || m.modeId || ""))
+      .filter(Boolean);
+    for (const modeId of order) {
+      if (
+        advertised.length &&
+        !advertised.some((id) => id.toLowerCase() === modeId.toLowerCase())
+      ) {
+        continue;
+      }
+      const exact = advertised.find((id) => id.toLowerCase() === modeId.toLowerCase()) || modeId;
+      try {
+        await this.request("session/set_mode", {
+          sessionId: this.sessionId,
+          modeId: exact,
+        });
+        return;
+      } catch {
+        if (!advertised.length) return;
+      }
     }
   }
 
@@ -635,12 +691,23 @@ export class AcpChannel {
       return;
     }
     if (msg.method === "fs/write_text_file") {
-      this.respond(msg.id, { error: "write disabled in ask mode" });
+      if (!this.agentMode) {
+        this.respond(msg.id, { error: "write disabled in ask mode" });
+        return;
+      }
+      try {
+        this.respond(msg.id, writeTextUnderCwd(this.cwd, msg.params?.path, msg.params?.content));
+      } catch (err) {
+        this.respond(msg.id, { error: String(err.message || err) });
+      }
       return;
     }
     if (msg.method === "session/request_permission") {
       this.respond(msg.id, {
-        outcome: { outcome: "selected", optionId: selectPermissionOption(msg.params) },
+        outcome: {
+          outcome: "selected",
+          optionId: selectPermissionOption(msg.params, { agentMode: this.agentMode }),
+        },
       });
       return;
     }
@@ -681,6 +748,7 @@ export function createSessionStore({
 } = {}) {
   const sessions = new Map();
   const activeByRepo = new Map();
+  let channelEpoch = 0;
 
   function repoKey(owner, repo) {
     return `${owner}/${repo}`;
@@ -748,6 +816,7 @@ export function createSessionStore({
         warmPromise: null,
         lock: Promise.resolve(),
         promptingSessionId: null,
+        epoch: channelEpoch,
       };
       repoChannels.set(key, entry);
     } else if (root && !entry.cwd) {
@@ -775,22 +844,34 @@ export function createSessionStore({
     const root = String(cwd || "").trim();
     if (!command || !root) return { warmed: false };
     const entry = repoEntry(owner, repo, root);
-    if (entry.channel?.alive) return { warmed: true, reused: true };
+    if (entry.channel?.alive && entry.epoch === channelEpoch) return { warmed: true, reused: true };
     if (entry.warmPromise) {
       await entry.warmPromise;
       return { warmed: Boolean(entry.channel?.alive), reused: true };
     }
-    entry.warmPromise = (async () => {
+    const epoch = channelEpoch;
+    entry.epoch = epoch;
+    const task = (async () => {
+      let channel = null;
       try {
         if (entry.channel) await entry.channel.close().catch(() => {});
-        entry.channel = new AcpChannel({ command, cwd: root, spawnImpl, idleMs });
-        await entry.channel.start();
+        channel = new AcpChannel({ command, cwd: root, spawnImpl, idleMs });
+        await channel.start();
+        if (epoch !== channelEpoch) {
+          await channel.close().catch(() => {});
+          return;
+        }
+        entry.channel = channel;
+      } catch (err) {
+        await channel?.close().catch(() => {});
+        throw err;
       } finally {
-        entry.warmPromise = null;
+        if (entry.warmPromise === task) entry.warmPromise = null;
       }
     })();
-    await entry.warmPromise;
-    return { warmed: true, reused: false };
+    entry.warmPromise = task;
+    await task;
+    return { warmed: Boolean(entry.channel?.alive), reused: false };
   }
 
   async function close(owner, repo, id) {
@@ -821,7 +902,7 @@ export function createSessionStore({
     return sessions.get(activeByRepo.get(repoKey(owner, repo)));
   }
 
-  async function prompt(session, { question, history, githubContext, bookContext, cwd, onDelta, buildPrompt }) {
+  async function prompt(session, { question, history, githubContext, bookContext, cwd, onDelta, buildPrompt, agentMode = false }) {
     const command = resolveCommand();
     if (!command) {
       const err = new Error("ACP agent not found");
@@ -853,12 +934,18 @@ export function createSessionStore({
       githubContext,
       bookContext,
       seedHistory,
+      agentMode: Boolean(agentMode) && !bookContext,
     });
     await withRepoLock(entry, async () => {
       entry.promptingSessionId = session.id;
+      const write = Boolean(agentMode) && !bookContext;
+      channel.agentMode = write;
       try {
+        await channel.applySessionMode();
         await channel.prompt(text, { onDelta });
       } finally {
+        channel.agentMode = false;
+        if (write) await channel.applySessionMode().catch(() => {});
         if (entry.promptingSessionId === session.id) entry.promptingSessionId = null;
       }
     });
@@ -883,12 +970,16 @@ export function createSessionStore({
   }
 
   async function resetAllChannels() {
+    channelEpoch += 1;
+    const pending = [];
     for (const entry of repoChannels.values()) {
-      if (entry.channel) await entry.channel.close().catch(() => {});
+      entry.epoch = channelEpoch;
+      if (entry.channel) pending.push(entry.channel.close().catch(() => {}));
       entry.channel = null;
       entry.warmPromise = null;
       entry.promptingSessionId = null;
     }
+    await Promise.all(pending);
   }
 
   return {

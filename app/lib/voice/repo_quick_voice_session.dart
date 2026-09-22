@@ -26,6 +26,7 @@ class RepoQuickVoiceSession implements QuickVoiceFabHost {
     this.voiceMedia,
     this.onError,
     this.resolveTtsVoice,
+    this.resolveAgentMode,
   }) {
     _hold = HoldToSpeakSession(
       api: api,
@@ -58,6 +59,7 @@ class RepoQuickVoiceSession implements QuickVoiceFabHost {
   })? onTurnRecorded;
   final void Function(String message)? onError;
   final String Function()? resolveTtsVoice;
+  final bool Function()? resolveAgentMode;
 
   late final HoldToSpeakSession _hold;
   VoiceMedia? _media;
@@ -245,6 +247,7 @@ class RepoQuickVoiceSession implements QuickVoiceFabHost {
         history: history,
         sessionId: sid,
         ttsVoice: resolveTtsVoice?.call(),
+        agentMode: resolveAgentMode?.call() ?? false,
       )) {
         if (!_replyActive) break;
         if (event.type == 'meta') {

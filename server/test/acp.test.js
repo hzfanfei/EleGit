@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import path from "node:path";
+import { PassThrough } from "node:stream";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
@@ -15,6 +16,7 @@ import {
   buildBookAcpPrompt,
   createSessionStore,
   sanitizeAcpEngine,
+  preferredAcpModeIds,
   selectPermissionOption,
 } from "../src/acp.js";
 import { whichSync } from "../src/which.js";
@@ -70,6 +72,18 @@ describe("whichSync", () => {
   });
 });
 
+describe("preferredAcpModeIds", () => {
+  it("picks each engine's write mode first and never a write mode for read", () => {
+    assert.equal(preferredAcpModeIds(true, true)[0], "bypassPermissions");
+    assert.equal(preferredAcpModeIds(true, false)[0], "agent");
+    for (const claude of [true, false]) {
+      const read = preferredAcpModeIds(false, claude);
+      assert.deepEqual(read, ["ask", "plan"]);
+      assert.equal(read.some((id) => /dontAsk|bypass|agent|accept/i.test(id)), false);
+    }
+  });
+});
+
 describe("selectPermissionOption", () => {
   it("rejects write/edit tools and allows reads", () => {
     const options = [
@@ -83,6 +97,35 @@ describe("selectPermissionOption", () => {
     assert.equal(
       selectPermissionOption({ toolCall: { kind: "read", title: "Read file" }, options }),
       "allow-once",
+    );
+  });
+
+  it("agent mode allows every tool, preferring allow-always", () => {
+    const options = [
+      { optionId: "allow-once" },
+      { optionId: "allow-always" },
+      { optionId: "reject-once" },
+    ];
+    assert.equal(
+      selectPermissionOption(
+        { toolCall: { kind: "edit", title: "Write file" }, options },
+        { agentMode: true },
+      ),
+      "allow-always",
+    );
+    assert.equal(
+      selectPermissionOption(
+        { toolCall: { kind: "delete", title: "Remove file" }, options: [{ optionId: "allow-once" }, { optionId: "reject-once" }] },
+        { agentMode: true },
+      ),
+      "allow-once",
+    );
+    assert.equal(
+      selectPermissionOption(
+        { toolCall: { kind: "edit", title: "Write file" }, options: [{ optionId: "reject-once" }] },
+        { agentMode: true },
+      ),
+      "allow-always",
     );
   });
 });
@@ -160,6 +203,13 @@ describe("buildBookAcpPrompt", () => {
       githubContext: "Repository: hzfanfei/fwechat",
     });
     assert.doesNotMatch(repo, /read the checkout and answer/i);
+    assert.match(repo, /ask mode/);
+    const agent = buildAcpPrompt({
+      question: "把 README 标题改掉",
+      agentMode: true,
+    });
+    assert.match(agent, /agent mode/);
+    assert.doesNotMatch(agent, /Do not edit files/);
   });
 });
 
@@ -270,6 +320,42 @@ describe("session store", () => {
     });
     await store.close("hzfanfei", "fwechat", session.id);
     await store.close("hzfanfei", "fwechat", other.id);
+  });
+
+  it("starts a new channel after an engine switch, even if the old warm finishes late", async () => {
+    let engine = "claude";
+    let held = null;
+    const store = createSessionStore({
+      resolveCommand: () => ({
+        id: engine,
+        provider: engine,
+        path: process.execPath,
+        args: [fakeAcp],
+        mode: "ask",
+        transport: "stdio",
+      }),
+      spawnImpl: (file, args, opts) => {
+        const child = spawn(file, args, opts);
+        if (!held) {
+          const stdout = child.stdout;
+          const gate = new PassThrough();
+          child.stdout = gate;
+          held = () => stdout.pipe(gate);
+        }
+        return child;
+      },
+    });
+    const cwd = process.cwd();
+    const firstWarm = store.warmRepo("hzfanfei", "fwechat", cwd);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    engine = "cursor";
+    await store.resetAllChannels();
+    held?.();
+    await firstWarm.catch(() => {});
+    const second = await store.warmRepo("hzfanfei", "fwechat", cwd);
+    assert.equal(second.reused, false);
+    assert.equal(second.warmed, true);
+    await store.resetAllChannels();
   });
 });
 

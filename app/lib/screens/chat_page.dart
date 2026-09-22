@@ -74,6 +74,7 @@ class _ChatPageState extends State<ChatPage> {
   String? _sessionId;
   bool _live = false;
   bool _busy = false;
+  bool _agentMode = false;
   int? _editingIndex;
   String? _lastUser;
   bool _voiceReady = false;
@@ -123,6 +124,7 @@ class _ChatPageState extends State<ChatPage> {
       owner: widget.repo.owner,
       repo: widget.repo.name,
       resolveTtsVoice: () => widget.memory?.ttsVoice() ?? kDefaultVolcTtsVoice,
+      resolveAgentMode: () => _agentMode,
       sttClient: widget.sttClient,
       voiceMedia: widget.voiceMedia,
       onChanged: () {
@@ -156,6 +158,7 @@ class _ChatPageState extends State<ChatPage> {
       },
     );
     _restoreLocal();
+    _agentMode = widget.memory?.agentModeFor(widget.repo.fullName) ?? false;
     widget.api
         .warmChatSession(widget.repo.owner, widget.repo.name)
         .catchError((_) {});
@@ -706,6 +709,7 @@ class _ChatPageState extends State<ChatPage> {
         message: text,
         sessionId: _sessionId,
         history: history,
+        agentMode: _agentMode,
       )) {
         if (!mounted) return;
         if (event.sessionId != null && event.sessionId!.isNotEmpty) {
@@ -1001,6 +1005,12 @@ class _ChatPageState extends State<ChatPage> {
             holdLive: _holdLive,
             holdHint: _holdHint,
             voiceHoldTipVisible: _voiceHoldTipVisible,
+            repoLabel: widget.repo.name,
+            agentMode: _agentMode,
+            onAgentMode: (value) {
+              setState(() => _agentMode = value);
+              widget.memory?.saveAgentMode(widget.repo.fullName, value);
+            },
             onToggleVoiceInput: _toggleVoiceInput,
             onHoldStart: _beginHold,
             onHoldMove: _moveHold,
@@ -1533,6 +1543,9 @@ class _Composer extends StatelessWidget {
     required this.holdLive,
     required this.holdHint,
     required this.voiceHoldTipVisible,
+    required this.repoLabel,
+    required this.agentMode,
+    required this.onAgentMode,
     required this.onToggleVoiceInput,
     required this.onHoldStart,
     required this.onHoldMove,
@@ -1553,6 +1566,9 @@ class _Composer extends StatelessWidget {
   final String holdLive;
   final String holdHint;
   final bool voiceHoldTipVisible;
+  final String repoLabel;
+  final bool agentMode;
+  final ValueChanged<bool> onAgentMode;
   final VoidCallback onToggleVoiceInput;
   final Future<void> Function(double globalY) onHoldStart;
   final void Function(double globalY) onHoldMove;
@@ -1574,6 +1590,32 @@ class _Composer extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              Row(
+                children: [
+                  Text(
+                    agentMode ? 'Agent' : '读',
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                          color: agentMode ? Wx.accent : Wx.muted,
+                          fontWeight: FontWeight.w600,
+                        ),
+                  ),
+                  const SizedBox(width: 4),
+                  Switch(
+                    key: const Key('wx-agent-mode'),
+                    value: agentMode,
+                    onChanged: inputLocked ? null : onAgentMode,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  Expanded(
+                    child: Text(
+                      agentMode ? '只改 $repoLabel' : '$repoLabel 只读',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.faint),
+                    ),
+                  ),
+                ],
+              ),
               if ((holding || sttBusy) && holdLive.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 10),
@@ -1631,7 +1673,9 @@ class _Composer extends StatelessWidget {
                                   ? '正在准备对话…'
                                   : busy
                                       ? '生成中，可先写下一条'
-                                      : '问这个仓库的进度',
+                                      : agentMode
+                                          ? '让 Agent 改这个仓库'
+                                          : '问这个仓库的进度',
                               filled: true,
                               fillColor: Wx.surface,
                             ),

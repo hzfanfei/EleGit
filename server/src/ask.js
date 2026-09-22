@@ -163,6 +163,7 @@ export async function* streamAnswer({
   detectEngine = detectCursorEngine,
   streamOpts = streamOptsFromEnv(),
   signal,
+  agentMode = false,
 }) {
   const opts = { ...streamOpts, signal };
   const engine = detectEngine();
@@ -181,6 +182,7 @@ export async function* streamAnswer({
         bookContext,
         cwd: local?.present ? local.path : undefined,
         buildPrompt,
+        agentMode,
         onDelta: (chunk) => {
           full += chunk;
           queue.push(chunk);

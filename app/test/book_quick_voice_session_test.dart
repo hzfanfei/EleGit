@@ -250,6 +250,7 @@ class _GatedRepoVoiceApi extends FakeWenxiangApi {
     required List<ChatMessage> history,
     String? sessionId,
     String? ttsVoice,
+    bool agentMode = false,
   }) async* {
     lastRepoTtsVoice = ttsVoice;
     yield ChatStreamEvent(type: 'caption', text: '仓库一句。');

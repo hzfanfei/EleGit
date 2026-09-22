@@ -559,6 +559,7 @@ class WenxiangApi {
     required List<ChatMessage> history,
     String? sessionId,
     String? ttsVoice,
+    bool agentMode = false,
   }) async* {
     final client = http.Client();
     _repoVoiceCancelled = false;
@@ -575,6 +576,7 @@ class WenxiangApi {
           'message': message,
           if (sessionId != null && sessionId.isNotEmpty) 'sessionId': sessionId,
           if (ttsVoice != null && ttsVoice.isNotEmpty) 'ttsVoice': ttsVoice,
+          if (agentMode) 'agentMode': true,
           'history': history
               .map((m) => {'role': m.role, 'content': m.content})
               .toList(),
@@ -699,6 +701,7 @@ class WenxiangApi {
     required String message,
     required List<ChatMessage> history,
     String? sessionId,
+    bool agentMode = false,
   }) async* {
     final client = http.Client();
     _chatCancelled = false;
@@ -714,6 +717,7 @@ class WenxiangApi {
           'repo': repo,
           'message': message,
           if (sessionId != null && sessionId.isNotEmpty) 'sessionId': sessionId,
+          if (agentMode) 'agentMode': true,
           'history': history
               .map((m) => {'role': m.role, 'content': m.content})
               .toList(),
