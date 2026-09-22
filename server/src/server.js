@@ -11,7 +11,7 @@ import {
   sanitizeAcpEngine,
 } from "./acp.js";
 import { handleBookVoiceTurn } from "./book-voice-turn.js";
-import { handleRepoVoiceTurn } from "./repo-voice-turn.js";
+import { handleRepoVoiceTurn, resolveRepoChatRuntime } from "./repo-voice-turn.js";
 import { streamAnswer, synthesizeBookAnswer } from "./ask.js";
 import { openSse, writeSse } from "./sse.js";
 import {
@@ -891,58 +891,26 @@ app.post("/v1/chat", requireGithub, async (req, res) => {
       writeSse(res, { type: "start", engine: "acp" });
     }
     writeSse(res, { type: "status", phase: "repo" });
-    const destGuess = checkoutPath(store.config.workspaceRoot, owner, repo);
-    const present = isCheckoutPresent(store.config.workspaceRoot, owner, repo);
-    const warmPromise =
-      present && detectCursorEngine()
-        ? sessions.warmRepo(owner, repo, destGuess).catch(() => {})
-        : Promise.resolve();
-    let progress;
-    let dest;
-    let local;
-    if (present) {
-      const snapPromise = snapshotCheckoutLite(destGuess);
-      const [, localSnap] = await Promise.all([warmPromise, snapPromise]);
-      if (localSnap?.present) {
-        dest = destGuess;
-        local = localSnap;
-        progress = emptyRepoProgress(owner, repo, local.branch || "main");
-        if (githubToken()) {
-          repoProgress(githubToken(), owner, repo)
-            .then((full) => {
-              if (full) Object.assign(progress, full);
-            })
-            .catch(() => {});
-        }
-      } else {
-        ({ progress, dest, local } = await checkoutRepo(owner, repo, signal, { fast: true }));
-        if (detectCursorEngine()) {
-          await sessions.warmRepo(owner, repo, dest).catch(() => {});
-        }
-      }
-    } else {
-      ({ progress, dest, local } = await Promise.all([
-        checkoutRepo(owner, repo, signal, { fast: true }),
-        warmPromise,
-      ]).then(([checkout]) => checkout));
-      if (detectCursorEngine()) {
-        await sessions.warmRepo(owner, repo, dest).catch(() => {});
-      }
-    }
+    const { progress, dest, local, githubContext, context } = await resolveRepoChatRuntime({
+      store,
+      owner,
+      repo,
+      sessions,
+      signal,
+      checkoutRepo,
+      githubToken,
+    });
     if (signal.aborted) {
       res.end();
       return;
     }
-    const localContext = formatLocalContext(local);
-    const githubContext = formatAcpContext(local, progress);
-    const context = `${formatProgressContext(progress)}\n\n${localContext}`;
+    writeSse(res, { type: "status", phase: "generate" });
     writeSse(res, {
       type: "meta",
       repo: progress.repo.fullName,
       checkout: dest,
       sessionId: session.id,
     });
-    writeSse(res, { type: "status", phase: "generate" });
     let finalEngine = "local-progress";
     let finalAnswer = "";
     for await (const event of streamAnswer({
