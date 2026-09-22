@@ -423,6 +423,21 @@ class WenxiangApi {
   /// Pre-start Cursor ACP for this repo so the first chat token arrives sooner.
   Uri bookCoverUri(String bookId) => _uri('/v1/books/$bookId/cover');
 
+  Future<StaticLibrary> listStaticFiles() async {
+    final res = await http
+        .get(_uri('/v1/static'), headers: _headers)
+        .timeout(const Duration(seconds: 25));
+    final body = await _json(res, fallback: '读取静态资源失败');
+    final list = (body['files'] as List?) ?? [];
+    return StaticLibrary(
+      dir: (body['dir'] ?? '').toString(),
+      files: list
+          .whereType<Map>()
+          .map((e) => StaticFileItem.fromJson(Map<String, dynamic>.from(e)))
+          .toList(),
+    );
+  }
+
   Future<List<BookItem>> listBooks() async {
     final res = await http
         .get(_uri('/v1/books'), headers: _headers)

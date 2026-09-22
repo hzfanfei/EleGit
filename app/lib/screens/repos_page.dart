@@ -19,6 +19,7 @@ class ReposPage extends StatefulWidget {
     required this.onOpen,
     required this.onAuthorized,
     this.onOpenBooks,
+    this.onOpenFiles,
     this.onOpenSettings,
     this.githubConnected = true,
     this.githubLogin = '',
@@ -30,6 +31,7 @@ class ReposPage extends StatefulWidget {
   final void Function(RepoItem repo) onOpen;
   final Future<void> Function() onAuthorized;
   final VoidCallback? onOpenBooks;
+  final VoidCallback? onOpenFiles;
   final VoidCallback? onOpenSettings;
   final bool githubConnected;
   final String githubLogin;
@@ -221,6 +223,11 @@ class ReposPageState extends State<ReposPage> {
             subtitle: subtitle,
             onBrandTap: blocked ? null : widget.onOpenSettings,
             trailing: [
+              if (widget.onOpenFiles != null)
+                TextButton(
+                  onPressed: blocked ? null : widget.onOpenFiles,
+                  child: const Text('资源'),
+                ),
               if (widget.onOpenBooks != null)
                 TextButton(
                   onPressed: blocked ? null : widget.onOpenBooks,

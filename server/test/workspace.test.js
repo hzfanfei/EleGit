@@ -11,6 +11,7 @@ import {
   getCheckoutSyncStatus,
   gitAuthConfigArgs,
   gitFailure,
+  toGithubSshRemote,
   GITHUB_GIT_FORBIDDEN_ZH,
   isCheckoutPresent,
   listLocalRepos,
@@ -32,6 +33,32 @@ function endsWithOwnerRepo(fullPath, owner, repo) {
   const normalized = path.normalize(String(fullPath || ""));
   return normalized.endsWith(path.join(owner, repo));
 }
+
+describe("github ssh remotes", () => {
+  it("turns GitHub HTTPS origins into git@github.com", () => {
+    assert.equal(
+      toGithubSshRemote("https://github.com/acme/widget.git"),
+      "git@github.com:acme/widget.git",
+    );
+    assert.equal(
+      toGithubSshRemote("https://github.com/acme/widget"),
+      "git@github.com:acme/widget.git",
+    );
+    assert.equal(
+      toGithubSshRemote("https://x-access-token:secret@github.com/acme/widget.git"),
+      "git@github.com:acme/widget.git",
+    );
+    assert.equal(
+      toGithubSshRemote("ssh://git@github.com/acme/widget.git"),
+      "git@github.com:acme/widget.git",
+    );
+    assert.equal(
+      toGithubSshRemote("git@github.com:acme/widget.git"),
+      "git@github.com:acme/widget.git",
+    );
+    assert.equal(toGithubSshRemote("/tmp/not-github"), "/tmp/not-github");
+  });
+});
 
 describe("git auth header", () => {
   it("sends Basic x-access-token via http.extraHeader, not Bearer", () => {
@@ -298,5 +325,32 @@ describe("ensureCheckout", () => {
     assert.equal(result.local.present, true);
     assert.ok(result.local.files.includes("README.md"));
     assert.ok(endsWithOwnerRepo(result.dest, "acme", "widget"));
+  });
+
+  it("rewrites an existing GitHub HTTPS origin to SSH", async () => {
+    const workspace = await mkdtemp(path.join(os.tmpdir(), "wenxiang-ws-"));
+    const dest = path.join(workspace, "acme", "widget");
+    await mkdir(dest, { recursive: true });
+    git(["init", "-b", "main"], dest);
+    git(["config", "user.email", "test@example.com"], dest);
+    git(["config", "user.name", "Test"], dest);
+    await writeFile(path.join(dest, "README.md"), "# local\n");
+    git(["add", "."], dest);
+    git(["commit", "-m", "Local"], dest);
+    git(["remote", "add", "origin", "https://github.com/acme/widget.git"], dest);
+
+    await ensureCheckout({
+      workspaceRoot: workspace,
+      owner: "acme",
+      repo: "widget",
+      defaultBranch: "main",
+      fetchRemote: false,
+    });
+
+    const origin = spawnSync("git", ["remote", "get-url", "origin"], {
+      cwd: dest,
+      encoding: "utf8",
+    });
+    assert.equal(origin.stdout.trim(), "git@github.com:acme/widget.git");
   });
 });

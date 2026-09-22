@@ -380,6 +380,36 @@ class BookReadingManifest {
   }
 }
 
+class StaticFileItem {
+  StaticFileItem({
+    required this.path,
+    required this.name,
+    required this.size,
+    required this.downloadUrl,
+  });
+
+  final String path;
+  final String name;
+  final int size;
+  final String downloadUrl;
+
+  factory StaticFileItem.fromJson(Map<String, dynamic> json) {
+    return StaticFileItem(
+      path: (json['path'] ?? '').toString(),
+      name: (json['name'] ?? '').toString(),
+      size: json['size'] is int ? json['size'] as int : int.tryParse('${json['size']}') ?? 0,
+      downloadUrl: (json['downloadUrl'] ?? '').toString(),
+    );
+  }
+}
+
+class StaticLibrary {
+  StaticLibrary({required this.dir, required this.files});
+
+  final String dir;
+  final List<StaticFileItem> files;
+}
+
 class BookItem {
   BookItem({
     required this.id,

@@ -14,8 +14,9 @@ import 'books_page.dart';
 import 'chat_page.dart';
 import 'repos_page.dart';
 import 'settings_page.dart';
+import 'static_files_page.dart';
 
-enum AppStep { boot, repos, books, chat, bookRead }
+enum AppStep { boot, repos, books, files, chat, bookRead }
 
 class ShellPage extends StatefulWidget {
   const ShellPage({super.key, this.api, this.memory});
@@ -130,6 +131,10 @@ class ShellPageState extends State<ShellPage> {
     setState(() => _step = AppStep.books);
   }
 
+  void _openFiles() {
+    setState(() => _step = AppStep.files);
+  }
+
   void _openSettings() {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -139,6 +144,10 @@ class ShellPageState extends State<ShellPage> {
   }
 
   void _backFromBooks() {
+    setState(() => _step = AppStep.repos);
+  }
+
+  void _backFromFiles() {
     setState(() => _step = AppStep.repos);
   }
 
@@ -187,6 +196,10 @@ class ShellPageState extends State<ShellPage> {
     }
     if (_step == AppStep.books) {
       _backFromBooks();
+      return true;
+    }
+    if (_step == AppStep.files) {
+      _backFromFiles();
       return true;
     }
     if (_step == AppStep.chat) {
@@ -240,9 +253,19 @@ class ShellPageState extends State<ShellPage> {
           onAuthorized: _onAuthorized,
           onOpen: _openRepo,
           onOpenBooks: _openBooks,
+          onOpenFiles: _openFiles,
           onOpenSettings: _openSettings,
         )),
       ),
+      if (_step == AppStep.files)
+        MaterialPage<void>(
+          key: const ValueKey('files'),
+          name: 'files',
+          child: _fit(StaticFilesPage(
+            api: _api,
+            onBack: _backFromFiles,
+          )),
+        ),
       if (_step == AppStep.books)
         MaterialPage<void>(
           key: const ValueKey('books'),
@@ -302,6 +325,8 @@ class ShellPageState extends State<ShellPage> {
                 _backFromBookRead();
               } else if (name == 'books' && _step == AppStep.books) {
                 _backFromBooks();
+              } else if (name == 'files' && _step == AppStep.files) {
+                _backFromFiles();
               } else if (name == 'chat' && _step == AppStep.chat) {
                 _backFromChat();
               }

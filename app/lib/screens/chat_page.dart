@@ -250,30 +250,40 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _loadVoice() async {
-    try {
-      final status = await widget.api.status();
-      if (!mounted) return;
-      setState(() {
-        _voiceReady = status.voiceReady;
-        _voiceHint = status.voiceReady
-            ? ''
-            : (status.voiceHint.isEmpty ? humanizeSttEvent(code: 'unconfigured') : status.voiceHint);
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _voiceReady = false;
-        _voiceHint = '连不上问象服务，暂时无法使用语音。请确认电脑上的服务已启动。';
-      });
+    for (var attempt = 0; attempt < 2; attempt++) {
+      try {
+        final status = await widget.api.status();
+        if (!mounted) return;
+        setState(() {
+          _voiceReady = status.voiceReady;
+          _voiceHint = status.voiceReady
+              ? ''
+              : (status.voiceHint.isEmpty ? humanizeSttEvent(code: 'unconfigured') : status.voiceHint);
+        });
+        return;
+      } catch (_) {
+        if (attempt == 0) {
+          await Future<void>.delayed(const Duration(milliseconds: 800));
+        }
+      }
     }
+    if (!mounted) return;
+    setState(() {
+      _voiceReady = false;
+      _voiceHint = '连不上问象服务，暂时无法使用语音。请确认电脑上的服务已启动。';
+    });
   }
 
-  void _toggleVoiceInput() {
+  Future<void> _toggleVoiceInput() async {
     if (!_voiceReady) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_voiceHint.isEmpty ? humanizeSttEvent(code: 'unconfigured') : _voiceHint)),
-      );
-      return;
+      await _loadVoice();
+      if (!mounted) return;
+      if (!_voiceReady) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_voiceHint.isEmpty ? humanizeSttEvent(code: 'unconfigured') : _voiceHint)),
+        );
+        return;
+      }
     }
     if (_busy) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -926,6 +936,32 @@ class _ChatPageState extends State<ChatPage> {
             title: widget.repo.fullName,
             subtitle: subtitle,
             trailing: [
+              Tooltip(
+                message: _agentMode ? '只改 ${widget.repo.name}' : '${widget.repo.name} 只读',
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _agentMode ? 'Agent' : '只读',
+                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                            color: _agentMode ? Wx.accent : Wx.muted,
+                            fontWeight: FontWeight.w600,
+                          ),
+                    ),
+                    Switch(
+                      key: const Key('wx-agent-mode'),
+                      value: _agentMode,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      onChanged: _busy || _preparingChat
+                          ? null
+                          : (value) {
+                              setState(() => _agentMode = value);
+                              widget.memory?.saveAgentMode(widget.repo.fullName, value);
+                            },
+                    ),
+                  ],
+                ),
+              ),
               IconButton(
                 tooltip: '新建会话',
                 onPressed: _busy || _preparingChat ? null : _newSession,
@@ -1005,12 +1041,7 @@ class _ChatPageState extends State<ChatPage> {
             holdLive: _holdLive,
             holdHint: _holdHint,
             voiceHoldTipVisible: _voiceHoldTipVisible,
-            repoLabel: widget.repo.name,
             agentMode: _agentMode,
-            onAgentMode: (value) {
-              setState(() => _agentMode = value);
-              widget.memory?.saveAgentMode(widget.repo.fullName, value);
-            },
             onToggleVoiceInput: _toggleVoiceInput,
             onHoldStart: _beginHold,
             onHoldMove: _moveHold,
@@ -1543,9 +1574,7 @@ class _Composer extends StatelessWidget {
     required this.holdLive,
     required this.holdHint,
     required this.voiceHoldTipVisible,
-    required this.repoLabel,
     required this.agentMode,
-    required this.onAgentMode,
     required this.onToggleVoiceInput,
     required this.onHoldStart,
     required this.onHoldMove,
@@ -1566,10 +1595,8 @@ class _Composer extends StatelessWidget {
   final String holdLive;
   final String holdHint;
   final bool voiceHoldTipVisible;
-  final String repoLabel;
   final bool agentMode;
-  final ValueChanged<bool> onAgentMode;
-  final VoidCallback onToggleVoiceInput;
+  final Future<void> Function() onToggleVoiceInput;
   final Future<void> Function(double globalY) onHoldStart;
   final void Function(double globalY) onHoldMove;
   final Future<void> Function() onHoldEnd;
@@ -1590,32 +1617,6 @@ class _Composer extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(
-                children: [
-                  Text(
-                    agentMode ? 'Agent' : '读',
-                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                          color: agentMode ? Wx.accent : Wx.muted,
-                          fontWeight: FontWeight.w600,
-                        ),
-                  ),
-                  const SizedBox(width: 4),
-                  Switch(
-                    key: const Key('wx-agent-mode'),
-                    value: agentMode,
-                    onChanged: inputLocked ? null : onAgentMode,
-                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  Expanded(
-                    child: Text(
-                      agentMode ? '只改 $repoLabel' : '$repoLabel 只读',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.faint),
-                    ),
-                  ),
-                ],
-              ),
               if ((holding || sttBusy) && holdLive.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 10),
@@ -1634,7 +1635,7 @@ class _Composer extends StatelessWidget {
                         : busy
                             ? '生成中，暂不可用'
                             : (voiceInputMode ? '键盘输入' : '按住说话'),
-                    onPressed: voiceLocked && voiceReady ? null : onToggleVoiceInput,
+                    onPressed: voiceLocked && voiceReady ? null : () => onToggleVoiceInput(),
                     icon: Icon(
                       voiceInputMode ? Icons.keyboard_outlined : Icons.mic_none_outlined,
                       color: !voiceReady ? Wx.faint : null,

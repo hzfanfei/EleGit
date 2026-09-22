@@ -164,6 +164,7 @@ export async function* streamAnswer({
   streamOpts = streamOptsFromEnv(),
   signal,
   agentMode = false,
+  staticFiles,
 }) {
   const opts = { ...streamOpts, signal };
   const engine = detectEngine();
@@ -183,6 +184,7 @@ export async function* streamAnswer({
         cwd: local?.present ? local.path : undefined,
         buildPrompt,
         agentMode,
+        staticFiles,
         onDelta: (chunk) => {
           full += chunk;
           queue.push(chunk);

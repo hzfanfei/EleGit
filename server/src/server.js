@@ -19,7 +19,6 @@ import {
   formatProgressContext,
   listRepos,
   pollDeviceFlow,
-  repoProgress,
   startDeviceFlow,
   verifyToken,
 } from "./github.js";
@@ -74,6 +73,18 @@ import {
   resolveBookCacheAssetPath,
 } from "./books.js";
 import { envWithNodeOnPath, resolveGitExecutable, resolveNodeExecutable } from "./which.js";
+import {
+  ensureStaticDir,
+  listStaticFiles,
+  openStaticFileStream,
+  resolveStaticFile,
+  staticContentDisposition,
+  staticDir,
+  staticDownloadAuthorized,
+  staticFilesPrompt,
+  contentTypeForStatic,
+} from "./static-files.js";
+import { stat } from "node:fs/promises";
 
 loadLocalEnv();
 process.env = envWithNodeOnPath(process.env);
@@ -132,6 +143,40 @@ app.get("/health", (_req, res) => {
     service: "wenxiang",
     publicReachable: tunnelHealth.status().reachable,
   });
+});
+
+app.get(/^\/files\/(.+)$/, async (req, res) => {
+  try {
+    if (
+      !staticDownloadAuthorized({
+        token: req.query.token,
+        headerKey: req.get("X-Wenxiang-Key"),
+        staticToken: store.config.staticToken,
+        apiKey: store.config.apiKey,
+      })
+    ) {
+      res.status(401).json({ error: "下载链接无效", code: "static_unauthorized" });
+      return;
+    }
+    const root = staticDir(store.config.workspaceRoot);
+    const { relative, abs } = resolveStaticFile(root, req.params[0]);
+    const info = await stat(abs);
+    if (!info.isFile()) {
+      res.status(404).json({ error: "文件不存在", code: "static_missing" });
+      return;
+    }
+    res.setHeader("Content-Type", contentTypeForStatic(relative));
+    res.setHeader("Content-Length", String(info.size));
+    res.setHeader("Content-Disposition", staticContentDisposition(relative, relative));
+    res.setHeader("Cache-Control", "private, no-cache");
+    openStaticFileStream(abs).pipe(res);
+  } catch (err) {
+    if (err?.code === "ENOENT") {
+      res.status(404).json({ error: "文件不存在", code: "static_missing" });
+      return;
+    }
+    sendError(res, err);
+  }
 });
 
 app.get("/oauth/github/callback", async (req, res) => {
@@ -219,6 +264,7 @@ app.get("/v1/status", (_req, res) => {
     workspace: {
       root: store.config.workspaceRoot,
       booksDir: booksDir(store.config.workspaceRoot),
+      staticDir: staticDir(store.config.workspaceRoot),
     },
     cursor: {
       available: Boolean(cursor),
@@ -362,62 +408,21 @@ async function resolveDefaultBranch(owner, repo) {
   if (isCheckoutPresent(store.config.workspaceRoot, owner, repo)) {
     return detectDefaultBranch(dest);
   }
-  if (!githubToken()) {
-    return "main";
-  }
-  const progress = await repoProgress(githubToken(), owner, repo);
-  return progress.repo.defaultBranch || "main";
+  return "main";
 }
 
 async function checkoutRepo(owner, repo, signal, { fast = false } = {}) {
   const present = isCheckoutPresent(store.config.workspaceRoot, owner, repo);
-  const dest = checkoutPath(store.config.workspaceRoot, owner, repo);
-  let progress = null;
-  let progressTask = null;
-
-  if (!present && !githubToken()) {
-    const err = new Error("尚未登录 GitHub，无法首次克隆。请先在浏览器里登录。");
-    err.status = 401;
-    err.code = "github_required";
-    throw err;
-  }
-
-  if (githubToken()) {
-    if (fast && present) {
-      const branchHint = await detectDefaultBranch(dest).catch(() => "main");
-      progress = emptyRepoProgress(owner, repo, branchHint);
-      progressTask = repoProgress(githubToken(), owner, repo).catch(() => null);
-    } else {
-      try {
-        progress = await repoProgress(githubToken(), owner, repo);
-      } catch (err) {
-        if (!present) throw err;
-      }
-    }
-  }
-
-  const defaultBranch =
-    progress?.repo?.defaultBranch || (present ? await resolveDefaultBranch(owner, repo) : "main");
+  const defaultBranch = present ? await resolveDefaultBranch(owner, repo) : "main";
   const result = await ensureCheckout({
     workspaceRoot: store.config.workspaceRoot,
     owner,
     repo,
-    token: githubToken(),
     defaultBranch,
     fetchRemote: !(fast && present),
     signal,
   });
-
-  if (!progress) {
-    progress = emptyRepoProgress(owner, repo, defaultBranch);
-  }
-  if (progressTask) {
-    progressTask
-      .then((full) => {
-        if (full) Object.assign(progress, full);
-      })
-      .catch(() => {});
-  }
+  const progress = emptyRepoProgress(owner, repo, result.local?.branch || defaultBranch);
   return { progress, ...result };
 }
 
@@ -433,7 +438,6 @@ app.get("/v1/repos/:owner/:repo/checkout-status", async (req, res) => {
       owner,
       repo,
       defaultBranch,
-      token: githubToken(),
       fetchRemote: req.query.fetch !== "0",
     });
     res.json(status);
@@ -445,13 +449,6 @@ app.get("/v1/repos/:owner/:repo/checkout-status", async (req, res) => {
 app.post("/v1/repos/:owner/:repo/checkout", async (req, res) => {
   try {
     const { owner, repo } = req.params;
-    if (!isCheckoutPresent(store.config.workspaceRoot, owner, repo) && !githubToken()) {
-      res.status(401).json({
-        error: "尚未登录 GitHub，无法首次克隆。请先在浏览器里登录。",
-        code: "github_required",
-      });
-      return;
-    }
     const { progress, dest, existed, local } = await checkoutRepo(
       owner,
       repo,
@@ -471,7 +468,7 @@ app.post("/v1/repos/:owner/:repo/checkout", async (req, res) => {
   }
 });
 
-app.get("/v1/repos/:owner/:repo/progress", requireGithub, async (req, res) => {
+app.get("/v1/repos/:owner/:repo/progress", async (req, res) => {
   try {
     const { progress, dest, local } = await checkoutRepo(req.params.owner, req.params.repo);
     res.json({ ...progress, checkout: { path: dest, ...local } });
@@ -480,7 +477,7 @@ app.get("/v1/repos/:owner/:repo/progress", requireGithub, async (req, res) => {
   }
 });
 
-app.get("/v1/repos/:owner/:repo/sessions", requireGithub, (req, res) => {
+app.get("/v1/repos/:owner/:repo/sessions", (req, res) => {
   try {
     res.json(sessions.list(req.params.owner, req.params.repo));
   } catch (err) {
@@ -488,7 +485,7 @@ app.get("/v1/repos/:owner/:repo/sessions", requireGithub, (req, res) => {
   }
 });
 
-app.post("/v1/repos/:owner/:repo/sessions", requireGithub, (req, res) => {
+app.post("/v1/repos/:owner/:repo/sessions", (req, res) => {
   try {
     const { owner, repo } = req.params;
     const view = sessions.create(owner, repo);
@@ -502,7 +499,7 @@ app.post("/v1/repos/:owner/:repo/sessions", requireGithub, (req, res) => {
   }
 });
 
-app.post("/v1/repos/:owner/:repo/sessions/warm", requireGithub, async (req, res) => {
+app.post("/v1/repos/:owner/:repo/sessions/warm", async (req, res) => {
   try {
     const { owner, repo } = req.params;
     const dest = checkoutPath(store.config.workspaceRoot, owner, repo);
@@ -517,9 +514,21 @@ app.post("/v1/repos/:owner/:repo/sessions/warm", requireGithub, async (req, res)
   }
 });
 
-app.delete("/v1/repos/:owner/:repo/sessions/:id", requireGithub, async (req, res) => {
+app.delete("/v1/repos/:owner/:repo/sessions/:id", async (req, res) => {
   try {
     res.json(await sessions.close(req.params.owner, req.params.repo, req.params.id));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.get("/v1/static", async (_req, res) => {
+  try {
+    const listed = await listStaticFiles(store.config.workspaceRoot, {
+      publicUrl: store.config.publicUrl,
+      token: store.config.staticToken,
+    });
+    res.json(listed);
   } catch (err) {
     sendError(res, err);
   }
@@ -757,13 +766,12 @@ app.post("/v1/books/voice-turn", async (req, res) => {
   }
 });
 
-app.post("/v1/chat/voice-turn", requireGithub, async (req, res) => {
+app.post("/v1/chat/voice-turn", async (req, res) => {
   try {
     await handleRepoVoiceTurn(req, res, {
       store,
       sessions,
       checkoutRepo: (owner, repo, signal) => checkoutRepo(owner, repo, signal, { fast: true }),
-      githubToken,
     });
   } catch (err) {
     sendError(res, err);
@@ -880,7 +888,7 @@ app.post("/v1/books/chat", async (req, res) => {
   }
 });
 
-app.post("/v1/chat", requireGithub, async (req, res) => {
+app.post("/v1/chat", async (req, res) => {
   try {
     const owner = String(req.body?.owner || "").trim();
     const repo = String(req.body?.repo || "").trim();
@@ -919,13 +927,6 @@ app.post("/v1/chat", requireGithub, async (req, res) => {
         dest = destGuess;
         local = localSnap;
         progress = emptyRepoProgress(owner, repo, local.branch || "main");
-        if (githubToken()) {
-          repoProgress(githubToken(), owner, repo)
-            .then((full) => {
-              if (full) Object.assign(progress, full);
-            })
-            .catch(() => {});
-        }
       } else {
         ({ progress, dest, local } = await checkoutRepo(owner, repo, signal, { fast: true }));
         if (detectCursorEngine()) {
@@ -968,6 +969,7 @@ app.post("/v1/chat", requireGithub, async (req, res) => {
       sessions,
       signal,
       agentMode,
+      staticFiles: staticFilesPrompt(store.config),
     })) {
       if (signal.aborted) break;
       if (event.type === "done") {
@@ -1038,6 +1040,7 @@ attachSttGateway(httpServer, {
 });
 
 async function startCompanion() {
+  await ensureStaticDir(store.config.workspaceRoot);
   const voiceCfg = resolveVoiceConfig();
   if (voiceCfg.asrProvider === "funasr") {
     console.log("Preloading FunASR worker (Paraformer)...");
@@ -1067,6 +1070,7 @@ async function startCompanion() {
   console.log(`API key: ${store.config.apiKey}`);
   console.log(`Config: ${store.file}`);
   console.log(`Workspace: ${store.config.workspaceRoot}`);
+  console.log(`Static files: ${staticDir(store.config.workspaceRoot)}`);
   if (lans.length) {
     console.log(`LAN: ${lans.join(", ")}`);
   }

@@ -29,6 +29,7 @@ function defaultConfig() {
     githubClientSecret: process.env.GITHUB_CLIENT_SECRET || "",
     workspaceRoot: defaultWorkspaceRoot(),
     publicUrl: DEFAULT_PUBLIC_URL,
+    staticToken: "",
     tunnel: {
       provider: "cloudflare",
       bin: process.env.WENXIANG_TUNNEL_BIN || "cloudflared",
@@ -61,6 +62,12 @@ function applyEnv(config) {
   }
   if (!config.apiKey) {
     config.apiKey = randomBytes(24).toString("hex");
+  }
+  if (process.env.WENXIANG_STATIC_TOKEN) {
+    config.staticToken = process.env.WENXIANG_STATIC_TOKEN;
+  }
+  if (!config.staticToken) {
+    config.staticToken = randomBytes(24).toString("hex");
   }
   return config;
 }

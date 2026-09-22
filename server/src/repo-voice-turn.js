@@ -1,4 +1,5 @@
 import { buildAcpPrompt, detectCursorEngine } from "./acp.js";
+import { staticFilesPrompt } from "./static-files.js";
 import { streamAnswer } from "./ask.js";
 import {
   checkoutPath,
@@ -7,7 +8,7 @@ import {
   isCheckoutPresent,
   snapshotCheckoutLite,
 } from "./workspace.js";
-import { emptyRepoProgress, formatProgressContext, repoProgress } from "./github.js";
+import { emptyRepoProgress, formatProgressContext } from "./github.js";
 import { requestSignal } from "./http-signal.js";
 import { openSse, writeSse } from "./sse.js";
 import { BOOK_VOICE_SPEAK_STRATEGY } from "./book-voice-latency.js";
@@ -26,6 +27,7 @@ export function createRepoAskIterator({
   history,
   signal,
   agentMode = false,
+  staticFiles,
 }) {
   return async function* ask(question, askSignal) {
     const mergedSignal = askSignal || signal;
@@ -39,6 +41,7 @@ export function createRepoAskIterator({
       session,
       sessions,
       agentMode,
+      staticFiles,
       buildPrompt: (opts) => buildAcpPrompt({ ...opts, spokenAnswer: true }),
       signal: mergedSignal,
     });
@@ -55,11 +58,9 @@ export async function resolveRepoChatRuntime({
   sessions,
   signal,
   checkoutRepo,
-  githubToken,
 }) {
   const destGuess = checkoutPath(store.config.workspaceRoot, owner, repo);
   const present = isCheckoutPresent(store.config.workspaceRoot, owner, repo);
-  const token = githubToken?.() || "";
   const warmPromise =
     present && detectCursorEngine()
       ? sessions.warmRepo(owner, repo, destGuess).catch(() => {})
@@ -75,13 +76,6 @@ export async function resolveRepoChatRuntime({
       dest = destGuess;
       local = localSnap;
       progress = emptyRepoProgress(owner, repo, local.branch || "main");
-      if (token) {
-        repoProgress(token, owner, repo)
-          .then((full) => {
-            if (full) Object.assign(progress, full);
-          })
-          .catch(() => {});
-      }
     } else {
       ({ progress, dest, local } = await checkoutRepo(owner, repo, signal, { fast: true }));
       if (detectCursorEngine()) {
@@ -111,7 +105,6 @@ export async function handleRepoVoiceTurn(
     store,
     sessions,
     checkoutRepo,
-    githubToken,
     resolveConfig = resolveVoiceConfig,
     createProviders = createVoiceProviders,
     detectEngine = detectCursorEngine,
@@ -173,7 +166,6 @@ export async function handleRepoVoiceTurn(
       sessions,
       signal,
       checkoutRepo,
-      githubToken,
     });
     if (signal.aborted) {
       res.end();
@@ -191,6 +183,7 @@ export async function handleRepoVoiceTurn(
       history,
       signal,
       agentMode,
+      staticFiles: staticFilesPrompt(store?.config),
     });
 
     await runVoiceTurn({

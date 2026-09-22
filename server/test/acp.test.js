@@ -224,6 +224,17 @@ describe("buildBookAcpPrompt", () => {
     });
     assert.match(agent, /agent mode/);
     assert.doesNotMatch(agent, /Do not edit files/);
+    const downloads = buildAcpPrompt({
+      question: "把安装包发到手机",
+      agentMode: true,
+      staticFiles: {
+        dir: "C:\\问象\\static",
+        linkTemplate: "https://example.ngrok.dev/files/<path>?token=abc",
+      },
+    });
+    assert.match(downloads, /C:\\问象\\static/);
+    assert.match(downloads, /files\/<path>\?token=abc/);
+    assert.match(downloads, /Do not put secrets/);
   });
 });
 

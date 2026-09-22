@@ -225,6 +225,7 @@ export function buildAcpPrompt({
   seedHistory,
   spokenAnswer = false,
   agentMode = false,
+  staticFiles,
 }) {
   const lines = [
     "You are 问象, a local repo progress assistant running on the user's computer.",
@@ -235,6 +236,21 @@ export function buildAcpPrompt({
     "Be concise and efficient: lead with the direct answer; use short paragraphs or bullets; skip preamble, filler, and long recaps unless the user asks for detail.",
     "Do not invent commits, PRs, files, or dates. Prefer the local checkout when it disagrees with stale memory.",
   ];
+  if (staticFiles?.dir) {
+    lines.push(
+      "",
+      "=== Phone downloads ===",
+      `Static directory: ${staticFiles.dir}`,
+      agentMode
+        ? "You may copy finished images, APKs, and other downloadable files into this directory, including subfolders. Do not put secrets, tokens, or .env files there."
+        : "Do not write files. If a download already exists, you may give the user its link.",
+    );
+    if (staticFiles.linkTemplate) {
+      lines.push(
+        `When a file is in that directory, give the user this phone download link, replacing <path> with the relative path using forward slashes: ${staticFiles.linkTemplate}`,
+      );
+    }
+  }
   if (spokenAnswer) {
     lines.push(
       "",
@@ -972,7 +988,7 @@ export function createSessionStore({
     return sessions.get(activeByRepo.get(repoKey(owner, repo)));
   }
 
-  async function prompt(session, { question, history, githubContext, bookContext, cwd, onDelta, buildPrompt, agentMode = false }) {
+  async function prompt(session, { question, history, githubContext, bookContext, cwd, onDelta, buildPrompt, agentMode = false, staticFiles }) {
     const command = resolveCommand();
     if (!command) {
       const err = new Error("ACP agent not found");
@@ -1005,6 +1021,7 @@ export function createSessionStore({
       bookContext,
       seedHistory,
       agentMode: Boolean(agentMode) && !bookContext,
+      staticFiles: bookContext ? undefined : staticFiles,
     });
     await withRepoLock(entry, async () => {
       entry.promptingSessionId = session.id;

@@ -91,6 +91,29 @@ function isGithubRemote(url) {
   return /github\.com[:/]/i.test(String(url || ""));
 }
 
+/** GitHub HTTPS remotes become git@github.com:owner/repo.git. Other URLs stay put. */
+export function toGithubSshRemote(url) {
+  const text = String(url || "").trim();
+  const sshUrl = text.match(/^ssh:\/\/git@github\.com\/([^/]+)\/([^/#?]+?)(?:\.git)?\/?$/i);
+  if (sshUrl) return `git@github.com:${sshUrl[1]}/${sshUrl[2].replace(/\.git$/i, "")}.git`;
+  const scp = text.match(/^git@github\.com:([^/]+)\/([^/#?]+?)(?:\.git)?$/i);
+  if (scp) return `git@github.com:${scp[1]}/${scp[2].replace(/\.git$/i, "")}.git`;
+  const https = text.match(
+    /^https?:\/\/(?:[^@/]+@)?github\.com\/([^/]+)\/([^/#?]+?)(?:\.git)?\/?$/i,
+  );
+  if (https) return `git@github.com:${https[1]}/${https[2].replace(/\.git$/i, "")}.git`;
+  return text;
+}
+
+async function preferGithubSshOrigin(dest, signal) {
+  const origin = await readOriginUrl(dest, signal);
+  if (!origin || !isGithubRemote(origin)) return origin;
+  const ssh = toGithubSshRemote(origin);
+  if (ssh === origin) return origin;
+  await runGit(["remote", "set-url", "origin", ssh], { cwd: dest, signal });
+  return ssh;
+}
+
 async function readOriginUrl(dest, signal) {
   try {
     return (await runGit(["remote", "get-url", "origin"], { cwd: dest, signal })).trim();
@@ -112,7 +135,7 @@ export function isCheckoutPresent(workspaceRoot, owner, repo) {
   return existsSync(path.join(dest, ".git"));
 }
 
-const LOCAL_REPO_SKIP = new Set(["books", ".book-cache"]);
+const LOCAL_REPO_SKIP = new Set(["books", ".book-cache", "static"]);
 
 export async function listLocalRepos(workspaceRoot, q = "") {
   const needle = String(q || "")
@@ -228,11 +251,11 @@ export async function getCheckoutSyncStatus({
   )) || defaultBranch;
   const headFull = await revParseRef("HEAD", dest);
   const head = headFull ? headFull.slice(0, 7) : "";
+  const origin = await preferGithubSshOrigin(dest, signal);
 
   let fetchError = "";
   if (fetchRemote) {
-    const origin = await readOriginUrl(dest, signal);
-    const fetchToken = isGithubRemote(origin) ? token : undefined;
+    const fetchToken = /^https?:\/\//i.test(origin) && isGithubRemote(origin) ? token : undefined;
     try {
       await runGit(["fetch", "--depth", "50", "origin"], { cwd: dest, token: fetchToken, signal });
     } catch (err) {
@@ -394,7 +417,9 @@ export async function ensureCheckout({
   }
   existed = existsSync(path.join(dest, ".git"));
   const existingRemote = existed ? await readOriginUrl(dest, signal) : "";
-  const remote = cloneUrl || existingRemote || `https://github.com/${owner}/${repo}.git`;
+  const remote = toGithubSshRemote(
+    cloneUrl || existingRemote || `git@github.com:${owner}/${repo}.git`,
+  );
   if (!existed) {
     try {
       await runGit(["clone", "--depth", "50", remote, dest], { token, signal });
@@ -405,7 +430,7 @@ export async function ensureCheckout({
       throw err;
     }
   } else {
-    if ((cloneUrl || !existingRemote) && existingRemote !== remote) {
+    if (existingRemote !== remote) {
       if (existingRemote) {
         await runGit(["remote", "set-url", "origin", remote], { cwd: dest, signal });
       } else {
