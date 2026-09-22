@@ -375,31 +375,36 @@ async function checkoutRepo(owner, repo, signal, { fast = false } = {}) {
   let progress = null;
   let progressTask = null;
 
-  if (githubToken()) {
-    if (fast && present) {
-      const branchHint = await detectDefaultBranch(dest).catch(() => "main");
-      progress = emptyRepoProgress(owner, repo, branchHint);
-      progressTask = repoProgress(githubToken(), owner, repo).catch(() => null);
-    } else {
-      progress = await repoProgress(githubToken(), owner, repo);
-    }
-  } else if (!present) {
+  if (!present && !githubToken()) {
     const err = new Error("尚未登录 GitHub，无法首次克隆。请先在浏览器里登录。");
     err.status = 401;
     err.code = "github_required";
     throw err;
   }
 
+  if (githubToken()) {
+    if (fast && present) {
+      const branchHint = await detectDefaultBranch(dest).catch(() => "main");
+      progress = emptyRepoProgress(owner, repo, branchHint);
+      progressTask = repoProgress(githubToken(), owner, repo).catch(() => null);
+    } else {
+      try {
+        progress = await repoProgress(githubToken(), owner, repo);
+      } catch (err) {
+        if (!present) throw err;
+      }
+    }
+  }
+
   const defaultBranch =
     progress?.repo?.defaultBranch || (present ? await resolveDefaultBranch(owner, repo) : "main");
-  const canFetchRemote = Boolean(githubToken());
   const result = await ensureCheckout({
     workspaceRoot: store.config.workspaceRoot,
     owner,
     repo,
     token: githubToken(),
     defaultBranch,
-    fetchRemote: canFetchRemote && !(fast && present),
+    fetchRemote: !(fast && present),
     signal,
   });
 
@@ -428,7 +433,8 @@ app.get("/v1/repos/:owner/:repo/checkout-status", async (req, res) => {
       owner,
       repo,
       defaultBranch,
-      fetchRemote: req.query.fetch !== "0" && Boolean(githubToken()),
+      token: githubToken(),
+      fetchRemote: req.query.fetch !== "0",
     });
     res.json(status);
   } catch (err) {

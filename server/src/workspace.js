@@ -19,9 +19,6 @@ const SKIP_DIR = new Set([
 export const GITHUB_GIT_FORBIDDEN_ZH =
   "无法访问该仓库：GitHub 返回 403。常见原因：仓库为私有且当前登录无权克隆、OAuth 未授予 repo 权限，或组织启用了 SSO 但尚未授权问象。请在 GitHub 授权中勾选 repo，并完成组织 SSO 授权后重试。";
 
-export const GIT_SYNC_AUTH_ZH =
-  "无法拉取更新：本机 Git 未能认证 GitHub。请在本机终端进入该仓库目录执行 git pull，或在问象里重新登录 GitHub。";
-
 export const GIT_NOT_INSTALLED_ZH =
   "本机未找到 Git。请安装 Git for Windows，或设置环境变量 WENXIANG_GIT 指向 git.exe，然后重启问象服务。";
 
@@ -68,7 +65,10 @@ export function gitFailure(output, code = 1) {
 function isGithubGitPermissionDenied(text) {
   if (/\b403\b/.test(text)) return true;
   if (/Authentication failed/i.test(text)) return true;
-  if (/Write access to repository not granted/i.test(text)) return true;
+  if (/could not read Username|could not read Password|terminal prompts disabled/i.test(text)) {
+    return true;
+  }
+  if (/Invalid username or token|Write access to repository not granted/i.test(text)) return true;
   if (/SAML|SSO enforcement/i.test(text)) return true;
   return false;
 }
@@ -85,6 +85,18 @@ export function safeSegment(name, label) {
     throw err;
   }
   return text;
+}
+
+function isGithubRemote(url) {
+  return /github\.com[:/]/i.test(String(url || ""));
+}
+
+async function readOriginUrl(dest, signal) {
+  try {
+    return (await runGit(["remote", "get-url", "origin"], { cwd: dest, signal })).trim();
+  } catch {
+    return "";
+  }
 }
 
 export function checkoutPath(workspaceRoot, owner, repo) {
@@ -219,8 +231,10 @@ export async function getCheckoutSyncStatus({
 
   let fetchError = "";
   if (fetchRemote) {
+    const origin = await readOriginUrl(dest, signal);
+    const fetchToken = isGithubRemote(origin) ? token : undefined;
     try {
-      await runGit(["fetch", "--depth", "50", "origin"], { cwd: dest, token, signal });
+      await runGit(["fetch", "--depth", "50", "origin"], { cwd: dest, token: fetchToken, signal });
     } catch (err) {
       fetchError = err?.message || String(err);
       if (err?.code === "github_git_forbidden") {
@@ -229,12 +243,12 @@ export async function getCheckoutSyncStatus({
           path: dest,
           branch,
           head,
-          syncState: "auth_required",
-          upToDate: false,
+          syncState: "local",
+          upToDate: true,
           behind: 0,
           ahead: 0,
           defaultBranch,
-          fetchError: GIT_SYNC_AUTH_ZH,
+          fetchError: "",
         };
       }
     }
@@ -374,12 +388,13 @@ export async function ensureCheckout({
 }) {
   const dest = checkoutPath(workspaceRoot, owner, repo);
   await mkdir(path.dirname(dest), { recursive: true });
-  const remote = cloneUrl || `https://github.com/${owner}/${repo}.git`;
   let existed = existsSync(path.join(dest, ".git"));
   if (!existed && existsSync(dest)) {
     await rm(dest, { recursive: true, force: true });
   }
   existed = existsSync(path.join(dest, ".git"));
+  const existingRemote = existed ? await readOriginUrl(dest, signal) : "";
+  const remote = cloneUrl || existingRemote || `https://github.com/${owner}/${repo}.git`;
   if (!existed) {
     try {
       await runGit(["clone", "--depth", "50", remote, dest], { token, signal });
@@ -390,40 +405,34 @@ export async function ensureCheckout({
       throw err;
     }
   } else {
-    const syncToken = undefined;
-    await runGit(["remote", "set-url", "origin", remote], { cwd: dest, signal });
+    if ((cloneUrl || !existingRemote) && existingRemote !== remote) {
+      if (existingRemote) {
+        await runGit(["remote", "set-url", "origin", remote], { cwd: dest, signal });
+      } else {
+        await runGit(["remote", "add", "origin", remote], { cwd: dest, signal });
+      }
+    }
+    const githubRemote = isGithubRemote(remote);
     const sync = await getCheckoutSyncStatus({
       workspaceRoot,
       owner,
       repo,
       defaultBranch,
-      token: syncToken,
+      token: githubRemote ? token : undefined,
       fetchRemote,
       signal,
     });
-    if (sync.syncState === "auth_required") {
-      throw zhGitError(GIT_SYNC_AUTH_ZH, sync.fetchError, {
-        code: "git_sync_auth",
-        status: 403,
-      });
-    }
-    if (!sync.upToDate && sync.behind > 0) {
+    if (!sync.upToDate && sync.behind > 0 && sync.syncState !== "local") {
       try {
         await runGit(["checkout", defaultBranch], { cwd: dest, signal });
         await runGit(["pull", "--ff-only", "origin", defaultBranch], {
           cwd: dest,
-          token: syncToken,
+          token: githubRemote ? token : undefined,
           signal,
         });
       } catch (err) {
         if (err?.code === "cancelled") throw err;
-        if (err?.code === "github_git_forbidden") {
-          throw zhGitError(GIT_SYNC_AUTH_ZH, err.detail, {
-            code: "git_sync_auth",
-            status: 403,
-          });
-        }
-        // Keep the existing checkout if the default branch cannot fast-forward.
+        // Keep the checkout already on disk when GitHub auth or fast-forward fails.
       }
     }
   }

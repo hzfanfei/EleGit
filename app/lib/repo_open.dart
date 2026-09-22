@@ -2,6 +2,10 @@ import 'api/wenxiang_api.dart';
 import 'models.dart';
 import 'widgets/wx_clone_scrim.dart';
 
+bool _useLocalCheckout(String syncState) {
+  return syncState == 'local' || syncState == 'auth_required';
+}
+
 /// Opens a repo: skip checkout when already up to date; pull when behind; clone when missing.
 Future<void> openRepoWithSync({
   required WenxiangApi api,
@@ -21,7 +25,7 @@ Future<void> openRepoWithSync({
     return;
   }
 
-  if (status.present && status.upToDate) {
+  if (status.present && (status.upToDate || _useLocalCheckout(status.syncState))) {
     api.warmChatSession(repo.owner, repo.name).catchError((_) {});
     await onReady();
     return;

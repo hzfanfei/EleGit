@@ -80,6 +80,10 @@ describe("git auth header", () => {
     const sso = gitFailure("remote: Resource protected by organization SAML SSO enforcement.");
     assert.equal(sso.status, 403);
     assert.equal(sso.message, GITHUB_GIT_FORBIDDEN_ZH);
+    const prompt = gitFailure(
+      "fatal: could not read Username for 'https://github.com/acme/secret.git': terminal prompts disabled",
+    );
+    assert.equal(prompt.code, "github_git_forbidden");
   });
 
   it("leaves unrelated git errors as short Chinese, not English fatals", () => {
@@ -243,6 +247,14 @@ describe("ensureCheckout", () => {
       defaultBranch: "main",
     });
     assert.equal(again.existed, true);
+    const kept = await ensureCheckout({
+      workspaceRoot: workspace,
+      owner: "acme",
+      repo: "widget",
+      defaultBranch: "main",
+    });
+    assert.equal(kept.existed, true);
+    assert.equal(kept.local.present, true);
     const origin = spawnSync("git", ["remote", "get-url", "origin"], {
       cwd: result.dest,
       encoding: "utf8",
