@@ -16,7 +16,7 @@ for (const line of readFileSync(envPath, "utf8").split(/\r?\n/)) {
   parsed[trimmed.slice(0, eq)] = trimmed.slice(eq + 1);
 }
 
-const publicUrl = (parsed.WENXIANG_PUBLIC_URL || "https://nonstrategically-pulverable-libby.ngrok-free.dev").replace(
+const publicUrl = (parsed.WENXIANG_PUBLIC_URL || "https://wenxiang.ngrok.app").replace(
   /\/+$/,
   "",
 );

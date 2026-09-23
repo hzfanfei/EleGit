@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { config as loadDotenv } from "dotenv";
 
-export const DEFAULT_PUBLIC_URL = "https://nonstrategically-pulverable-libby.ngrok-free.dev";
+export const DEFAULT_PUBLIC_URL = "https://wenxiang.ngrok.app";
 
 export function repoRoot() {
   return path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");

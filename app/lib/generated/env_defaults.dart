@@ -1,2 +1,2 @@
-const kDefaultPublicUrl = 'https://nonstrategically-pulverable-libby.ngrok-free.dev';
+const kDefaultPublicUrl = 'https://wenxiang.ngrok.app';
 const kDefaultApiKey = '';
