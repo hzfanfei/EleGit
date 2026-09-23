@@ -694,9 +694,21 @@ export class AcpChannel {
     clearTimeout(this.idleTimer);
     this._failAll(new Error("ACP channel closed"));
     if (this.child && !this.child.killed) {
-      const pid = this.child.pid;
+      const child = this.child;
+      const pid = child.pid;
       if (process.platform === "win32" && pid) {
-        spawn("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+        const taskkill = path.join(process.env.SystemRoot || "C:\\Windows", "System32", "taskkill.exe");
+        const killer = spawn(taskkill, ["/PID", String(pid), "/T", "/F"], {
+          windowsHide: true,
+          stdio: "ignore",
+        });
+        killer.on("error", () => {
+          try {
+            child.kill();
+          } catch {
+            // Already gone.
+          }
+        });
       } else {
         try {
           this.child.kill("SIGTERM");
