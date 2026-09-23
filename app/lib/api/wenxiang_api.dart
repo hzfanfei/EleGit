@@ -438,6 +438,13 @@ class WenxiangApi {
     );
   }
 
+  Future<void> deleteStaticFile(String path) async {
+    final res = await http
+        .delete(_uri('/v1/static', {'path': path}), headers: _headers)
+        .timeout(const Duration(seconds: 15));
+    await _json(res, fallback: '删除资源失败');
+  }
+
   Future<List<BookItem>> listBooks() async {
     final res = await http
         .get(_uri('/v1/books'), headers: _headers)

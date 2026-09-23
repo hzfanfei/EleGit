@@ -1,5 +1,5 @@
 import { createReadStream } from "node:fs";
-import { mkdir, readdir, stat } from "node:fs/promises";
+import { mkdir, readdir, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 
 const SKIP_DIR = new Set(["node_modules"]);
@@ -183,4 +183,29 @@ export async function listStaticFiles(workspaceRoot, { publicUrl, token } = {}) 
 
 export function openStaticFileStream(abs) {
   return createReadStream(abs);
+}
+
+export async function deleteStaticFile(workspaceRoot, rel) {
+  const root = staticDir(workspaceRoot);
+  const { relative, abs } = resolveStaticFile(root, rel);
+  let info;
+  try {
+    info = await stat(abs);
+  } catch (err) {
+    if (err?.code === "ENOENT") {
+      const missing = new Error("文件不存在");
+      missing.status = 404;
+      missing.code = "static_missing";
+      throw missing;
+    }
+    throw err;
+  }
+  if (!info.isFile()) {
+    const err = new Error("只能删除文件");
+    err.status = 400;
+    err.code = "static_not_file";
+    throw err;
+  }
+  await unlink(abs);
+  return { ok: true, path: relative };
 }

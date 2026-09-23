@@ -75,6 +75,7 @@ import {
 import { envWithNodeOnPath, resolveGitExecutable, resolveNodeExecutable } from "./which.js";
 import {
   ensureStaticDir,
+  deleteStaticFile,
   listStaticFiles,
   openStaticFileStream,
   resolveStaticFile,
@@ -530,6 +531,23 @@ app.get("/v1/static", async (_req, res) => {
     });
     res.json(listed);
   } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.delete("/v1/static", async (req, res) => {
+  try {
+    const rel = String(req.query.path || "").trim();
+    if (!rel) {
+      res.status(400).json({ error: "缺少 path", code: "static_path" });
+      return;
+    }
+    res.json(await deleteStaticFile(store.config.workspaceRoot, rel));
+  } catch (err) {
+    if (err?.code === "ENOENT" || err?.code === "static_missing") {
+      res.status(404).json({ error: "文件不存在", code: "static_missing" });
+      return;
+    }
     sendError(res, err);
   }
 });

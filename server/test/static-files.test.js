@@ -5,6 +5,7 @@ import path from "node:path";
 import { describe, it } from "node:test";
 import {
   contentTypeForStatic,
+  deleteStaticFile,
   listStaticFiles,
   normalizeStaticRelative,
   resolveStaticFile,
@@ -85,6 +86,26 @@ describe("static files", () => {
       assert.equal(listed.files[0].path, "demo/app.apk");
       assert.equal(listed.files[0].size, 3);
       assert.match(listed.files[0].downloadUrl, /\/files\/demo\/app\.apk\?token=tok$/);
+    } finally {
+      if (previous === undefined) delete process.env.WENXIANG_STATIC_DIR;
+      else process.env.WENXIANG_STATIC_DIR = previous;
+    }
+  });
+
+  it("deletes a file and rejects traversal", async () => {
+    const workspace = await mkdtemp(path.join(os.tmpdir(), "wenxiang-static-del-"));
+    const previous = process.env.WENXIANG_STATIC_DIR;
+    const dir = path.join(workspace, "drop");
+    process.env.WENXIANG_STATIC_DIR = dir;
+    try {
+      await mkdir(path.join(dir, "demo"), { recursive: true });
+      const target = path.join(dir, "demo", "app.apk");
+      await writeFile(target, "apk");
+      const out = await deleteStaticFile(workspace, "demo/app.apk");
+      assert.equal(out.path, "demo/app.apk");
+      assert.equal(out.ok, true);
+      await assert.rejects(() => deleteStaticFile(workspace, "demo/app.apk"), /文件不存在/);
+      await assert.rejects(() => deleteStaticFile(workspace, "../secret"), /路径无效/);
     } finally {
       if (previous === undefined) delete process.env.WENXIANG_STATIC_DIR;
       else process.env.WENXIANG_STATIC_DIR = previous;

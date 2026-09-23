@@ -24,6 +24,7 @@ class _StaticFilesPageState extends State<StaticFilesPage> {
   StaticLibrary? _library;
   Object? _error;
   bool _loading = true;
+  String? _deletingPath;
 
   @override
   void initState() {
@@ -60,6 +61,38 @@ class _StaticFilesPageState extends State<StaticFilesPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('无法打开下载链接')),
       );
+    }
+  }
+
+  Future<void> _confirmDelete(StaticFileItem file) async {
+    if (_deletingPath != null) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('删除这个资源？'),
+        content: Text('${file.name}\n\n删除后无法恢复。'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('删除')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() => _deletingPath = file.path);
+    try {
+      await widget.api.deleteStaticFile(file.path);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('已删除 ${file.name}')),
+      );
+      await _load();
+    } catch (err) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(err.toString())),
+      );
+    } finally {
+      if (mounted) setState(() => _deletingPath = null);
     }
   }
 
@@ -118,6 +151,7 @@ class _StaticFilesPageState extends State<StaticFilesPage> {
         separatorBuilder: (context, index) => const WxHairline(),
         itemBuilder: (context, index) {
           final file = files[index];
+          final deleting = _deletingPath == file.path;
           return ListTile(
             contentPadding: const EdgeInsets.symmetric(horizontal: 4),
             title: Text(file.name, maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -126,8 +160,25 @@ class _StaticFilesPageState extends State<StaticFilesPage> {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
-            trailing: const Icon(Icons.download_outlined, size: 20),
-            onTap: () => _open(file),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (deleting)
+                  const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                else
+                  IconButton(
+                    tooltip: '删除',
+                    icon: Icon(Icons.delete_outline, size: 22, color: Wx.danger),
+                    onPressed: _deletingPath != null ? null : () => _confirmDelete(file),
+                  ),
+                const Icon(Icons.download_outlined, size: 20),
+              ],
+            ),
+            onTap: deleting ? null : () => _open(file),
           );
         },
       ),
