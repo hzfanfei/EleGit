@@ -742,8 +742,17 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
                       if (moved > _kChromeTapMaxDistance) return;
                       final elapsed = event.timeStamp - downAt;
                       if (elapsed > _kChromeTapMaxDuration) return;
-                      if (_linkTappedThisGesture) return;
-                      _toggleChrome();
+                      // Defer to the next frame so the link's tap callback
+                      // (fired when the gesture arena resolves, after this
+                      // raw pointer-up listener) has already set
+                      // _linkTappedThisGesture. Without this defer, the
+                      // chrome toggles on every link tap because the
+                      // pointer-up Listener runs synchronously before the
+                      // arena resolves.
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (_linkTappedThisGesture) return;
+                        _toggleChrome();
+                      });
                     },
                     onPointerCancel: (_) {
                       _chromeTapDown = null;

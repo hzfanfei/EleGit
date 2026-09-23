@@ -24,6 +24,11 @@ MarkdownStyleSheet bookReaderMarkdownStyle({
       color: Wx.accent,
       decoration: TextDecoration.underline,
       decorationColor: Wx.accent.withValues(alpha: 0.55),
+      // Soft tint behind the link text — makes the tap target obvious
+      // without turning each link into a button. flutter_markdown's
+      // TapGestureRecognizer is attached to the span itself, so the
+      // highlighted region is exactly the link text, not the paragraph.
+      backgroundColor: Wx.accent.withValues(alpha: 0.16),
     ),
     h1: TextStyle(
       fontSize: settings.fontSize + 6,
