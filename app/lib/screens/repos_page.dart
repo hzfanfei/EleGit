@@ -224,14 +224,16 @@ class ReposPageState extends State<ReposPage> {
             onBrandTap: blocked ? null : widget.onOpenSettings,
             trailing: [
               if (widget.onOpenFiles != null)
-                TextButton(
+                IconButton(
+                  tooltip: '资源',
                   onPressed: blocked ? null : widget.onOpenFiles,
-                  child: const Text('资源'),
+                  icon: const Icon(Icons.folder_outlined),
                 ),
               if (widget.onOpenBooks != null)
-                TextButton(
+                IconButton(
+                  tooltip: '问书',
                   onPressed: blocked ? null : widget.onOpenBooks,
-                  child: const Text('问书'),
+                  icon: const Icon(Icons.menu_book_outlined),
                 ),
               TextButton(
                 onPressed: blocked ? null : () => setState(() => _reauth = true),
