@@ -81,9 +81,20 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
   double _scrollFraction = 0;
   late final BookQuickVoiceSession _quickVoice;
   bool _voiceReady = false;
+  // Set by BookMarkdownBody#onTapLink before our pointer-up Listener fires.
+  // Stops the chrome from toggling when the tap was actually a link click.
+  bool _linkTappedThisGesture = false;
+  // Tap detection for chrome toggle. Listener doesn't join the gesture arena,
+  // so it doesn't compete with the markdown link recognizers (which would
+  // otherwise swallow link clicks when wrapped in a GestureDetector).
+  Offset? _chromeTapDown;
+  Duration? _chromeTapDownAt;
 
   static const _askExpandedSheet = kBookAskHalfFraction;
   static const _askFullSheet = kBookAskFullFraction;
+  // Loose thresholds so a swiping scroll never counts as a tap.
+  static const _kChromeTapMaxDistance = 10.0;
+  static const _kChromeTapMaxDuration = Duration(milliseconds: 600);
 
   @override
   void initState() {
@@ -286,6 +297,9 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
   }
 
   Future<void> _onBookLink(String href, String text) async {
+    // Mark this gesture as a link click so the chrome-toggle Listener below
+    // doesn't also toggle when the same tap completes.
+    _linkTappedThisGesture = true;
     final external = bookMarkdownExternalUri(href);
     if (external != null) {
       final opened = await launchUrl(external, mode: LaunchMode.externalApplication);
@@ -716,9 +730,32 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
                   left: 0,
                   right: 0,
                   bottom: readerBottom,
-                  child: GestureDetector(
+                  child: Listener(
                     behavior: HitTestBehavior.translucent,
-                    onTap: _toggleChrome,
+                    onPointerDown: (event) {
+                      // Reset before each gesture; _onBookLink will set this
+                      // back to true if the tap lands on a markdown link.
+                      _linkTappedThisGesture = false;
+                      _chromeTapDown = event.localPosition;
+                      _chromeTapDownAt = event.timeStamp;
+                    },
+                    onPointerUp: (event) {
+                      final down = _chromeTapDown;
+                      final downAt = _chromeTapDownAt;
+                      _chromeTapDown = null;
+                      _chromeTapDownAt = null;
+                      if (down == null || downAt == null) return;
+                      final moved = (event.localPosition - down).distance;
+                      if (moved > _kChromeTapMaxDistance) return;
+                      final elapsed = event.timeStamp - downAt;
+                      if (elapsed > _kChromeTapMaxDuration) return;
+                      if (_linkTappedThisGesture) return;
+                      _toggleChrome();
+                    },
+                    onPointerCancel: (_) {
+                      _chromeTapDown = null;
+                      _chromeTapDownAt = null;
+                    },
                     child: ColoredBox(
                       key: const Key('book-reader-body'),
                       color: palette.paper,
