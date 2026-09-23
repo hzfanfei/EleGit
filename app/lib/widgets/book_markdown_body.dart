@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../api/wenxiang_api.dart';
 import '../theme.dart';
 import '../utils/book_markdown_assets.dart';
@@ -19,6 +20,7 @@ class BookMarkdownBody extends StatelessWidget {
     required this.styleSheet,
     this.spineHref,
     this.onTapLink,
+    this.launchExternalLinks = true,
   });
 
   final WenxiangApi api;
@@ -29,14 +31,44 @@ class BookMarkdownBody extends StatelessWidget {
   final MarkdownStyleSheet styleSheet;
   final void Function(String href, String text)? onTapLink;
 
+  /// When true (default), http(s) / mailto / tel / bare-domain links are
+  /// opened in the system browser automatically. The [onTapLink] callback is
+  /// still invoked for every link so callers can do their own bookkeeping
+  /// (e.g. suppress the chrome-toggle gesture in the book reader).
+  final bool launchExternalLinks;
+
   @override
   Widget build(BuildContext context) {
+    final messenger = ScaffoldMessenger.maybeOf(context);
     return MarkdownBody(
       data: normalizeBookMarkdown(data),
       styleSheet: styleSheet,
       onTapLink: (text, href, title) {
         final target = (href ?? '').trim();
         if (target.isEmpty) return;
+        if (launchExternalLinks) {
+          final external = bookMarkdownExternalUri(target);
+          if (external != null) {
+            // Fire-and-forget: this callback is sync; surface launch failures
+            // via SnackBar if we have a messenger.
+            () async {
+              final opened = await launchUrl(
+                external,
+                mode: LaunchMode.externalApplication,
+              );
+              if (!opened && messenger != null && messenger.mounted) {
+                messenger.showSnackBar(
+                  SnackBar(
+                    content: Text('无法打开链接：$target'),
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              }
+            }();
+          }
+        }
+        // Always let the caller observe the tap — they may want to mark
+        // the gesture (e.g. prevent the reader's chrome from toggling).
         onTapLink?.call(target, text);
       },
       sizedImageBuilder: (config) => _BookMarkdownImage(

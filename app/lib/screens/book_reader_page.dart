@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../widgets/book_markdown_body.dart';
 import '../api/wenxiang_api.dart';
@@ -300,16 +299,10 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
     // Mark this gesture as a link click so the chrome-toggle Listener below
     // doesn't also toggle when the same tap completes.
     _linkTappedThisGesture = true;
-    final external = bookMarkdownExternalUri(href);
-    if (external != null) {
-      final opened = await launchUrl(external, mode: LaunchMode.externalApplication);
-      if (!opened && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('无法打开链接：$href'), behavior: SnackBarBehavior.floating),
-        );
-      }
-      return;
-    }
+    // External http(s) / mailto / tel / bare-domain links are launched by
+    // BookMarkdownBody itself (launchExternalLinks: true). Nothing to do here
+    // for them — we only own in-book chapter navigation.
+    if (bookMarkdownExternalUri(href) != null) return;
     final manifest = _manifest;
     if (manifest == null) return;
     final index = resolveBookMarkdownChapterLink(
