@@ -21,7 +21,7 @@ export function splitTextForTts(text, maxChars = 320) {
 
   const out = [];
   let buf = "";
-  const punct = /[。！？!?；;\n]/;
+  const punct = /[。！？!?\n]/;
   for (const ch of chars) {
     buf += ch;
     const len = [...buf].length;

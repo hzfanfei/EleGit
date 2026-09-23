@@ -42,6 +42,26 @@ describe("takeSpeakable", () => {
     assert.equal(hold.speak, "");
     assert.equal(hold.rest, "还没说完");
   });
+
+  it("keeps a comma-heavy sentence together past 72 characters", () => {
+    const sentence = `${"这是一句很长的话，中间只有逗号，".repeat(6)}最后才收束。`;
+    assert.ok(sentence.length > 72);
+    const unfinished = takeSpeakable(sentence.slice(0, -1));
+    assert.equal(unfinished.speak, "");
+    assert.equal(unfinished.rest, sentence.slice(0, -1));
+    const done = takeSpeakable(sentence);
+    assert.equal(done.speak, sentence);
+    assert.equal(done.rest, "");
+  });
+
+  it("does not split one sentence on a semicolon", () => {
+    const text = "前半句还没结束；后半句才收束。";
+    const chunk = takeSpeakable(text);
+    assert.equal(chunk.speak, text);
+    assert.equal(chunk.rest, "");
+    const mid = takeSpeakable("前半句还没结束；");
+    assert.equal(mid.speak, "");
+  });
 });
 
 describe("barge energy", () => {

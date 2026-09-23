@@ -1,6 +1,10 @@
 import { isSpeakableTtsText, isUnreadableTtsError, speakTextInParts } from "./spoken-tts.js";
 
-const SPEAK_PUNCT = /[。！？!?；;\n]/;
+/** Sentence ends only. Semicolons and commas stay inside one spoken segment. */
+const SENTENCE_END = /[。！？!?\n]/;
+/** Fallback pause when a clause has no sentence end and exceeds SPEAK_HARD_LEN. */
+const CLAUSE_PAUSE = /[，,、；;]/;
+const SPEAK_HARD_LEN = 320;
 
 export function createCallMachine() {
   let state = "idle";
@@ -36,19 +40,31 @@ export function createCallMachine() {
   };
 }
 
-export function takeSpeakable(buffer, hardLen = 72) {
+export function takeSpeakable(buffer, hardLen = SPEAK_HARD_LEN) {
   const text = String(buffer || "");
-  let last = -1;
+  if (!text) return { speak: "", rest: "" };
+  let lastSentence = -1;
   for (let i = 0; i < text.length; i += 1) {
-    if (SPEAK_PUNCT.test(text[i])) last = i;
+    if (SENTENCE_END.test(text[i])) lastSentence = i;
   }
-  if (last >= 0) {
-    return { speak: text.slice(0, last + 1).trim(), rest: text.slice(last + 1) };
+  if (lastSentence >= 0) {
+    return {
+      speak: text.slice(0, lastSentence + 1).trim(),
+      rest: text.slice(lastSentence + 1),
+    };
   }
-  if (text.length >= hardLen) {
-    return { speak: text.trim(), rest: "" };
+  if (text.length < hardLen) return { speak: "", rest: text };
+  let lastClause = -1;
+  for (let i = 0; i < text.length; i += 1) {
+    if (CLAUSE_PAUSE.test(text[i])) lastClause = i;
   }
-  return { speak: "", rest: text };
+  if (lastClause >= 24) {
+    return {
+      speak: text.slice(0, lastClause + 1).trim(),
+      rest: text.slice(lastClause + 1),
+    };
+  }
+  return { speak: text.slice(0, hardLen).trim(), rest: text.slice(hardLen) };
 }
 
 export function pcmRms(buf) {
@@ -132,7 +148,7 @@ export async function runVoiceTurn({
     if (capped && !force) return;
     const chunk = force
       ? { speak: pending.trim(), rest: "" }
-      : takeSpeakable(pending, maxSpeakChars ? 32 : 72);
+      : takeSpeakable(pending);
     if (!chunk.speak) {
       pending = chunk.rest || pending;
       return;
