@@ -6,6 +6,8 @@ import {
   resolveVoiceConfig,
   resolveTurnTtsVoice,
   sanitizeTtsVoice,
+  setPreferredVoiceStack,
+  voiceAfterStackSwitch,
   withTtsVoice,
 } from "../src/voice-config.js";
 
@@ -95,6 +97,44 @@ describe("resolveVoiceConfig", () => {
     const pub = publicVoiceStatus(cfg);
     assert.equal(pub.asrProvider, "funasr");
     assert.equal(pub.asrEngine, "FunASR-Paraformer");
+  });
+
+  it("switches recognition and synthesis together", () => {
+    const env = {
+      VOLC_API_KEY: "ak-only",
+      WENXIANG_TTS_PROVIDER: "cosyvoice",
+      WENXIANG_ASR_PROVIDER: "funasr",
+    };
+    setPreferredVoiceStack("volc");
+    try {
+      const volc = resolveVoiceConfig(env);
+      assert.equal(volc.ttsProvider, "volc");
+      assert.equal(volc.asrProvider, "volc");
+      assert.equal(volc.cosyvoice, null);
+      assert.equal(volc.funasr, null);
+      assert.equal(publicVoiceStatus(volc).voiceStack, "volc");
+      assert.equal(
+        voiceAfterStackSwitch(volc, "", "zh_male_m191_uranus_bigtts"),
+        "zh_male_m191_uranus_bigtts",
+      );
+      assert.equal(
+        voiceAfterStackSwitch(volc, "zh_female_xiaohe_uranus_bigtts", "zh_male_m191_uranus_bigtts"),
+        "zh_female_xiaohe_uranus_bigtts",
+      );
+    } finally {
+      setPreferredVoiceStack("");
+    }
+    setPreferredVoiceStack("local");
+    try {
+      const local = resolveVoiceConfig({ VOLC_API_KEY: "ak-only" });
+      assert.equal(local.ttsProvider, "cosyvoice");
+      assert.equal(local.asrProvider, "funasr");
+      assert.equal(local.cosyvoice.enabled, true);
+      assert.equal(local.funasr.enabled, true);
+      assert.equal(publicVoiceStatus(local).voiceStack, "local");
+    } finally {
+      setPreferredVoiceStack("");
+    }
   });
 
   it("keeps an explicit VOLC_TTS_VOICE", () => {

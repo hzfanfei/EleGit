@@ -127,6 +127,7 @@ void main() {
       settings: const ReaderSettings(),
     );
     expect(sheet.a?.backgroundColor, isNull);
+    expect(sheet.tableColumnWidth, isA<IntrinsicColumnWidth>());
     expect(sheet.blockSpacing, greaterThanOrEqualTo(20));
     expect(sheet.h1!.fontSize!, greaterThan(sheet.h2!.fontSize!));
     expect(sheet.h2!.fontSize!, greaterThan(sheet.h3!.fontSize!));
@@ -176,5 +177,44 @@ void main() {
       findsNothing,
     );
     expect(tester.getSize(find.byType(SelectableText).last).width, lessThanOrEqualTo(180));
+  });
+
+  testWidgets('a wide table can scroll sideways inside the column', (tester) async {
+    final sheet = bookReaderMarkdownStyle(
+      theme: wenxiangTheme(),
+      palette: ReaderPalette.forMode(ReaderThemeMode.dark),
+      settings: const ReaderSettings(),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: Scaffold(
+          body: SizedBox(
+            width: 180,
+            child: BookMarkdownBody(
+              api: FakeWenxiangApi(),
+              bookId: 'book',
+              chapterFile: '001.md',
+              data: '| 列甲 | 列乙 | 列丙 | 列丁 |\n| --- | --- | --- | --- |\n| 甲 | 乙 | 丙 | 丁 |',
+              styleSheet: sheet,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('列甲'), findsOneWidget);
+    expect(
+      find.byWidgetPredicate(
+        (widget) => widget is SingleChildScrollView && widget.scrollDirection == Axis.horizontal,
+      ),
+      findsOneWidget,
+    );
+    final scroll = find.byWidgetPredicate(
+      (widget) => widget is SingleChildScrollView && widget.scrollDirection == Axis.horizontal,
+    );
+    expect(tester.getSize(scroll).width, lessThanOrEqualTo(180));
   });
 }

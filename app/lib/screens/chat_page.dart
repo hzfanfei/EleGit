@@ -206,12 +206,11 @@ class _ChatPageState extends State<ChatPage> {
     _streamScrollTimer = Timer(const Duration(milliseconds: 48), () {
       if (!mounted || !_scroll.hasClients) return;
       final pos = _scroll.position;
-      final target = pos.maxScrollExtent;
-      if (target <= 0) return;
-      if ((target - _lastFollowExtent).abs() < 0.5 && _nearBottom) return;
-      _lastFollowExtent = target;
+      if (pos.pixels <= 0.5) return;
+      if (_lastFollowExtent == 0 && _nearBottom) return;
+      _lastFollowExtent = 0;
       _autoFollowing = true;
-      pos.jumpTo(target);
+      pos.jumpTo(0);
       _autoFollowing = false;
     });
   }
@@ -230,15 +229,14 @@ class _ChatPageState extends State<ChatPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!_scroll.hasClients || !mounted) return;
       final pos = _scroll.position;
-      final target = pos.maxScrollExtent;
-      if (target <= 0) return;
+      if (pos.pixels <= 1) return;
       _autoFollowing = true;
       try {
         if (_live) {
-          pos.jumpTo(target);
+          pos.jumpTo(0);
         } else {
           await pos.animateTo(
-            target,
+            0,
             duration: const Duration(milliseconds: 140),
             curve: Curves.easeOutCubic,
           );
@@ -817,7 +815,7 @@ class _ChatPageState extends State<ChatPage> {
   bool get _nearBottom {
     if (!_scroll.hasClients) return true;
     final pos = _scroll.position;
-    return pos.pixels >= pos.maxScrollExtent - _scrollBottomThreshold;
+    return pos.pixels <= _scrollBottomThreshold;
   }
 
   Future<void> _openSessions() async {
@@ -988,20 +986,22 @@ class _ChatPageState extends State<ChatPage> {
                         child: ListView.builder(
                           key: const Key('wx-chat-list'),
                           controller: _scroll,
+                          reverse: true,
                           padding: const EdgeInsets.fromLTRB(Wx.inset, 20, Wx.inset, 16),
                           itemCount: itemCount,
                           itemBuilder: (context, index) {
-                      if (index < _messages.length) {
-                        final message = _messages[index];
+                      final chronological = itemCount - 1 - index;
+                      if (chronological < _messages.length) {
+                        final message = _messages[chronological];
                         return _FinishedTurn(
-                          key: ValueKey('m-$index-${message.role}'),
+                          key: ValueKey('m-$chronological-${message.role}'),
                           message: message,
-                          editing: _editingIndex == index,
+                          editing: _editingIndex == chronological,
                           onEdit: message.role == 'user' && !_busy && !_live
-                              ? () => _beginEdit(index)
+                              ? () => _beginEdit(chronological)
                               : null,
                           onCancelEdit: _cancelEdit,
-                          onSubmitEdit: (text) => _commitEdit(index, text),
+                          onSubmitEdit: (text) => _commitEdit(chronological, text),
                           onRetry: message.role == 'error' && _lastUser != null && !_busy
                               ? () => _send(_lastUser)
                               : null,

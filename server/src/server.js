@@ -38,6 +38,10 @@ import {
   resolveTtsVoiceId,
   resolveVoiceConfig,
   sanitizeTtsVoice,
+  sanitizeVoiceStack,
+  setPreferredVoiceStack,
+  voiceAfterStackSwitch,
+  voiceStackOf,
   withTtsVoice,
 } from "./voice-config.js";
 import { ensureCosyVoiceTtsWorker, shutdownCosyVoiceTtsWorker } from "./cosyvoice-tts.js";
@@ -46,6 +50,7 @@ import { COMPANION_ALREADY_RUNNING } from "./keep-alive-policy.js";
 import { bindCompanion } from "./listen.js";
 import { attachSttGateway } from "./voice-stt-ws.js";
 import { attachVoiceGateway, isVoiceCallEnabled } from "./voice-ws.js";
+import { appendClientLogs } from "./client-logs.js";
 import { runDiagnosticsProbe, synthesizeVoicePreview } from "./diagnostics.js";
 import {
   checkoutPath,
@@ -102,6 +107,7 @@ const savedAcpEngine =
   "claude";
 store.config.acpEngine = savedAcpEngine;
 applyAcpEnginePreference(savedAcpEngine);
+setPreferredVoiceStack(store.config.voiceStack);
 
 const sessions = createSessionStore();
 const bookSessions = createSessionStore();
@@ -706,6 +712,8 @@ app.put("/v1/voice/tts-voice", async (req, res) => {
     return;
   }
   store.config.ttsVoice = ttsVoice;
+  if (voiceStackOf(voiceCfg) === "local") store.config.ttsVoiceLocal = ttsVoice;
+  else store.config.ttsVoiceVolc = ttsVoice;
   await store.save();
   res.json({ ttsVoice });
 });
@@ -735,6 +743,19 @@ app.post("/v1/voice/tts-preview", async (req, res) => {
   }
 });
 
+app.post("/v1/client-logs", async (req, res) => {
+  try {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const accepted = await appendClientLogs(store.config.workspaceRoot, body.entries, {
+      app: body.app,
+      platform: body.platform,
+    });
+    res.json({ accepted });
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
 app.post("/v1/diagnostics/probe", async (req, res) => {
   try {
     const body = req.body && typeof req.body === "object" ? req.body : {};
@@ -750,6 +771,48 @@ app.post("/v1/diagnostics/probe", async (req, res) => {
       signal: requestSignal(req, res),
     });
     res.json(result);
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.put("/v1/settings/voice-stack", async (req, res) => {
+  try {
+    const stack = sanitizeVoiceStack(req.body?.stack ?? req.body?.voiceStack);
+    if (!stack) {
+      res.status(400).json({ error: "stack must be local or volc" });
+      return;
+    }
+    if (stack === "local") {
+      await ensureFunasrAsrWorker(process.env);
+      await ensureCosyVoiceTtsWorker(process.env);
+    }
+    const previousStack = store.config.voiceStack;
+    const previousVoice = store.config.ttsVoice;
+    const previousLocal = store.config.ttsVoiceLocal;
+    const previousVolc = store.config.ttsVoiceVolc;
+    const leaving = sanitizeVoiceStack(previousStack) || voiceStackOf(resolveVoiceConfig());
+    if (leaving === "local") store.config.ttsVoiceLocal = previousVoice || previousLocal;
+    else store.config.ttsVoiceVolc = previousVoice || previousVolc;
+    store.config.voiceStack = stack;
+    setPreferredVoiceStack(stack);
+    const next = resolveVoiceConfig();
+    const remembered = stack === "local" ? store.config.ttsVoiceLocal : store.config.ttsVoiceVolc;
+    const ttsVoice = voiceAfterStackSwitch(next, remembered, previousVoice);
+    store.config.ttsVoice = ttsVoice;
+    if (stack === "local") store.config.ttsVoiceLocal = ttsVoice;
+    else store.config.ttsVoiceVolc = ttsVoice;
+    try {
+      await store.save();
+    } catch (err) {
+      store.config.voiceStack = previousStack;
+      store.config.ttsVoice = previousVoice;
+      store.config.ttsVoiceLocal = previousLocal;
+      store.config.ttsVoiceVolc = previousVolc;
+      setPreferredVoiceStack(previousStack);
+      throw err;
+    }
+    res.json({ stack, ...publicVoiceStatus(withTtsVoice(next, ttsVoice)) });
   } catch (err) {
     sendError(res, err);
   }

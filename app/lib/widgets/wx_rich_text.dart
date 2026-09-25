@@ -405,9 +405,11 @@ class _MarkdownTable extends StatelessWidget {
             ? constraints.maxWidth
             : MediaQuery.sizeOf(context).width;
         final count = table.headers.length;
-        return SizedBox(
-          width: width,
-          child: DecoratedBox(
+        final columns = _tableColumnWidths(table, count);
+        final natural = columns.fold<double>(0, (sum, column) => sum + column);
+        final scroll = natural > width + 0.5;
+        final extra = scroll || count == 0 ? 0.0 : (width - natural) / count;
+        final framed = DecoratedBox(
             decoration: BoxDecoration(
               color: Wx.surface,
               borderRadius: BorderRadius.circular(10),
@@ -416,7 +418,7 @@ class _MarkdownTable extends StatelessWidget {
             child: Table(
               key: const Key('wx-md-table'),
               columnWidths: {
-                for (var i = 0; i < count; i++) i: FixedColumnWidth(width / count),
+                for (var i = 0; i < count; i++) i: FixedColumnWidth(columns[i] + extra),
               },
               defaultVerticalAlignment: TableCellVerticalAlignment.top,
               border: const TableBorder(
@@ -446,11 +448,58 @@ class _MarkdownTable extends StatelessWidget {
                   ),
               ],
             ),
+        );
+        if (!scroll) {
+          return SizedBox(width: width, child: framed);
+        }
+        return SizedBox(
+          width: width,
+          child: SingleChildScrollView(
+            key: const Key('wx-table-scroll'),
+            scrollDirection: Axis.horizontal,
+            child: SizedBox(width: natural, child: framed),
           ),
         );
       },
     );
   }
+}
+
+const _tableCellPadding = 24.0;
+const _tableMinColumn = 72.0;
+const _tableMaxColumn = 240.0;
+
+List<double> _tableColumnWidths(WxTableData table, int count) {
+  const headerStyle = TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, fontFamilyFallback: Wx.fontFallback);
+  const bodyStyle = TextStyle(fontSize: 13.5, fontWeight: FontWeight.w400, fontFamilyFallback: Wx.fontFallback);
+  return [
+    for (var i = 0; i < count; i++)
+      _columnWidth([
+        table.headers[i],
+        for (final row in table.rows) i < row.length ? row[i] : '',
+      ], headerStyle, bodyStyle),
+  ];
+}
+
+double _columnWidth(List<String> cells, TextStyle headerStyle, TextStyle bodyStyle) {
+  var widest = _tableMinColumn;
+  for (var i = 0; i < cells.length; i++) {
+    final measured = _singleLineWidth(cells[i], i == 0 ? headerStyle : bodyStyle) + _tableCellPadding;
+    if (measured > widest) widest = measured;
+  }
+  if (widest > _tableMaxColumn) return _tableMaxColumn;
+  return widest;
+}
+
+double _singleLineWidth(String text, TextStyle style) {
+  final painter = TextPainter(
+    text: TextSpan(text: text, style: style),
+    textDirection: TextDirection.ltr,
+    maxLines: 1,
+  )..layout();
+  final width = painter.width;
+  painter.dispose();
+  return width;
 }
 
 class WxReplyFrame extends StatelessWidget {

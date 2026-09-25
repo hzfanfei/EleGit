@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import '../models.dart';
 import '../models/diagnostics.dart';
 import '../utils/async_gate.dart';
+import '../voice/background_work.dart';
 
 bool chatEventHasVisibleText(ChatStreamEvent event) {
   if (event.pcm != null && event.pcm!.isNotEmpty) return true;
@@ -196,6 +197,29 @@ class WenxiangApi {
     return body;
   }
 
+  Future<List<String>> uploadClientLogs(
+    List<Map<String, dynamic>> entries, {
+    String app = 'wenxiang',
+    String platform = '',
+  }) async {
+    if (entries.isEmpty) return const [];
+    final res = await http
+        .post(
+          _uri('/v1/client-logs'),
+          headers: _headers,
+          body: jsonEncode({
+            'app': app,
+            'platform': platform,
+            'entries': entries,
+          }),
+        )
+        .timeout(const Duration(seconds: 12));
+    final body = await _json(res, fallback: '上传错误日志失败');
+    final accepted = body['accepted'];
+    if (accepted is! List) return const [];
+    return [for (final id in accepted) id.toString()];
+  }
+
   Future<void> ping() async {
     final res = await http.get(_uri('/health'), headers: _headers).timeout(const Duration(seconds: 8));
     if (res.statusCode != 200) {
@@ -253,6 +277,19 @@ class WenxiangApi {
         .timeout(const Duration(minutes: 3));
     final body = await _json(res, fallback: '通路检测失败');
     return DiagnosticsProbeResult.fromJson(body);
+  }
+
+  Future<void> setVoiceStack(String stack) async {
+    final res = await http
+        .put(
+          _uri('/v1/settings/voice-stack'),
+          headers: _headers,
+          body: jsonEncode({'stack': stack}),
+        )
+        .timeout(const Duration(seconds: 90));
+    if (res.statusCode >= 400) {
+      await _json(res, fallback: '保存语音引擎失败');
+    }
   }
 
   Future<void> setAskEngine(String engine) async {
@@ -315,6 +352,7 @@ class WenxiangApi {
     final client = http.Client();
     _checkoutCancelled = false;
     _checkoutClient = client;
+    await BackgroundWork.acquire();
     try {
       final res = await client
           .post(_uri('/v1/repos/$owner/$repo/checkout'), headers: _headers)
@@ -349,6 +387,7 @@ class WenxiangApi {
       }
       rethrow;
     } finally {
+      await BackgroundWork.release();
       if (identical(_checkoutClient, client)) _checkoutClient = null;
       client.close();
     }
@@ -819,30 +858,35 @@ class WenxiangApi {
     Stream<ChatStreamEvent> Function() open, {
     required bool Function() cancelled,
   }) async* {
-    var failures = 0;
-    while (true) {
-      var sawText = false;
-      try {
-        await for (final event in open()) {
-          if (chatEventHasVisibleText(event)) sawText = true;
-          yield event;
-        }
-        return;
-      } catch (err) {
-        failures += 1;
-        if (!shouldRetryChatStreamBeforeText(
-          sawText: sawText,
-          failures: failures,
-          cancelled: cancelled(),
-          error: err,
-        )) {
-          if (cancelled() || err is OperationCancelled) {
-            throw const OperationCancelled();
+    await BackgroundWork.acquire();
+    try {
+      var failures = 0;
+      while (true) {
+        var sawText = false;
+        try {
+          await for (final event in open()) {
+            if (chatEventHasVisibleText(event)) sawText = true;
+            yield event;
           }
-          rethrow;
+          return;
+        } catch (err) {
+          failures += 1;
+          if (!shouldRetryChatStreamBeforeText(
+            sawText: sawText,
+            failures: failures,
+            cancelled: cancelled(),
+            error: err,
+          )) {
+            if (cancelled() || err is OperationCancelled) {
+              throw const OperationCancelled();
+            }
+            rethrow;
+          }
+          await _waitToRetry(chatStreamRetryDelay(failures), cancelled);
         }
-        await _waitToRetry(chatStreamRetryDelay(failures), cancelled);
       }
+    } finally {
+      await BackgroundWork.release();
     }
   }
 

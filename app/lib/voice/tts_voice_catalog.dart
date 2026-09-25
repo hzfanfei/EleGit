@@ -21,10 +21,29 @@ class TtsVoiceOption {
   }
 }
 
+enum VoiceStackChoice { local, volc }
+
+VoiceStackChoice parseVoiceStack(String? raw) {
+  return raw?.trim().toLowerCase() == 'local' ? VoiceStackChoice.local : VoiceStackChoice.volc;
+}
+
+String voiceStackId(VoiceStackChoice choice) {
+  return choice == VoiceStackChoice.local ? 'local' : 'volc';
+}
+
+String voiceStackLabel(VoiceStackChoice choice) {
+  return choice == VoiceStackChoice.local ? '本地' : '火山';
+}
+
+String voiceStackBlurb(VoiceStackChoice choice) {
+  return choice == VoiceStackChoice.local ? 'FunASR 识别，CosyVoice 合成。' : '火山识别，火山合成。';
+}
+
 class VoiceServiceProfile {
   const VoiceServiceProfile({
     this.ready = false,
     this.hint = '',
+    this.voiceStack = '',
     this.ttsProvider = 'volc',
     this.ttsEngine = 'volc',
     this.asrProvider = 'volc',
@@ -35,6 +54,7 @@ class VoiceServiceProfile {
 
   final bool ready;
   final String hint;
+  final String voiceStack;
   final String ttsProvider;
   final String ttsEngine;
   final String asrProvider;
@@ -43,6 +63,12 @@ class VoiceServiceProfile {
   final List<TtsVoiceOption> voices;
 
   bool get usesCosyvoiceTts => ttsProvider == 'cosyvoice';
+
+  String get activeVoiceStack {
+    if (voiceStack == 'local' || voiceStack == 'volc') return voiceStack;
+    if (ttsProvider == 'cosyvoice' && asrProvider == 'funasr') return 'local';
+    return 'volc';
+  }
 
   factory VoiceServiceProfile.fromStatusJson(Map<String, dynamic>? voice) {
     final map = voice ?? {};
@@ -61,6 +87,7 @@ class VoiceServiceProfile {
     return VoiceServiceProfile(
       ready: map['ready'] == true,
       hint: (map['hint'] ?? '').toString(),
+      voiceStack: (map['voiceStack'] ?? '').toString(),
       ttsProvider: ttsProvider,
       ttsEngine: (map['ttsEngine'] ?? 'volc').toString(),
       asrProvider: (map['asrProvider'] ?? 'volc').toString(),

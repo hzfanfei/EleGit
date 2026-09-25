@@ -1,4 +1,15 @@
+import '../diagnostics/client_error_log.dart';
+
 String humanizeError(Object error) {
+  final text = _explain(error);
+  final raw = error.toString().trim();
+  if (raw.isNotEmpty && raw != 'cancelled') {
+    ClientErrorLog.instance.note(message: raw, summary: text, kind: 'shown');
+  }
+  return text;
+}
+
+String _explain(Object error) {
   final raw = error.toString().trim();
   if (raw.isEmpty) return '出了点问题。请稍后重试。';
 

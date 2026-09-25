@@ -33,8 +33,10 @@ class _SettingsPageState extends State<SettingsPage> {
   late AskEngineChoice _askEngine;
   bool _saving = false;
   bool _savingAskEngine = false;
+  bool _savingVoiceStack = false;
   String? _saveError;
   String? _askEngineSaveError;
+  String? _voiceStackError;
   bool _probing = false;
   DiagnosticsProbeResult? _probeResult;
   String? _probeError;
@@ -63,13 +65,14 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  Future<void> _loadVoiceProfile() async {
+  Future<void> _loadVoiceProfile({bool adoptServerVoice = false}) async {
     if (widget.api == null) return;
     try {
       final status = await widget.api!.status();
       if (!mounted) return;
       final profile = status.voiceProfile;
-      final resolved = profile.resolveVoice(_memory?.ttsVoice() ?? profile.ttsVoice);
+      final preferred = adoptServerVoice ? profile.ttsVoice : (_memory?.ttsVoice() ?? profile.ttsVoice);
+      final resolved = profile.resolveVoice(preferred);
       setState(() {
         _voiceProfile = profile;
         _voiceId = profile.voices.any((v) => v.id == resolved.id)
@@ -79,7 +82,9 @@ class _SettingsPageState extends State<SettingsPage> {
       if (_memory != null && _voiceId != _memory!.ttsVoice()) {
         await _memory!.saveTtsVoice(_voiceId);
       }
-    } catch (_) {}
+    } catch (err) {
+      if (adoptServerVoice) rethrow;
+    }
   }
 
   Future<void> _loadMemory() async {
@@ -144,6 +149,23 @@ class _SettingsPageState extends State<SettingsPage> {
       setState(() => _probeError = err.toString());
     } finally {
       if (mounted) setState(() => _probing = false);
+    }
+  }
+
+  Future<void> _selectVoiceStack(VoiceStackChoice choice) async {
+    final stack = voiceStackId(choice);
+    if (stack == _voiceProfile.activeVoiceStack || _savingVoiceStack) return;
+    setState(() {
+      _savingVoiceStack = true;
+      _voiceStackError = null;
+    });
+    try {
+      await widget.api?.setVoiceStack(stack);
+      await _loadVoiceProfile(adoptServerVoice: true);
+    } catch (err) {
+      if (mounted) setState(() => _voiceStackError = err.toString());
+    } finally {
+      if (mounted) setState(() => _savingVoiceStack = false);
     }
   }
 
@@ -252,6 +274,46 @@ class _SettingsPageState extends State<SettingsPage> {
                           choice: AskEngineChoice.values[i],
                           selected: AskEngineChoice.values[i] == _askEngine,
                           onTap: () => _selectAskEngine(AskEngineChoice.values[i]),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 28),
+                Text('语音', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 6),
+                Text(
+                  '识别和合成一起切换。',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.muted),
+                ),
+                if (_savingVoiceStack) ...[
+                  const SizedBox(height: 10),
+                  Text('正在同步到本机服务…', style: Theme.of(context).textTheme.labelSmall),
+                ],
+                if (_voiceStackError != null) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    '还没换过去。$_voiceStackError',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.danger),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                Material(
+                  color: Wx.surface,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: const BorderSide(color: Wx.hairline),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: Column(
+                    children: [
+                      for (var i = 0; i < VoiceStackChoice.values.length; i++) ...[
+                        if (i > 0) const WxHairline(),
+                        _VoiceStackTile(
+                          choice: VoiceStackChoice.values[i],
+                          selected: voiceStackId(VoiceStackChoice.values[i]) ==
+                              _voiceProfile.activeVoiceStack,
+                          onTap: () => _selectVoiceStack(VoiceStackChoice.values[i]),
                         ),
                       ],
                     ],
@@ -519,6 +581,48 @@ class _AskEngineTile extends StatelessWidget {
                   const SizedBox(height: 2),
                   Text(
                     isDefault ? '默认 · ${askEngineChoiceBlurb(choice)}' : askEngineChoiceBlurb(choice),
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.faint),
+                  ),
+                ],
+              ),
+            ),
+            if (selected) const Icon(Icons.check_rounded, color: Wx.accent, size: 20),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _VoiceStackTile extends StatelessWidget {
+  const _VoiceStackTile({
+    required this.choice,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final VoiceStackChoice choice;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      splashFactory: NoSplash.splashFactory,
+      overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(voiceStackLabel(choice), style: Theme.of(context).textTheme.titleSmall),
+                  const SizedBox(height: 2),
+                  Text(
+                    voiceStackBlurb(choice),
                     style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.faint),
                   ),
                 ],

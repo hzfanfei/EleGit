@@ -73,7 +73,7 @@ MarkdownStyleSheet bookReaderMarkdownStyle({
     tableBody: body.copyWith(fontSize: settings.fontSize * 0.9),
     tableBorder: TableBorder.all(color: palette.ink.withValues(alpha: 0.12), width: 0.6),
     tableCellsPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-    tableColumnWidth: const FlexColumnWidth(),
+    tableColumnWidth: const IntrinsicColumnWidth(),
     blockSpacing: 22,
     listIndent: 24,
     horizontalRuleDecoration: BoxDecoration(

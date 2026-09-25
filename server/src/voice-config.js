@@ -49,7 +49,66 @@ function volcTtsLoudnessRate(env) {
   return Math.max(-50, Math.min(100, Math.round(n)));
 }
 
+let preferredVoiceStack = "";
+
+export function sanitizeVoiceStack(value) {
+  const raw = trim(value).toLowerCase();
+  if (raw === "local" || raw === "funasr" || raw === "cosyvoice") return "local";
+  if (raw === "volc" || raw === "volcengine" || raw === "huoshan") return "volc";
+  return "";
+}
+
+export function setPreferredVoiceStack(stack) {
+  preferredVoiceStack = sanitizeVoiceStack(stack);
+  return preferredVoiceStack;
+}
+
+export function voiceStackOf(config) {
+  if (config?.ttsProvider === "cosyvoice" && config?.asrProvider === "funasr") return "local";
+  return "volc";
+}
+
+export function applyVoiceStack(config, stack) {
+  const choice = sanitizeVoiceStack(stack);
+  if (!config || !choice) return config;
+  if (choice === "local") {
+    return {
+      ...config,
+      ttsProvider: "cosyvoice",
+      asrProvider: "funasr",
+      cosyvoice: { enabled: true, ...(config.cosyvoice || {}) },
+      funasr: { enabled: true, ...(config.funasr || {}) },
+    };
+  }
+  return {
+    ...config,
+    ttsProvider: "volc",
+    asrProvider: "volc",
+    cosyvoice: null,
+    funasr: null,
+  };
+}
+
+export function voiceAfterStackSwitch(nextConfig, remembered, previous) {
+  return voiceForActiveStack(nextConfig, remembered || previous);
+}
+
+export function voiceForActiveStack(config, raw) {
+  const provider = config?.ttsProvider || "volc";
+  const resolved = resolveTtsVoiceId(config, raw);
+  if (provider === "cosyvoice") {
+    return isCosyvoiceTtsVoice(resolved) ? resolved : DEFAULT_COSYVOICE_TTS_VOICE;
+  }
+  if (config?.provider === "openai") return resolved || config.openai?.ttsVoice || "alloy";
+  if (resolved && VOLC_TTS_VOICES.some((row) => row.id === resolved)) return resolved;
+  return DEFAULT_VOLC_TTS_VOICE;
+}
+
 export function resolveVoiceConfig(env = process.env) {
+  return applyVoiceStack(resolveVoiceConfigFromEnv(env), preferredVoiceStack);
+}
+
+function resolveVoiceConfigFromEnv(env = process.env) {
   const appId = trim(env.VOLC_APP_ID || env.DOUBAO_APP_ID || env.VOLCENGINE_APP_ID);
   const accessToken = trim(
     env.VOLC_ACCESS_TOKEN ||
@@ -173,6 +232,7 @@ export function publicVoiceStatus(config = resolveVoiceConfig()) {
   return {
     ready: Boolean(config.ready),
     hint: config.ready ? "" : config.hint || "还没配语音密钥。请在本机问象服务的 .env 里配置。",
+    voiceStack: voiceStackOf(config),
     asrProvider,
     asrEngine: asrProvider === "funasr" ? "FunASR-Paraformer" : "volc",
     ttsProvider,

@@ -173,7 +173,7 @@ void main() {
     expect(_horizontalScrolls, findsNothing);
   });
 
-  testWidgets('wide table and long code fit the screen without sideways scrolling', (tester) async {
+  testWidgets('wide table scrolls sideways and long code stays in the column', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
         theme: wenxiangTheme(),
@@ -193,11 +193,12 @@ void main() {
       ),
     );
     expect(tester.takeException(), isNull);
-    expect(_horizontalScrolls, findsNothing);
+    expect(find.byKey(const Key('wx-table-scroll')), findsOneWidget);
     expect(find.textContaining('很长的列名甲'), findsOneWidget);
     expect(find.textContaining('const token'), findsOneWidget);
 
-    expect(tester.getSize(find.byKey(const Key('wx-md-table'))).width, lessThanOrEqualTo(160));
+    expect(tester.getSize(find.byKey(const Key('wx-table-scroll'))).width, lessThanOrEqualTo(160));
+    expect(tester.getSize(find.byKey(const Key('wx-md-table'))).width, greaterThan(160));
     expect(tester.getSize(find.byKey(const Key('wx-code-block'))).width, lessThanOrEqualTo(160));
   });
 

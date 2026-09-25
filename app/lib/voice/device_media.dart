@@ -17,6 +17,7 @@ import 'package:record/record.dart';
 
 
 import 'android_media_audio.dart';
+import 'background_work.dart';
 import 'voice_media.dart';
 
 
@@ -196,7 +197,8 @@ class DeviceVoiceMedia implements VoiceMedia {
 
             usageType: AndroidUsageType.voiceCommunication,
 
-            audioFocus: AndroidAudioFocus.gain,
+            // Leaving the app must not pause the in-app call.
+            audioFocus: AndroidAudioFocus.none,
 
           ),
 
@@ -274,7 +276,8 @@ class DeviceVoiceMedia implements VoiceMedia {
 
             usageType: AndroidUsageType.media,
 
-            audioFocus: AndroidAudioFocus.gain,
+            // Leaving the app must not pause MediaPlayer via focus loss.
+            audioFocus: AndroidAudioFocus.none,
 
           ),
 
@@ -487,6 +490,8 @@ class DeviceVoiceMedia implements VoiceMedia {
 
     _playing = true;
 
+    await BackgroundWork.acquire();
+
     try {
 
       await _preparePlaybackAudio();
@@ -498,6 +503,8 @@ class DeviceVoiceMedia implements VoiceMedia {
       }
 
     } finally {
+
+      await BackgroundWork.release();
 
       _playing = false;
 

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../api/wenxiang_api.dart';
 import '../models.dart';
 import '../theme.dart';
+import '../voice/background_work.dart';
 import '../voice/device_media.dart';
 import '../voice/voice_client.dart';
 import '../voice/voice_media.dart';
@@ -59,6 +60,7 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
   String _userLive = '';
   String _assistantLive = '';
   bool _disposing = false;
+  bool _backgroundHeld = false;
   Timer? _bargeFlash;
 
   bool get isLive => _live;
@@ -117,6 +119,18 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
 
   bool get canBarge => _live && _phase == 'speaking';
 
+  void _holdBackground() {
+    if (_backgroundHeld) return;
+    _backgroundHeld = true;
+    unawaited(BackgroundWork.acquire(microphone: true));
+  }
+
+  void _freeBackground() {
+    if (!_backgroundHeld) return;
+    _backgroundHeld = false;
+    unawaited(BackgroundWork.release(microphone: true));
+  }
+
   Future<void> startCall() async {
     if (_live) return;
     if (!_voiceReady) {
@@ -138,6 +152,7 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
       });
       return;
     }
+    _holdBackground();
     final client = widget.client ?? SocketVoiceClient(widget.api.voiceUri());
     _client = client;
     try {
@@ -240,6 +255,7 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
   }
 
   void hangup({bool pop = false}) {
+    _freeBackground();
     _bargeFlash?.cancel();
     _bargeFlash = null;
     _sub?.cancel();

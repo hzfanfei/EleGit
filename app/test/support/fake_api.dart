@@ -69,6 +69,7 @@ class FakeWenxiangApi extends WenxiangApi {
   String? lastRepoTtsVoice;
   String? lastSetTtsVoice;
   String? lastSetAskEngine;
+  String? lastSetVoiceStack;
   int createSessionCalls = 0;
   final List<ChatSession> sessions = [
     ChatSession(
@@ -82,6 +83,29 @@ class FakeWenxiangApi extends WenxiangApi {
 
   @override
   Future<void> ping() async {}
+
+  final List<List<Map<String, dynamic>>> uploadedClientLogs = [];
+
+  @override
+  Future<List<String>> uploadClientLogs(
+    List<Map<String, dynamic>> entries, {
+    String app = 'wenxiang',
+    String platform = '',
+  }) async {
+    uploadedClientLogs.add([
+      for (final entry in entries) Map<String, dynamic>.from(entry),
+    ]);
+    return [
+      for (final entry in entries)
+        if (entry['id'] != null) entry['id'].toString(),
+    ];
+  }
+
+  @override
+  Future<void> setVoiceStack(String stack) async {
+    lastSetVoiceStack = stack;
+    voiceTtsProvider = stack == 'local' ? 'cosyvoice' : 'volc';
+  }
 
   @override
   Future<void> setAskEngine(String engine) async {

@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 
 import '../api/wenxiang_api.dart';
 import '../copy/voice_stt_copy.dart';
+import 'background_work.dart';
 import 'device_media.dart';
 import 'voice_media.dart';
 import 'voice_client.dart';
@@ -39,8 +40,21 @@ class HoldToSpeakSession {
   StreamSubscription<List<int>>? _micSub;
   VoiceMedia? _media;
   double _holdStartY = 0;
+  bool _backgroundHeld = false;
 
   bool get active => holding || holdPending || sttBusy;
+
+  void _holdBackground() {
+    if (_backgroundHeld) return;
+    _backgroundHeld = true;
+    unawaited(BackgroundWork.acquire(microphone: true));
+  }
+
+  void _freeBackground() {
+    if (!_backgroundHeld) return;
+    _backgroundHeld = false;
+    unawaited(BackgroundWork.release(microphone: true));
+  }
 
   Future<void> beginHold(double globalY) async {
     if (sttBusy || holding || holdPending) return;
@@ -67,6 +81,7 @@ class HoldToSpeakSession {
       onError('需要麦克风才能说话');
       return;
     }
+    _holdBackground();
     _micSub = media.startMic().listen(client.sendPcm, onError: (_) {
       _fail('需要麦克风才能说话');
     });
@@ -160,6 +175,7 @@ class HoldToSpeakSession {
   }
 
   void _disposeStt() {
+    _freeBackground();
     _sttSub?.cancel();
     _sttSub = null;
     _stt?.dispose();

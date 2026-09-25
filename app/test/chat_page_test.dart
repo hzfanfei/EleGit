@@ -296,6 +296,52 @@ void main() {
     expect(find.textContaining('从进度问起'), findsNothing);
   });
 
+  testWidgets('opens a restored repo chat at the latest message', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final memory = AppMemory(await SharedPreferences.getInstance());
+    await memory.saveChats(
+      'octo/demo',
+      RepoChatStore(
+        activeId: 'local-1',
+        sessions: [
+          ChatSession(
+            id: 'local-1',
+            title: '长对话',
+            createdAt: '2026-09-16T00:00:00Z',
+            updatedAt: '2026-09-16T00:00:00Z',
+            active: true,
+          ),
+        ],
+        transcripts: {
+          'local-1': [
+            for (var i = 0; i < 24; i++) ...[
+              ChatMessage(role: 'user', content: '早期问题 $i'),
+              ChatMessage(role: 'assistant', content: '早期回答 $i'),
+            ],
+            ChatMessage(role: 'assistant', content: '最新回答在底部'),
+          ],
+        },
+      ),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: ChatPage(
+          api: FakeWenxiangApi(),
+          repo: sampleRepo(),
+          memory: memory,
+          onBack: () {},
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('最新回答在底部'), findsOneWidget);
+    expect(find.text('早期问题 0'), findsNothing);
+    expect(_chatScrollState(tester).position.pixels, lessThanOrEqualTo(1));
+  });
+
   testWidgets('voice-ready chat hides call and shows hold-to-speak pad', (tester) async {
     await tester.pumpWidget(
       MaterialApp(

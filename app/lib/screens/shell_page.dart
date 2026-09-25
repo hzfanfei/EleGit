@@ -1,9 +1,12 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api/wenxiang_api.dart';
 import '../config.dart';
 import '../copy/errors.dart';
+import '../diagnostics/client_error_log.dart';
 import '../models.dart';
 import '../persist/app_memory.dart';
 import '../theme.dart';
@@ -28,7 +31,7 @@ class ShellPage extends StatefulWidget {
   State<ShellPage> createState() => ShellPageState();
 }
 
-class ShellPageState extends State<ShellPage> {
+class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
   AppStep _step = AppStep.boot;
   late final WenxiangApi _api = widget.api ??
       WenxiangApi(
@@ -48,14 +51,57 @@ class ShellPageState extends State<ShellPage> {
   bool _oauthAutoStart = false;
   final _reposKey = GlobalKey<ReposPageState>();
 
+  bool _uploadingClientErrors = false;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _memory = widget.memory;
     _lastRepo = _memory?.lastRepo();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _boot();
+      if (!mounted) return;
+      _boot();
+      _uploadClientErrors();
     });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      _uploadClientErrors();
+    }
+  }
+
+  Future<void> _uploadClientErrors() async {
+    if (_uploadingClientErrors) return;
+    _uploadingClientErrors = true;
+    try {
+      for (var round = 0; round < 5; round += 1) {
+        final batch = await ClientErrorLog.instance.peek(40);
+        if (batch.isEmpty) return;
+        final accepted = await _api.uploadClientLogs(
+          batch,
+          platform: Platform.operatingSystem,
+        );
+        if (accepted.isEmpty) return;
+        await ClientErrorLog.instance.drop(accepted);
+        final sent = batch.map((entry) => entry['id']?.toString()).toSet();
+        if (!sent.every(accepted.toSet().contains)) return;
+      }
+    } catch (_) {
+      // Keep the local file. A failed upload must not record another error.
+    } finally {
+      _uploadingClientErrors = false;
+    }
   }
 
   Future<AppMemory?> _ensureMemory() async {

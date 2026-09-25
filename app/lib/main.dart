@@ -1,10 +1,34 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 
+import 'diagnostics/client_error_log.dart';
 import 'screens/shell_page.dart';
 import 'theme.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  final previous = FlutterError.onError;
+  FlutterError.onError = (details) {
+    ClientErrorLog.instance.note(
+      message: details.exceptionAsString(),
+      stack: details.stack?.toString() ?? '',
+      kind: 'flutter',
+    );
+    if (previous != null) {
+      previous(details);
+    } else {
+      FlutterError.presentError(details);
+    }
+  };
+  PlatformDispatcher.instance.onError = (error, stack) {
+    ClientErrorLog.instance.note(
+      message: error.toString(),
+      stack: stack.toString(),
+      kind: 'platform',
+    );
+    return false;
+  };
   runApp(const WenxiangApp());
 }
 
