@@ -40,46 +40,57 @@ rl.on("line", (line) => {
     return;
   }
   if (msg.method === "session/prompt") {
-    const text = (msg.params?.prompt || []).map((p) => p.text || "").join("");
-    seen.push(text);
-    if (/write file|apply_patch/i.test(text)) {
-      write({
-        jsonrpc: "2.0",
-        id: 9000 + seen.length,
-        method: "session/request_permission",
-        params: {
-          sessionId,
-          toolCall: { title: "Write file", kind: "edit" },
-          options: [
-            { optionId: "allow-once", name: "Allow" },
-            { optionId: "reject-once", name: "Reject" },
-          ],
-        },
-      });
+    const delayMs = Number(process.env.FAKE_ACP_PROMPT_DELAY_MS || 0);
+    if (delayMs > 0) {
+      setTimeout(() => answerPrompt(msg), delayMs);
+      return;
     }
-    const recall = /restore after reconnect/i.test(text) ? "seeded" : seen.length > 1 ? "followup" : "first";
-    write({
-      jsonrpc: "2.0",
-      method: "session/update",
-      params: {
-        sessionId,
-        update: {
-          sessionUpdate: "agent_thought_chunk",
-          content: { type: "text", text: `hidden-thought:${seen.length}` },
-        },
-      },
-    });
-    write({
-      jsonrpc: "2.0",
-      method: "session/update",
-      params: {
-        sessionId,
-        update: {
-          sessionUpdate: "agent_message_chunk",
-          content: { type: "text", text: `${recall}:${seen.length}` },
-        },
-      },
-    });
-    reply({ stopReason: "end_turn" });
+    answerPrompt(msg);
+    return;
   }
 });
+
+function answerPrompt(msg) {
+  const reply = (result) => write({ jsonrpc: "2.0", id: msg.id, result });
+  const text = (msg.params?.prompt || []).map((p) => p.text || "").join("");
+  seen.push(text);
+  if (/write file|apply_patch/i.test(text)) {
+    write({
+      jsonrpc: "2.0",
+      id: 9000 + seen.length,
+      method: "session/request_permission",
+      params: {
+        sessionId,
+        toolCall: { title: "Write file", kind: "edit" },
+        options: [
+          { optionId: "allow-once", name: "Allow" },
+          { optionId: "reject-once", name: "Reject" },
+        ],
+      },
+    });
+  }
+  const recall = /restore after reconnect/i.test(text) ? "seeded" : seen.length > 1 ? "followup" : "first";
+  write({
+    jsonrpc: "2.0",
+    method: "session/update",
+    params: {
+      sessionId,
+      update: {
+        sessionUpdate: "agent_thought_chunk",
+        content: { type: "text", text: `hidden-thought:${seen.length}` },
+      },
+    },
+  });
+  write({
+    jsonrpc: "2.0",
+    method: "session/update",
+    params: {
+      sessionId,
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: `${recall}:${seen.length}` },
+      },
+    },
+  });
+  reply({ stopReason: "end_turn" });
+}

@@ -462,6 +462,7 @@ export class AcpChannel {
     this.pending = new Map();
     this.alive = false;
     this.idleTimer = null;
+    this.prompting = 0;
     this.onDelta = null;
     this._lastDeltaAt = 0;
     this._usageAt = 0;
@@ -591,6 +592,7 @@ export class AcpChannel {
 
   async prompt(text, { onDelta, timeoutMs = acpPromptTimeoutMs() } = {}) {
     if (!this.alive) await this.start();
+    this.prompting += 1;
     this._touch();
     try {
       if (this.isClaudeProvider()) {
@@ -608,6 +610,7 @@ export class AcpChannel {
       return result;
     } finally {
       this.onDelta = null;
+      this.prompting = Math.max(0, this.prompting - 1);
       this._touch();
     }
   }
@@ -820,7 +823,8 @@ export class AcpChannel {
 
   _touch() {
     clearTimeout(this.idleTimer);
-    if (!this.idleMs || !this.alive) return;
+    this.idleTimer = null;
+    if (!this.idleMs || !this.alive || this.prompting > 0) return;
     this.idleTimer = setTimeout(() => {
       this.close();
     }, this.idleMs);

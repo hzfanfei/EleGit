@@ -7,6 +7,35 @@ import '../models.dart';
 import '../models/diagnostics.dart';
 import '../utils/async_gate.dart';
 
+bool chatEventHasVisibleText(ChatStreamEvent event) {
+  if (event.pcm != null && event.pcm!.isNotEmpty) return true;
+  if (event.text.isEmpty) return false;
+  return event.type == 'delta' || event.type == 'done' || event.type == 'caption';
+}
+
+Duration chatStreamRetryDelay(int failures) {
+  switch (failures) {
+    case 1:
+      return const Duration(seconds: 2);
+    case 2:
+      return const Duration(seconds: 4);
+    default:
+      return const Duration(seconds: 6);
+  }
+}
+
+bool shouldRetryChatStreamBeforeText({
+  required bool sawText,
+  required int failures,
+  required bool cancelled,
+  required Object error,
+}) {
+  if (cancelled || error is OperationCancelled) return false;
+  if (error is ApiException) return false;
+  if (sawText) return false;
+  return failures < 4;
+}
+
 class ApiException implements Exception {
   ApiException(this.message);
   final String message;
@@ -525,9 +554,30 @@ class WenxiangApi {
     String? sessionId,
     String? chapter,
     String? ttsVoice,
+  }) {
+    _bookVoiceCancelled = false;
+    return _retryBeforeVisible(
+      () => _bookVoiceTurnOnce(
+        bookId: bookId,
+        message: message,
+        history: history,
+        sessionId: sessionId,
+        chapter: chapter,
+        ttsVoice: ttsVoice,
+      ),
+      cancelled: () => _bookVoiceCancelled,
+    );
+  }
+
+  Stream<ChatStreamEvent> _bookVoiceTurnOnce({
+    required String bookId,
+    required String message,
+    required List<ChatMessage> history,
+    String? sessionId,
+    String? chapter,
+    String? ttsVoice,
   }) async* {
     final client = http.Client();
-    _bookVoiceCancelled = false;
     _bookVoiceClient = client;
     try {
       final request = http.Request('POST', _uri('/v1/books/voice-turn'))
@@ -545,7 +595,7 @@ class WenxiangApi {
               .map((m) => {'role': m.role, 'content': m.content})
               .toList(),
         });
-      final res = await client.send(request).timeout(const Duration(minutes: 4));
+      final res = await client.send(request).timeout(const Duration(seconds: 25));
       if (res.statusCode >= 400) {
         final raw = await res.stream.bytesToString();
         String error = '快问快答失败';
@@ -588,9 +638,32 @@ class WenxiangApi {
     String? sessionId,
     String? ttsVoice,
     bool agentMode = false,
+  }) {
+    _repoVoiceCancelled = false;
+    return _retryBeforeVisible(
+      () => _repoVoiceTurnOnce(
+        owner: owner,
+        repo: repo,
+        message: message,
+        history: history,
+        sessionId: sessionId,
+        ttsVoice: ttsVoice,
+        agentMode: agentMode,
+      ),
+      cancelled: () => _repoVoiceCancelled,
+    );
+  }
+
+  Stream<ChatStreamEvent> _repoVoiceTurnOnce({
+    required String owner,
+    required String repo,
+    required String message,
+    required List<ChatMessage> history,
+    String? sessionId,
+    String? ttsVoice,
+    bool agentMode = false,
   }) async* {
     final client = http.Client();
-    _repoVoiceCancelled = false;
     _repoVoiceClient = client;
     try {
       final request = http.Request('POST', _uri('/v1/chat/voice-turn'))
@@ -609,7 +682,7 @@ class WenxiangApi {
               .map((m) => {'role': m.role, 'content': m.content})
               .toList(),
         });
-      final res = await client.send(request).timeout(const Duration(minutes: 4));
+      final res = await client.send(request).timeout(const Duration(seconds: 25));
       if (res.statusCode >= 400) {
         final raw = await res.stream.bytesToString();
         String error = '快问快答失败';
@@ -650,9 +723,28 @@ class WenxiangApi {
     required List<ChatMessage> history,
     String? sessionId,
     String? chapter,
+  }) {
+    _chatCancelled = false;
+    return _retryBeforeVisible(
+      () => _bookChatStreamOnce(
+        bookId: bookId,
+        message: message,
+        history: history,
+        sessionId: sessionId,
+        chapter: chapter,
+      ),
+      cancelled: () => _chatCancelled,
+    );
+  }
+
+  Stream<ChatStreamEvent> _bookChatStreamOnce({
+    required String bookId,
+    required String message,
+    required List<ChatMessage> history,
+    String? sessionId,
+    String? chapter,
   }) async* {
     final client = http.Client();
-    _chatCancelled = false;
     _chatClient = client;
     try {
       final request = http.Request('POST', _uri('/v1/books/chat'))
@@ -669,7 +761,7 @@ class WenxiangApi {
               .map((m) => {'role': m.role, 'content': m.content})
               .toList(),
         });
-      final res = await client.send(request).timeout(const Duration(minutes: 4));
+      final res = await client.send(request).timeout(const Duration(seconds: 25));
       if (res.statusCode >= 400) {
         final raw = await res.stream.bytesToString();
         String error = '问书失败';
@@ -723,7 +815,71 @@ class WenxiangApi {
     }
   }
 
+  Stream<ChatStreamEvent> _retryBeforeVisible(
+    Stream<ChatStreamEvent> Function() open, {
+    required bool Function() cancelled,
+  }) async* {
+    var failures = 0;
+    while (true) {
+      var sawText = false;
+      try {
+        await for (final event in open()) {
+          if (chatEventHasVisibleText(event)) sawText = true;
+          yield event;
+        }
+        return;
+      } catch (err) {
+        failures += 1;
+        if (!shouldRetryChatStreamBeforeText(
+          sawText: sawText,
+          failures: failures,
+          cancelled: cancelled(),
+          error: err,
+        )) {
+          if (cancelled() || err is OperationCancelled) {
+            throw const OperationCancelled();
+          }
+          rethrow;
+        }
+        await _waitToRetry(chatStreamRetryDelay(failures), cancelled);
+      }
+    }
+  }
+
+  Future<void> _waitToRetry(Duration total, bool Function() cancelled) async {
+    const slice = Duration(milliseconds: 200);
+    var left = total;
+    while (left > Duration.zero) {
+      if (cancelled()) throw const OperationCancelled();
+      final step = left < slice ? left : slice;
+      await Future<void>.delayed(step);
+      left -= step;
+    }
+  }
+
   Stream<ChatStreamEvent> chatStream({
+    required String owner,
+    required String repo,
+    required String message,
+    required List<ChatMessage> history,
+    String? sessionId,
+    bool agentMode = false,
+  }) {
+    _chatCancelled = false;
+    return _retryBeforeVisible(
+      () => _chatStreamOnce(
+        owner: owner,
+        repo: repo,
+        message: message,
+        history: history,
+        sessionId: sessionId,
+        agentMode: agentMode,
+      ),
+      cancelled: () => _chatCancelled,
+    );
+  }
+
+  Stream<ChatStreamEvent> _chatStreamOnce({
     required String owner,
     required String repo,
     required String message,
@@ -732,7 +888,6 @@ class WenxiangApi {
     bool agentMode = false,
   }) async* {
     final client = http.Client();
-    _chatCancelled = false;
     _chatClient = client;
     try {
       final request = http.Request('POST', _uri('/v1/chat'))
@@ -750,7 +905,7 @@ class WenxiangApi {
               .map((m) => {'role': m.role, 'content': m.content})
               .toList(),
         });
-      final res = await client.send(request).timeout(const Duration(minutes: 4));
+      final res = await client.send(request).timeout(const Duration(seconds: 25));
       if (res.statusCode >= 400) {
         final raw = await res.stream.bytesToString();
         String error = '问答失败';

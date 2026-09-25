@@ -459,4 +459,29 @@ describe("AcpChannel", () => {
     await channel.close();
     assert.deepEqual(chunks, ["first:1", "followup:2"]);
   });
+
+  it("does not close the channel while a prompt is still running", async () => {
+    const channel = new AcpChannel({
+      command: { path: process.execPath, args: [fakeAcp] },
+      cwd: process.cwd(),
+      spawnImpl: (file, args, opts) =>
+        spawn(file, args, {
+          ...opts,
+          env: { ...opts.env, FAKE_ACP_PROMPT_DELAY_MS: "160" },
+        }),
+      idleMs: 40,
+    });
+    try {
+      await channel.start();
+      const pending = channel.prompt("slow question");
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      assert.equal(channel.alive, true);
+      await pending;
+      assert.equal(channel.alive, true);
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      assert.equal(channel.alive, false);
+    } finally {
+      await channel.close();
+    }
+  });
 });

@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { readReadyHealth } from "./worker-health.js";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -65,11 +66,20 @@ async function waitForHealth(baseUrl, { timeoutMs = 600000, intervalMs = 500 } =
   throw new Error(`FunASR worker not ready: ${lastErr}`);
 }
 
-export async function ensureFunasrAsrWorker(env = process.env) {
+export async function ensureFunasrAsrWorker(env = process.env, deps = {}) {
   if (workerReady && workerChild && !workerChild.killed) {
     return resolveFunasrLayout(env);
   }
   const layout = resolveFunasrLayout(env);
+  const fetchImpl = deps.fetchImpl || fetch;
+  const spawnImpl = deps.spawnImpl || spawn;
+  const existing = await readReadyHealth(layout.baseUrl, fetchImpl);
+  if (existing) {
+    workerReady = true;
+    layout.health = existing;
+    activeLayout = layout;
+    return layout;
+  }
   if (!fs.existsSync(layout.python)) {
     throw new Error(`FunASR Python not found: ${layout.python} (run tools/local-voice/setup.ps1)`);
   }
@@ -80,7 +90,7 @@ export async function ensureFunasrAsrWorker(env = process.env) {
     workerChild.kill();
     workerChild = null;
   }
-  workerChild = spawn(layout.python, [layout.serverScript], {
+  workerChild = spawnImpl(layout.python, [layout.serverScript], {
     cwd: layout.root,
     env: {
       ...env,

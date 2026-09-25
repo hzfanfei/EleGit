@@ -42,6 +42,8 @@ import {
 } from "./voice-config.js";
 import { ensureCosyVoiceTtsWorker, shutdownCosyVoiceTtsWorker } from "./cosyvoice-tts.js";
 import { ensureFunasrAsrWorker, shutdownFunasrAsrWorker } from "./funasr-asr.js";
+import { COMPANION_ALREADY_RUNNING } from "./keep-alive-policy.js";
+import { bindCompanion } from "./listen.js";
 import { attachSttGateway } from "./voice-stt-ws.js";
 import { attachVoiceGateway, isVoiceCallEnabled } from "./voice-ws.js";
 import { runDiagnosticsProbe, synthesizeVoicePreview } from "./diagnostics.js";
@@ -1057,27 +1059,7 @@ attachSttGateway(httpServer, {
   getApiKey: () => store.config.apiKey,
 });
 
-async function startCompanion() {
-  await ensureStaticDir(store.config.workspaceRoot);
-  const voiceCfg = resolveVoiceConfig();
-  if (voiceCfg.asrProvider === "funasr") {
-    console.log("Preloading FunASR worker (Paraformer)...");
-    const layout = await ensureFunasrAsrWorker(process.env);
-    const h = layout.health || {};
-    console.log(
-      `FunASR ready: device=${h.device || "?"} load_ms=${h.load_ms ?? "?"} @ ${layout.baseUrl}`,
-    );
-  }
-  if (voiceCfg.ttsProvider === "cosyvoice") {
-    console.log("Preloading CosyVoice TTS worker (Fun-CosyVoice3)...");
-    const layout = await ensureCosyVoiceTtsWorker(process.env);
-    const h = layout.health || {};
-    console.log(
-      `CosyVoice TTS ready: device=${h.device || "?"} load_ms=${h.load_ms ?? "?"} @ ${layout.baseUrl}`,
-    );
-  }
-
-  httpServer.listen(PORT, BIND, () => {
+function logCompanionStartup() {
   const lans = lanUrls(PORT);
   const callbacks = suggestedCallbackUrls({
     lanUrls: lans,
@@ -1122,8 +1104,38 @@ async function startCompanion() {
       ? "Voice call (/v1/voice): enabled"
       : "Voice call (/v1/voice): disabled (set WENXIANG_VOICE_CALL_ENABLED=true to debug)",
   );
+}
+
+async function preloadVoiceWorkers() {
+  const voiceCfg = resolveVoiceConfig();
+  if (voiceCfg.asrProvider === "funasr") {
+    console.log("Preloading FunASR worker (Paraformer)...");
+    const layout = await ensureFunasrAsrWorker(process.env);
+    const h = layout.health || {};
+    console.log(
+      `FunASR ready: device=${h.device || "?"} load_ms=${h.load_ms ?? "?"} @ ${layout.baseUrl}`,
+    );
+  }
+  if (voiceCfg.ttsProvider === "cosyvoice") {
+    console.log("Preloading CosyVoice TTS worker (Fun-CosyVoice3)...");
+    const layout = await ensureCosyVoiceTtsWorker(process.env);
+    const h = layout.health || {};
+    console.log(
+      `CosyVoice TTS ready: device=${h.device || "?"} load_ms=${h.load_ms ?? "?"} @ ${layout.baseUrl}`,
+    );
+  }
+}
+
+async function startCompanion() {
+  await ensureStaticDir(store.config.workspaceRoot);
+  const bound = await bindCompanion(httpServer, PORT, BIND);
+  if (bound === "busy") {
+    console.error(`问象已在端口 ${PORT} 运行，不再启动第二套。`);
+    process.exit(COMPANION_ALREADY_RUNNING);
+  }
+  logCompanionStartup();
   tunnelHealth.start();
-  });
+  await preloadVoiceWorkers();
 }
 
 startCompanion().catch((err) => {
