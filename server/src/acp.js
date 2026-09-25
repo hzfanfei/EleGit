@@ -914,6 +914,7 @@ export function createSessionStore({
         warmPromise: null,
         lock: Promise.resolve(),
         promptingSessionId: null,
+        primedSessionId: null,
         epoch: channelEpoch,
       };
       repoChannels.set(key, entry);
@@ -960,6 +961,7 @@ export function createSessionStore({
           return;
         }
         entry.channel = channel;
+        entry.primedSessionId = null;
       } catch (err) {
         await channel?.close().catch(() => {});
         throw err;
@@ -1021,8 +1023,10 @@ export function createSessionStore({
       err.code = "acp_dead";
       throw err;
     }
-    const seedHistory =
-      session.turns === 0 && (history || []).filter((m) => m?.content).length > 0;
+    const hasHistory = (history || []).some(
+      (m) => m?.content && (m.role === "user" || m.role === "assistant"),
+    );
+    const seedHistory = hasHistory && !entry.primedSessionId;
     const makePrompt =
       buildPrompt ||
       (bookContext ? buildBookAcpPrompt : buildAcpPrompt);
@@ -1042,6 +1046,7 @@ export function createSessionStore({
       try {
         await channel.applySessionMode();
         await channel.prompt(text, { onDelta });
+        entry.primedSessionId = session.id;
       } finally {
         channel.agentMode = false;
         if (write) await channel.applySessionMode().catch(() => {});
@@ -1077,6 +1082,7 @@ export function createSessionStore({
       entry.channel = null;
       entry.warmPromise = null;
       entry.promptingSessionId = null;
+      entry.primedSessionId = null;
     }
     await Promise.all(pending);
   }

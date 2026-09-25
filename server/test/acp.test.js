@@ -382,6 +382,65 @@ describe("session store", () => {
     assert.equal(second.warmed, true);
     await store.resetAllChannels();
   });
+
+  it("reseeds prior chat when the Claude process is recreated", async () => {
+    const store = createSessionStore({
+      resolveCommand: () => ({
+        id: "acp",
+        path: process.execPath,
+        args: [fakeAcp],
+        mode: "ask",
+        transport: "stdio",
+      }),
+      spawnImpl: spawn,
+    });
+    const cwd = process.cwd();
+    const history = [
+      { role: "user", content: "仓库叫什么" },
+      { role: "assistant", content: "fwechat" },
+    ];
+    const session = store.resolveForChat("hzfanfei", "fwechat", "");
+    const first = [];
+    await store.prompt(session, {
+      question: "第一问",
+      history,
+      githubContext: "Repository: hzfanfei/fwechat",
+      cwd,
+      onDelta: (text) => first.push(text),
+    });
+    assert.match(first.join(""), /seeded/);
+
+    const second = [];
+    await store.prompt(session, {
+      question: "第二问",
+      history: [
+        ...history,
+        { role: "user", content: "第一问" },
+        { role: "assistant", content: "答过了" },
+      ],
+      githubContext: "Repository: hzfanfei/fwechat",
+      cwd,
+      onDelta: (text) => second.push(text),
+    });
+    assert.match(second.join(""), /followup/);
+    assert.doesNotMatch(second.join(""), /seeded/);
+
+    await store.resetAllChannels();
+    const restored = [];
+    await store.prompt(session, {
+      question: "重启后再问",
+      history: [
+        ...history,
+        { role: "user", content: "第一问" },
+        { role: "assistant", content: "答过了" },
+      ],
+      githubContext: "Repository: hzfanfei/fwechat",
+      cwd,
+      onDelta: (text) => restored.push(text),
+    });
+    assert.match(restored.join(""), /seeded/);
+    await store.resetAllChannels();
+  });
 });
 
 describe("AcpChannel", () => {
