@@ -9,6 +9,7 @@ import {
   DEFAULT_ACP_MODEL,
   acpModelId,
   acpPromptTimeoutMs,
+  claudeConfiguredModel,
   acpVisibleTextFromUpdate,
   applyAcpEnginePreference,
   sanitizeAcpUserVisibleText,
@@ -65,6 +66,29 @@ describe("acpPromptTimeoutMs", () => {
 });
 
 describe("acpModelId", () => {
+  it("follows the Claude settings model", () => {
+    const prevEngine = process.env.WENXIANG_ACP_ENGINE;
+    const prevClaude = process.env.WENXIANG_CLAUDE_MODEL;
+    const prevAcpModel = process.env.WENXIANG_ACP_MODEL;
+    delete process.env.WENXIANG_CLAUDE_MODEL;
+    delete process.env.WENXIANG_ACP_MODEL;
+    process.env.WENXIANG_ACP_ENGINE = "claude";
+    const settings = { env: { ANTHROPIC_MODEL: "mimo-v2.6-flash", ANTHROPIC_AUTH_TOKEN: "secret" } };
+    try {
+      assert.equal(claudeConfiguredModel(settings), "mimo-v2.6-flash");
+      assert.equal(acpModelId(process.env, settings), "mimo-v2.6-flash");
+      process.env.WENXIANG_CLAUDE_MODEL = "MiniMax-M3";
+      assert.equal(acpModelId(process.env, settings), "MiniMax-M3");
+    } finally {
+      if (prevEngine !== undefined) process.env.WENXIANG_ACP_ENGINE = prevEngine;
+      else delete process.env.WENXIANG_ACP_ENGINE;
+      if (prevClaude !== undefined) process.env.WENXIANG_CLAUDE_MODEL = prevClaude;
+      else delete process.env.WENXIANG_CLAUDE_MODEL;
+      if (prevAcpModel !== undefined) process.env.WENXIANG_ACP_MODEL = prevAcpModel;
+      else delete process.env.WENXIANG_ACP_MODEL;
+    }
+  });
+
   it("defaults to composer-2.5-fast for cursor engine", () => {
     const prev = process.env.WENXIANG_CURSOR_MODEL;
     const prev2 = process.env.CURSOR_MODEL;

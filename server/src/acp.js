@@ -56,17 +56,29 @@ export function claudeCodeSessionOptions(model) {
   };
 }
 
-export function acpModelId() {
-  const engine = acpEnginePreference();
-  const raw = String(
-    process.env.WENXIANG_ACP_MODEL ||
-      process.env.WENXIANG_CLAUDE_MODEL ||
-      (engine === "claude" ? CLAUDE_DEFAULT_MODEL : "") ||
-      process.env.WENXIANG_CURSOR_MODEL ||
-      process.env.CURSOR_MODEL ||
-      (engine === "claude" ? CLAUDE_DEFAULT_MODEL : DEFAULT_ACP_MODEL),
-  ).trim();
-  return raw || (engine === "claude" ? CLAUDE_DEFAULT_MODEL : DEFAULT_ACP_MODEL);
+export function claudeConfiguredModel(settings) {
+  return String(settings?.env?.ANTHROPIC_MODEL || "").trim();
+}
+
+export function readClaudeUserSettings(filePath = path.join(os.homedir(), ".claude", "settings.json")) {
+  try {
+    return JSON.parse(readFileSync(filePath, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+export function acpModelId(env = process.env, settings) {
+  const engine = sanitizeAcpEngine(env.WENXIANG_ACP_ENGINE) || "claude";
+  const explicit = String(env.WENXIANG_ACP_MODEL || "").trim();
+  if (explicit) return explicit;
+  if (engine === "claude") {
+    const pinned = String(env.WENXIANG_CLAUDE_MODEL || "").trim();
+    if (pinned) return pinned;
+    const configured = claudeConfiguredModel(settings === undefined ? readClaudeUserSettings() : settings);
+    return configured || CLAUDE_DEFAULT_MODEL;
+  }
+  return String(env.WENXIANG_CURSOR_MODEL || env.CURSOR_MODEL || "").trim() || DEFAULT_ACP_MODEL;
 }
 
 function modelArgs() {
