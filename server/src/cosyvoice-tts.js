@@ -90,6 +90,7 @@ export async function ensureCosyVoiceTtsWorker(env = process.env) {
       PYTHONIOENCODING: "utf-8",
     },
     stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
   });
   workerChild.stdout?.on("data", (chunk) => process.stderr.write(`[cosyvoice] ${chunk}`));
   workerChild.stderr?.on("data", (chunk) => process.stderr.write(`[cosyvoice] ${chunk}`));

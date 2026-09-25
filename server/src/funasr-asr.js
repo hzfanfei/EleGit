@@ -90,6 +90,7 @@ export async function ensureFunasrAsrWorker(env = process.env) {
       PYTHONIOENCODING: "utf-8",
     },
     stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
   });
   workerChild.stdout?.on("data", (chunk) => process.stderr.write(`[funasr] ${chunk}`));
   workerChild.stderr?.on("data", (chunk) => process.stderr.write(`[funasr] ${chunk}`));

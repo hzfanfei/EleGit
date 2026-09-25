@@ -32,6 +32,7 @@ function boot() {
   const child = spawn(nodeExe, ["src/server.js"], {
     cwd: root,
     stdio: "inherit",
+    windowsHide: true,
     env: envWithNodeOnPath(process.env),
   });
   const started = Date.now();
