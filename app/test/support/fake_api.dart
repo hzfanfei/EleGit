@@ -6,6 +6,7 @@ import 'package:wenxiang/models/diagnostics.dart';
 import 'package:wenxiang/voice/cosyvoice_tts_voices.dart';
 import 'package:wenxiang/voice/tts_voice_catalog.dart';
 import 'package:wenxiang/voice/volc_tts_voices.dart';
+import 'package:wenxiang/voice/xiaomi_tts_voices.dart';
 
 class FakeWenxiangApi extends WenxiangApi {
   FakeWenxiangApi({
@@ -104,7 +105,13 @@ class FakeWenxiangApi extends WenxiangApi {
   @override
   Future<void> setVoiceStack(String stack) async {
     lastSetVoiceStack = stack;
-    voiceTtsProvider = stack == 'local' ? 'cosyvoice' : 'volc';
+    if (stack == 'local') {
+      voiceTtsProvider = 'cosyvoice';
+    } else if (stack == 'xiaomi') {
+      voiceTtsProvider = 'xiaomi';
+    } else {
+      voiceTtsProvider = 'volc';
+    }
   }
 
   @override
@@ -201,6 +208,21 @@ class FakeWenxiangApi extends WenxiangApi {
   }) async {}
 
   VoiceServiceProfile _voiceProfileForFake() {
+    if (voiceTtsProvider == 'xiaomi') {
+      return VoiceServiceProfile(
+        ready: voiceReady,
+        hint: voiceReady ? '' : voiceHint,
+        voiceStack: 'xiaomi',
+        ttsProvider: 'xiaomi',
+        ttsEngine: 'mimo-v2.5-tts',
+        asrProvider: 'xiaomi',
+        asrEngine: 'mimo-v2.5-asr',
+        ttsVoice: kDefaultXiaomiTtsVoice,
+        voices: kXiaomiTtsVoices
+            .map((v) => TtsVoiceOption(id: v.id, name: v.name, scene: v.scene))
+            .toList(),
+      );
+    }
     if (voiceTtsProvider == 'cosyvoice') {
       return VoiceServiceProfile(
         ready: voiceReady,

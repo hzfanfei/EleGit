@@ -137,6 +137,41 @@ describe("resolveVoiceConfig", () => {
     }
   });
 
+  it("switches both sides to Xiaomi when the token is set", () => {
+    setPreferredVoiceStack("xiaomi");
+    try {
+      const missing = resolveVoiceConfig({ VOLC_API_KEY: "ak-only" });
+      assert.equal(missing.ready, false);
+      assert.equal(missing.ttsProvider, "xiaomi");
+      assert.equal(missing.asrProvider, "xiaomi");
+      assert.match(missing.hint, /XIAOMI_MIMO_TOKEN/);
+      assert.equal(publicVoiceStatus(missing).voiceStack, "xiaomi");
+
+      const cfg = resolveVoiceConfig({
+        VOLC_API_KEY: "ak-only",
+        XIAOMI_MIMO_TOKEN: "tp-test-token",
+      });
+      assert.equal(cfg.ready, true);
+      assert.equal(cfg.provider, "xiaomi");
+      assert.equal(cfg.ttsProvider, "xiaomi");
+      assert.equal(cfg.asrProvider, "xiaomi");
+      assert.equal(cfg.xiaomi.apiKey, "tp-test-token");
+      assert.equal(cfg.cosyvoice, null);
+      assert.equal(cfg.funasr, null);
+      const pub = publicVoiceStatus(withTtsVoice(cfg, "moli"));
+      assert.equal(pub.voiceStack, "xiaomi");
+      assert.equal(pub.ttsEngine, "mimo-v2.5-tts");
+      assert.equal(pub.asrEngine, "mimo-v2.5-asr");
+      assert.equal(pub.ttsVoice, "moli");
+      assert.ok(pub.voices.some((v) => v.id === "bingtang" && v.name === "冰糖"));
+      assert.equal(JSON.stringify(pub).includes("tp-test-token"), false);
+      assert.equal(voiceAfterStackSwitch(cfg, "baihua", "zh_female_xiaohe_uranus_bigtts"), "baihua");
+      assert.equal(voiceAfterStackSwitch(cfg, "", "zh_female_xiaohe_uranus_bigtts"), "bingtang");
+    } finally {
+      setPreferredVoiceStack("");
+    }
+  });
+
   it("keeps an explicit VOLC_TTS_VOICE", () => {
     const cfg = resolveVoiceConfig({
       VOLC_API_KEY: "ak-only",

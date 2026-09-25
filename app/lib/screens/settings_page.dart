@@ -12,6 +12,7 @@ import '../voice/cosyvoice_tts_voices.dart';
 import '../voice/device_media.dart';
 import '../voice/tts_voice_catalog.dart';
 import '../voice/volc_tts_voices.dart';
+import '../voice/xiaomi_tts_voices.dart';
 import '../widgets/wx_chrome.dart';
 import '../widgets/wx_edge_back.dart';
 
@@ -223,7 +224,9 @@ class _SettingsPageState extends State<SettingsPage> {
     final voiceGroups = _voiceProfile.voiceGroups();
     final defaultVoiceId = _voiceProfile.usesCosyvoiceTts
         ? kDefaultCosyvoiceTtsVoice
-        : kDefaultVolcTtsVoice;
+        : _voiceProfile.usesXiaomiTts
+            ? kDefaultXiaomiTtsVoice
+            : kDefaultVolcTtsVoice;
     return WxEdgeBack(
       onBack: widget.onBack ?? () => Navigator.of(context).maybePop(),
       child: Scaffold(
@@ -323,9 +326,11 @@ class _SettingsPageState extends State<SettingsPage> {
                 Text('语音音色', style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 6),
                 Text(
-                  _voiceProfile.usesCosyvoiceTts
-                      ? '快问快答使用本机 ${_voiceProfile.ttsEngine} 合成（${voiceEngineSummary(_voiceProfile)}）。当前 ${current.name}。'
-                      : '快问快答使用火山引擎音色。当前 ${current.name}。',
+                  _voiceProfile.usesXiaomiTts
+                      ? '快问快答使用小米 MiMo 语音。当前 ${current.name}。'
+                      : _voiceProfile.usesCosyvoiceTts
+                          ? '快问快答使用本机 ${_voiceProfile.ttsEngine} 合成（${voiceEngineSummary(_voiceProfile)}）。当前 ${current.name}。'
+                          : '快问快答使用火山引擎音色。当前 ${current.name}。',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.muted),
                 ),
                 if (_voiceProfile.usesCosyvoiceTts) ...[

@@ -6,6 +6,7 @@ import { createVoiceSession } from "./voice-session.js";
 import { createOpenAiAsr, openAiTts } from "./voice-openai.js";
 import { cosyvoiceTts } from "./cosyvoice-tts.js";
 import { createFunasrAsr } from "./funasr-asr.js";
+import { createXiaomiAsr, xiaomiTts } from "./xiaomi-speech.js";
 import { createVolcAsr, volcTts } from "./voice-volc.js";
 import { formatLocalContext } from "./workspace.js";
 
@@ -55,6 +56,14 @@ export function createDefaultAsk() {
 }
 
 function resolveAsr(config, hooks) {
+  if (config?.asrProvider === "xiaomi" && config.xiaomi?.enabled) {
+    return createXiaomiAsr({
+      xiaomi: config.xiaomi,
+      pushToTalk: hooks.pushToTalk === true,
+      onFinal: hooks.onFinal,
+      onError: (detail) => hooks.onAsrError?.({ message: detail?.message, err: detail }),
+    });
+  }
   if (config?.asrProvider === "funasr" && config.funasr?.enabled) {
     return createFunasrAsr({
       funasr: config.funasr,
@@ -85,6 +94,14 @@ function resolveAsr(config, hooks) {
 }
 
 function resolveTtsFn(config) {
+  if (config?.ttsProvider === "xiaomi" && config.xiaomi?.enabled) {
+    return (text, signal) =>
+      xiaomiTts(
+        { ...config.xiaomi, ttsVoice: config.ttsVoice || config.xiaomi?.ttsVoice },
+        text,
+        signal,
+      );
+  }
   if (config?.ttsProvider === "cosyvoice" && config.cosyvoice?.enabled) {
     return (text, signal) =>
       cosyvoiceTts(
@@ -103,7 +120,7 @@ function resolveTtsFn(config) {
 }
 
 export function createVoiceProviders(config, hooks = {}) {
-  if (config?.ready && (config.provider === "volc" || config.provider === "openai")) {
+  if (config?.ready && (config.provider === "volc" || config.provider === "openai" || config.provider === "xiaomi")) {
     return {
       asr: resolveAsr(config, hooks),
       tts: resolveTtsFn(config),

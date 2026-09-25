@@ -162,7 +162,10 @@ export async function handleBookVoiceTurn(
         hint = "没有可朗读的内容，请换个问法再试。";
       } else if (/tts/i.test(hint) || err.status === 401 || err.status === 403) {
         code = "tts_failed";
-        hint = "语音合成失败，请检查本机 .env 里的火山 TTS 配置。";
+        hint =
+          voiceConfig.ttsProvider === "xiaomi"
+            ? "语音合成失败，请检查本机 .env 里的 XIAOMI_MIMO_TOKEN。"
+            : "语音合成失败，请检查本机 .env 里的火山 TTS 配置。";
       } else if (hint.length > 200 || !/[\u4e00-\u9fff]/.test(hint)) {
         hint = "快问快答失败，请稍后重试。";
       }

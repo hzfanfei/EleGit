@@ -94,6 +94,30 @@ void main() {
     expect(find.textContaining('CosyVoice3'), findsNothing);
   });
 
+  testWidgets('settings page switches to the Xiaomi voice stack', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final memory = AppMemory(await SharedPreferences.getInstance());
+    final api = FakeWenxiangApi(voiceReady: true);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme().copyWith(splashFactory: NoSplash.splashFactory),
+        home: SettingsPage(api: api, memory: memory),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('小米'), findsOneWidget);
+    expect(find.text('小米识别，小米合成。'), findsOneWidget);
+
+    await tester.tap(find.text('小米'));
+    await tester.pumpAndSettle();
+
+    expect(api.lastSetVoiceStack, 'xiaomi');
+    expect(find.textContaining('小米 MiMo 语音'), findsOneWidget);
+    await _reveal(tester, find.text('冰糖'));
+    expect(find.text('冰糖'), findsOneWidget);
+  });
+
   testWidgets('settings page saves ask engine choice', (tester) async {
     SharedPreferences.setMockInitialValues({});
     final memory = AppMemory(await SharedPreferences.getInstance());

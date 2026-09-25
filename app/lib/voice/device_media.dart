@@ -41,6 +41,10 @@ class DeviceVoiceMedia implements VoiceMedia {
 
   StreamSubscription<Uint8List>? _micSub;
 
+  int _micEpoch = 0;
+
+  Future<void> _micChain = Future<void>.value();
+
   bool _playing = false;
 
   int _pendingPlayCalls = 0;
@@ -65,27 +69,63 @@ class DeviceVoiceMedia implements VoiceMedia {
 
 
 
-  @override
+  Future<void> _enqueueMic(Future<void> Function() action) {
 
-  Stream<Uint8List> startMic() {
+    final run = _micChain.then((_) => action());
 
-    final controller = StreamController<Uint8List>();
+    _micChain = run.then((_) {}, onError: (_) {});
 
-    () async {
+    return run;
 
-      try {
+  }
 
-        if (Platform.isIOS || telephonyCapture) {
 
-          await _prepareCallAudio();
 
-        } else {
+  /// The record plugin throws this when stop races a create or a dispose.
 
-          await AndroidMediaAudio.resetToMediaPlayback();
+  Future<void> _stopRecorderQuietly() async {
 
-        }
+    try {
 
-        final stream = await _recorder.startStream(
+      if (await _recorder.isRecording()) {
+
+        await _recorder.stop();
+
+      }
+
+    } on PlatformException {
+
+      // Not created yet, or the native recorder was already disposed.
+
+    }
+
+  }
+
+
+
+  Future<void> _openMic(int epoch, StreamController<Uint8List> controller) async {
+
+    try {
+
+      if (Platform.isIOS || telephonyCapture) {
+
+        await _prepareCallAudio();
+
+      } else {
+
+        await AndroidMediaAudio.resetToMediaPlayback();
+
+      }
+
+      if (epoch != _micEpoch) {
+
+        await controller.close();
+
+        return;
+
+      }
+
+      final stream = await _recorder.startStream(
 
           RecordConfig(
 
@@ -127,17 +167,39 @@ class DeviceVoiceMedia implements VoiceMedia {
 
         );
 
+        if (epoch != _micEpoch) {
+
+          await _stopRecorderQuietly();
+
+          await controller.close();
+
+          return;
+
+        }
+
         _micSub = stream.listen(controller.add, onError: controller.addError, onDone: controller.close);
 
       } catch (err) {
 
-        controller.addError(err);
+        if (epoch == _micEpoch) controller.addError(err);
 
         await controller.close();
 
       }
 
-    }();
+  }
+
+
+
+  @override
+
+  Stream<Uint8List> startMic() {
+
+    final epoch = ++_micEpoch;
+
+    final controller = StreamController<Uint8List>();
+
+    unawaited(_enqueueMic(() => _openMic(epoch, controller)));
 
     return controller.stream;
 
@@ -149,17 +211,19 @@ class DeviceVoiceMedia implements VoiceMedia {
 
   Future<void> stopMic() async {
 
-    await _micSub?.cancel();
+    _micEpoch++;
 
-    _micSub = null;
+    await _enqueueMic(() async {
 
-    if (await _recorder.isRecording()) {
+      await _micSub?.cancel();
 
-      await _recorder.stop();
+      _micSub = null;
 
-    }
+      await _stopRecorderQuietly();
 
-    await _exitTelephonyRoute();
+      await _exitTelephonyRoute();
+
+    });
 
   }
 
@@ -540,7 +604,15 @@ class DeviceVoiceMedia implements VoiceMedia {
 
     if (play != null && !play.isCompleted) play.complete();
 
-    await _player.stop();
+    try {
+
+      await _player.stop();
+
+    } on PlatformException {
+
+      // Player was not prepared, or already disposed.
+
+    }
 
   }
 
@@ -550,13 +622,37 @@ class DeviceVoiceMedia implements VoiceMedia {
 
   void dispose() {
 
-    unawaited(stopMic());
+    unawaited(_shutdown());
 
-    unawaited(stopPlayback());
+  }
 
-    unawaited(_recorder.dispose());
 
-    unawaited(_player.dispose());
+
+  Future<void> _shutdown() async {
+
+    await stopMic();
+
+    await stopPlayback();
+
+    try {
+
+      await _recorder.dispose();
+
+    } on PlatformException {
+
+      // Already gone.
+
+    }
+
+    try {
+
+      await _player.dispose();
+
+    } on PlatformException {
+
+      // Already gone.
+
+    }
 
   }
 

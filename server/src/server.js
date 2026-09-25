@@ -41,6 +41,7 @@ import {
   sanitizeVoiceStack,
   setPreferredVoiceStack,
   voiceAfterStackSwitch,
+  voiceMemoryKey,
   voiceStackOf,
   withTtsVoice,
 } from "./voice-config.js";
@@ -712,8 +713,7 @@ app.put("/v1/voice/tts-voice", async (req, res) => {
     return;
   }
   store.config.ttsVoice = ttsVoice;
-  if (voiceStackOf(voiceCfg) === "local") store.config.ttsVoiceLocal = ttsVoice;
-  else store.config.ttsVoiceVolc = ttsVoice;
+  store.config[voiceMemoryKey(voiceStackOf(voiceCfg))] = ttsVoice;
   await store.save();
   res.json({ ttsVoice });
 });
@@ -780,7 +780,7 @@ app.put("/v1/settings/voice-stack", async (req, res) => {
   try {
     const stack = sanitizeVoiceStack(req.body?.stack ?? req.body?.voiceStack);
     if (!stack) {
-      res.status(400).json({ error: "stack must be local or volc" });
+      res.status(400).json({ error: "stack must be local, volc, or xiaomi" });
       return;
     }
     if (stack === "local") {
@@ -791,17 +791,17 @@ app.put("/v1/settings/voice-stack", async (req, res) => {
     const previousVoice = store.config.ttsVoice;
     const previousLocal = store.config.ttsVoiceLocal;
     const previousVolc = store.config.ttsVoiceVolc;
+    const previousXiaomi = store.config.ttsVoiceXiaomi;
     const leaving = sanitizeVoiceStack(previousStack) || voiceStackOf(resolveVoiceConfig());
-    if (leaving === "local") store.config.ttsVoiceLocal = previousVoice || previousLocal;
-    else store.config.ttsVoiceVolc = previousVoice || previousVolc;
+    const leavingKey = voiceMemoryKey(leaving || "volc");
+    store.config[leavingKey] = previousVoice || store.config[leavingKey];
     store.config.voiceStack = stack;
     setPreferredVoiceStack(stack);
     const next = resolveVoiceConfig();
-    const remembered = stack === "local" ? store.config.ttsVoiceLocal : store.config.ttsVoiceVolc;
+    const remembered = store.config[voiceMemoryKey(stack)];
     const ttsVoice = voiceAfterStackSwitch(next, remembered, previousVoice);
     store.config.ttsVoice = ttsVoice;
-    if (stack === "local") store.config.ttsVoiceLocal = ttsVoice;
-    else store.config.ttsVoiceVolc = ttsVoice;
+    store.config[voiceMemoryKey(stack)] = ttsVoice;
     try {
       await store.save();
     } catch (err) {
@@ -809,6 +809,7 @@ app.put("/v1/settings/voice-stack", async (req, res) => {
       store.config.ttsVoice = previousVoice;
       store.config.ttsVoiceLocal = previousLocal;
       store.config.ttsVoiceVolc = previousVolc;
+      store.config.ttsVoiceXiaomi = previousXiaomi;
       setPreferredVoiceStack(previousStack);
       throw err;
     }
@@ -1155,12 +1156,16 @@ function logCompanionStartup() {
   console.log(
     voice.asrProvider === "funasr"
       ? "Voice ASR: FunASR (local, preloaded)"
-      : "Voice ASR: Volcengine",
+      : voice.asrProvider === "xiaomi"
+        ? "Voice ASR: Xiaomi MiMo"
+        : "Voice ASR: Volcengine",
   );
   console.log(
     voice.ttsProvider === "cosyvoice"
       ? "Voice TTS: CosyVoice3 (local, preloaded)"
-      : "Voice TTS: Volcengine",
+      : voice.ttsProvider === "xiaomi"
+        ? "Voice TTS: Xiaomi MiMo"
+        : "Voice TTS: Volcengine",
   );
   console.log(
     isVoiceCallEnabled()

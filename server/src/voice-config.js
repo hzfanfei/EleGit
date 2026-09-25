@@ -8,12 +8,20 @@ import {
   VOLC_TTS_VOICES,
   sanitizeTtsVoice,
 } from "./volc-tts-voices.js";
+import { xiaomiSpeechFromEnv } from "./xiaomi-speech.js";
+import {
+  DEFAULT_XIAOMI_TTS_VOICE,
+  getXiaomiTtsVoices,
+  isXiaomiTtsVoice,
+} from "./xiaomi-tts-voices.js";
 
 export {
   DEFAULT_COSYVOICE_TTS_VOICE,
   DEFAULT_VOLC_TTS_VOICE,
+  DEFAULT_XIAOMI_TTS_VOICE,
   VOLC_TTS_VOICES,
   getCosyvoiceTtsVoices,
+  getXiaomiTtsVoices,
   sanitizeTtsVoice,
 };
 
@@ -55,7 +63,14 @@ export function sanitizeVoiceStack(value) {
   const raw = trim(value).toLowerCase();
   if (raw === "local" || raw === "funasr" || raw === "cosyvoice") return "local";
   if (raw === "volc" || raw === "volcengine" || raw === "huoshan") return "volc";
+  if (raw === "xiaomi" || raw === "mimo") return "xiaomi";
   return "";
+}
+
+export function voiceMemoryKey(stack) {
+  if (stack === "local") return "ttsVoiceLocal";
+  if (stack === "xiaomi") return "ttsVoiceXiaomi";
+  return "ttsVoiceVolc";
 }
 
 export function setPreferredVoiceStack(stack) {
@@ -64,6 +79,7 @@ export function setPreferredVoiceStack(stack) {
 }
 
 export function voiceStackOf(config) {
+  if (config?.ttsProvider === "xiaomi" && config?.asrProvider === "xiaomi") return "xiaomi";
   if (config?.ttsProvider === "cosyvoice" && config?.asrProvider === "funasr") return "local";
   return "volc";
 }
@@ -78,6 +94,20 @@ export function applyVoiceStack(config, stack) {
       asrProvider: "funasr",
       cosyvoice: { enabled: true, ...(config.cosyvoice || {}) },
       funasr: { enabled: true, ...(config.funasr || {}) },
+    };
+  }
+  if (choice === "xiaomi") {
+    const xiaomi = config.xiaomi?.apiKey ? { ...config.xiaomi, enabled: true } : null;
+    return {
+      ...config,
+      ready: Boolean(xiaomi?.apiKey),
+      provider: xiaomi ? "xiaomi" : config.provider,
+      ttsProvider: "xiaomi",
+      asrProvider: "xiaomi",
+      xiaomi,
+      cosyvoice: null,
+      funasr: null,
+      hint: xiaomi ? "" : "还没配小米语音密钥。请在本机问象服务的 .env 里配置 XIAOMI_MIMO_TOKEN。",
     };
   }
   return {
@@ -99,13 +129,19 @@ export function voiceForActiveStack(config, raw) {
   if (provider === "cosyvoice") {
     return isCosyvoiceTtsVoice(resolved) ? resolved : DEFAULT_COSYVOICE_TTS_VOICE;
   }
+  if (provider === "xiaomi") {
+    return isXiaomiTtsVoice(resolved) ? resolved : DEFAULT_XIAOMI_TTS_VOICE;
+  }
   if (config?.provider === "openai") return resolved || config.openai?.ttsVoice || "alloy";
   if (resolved && VOLC_TTS_VOICES.some((row) => row.id === resolved)) return resolved;
   return DEFAULT_VOLC_TTS_VOICE;
 }
 
 export function resolveVoiceConfig(env = process.env) {
-  return applyVoiceStack(resolveVoiceConfigFromEnv(env), preferredVoiceStack);
+  const base = resolveVoiceConfigFromEnv(env);
+  const xiaomi = xiaomiSpeechFromEnv(env);
+  const withXiaomi = xiaomi ? { ...base, xiaomi } : base;
+  return applyVoiceStack(withXiaomi, preferredVoiceStack);
 }
 
 function resolveVoiceConfigFromEnv(env = process.env) {
@@ -186,6 +222,7 @@ function readyVolc({ appId, accessToken, apiKey, env }) {
 function defaultTtsVoiceForConfig(config) {
   const ttsProvider = config?.ttsProvider || "volc";
   if (ttsProvider === "cosyvoice") return DEFAULT_COSYVOICE_TTS_VOICE;
+  if (ttsProvider === "xiaomi") return DEFAULT_XIAOMI_TTS_VOICE;
   if (config?.provider === "openai") return config.openai?.ttsVoice || "alloy";
   return DEFAULT_VOLC_TTS_VOICE;
 }
@@ -196,6 +233,9 @@ export function resolveTtsVoiceId(config, rawVoice) {
   const ttsProvider = config.ttsProvider || "volc";
   if (ttsProvider === "cosyvoice") {
     return isCosyvoiceTtsVoice(voice) ? voice : DEFAULT_COSYVOICE_TTS_VOICE;
+  }
+  if (ttsProvider === "xiaomi") {
+    return isXiaomiTtsVoice(voice) ? voice : DEFAULT_XIAOMI_TTS_VOICE;
   }
   if (config.provider === "openai") return voice;
   return VOLC_TTS_VOICES.some((row) => row.id === voice) ? voice : voice;
@@ -218,14 +258,22 @@ export function withTtsVoice(config, rawVoice) {
   if (config.openai) {
     next.openai = { ...config.openai, ttsVoice: voice };
   }
+  if (config.xiaomi) {
+    next.xiaomi = { ...config.xiaomi, ttsVoice: voice };
+  }
   return next;
 }
 
 export function publicVoiceStatus(config = resolveVoiceConfig()) {
   const ttsProvider = config.ttsProvider || "volc";
   const asrProvider = config.asrProvider || "volc";
-  const voices = ttsProvider === "cosyvoice" ? getCosyvoiceTtsVoices() : VOLC_TTS_VOICES;
-  const stored = config.ttsVoice || config.cosyvoice?.ttsVoice || config.volc?.ttsVoice;
+  const voices =
+    ttsProvider === "cosyvoice"
+      ? getCosyvoiceTtsVoices()
+      : ttsProvider === "xiaomi"
+        ? getXiaomiTtsVoices()
+        : VOLC_TTS_VOICES;
+  const stored = config.ttsVoice || config.xiaomi?.ttsVoice || config.cosyvoice?.ttsVoice || config.volc?.ttsVoice;
   const ttsVoice = stored
     ? resolveTtsVoiceId(config, stored)
     : defaultTtsVoiceForConfig(config);
@@ -234,9 +282,11 @@ export function publicVoiceStatus(config = resolveVoiceConfig()) {
     hint: config.ready ? "" : config.hint || "还没配语音密钥。请在本机问象服务的 .env 里配置。",
     voiceStack: voiceStackOf(config),
     asrProvider,
-    asrEngine: asrProvider === "funasr" ? "FunASR-Paraformer" : "volc",
+    asrEngine:
+      asrProvider === "funasr" ? "FunASR-Paraformer" : asrProvider === "xiaomi" ? "mimo-v2.5-asr" : "volc",
     ttsProvider,
-    ttsEngine: ttsProvider === "cosyvoice" ? "Fun-CosyVoice3" : "volc",
+    ttsEngine:
+      ttsProvider === "cosyvoice" ? "Fun-CosyVoice3" : ttsProvider === "xiaomi" ? "mimo-v2.5-tts" : "volc",
     ttsVoice,
     voices,
   };
