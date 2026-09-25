@@ -1,7 +1,10 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../theme.dart';
+import '../utils/text_fit.dart';
 
 enum RichKind { prose, code }
 
@@ -257,16 +260,16 @@ Widget _inline(
   var cursor = 0;
   for (final match in token.allMatches(text)) {
     if (match.start > cursor) {
-      spans.add(TextSpan(text: text.substring(cursor, match.start)));
+      spans.add(TextSpan(text: breakLongRuns(text.substring(cursor, match.start))));
     }
     if (match.group(1) != null) {
       spans.add(TextSpan(
-        text: match.group(1),
+        text: breakLongRuns(match.group(1)!),
         style: const TextStyle(fontWeight: FontWeight.w600),
       ));
     } else {
       spans.add(TextSpan(
-        text: match.group(2),
+        text: breakLongRuns(match.group(2)!),
         style: const TextStyle(
           fontFamily: 'ui-monospace',
           fontFamilyFallback: ['SF Mono', 'Menlo', 'Consolas', 'monospace'],
@@ -278,7 +281,7 @@ Widget _inline(
     cursor = match.end;
   }
   if (cursor < text.length) {
-    spans.add(TextSpan(text: text.substring(cursor)));
+    spans.add(TextSpan(text: breakLongRuns(text.substring(cursor))));
   }
 
   final style = TextStyle(
@@ -357,12 +360,11 @@ class _CodeBlock extends StatelessWidget {
             color: Wx.hairline,
             child: SizedBox(height: 1),
           ),
-          SingleChildScrollView(
-            key: const Key('wx-code-scroll'),
-            scrollDirection: Axis.horizontal,
+          Padding(
+            key: const Key('wx-code-block'),
             padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
             child: SelectableText(
-              code.isEmpty ? ' ' : code,
+              code.isEmpty ? ' ' : breakLongRuns(code),
               style: _mono,
             ),
           ),
@@ -397,47 +399,138 @@ class _MarkdownTable extends StatelessWidget {
       );
     }
 
-    return SingleChildScrollView(
-      key: const Key('wx-table-scroll'),
-      scrollDirection: Axis.horizontal,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: Wx.surface,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: Wx.hairline),
-        ),
-        child: Table(
-          key: const Key('wx-md-table'),
-          defaultColumnWidth: const IntrinsicColumnWidth(),
-          defaultVerticalAlignment: TableCellVerticalAlignment.middle,
-          border: const TableBorder(
-            horizontalInside: BorderSide(color: Wx.hairline),
-            verticalInside: BorderSide(color: Wx.hairline),
-          ),
-          children: [
-            TableRow(
-              decoration: const BoxDecoration(
-                color: Wx.raised,
-                border: Border(
-                  bottom: BorderSide(color: Wx.accent, width: 1.2),
-                ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth.isFinite && constraints.maxWidth > 0
+            ? constraints.maxWidth
+            : MediaQuery.sizeOf(context).width;
+        final count = table.headers.length;
+        return SizedBox(
+          width: width,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: Wx.surface,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Wx.hairline),
+            ),
+            child: Table(
+              key: const Key('wx-md-table'),
+              columnWidths: {
+                for (var i = 0; i < count; i++) i: FixedColumnWidth(width / count),
+              },
+              defaultVerticalAlignment: TableCellVerticalAlignment.top,
+              border: const TableBorder(
+                horizontalInside: BorderSide(color: Wx.hairline),
+                verticalInside: BorderSide(color: Wx.hairline),
               ),
               children: [
-                for (final header in table.headers) cell(header, header: true),
+                TableRow(
+                  decoration: const BoxDecoration(
+                    color: Wx.raised,
+                    border: Border(
+                      bottom: BorderSide(color: Wx.accent, width: 1.2),
+                    ),
+                  ),
+                  children: [
+                    for (final header in table.headers) cell(header, header: true),
+                  ],
+                ),
+                for (var row = 0; row < table.rows.length; row++)
+                  TableRow(
+                    decoration: BoxDecoration(
+                      color: row.isOdd ? const Color(0x121C1F24) : Colors.transparent,
+                    ),
+                    children: [
+                      for (final value in table.rows[row]) cell(value, header: false),
+                    ],
+                  ),
               ],
             ),
-            for (var row = 0; row < table.rows.length; row++)
-              TableRow(
-                decoration: BoxDecoration(
-                  color: row.isOdd ? const Color(0x121C1F24) : Colors.transparent,
-                ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class WxReplyFrame extends StatelessWidget {
+  const WxReplyFrame({
+    super.key,
+    required this.label,
+    required this.child,
+    this.footer,
+    this.trailing,
+    this.labelColor = Wx.text,
+    this.railColor = Wx.hairline,
+    this.railWidth = 2,
+    this.bottom = 16,
+  });
+
+  final String label;
+  final Widget child;
+  final Widget? footer;
+  final Widget? trailing;
+  final Color labelColor;
+  final Color railColor;
+  final double railWidth;
+  final double bottom;
+
+  @override
+  Widget build(BuildContext context) {
+    final ask = label == '你问';
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottom),
+      child: CustomPaint(
+        painter: _ReplyRailPainter(color: railColor, width: railWidth),
+        child: Padding(
+          padding: EdgeInsets.only(left: railWidth + 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
                 children: [
-                  for (final value in table.rows[row]) cell(value, header: false),
+                  Expanded(
+                    child: Text(
+                      label,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                            color: labelColor,
+                            fontSize: ask ? 12 : 13,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: ask ? 0.4 : 0.8,
+                          ),
+                    ),
+                  ),
+                  if (trailing != null) trailing!,
                 ],
               ),
-          ],
+              const SizedBox(height: 8),
+              child,
+              if (footer != null) ...[
+                const SizedBox(height: 8),
+                footer!,
+              ],
+            ],
+          ),
         ),
       ),
     );
+  }
+}
+
+class _ReplyRailPainter extends CustomPainter {
+  const _ReplyRailPainter({required this.color, required this.width});
+
+  final Color color;
+  final double width;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawRect(Rect.fromLTWH(0, 2, width, math.max(0, size.height - 2)), Paint()..color = color);
+  }
+
+  @override
+  bool shouldRepaint(covariant _ReplyRailPainter oldDelegate) {
+    return oldDelegate.color != color || oldDelegate.width != width;
   }
 }

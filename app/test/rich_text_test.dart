@@ -104,7 +104,8 @@ void main() {
     expect(find.text('yaml'), findsOneWidget);
     expect(find.textContaining('name: 问象'), findsOneWidget);
     expect(find.textContaining('```'), findsNothing);
-    expect(find.byKey(const Key('wx-code-scroll')), findsOneWidget);
+    expect(find.byKey(const Key('wx-code-block')), findsOneWidget);
+    expect(_horizontalScrolls, findsNothing);
     expect(find.byTooltip('复制'), findsOneWidget);
   });
 
@@ -118,7 +119,8 @@ void main() {
       ),
     );
     expect(find.text('dart'), findsOneWidget);
-    expect(find.byKey(const Key('wx-code-scroll')), findsOneWidget);
+    expect(find.byKey(const Key('wx-code-block')), findsOneWidget);
+    expect(_horizontalScrolls, findsNothing);
     expect(find.textContaining('```'), findsNothing);
   });
 
@@ -168,39 +170,62 @@ void main() {
     expect(find.textContaining('|'), findsNothing);
     expect(find.textContaining('---'), findsNothing);
     expect(find.byKey(const Key('wx-md-table')), findsOneWidget);
-    expect(find.byKey(const Key('wx-table-scroll')), findsOneWidget);
+    expect(_horizontalScrolls, findsNothing);
   });
 
-  testWidgets('wide table and long code stay scrollable on a narrow screen', (tester) async {
+  testWidgets('wide table and long code fit the screen without sideways scrolling', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
         theme: wenxiangTheme(),
         home: Scaffold(
-          body: SizedBox(
-            width: 160,
-            child: WxReadableText(
-              '| 很长的列名甲 | 很长的列名乙 | 很长的列名丙 |\n'
-              '| --- | --- | --- |\n'
-              '| 单元格内容甲 | 单元格内容乙 | 单元格内容丙 |\n\n'
-              '```js\nconst token = "${'x' * 80}";\n```',
+          body: SingleChildScrollView(
+            child: SizedBox(
+              width: 160,
+              child: WxReadableText(
+                '| 很长的列名甲 | 很长的列名乙 | 很长的列名丙 |\n'
+                '| --- | --- | --- |\n'
+                '| 单元格内容甲 | 单元格内容乙 | 单元格内容丙 |\n\n'
+                '```js\nconst token = "${'x' * 80}";\n```',
+              ),
             ),
           ),
         ),
       ),
     );
     expect(tester.takeException(), isNull);
-    expect(find.byKey(const Key('wx-table-scroll')), findsOneWidget);
-    expect(find.byKey(const Key('wx-code-scroll')), findsOneWidget);
+    expect(_horizontalScrolls, findsNothing);
     expect(find.textContaining('很长的列名甲'), findsOneWidget);
     expect(find.textContaining('const token'), findsOneWidget);
 
-    final tableScroll = tester.widget<SingleChildScrollView>(
-      find.byKey(const Key('wx-table-scroll')),
+    expect(tester.getSize(find.byKey(const Key('wx-md-table'))).width, lessThanOrEqualTo(160));
+    expect(tester.getSize(find.byKey(const Key('wx-code-block'))).width, lessThanOrEqualTo(160));
+  });
+
+  testWidgets('reply frame stays snug under the text', (tester) async {
+    const sample = '最近在修登录，改完回调再看上下文。';
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: const Scaffold(
+          body: Align(
+            alignment: Alignment.topLeft,
+            child: SizedBox(
+              width: 320,
+              child: WxReplyFrame(
+                label: '问象',
+                child: Text(sample),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
-    final codeScroll = tester.widget<SingleChildScrollView>(
-      find.byKey(const Key('wx-code-scroll')),
-    );
-    expect(tableScroll.scrollDirection, Axis.horizontal);
-    expect(codeScroll.scrollDirection, Axis.horizontal);
+    final frame = tester.getSize(find.byType(WxReplyFrame));
+    final text = tester.getSize(find.text(sample));
+    expect(frame.height, lessThan(text.height + 80));
   });
 }
+
+final _horizontalScrolls = find.byWidgetPredicate(
+  (widget) => widget is SingleChildScrollView && widget.scrollDirection == Axis.horizontal,
+);

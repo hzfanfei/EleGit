@@ -1,6 +1,13 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wenxiang/models.dart';
+import 'package:wenxiang/persist/book_reader_prefs.dart';
+import 'package:wenxiang/theme.dart';
 import 'package:wenxiang/utils/book_markdown_markup.dart';
+import 'package:wenxiang/utils/book_reader_markdown_style.dart';
+import 'package:wenxiang/widgets/book_markdown_body.dart';
+
+import 'support/fake_api.dart';
 
 void main() {
   test('promotes leftover html code and anchors', () {
@@ -8,7 +15,7 @@ void main() {
       normalizeBookMarkdown(
         '见 <a href="https://vuejs.org">官网</a> 与 <code>ref()</code>',
       ),
-      '见 [官网](https://vuejs.org) 与 `ref()`',
+      '　　见 [官网↗](https://vuejs.org) 与 `ref()`',
     );
     expect(
       normalizeBookMarkdown('<pre><code>const a = 1;</code></pre>'),
@@ -19,9 +26,10 @@ void main() {
       '<span class="image placeholder" original-image-src="../images/cover.jpg">Cover Image</span>\n'
       '诺亚 <sup><a href="#fn"><span class="image placeholder epub-footnote">译者注</span></a></sup>似的',
     );
-    expect(cleaned, contains('像约翰和我这样的普通人。'));
+    expect(cleaned, contains('　　像约翰和我这样的普通人。'));
     expect(cleaned, contains('![](../images/cover.jpg)'));
-    expect(cleaned, contains('诺亚 （译者注）似的'));
+    expect(cleaned, contains('诺亚 [注](wx-footnote:${Uri.encodeComponent('译者注')})似的'));
+    expect(cleaned, isNot(contains('（译者注）')));
     expect(cleaned, isNot(contains('<span')));
     expect(cleaned, isNot(contains('<div')));
   });
@@ -65,6 +73,7 @@ void main() {
     expect(bookMarkdownExternalUri('https://vuejs.org/guide'), Uri.parse('https://vuejs.org/guide'));
     expect(bookMarkdownExternalUri('foo.com?a=1'), Uri.parse('https://foo.com?a=1'));
     expect(bookMarkdownExternalUri('../Text/part0000.xhtml#nav_point_0'), isNull);
+    expect(bookMarkdownExternalUri('wx-footnote:note'), isNull);
 
     const chapters = [
       BookChapterEntry(index: 1, file: '002-part0000.md', title: '版权信息', href: 'OEBPS/Text/part0000.xhtml'),
@@ -77,5 +86,95 @@ void main() {
       ),
       1,
     );
+  });
+
+  test('turns headings, lists, and quotes into markdown', () {
+    final cleaned = normalizeBookMarkdown(
+      '<h1>标题</h1><ul><li>甲</li><li>乙</li></ul><blockquote><p>引用一句。</p></blockquote>',
+    );
+    expect(cleaned, contains('# 标题'));
+    expect(cleaned, contains('- 甲'));
+    expect(cleaned, contains('- 乙'));
+    expect(cleaned, contains('> 引用一句。'));
+    expect(cleaned, isNot(contains('<h1')));
+    expect(cleaned, isNot(contains('<li')));
+  });
+
+  test('joins prose line breaks and keeps short verse lines', () {
+    expect(
+      normalizeBookMarkdown('<p>这是一句<br>很长的话，还没说完。</p>'),
+      contains('这是一句很长的话，还没说完。'),
+    );
+    expect(
+      normalizeBookMarkdown('<p>这是一句<br>很长的话，还没说完。</p>'),
+      isNot(contains('这是一句\n很长')),
+    );
+    final verse = normalizeBookMarkdown('<p>床前明月光<br>疑是地上霜<br>举头望明月<br>低头思故乡</p>');
+    expect(verse, contains('床前明月光\n疑是地上霜\n举头望明月\n低头思故乡'));
+  });
+
+  test('drops a repeated chapter heading and indents chinese prose', () {
+    const body = '# 第一章\n\n正文开始了。';
+    expect(omitLeadingChapterHeading(normalizeBookMarkdown(body), '第一章'), contains('正文开始了。'));
+    expect(omitLeadingChapterHeading(normalizeBookMarkdown(body), '第一章'), isNot(contains('# 第一章')));
+    expect(normalizeBookMarkdown('正文开始了。'), startsWith('　　正文开始了。'));
+  });
+
+  test('reader type scale separates headings and quiets links', () {
+    final sheet = bookReaderMarkdownStyle(
+      theme: wenxiangTheme(),
+      palette: ReaderPalette.forMode(ReaderThemeMode.dark),
+      settings: const ReaderSettings(),
+    );
+    expect(sheet.a?.backgroundColor, isNull);
+    expect(sheet.blockSpacing, greaterThanOrEqualTo(20));
+    expect(sheet.h1!.fontSize!, greaterThan(sheet.h2!.fontSize!));
+    expect(sheet.h2!.fontSize!, greaterThan(sheet.h3!.fontSize!));
+    final chapter = bookReaderChapterStyle(
+      palette: ReaderPalette.forMode(ReaderThemeMode.dark),
+      settings: const ReaderSettings(),
+    );
+    expect(chapter.fontSize!, greaterThan(sheet.h1!.fontSize!));
+  });
+
+  testWidgets('chapter body is selectable and wide code stays inside the column', (tester) async {
+    final sheet = bookReaderMarkdownStyle(
+      theme: wenxiangTheme(),
+      palette: ReaderPalette.forMode(ReaderThemeMode.dark),
+      settings: const ReaderSettings(),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: SizedBox(
+              width: 180,
+              child: BookMarkdownBody(
+                api: FakeWenxiangApi(),
+                bookId: 'book',
+                chapterFile: '001.md',
+                chapterTitle: '第一章',
+                data: '# 第一章\n\n正文从这里开始。\n\n```\n${'token' * 20}\n```',
+                styleSheet: sheet,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(tester.takeException(), isNull);
+    expect(find.byType(SelectableText), findsWidgets);
+    expect(find.textContaining('正文从这里开始'), findsOneWidget);
+    expect(find.textContaining('# 第一章'), findsNothing);
+    expect(
+      find.byWidgetPredicate(
+        (widget) => widget is SingleChildScrollView && widget.scrollDirection == Axis.horizontal,
+      ),
+      findsNothing,
+    );
+    expect(tester.getSize(find.byType(SelectableText).last).width, lessThanOrEqualTo(180));
   });
 }

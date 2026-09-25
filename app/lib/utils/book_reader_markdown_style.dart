@@ -23,34 +23,20 @@ MarkdownStyleSheet bookReaderMarkdownStyle({
     a: body.copyWith(
       color: Wx.accent,
       decoration: TextDecoration.underline,
-      decorationColor: Wx.accent.withValues(alpha: 0.55),
-      // Soft tint behind the link text — makes the tap target obvious
-      // without turning each link into a button. flutter_markdown's
-      // TapGestureRecognizer is attached to the span itself, so the
-      // highlighted region is exactly the link text, not the paragraph.
-      backgroundColor: Wx.accent.withValues(alpha: 0.16),
+      decorationColor: Wx.accent.withValues(alpha: 0.45),
     ),
-    h1: TextStyle(
-      fontSize: settings.fontSize + 6,
-      fontWeight: FontWeight.w700,
-      height: 1.35,
-      color: palette.ink,
-      fontFamilyFallback: Wx.fontFallback,
-    ),
-    h2: TextStyle(
-      fontSize: settings.fontSize + 3,
-      fontWeight: FontWeight.w700,
-      height: 1.35,
-      color: palette.ink,
-      fontFamilyFallback: Wx.fontFallback,
-    ),
-    h3: TextStyle(
-      fontSize: settings.fontSize + 1,
-      fontWeight: FontWeight.w600,
-      height: 1.4,
-      color: palette.ink,
-      fontFamilyFallback: Wx.fontFallback,
-    ),
+    h1: _heading(settings.fontSize + 8, palette, FontWeight.w700),
+    h2: _heading(settings.fontSize + 4, palette, FontWeight.w700),
+    h3: _heading(settings.fontSize + 2, palette, FontWeight.w600),
+    h4: _heading(settings.fontSize + 1, palette, FontWeight.w600),
+    h5: _heading(settings.fontSize, palette, FontWeight.w600),
+    h6: _heading(settings.fontSize, palette, FontWeight.w600),
+    h1Padding: const EdgeInsets.only(top: 18, bottom: 6),
+    h2Padding: const EdgeInsets.only(top: 16, bottom: 4),
+    h3Padding: const EdgeInsets.only(top: 12, bottom: 2),
+    h4Padding: const EdgeInsets.only(top: 10, bottom: 2),
+    h5Padding: const EdgeInsets.only(top: 8, bottom: 2),
+    h6Padding: const EdgeInsets.only(top: 8, bottom: 2),
     em: TextStyle(fontStyle: FontStyle.italic, color: palette.ink),
     strong: TextStyle(fontWeight: FontWeight.w700, color: palette.ink),
     del: TextStyle(
@@ -87,10 +73,28 @@ MarkdownStyleSheet bookReaderMarkdownStyle({
     tableBody: body.copyWith(fontSize: settings.fontSize * 0.9),
     tableBorder: TableBorder.all(color: palette.ink.withValues(alpha: 0.12), width: 0.6),
     tableCellsPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-    blockSpacing: 12,
+    tableColumnWidth: const FlexColumnWidth(),
+    blockSpacing: 22,
     listIndent: 24,
     horizontalRuleDecoration: BoxDecoration(
       border: Border(top: BorderSide(color: palette.ink.withValues(alpha: 0.14), width: 0.6)),
     ),
   );
+}
+
+TextStyle _heading(double size, ReaderPalette palette, FontWeight weight) {
+  return TextStyle(
+    fontSize: size,
+    fontWeight: weight,
+    height: 1.35,
+    color: palette.ink,
+    fontFamilyFallback: Wx.fontFallback,
+  );
+}
+
+TextStyle bookReaderChapterStyle({
+  required ReaderPalette palette,
+  required ReaderSettings settings,
+}) {
+  return _heading(settings.fontSize + 12, palette, FontWeight.w700);
 }

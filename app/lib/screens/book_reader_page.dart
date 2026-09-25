@@ -93,7 +93,8 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
   static const _askFullSheet = kBookAskFullFraction;
   // Loose thresholds so a swiping scroll never counts as a tap.
   static const _kChromeTapMaxDistance = 10.0;
-  static const _kChromeTapMaxDuration = Duration(milliseconds: 600);
+  // Shorter than a long-press, so selecting text does not also toggle chrome.
+  static const _kChromeTapMaxDuration = Duration(milliseconds: 400);
 
   @override
   void initState() {
@@ -813,16 +814,24 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.stretch,
                                     children: [
-                                      Text(heading, style: styleSheet.h2),
-                                      const SizedBox(height: 12),
+                                      Text(
+                                        heading,
+                                        style: bookReaderChapterStyle(
+                                          palette: palette,
+                                          settings: _settings,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 16),
                                       BookMarkdownBody(
                                         api: widget.api,
                                         bookId: widget.book.id,
                                         chapterFile: chapter?.file ?? '',
                                         spineHref: chapter?.href,
+                                        chapterTitle: heading,
                                         data: body,
                                         styleSheet: styleSheet,
                                         onTapLink: _onBookLink,
+                                        onConsumeTap: () => _linkTappedThisGesture = true,
                                       ),
                                     ],
                                   ),

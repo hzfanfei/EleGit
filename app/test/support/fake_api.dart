@@ -398,6 +398,7 @@ class FakeWenxiangApi extends WenxiangApi {
     required String message,
     required List<ChatMessage> history,
     String? sessionId,
+    bool agentMode = false,
   }) async* {
     lastSessionId = sessionId;
     lastChatMessage = message;

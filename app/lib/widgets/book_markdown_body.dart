@@ -7,6 +7,7 @@ import '../api/wenxiang_api.dart';
 import '../theme.dart';
 import '../utils/book_markdown_assets.dart';
 import '../utils/book_markdown_markup.dart';
+import '../utils/text_fit.dart';
 
 final Map<String, Uint8List> _bookImageBytes = {};
 
@@ -19,7 +20,9 @@ class BookMarkdownBody extends StatelessWidget {
     required this.data,
     required this.styleSheet,
     this.spineHref,
+    this.chapterTitle,
     this.onTapLink,
+    this.onConsumeTap,
     this.launchExternalLinks = true,
   });
 
@@ -27,9 +30,13 @@ class BookMarkdownBody extends StatelessWidget {
   final String bookId;
   final String chapterFile;
   final String? spineHref;
+  final String? chapterTitle;
   final String data;
   final MarkdownStyleSheet styleSheet;
   final void Function(String href, String text)? onTapLink;
+
+  /// A tap that should not also toggle the reader chrome.
+  final VoidCallback? onConsumeTap;
 
   /// When true (default), http(s) / mailto / tel / bare-domain links are
   /// opened in the system browser automatically. The [onTapLink] callback is
@@ -37,15 +44,59 @@ class BookMarkdownBody extends StatelessWidget {
   /// (e.g. suppress the chrome-toggle gesture in the book reader).
   final bool launchExternalLinks;
 
+  String _prepared() {
+    final normalized = normalizeBookMarkdown(data);
+    final title = chapterTitle?.trim() ?? '';
+    if (title.isEmpty) return normalized;
+    return omitLeadingChapterHeading(normalized, title);
+  }
+
+  void _showFootnote(BuildContext context, String href) {
+    final encoded = href.substring('wx-footnote:'.length);
+    var note = encoded;
+    try {
+      note = Uri.decodeComponent(encoded);
+    } catch (_) {}
+    note = note.trim();
+    if (note.isEmpty) return;
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(22, 4, 22, 24),
+            child: Text(
+              note,
+              style: Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.6),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final messenger = ScaffoldMessenger.maybeOf(context);
+    final codeStyle = (styleSheet.code ?? const TextStyle()).copyWith(backgroundColor: null);
     return MarkdownBody(
-      data: normalizeBookMarkdown(data),
+      data: _prepared(),
+      selectable: true,
       styleSheet: styleSheet,
+      builders: {'pre': _WrappingCodeBlock(codeStyle)},
+      onSelectionChanged: (_, selection, __) {
+        if (!selection.isCollapsed) onConsumeTap?.call();
+      },
       onTapLink: (text, href, title) {
         final target = (href ?? '').trim();
         if (target.isEmpty) return;
+        onConsumeTap?.call();
+        if (target.startsWith('wx-footnote:')) {
+          _showFootnote(context, target);
+          onTapLink?.call(target, text);
+          return;
+        }
         if (launchExternalLinks) {
           final external = bookMarkdownExternalUri(target);
           if (external != null) {
@@ -80,6 +131,37 @@ class BookMarkdownBody extends StatelessWidget {
         alt: config.alt ?? config.title ?? '',
         width: config.width,
         height: config.height,
+        onOpen: onConsumeTap,
+      ),
+    );
+  }
+}
+
+class _WrappingCodeBlock extends MarkdownElementBuilder {
+  _WrappingCodeBlock(this.style);
+
+  final TextStyle style;
+
+  @override
+  Widget? visitText(dynamic text, TextStyle? preferredStyle) {
+    // flutter_markdown only clears the inline stack when visitText returns
+    // a widget. The real block is built in visitElementAfterWithContext.
+    return const SizedBox.shrink();
+  }
+
+  @override
+  Widget? visitElementAfterWithContext(
+    BuildContext context,
+    dynamic element,
+    TextStyle? preferredStyle,
+    TextStyle? parentStyle,
+  ) {
+    final code = (element.textContent as String).replaceAll(RegExp(r'\s+$'), '');
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      child: SelectableText(
+        breakLongRuns(code),
+        style: style,
       ),
     );
   }
@@ -95,6 +177,7 @@ class _BookMarkdownImage extends StatefulWidget {
     this.spineHref,
     this.width,
     this.height,
+    this.onOpen,
   });
 
   final WenxiangApi api;
@@ -105,6 +188,7 @@ class _BookMarkdownImage extends StatefulWidget {
   final String alt;
   final double? width;
   final double? height;
+  final VoidCallback? onOpen;
 
   @override
   State<_BookMarkdownImage> createState() => _BookMarkdownImageState();
@@ -188,29 +272,102 @@ class _BookMarkdownImageState extends State<_BookMarkdownImage> {
     return FutureBuilder<Uint8List?>(
       future: _bytes,
       builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done) {
-          return const SizedBox(
-            height: 120,
-            child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-          );
-        }
-        final bytes = snapshot.data;
-        if (bytes == null || bytes.isEmpty) return _broken();
-        return _framed(
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final maxW = constraints.maxWidth.isFinite && constraints.maxWidth > 0
-                  ? constraints.maxWidth
-                  : MediaQuery.sizeOf(context).width;
-              return Image.memory(
-                bytes,
-                fit: BoxFit.contain,
-                width: widget.width ?? maxW,
-                height: widget.height,
-                gaplessPlayback: true,
-                errorBuilder: (_, __, ___) => _broken(),
-              );
-            },
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final maxW = constraints.maxWidth.isFinite && constraints.maxWidth > 0
+                ? constraints.maxWidth
+                : MediaQuery.sizeOf(context).width;
+            if (snapshot.connectionState != ConnectionState.done) {
+              return _loading(maxW);
+            }
+            final bytes = snapshot.data;
+            if (bytes == null || bytes.isEmpty) return _broken();
+            return _framed(
+              GestureDetector(
+                onTap: () {
+                  widget.onOpen?.call();
+                  _zoom(context, bytes);
+                },
+                child: _picture(bytes, maxW),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _loading(double maxW) {
+    final w = widget.width;
+    final h = widget.height;
+    if (w != null && h != null && w > 0 && h > 0) {
+      final dw = w > maxW ? maxW : w;
+      final dh = h * (dw / w);
+      return SizedBox(
+        width: dw,
+        height: dh,
+        child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+      );
+    }
+    return const SizedBox(
+      width: 36,
+      height: 36,
+      child: Padding(
+        padding: EdgeInsets.all(8),
+        child: CircularProgressIndicator(strokeWidth: 2),
+      ),
+    );
+  }
+
+  Widget _picture(Uint8List bytes, double maxW) {
+    final attrW = widget.width;
+    final attrH = widget.height;
+    double? width;
+    double? height;
+    if (attrW != null && attrW > 0) {
+      width = attrW > maxW ? maxW : attrW;
+      if (attrH != null && attrH > 0) height = attrH * (width / attrW);
+    }
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: maxW),
+        child: Image.memory(
+          bytes,
+          width: width,
+          height: height,
+          fit: BoxFit.contain,
+          gaplessPlayback: true,
+          errorBuilder: (_, __, ___) => _broken(),
+        ),
+      ),
+    );
+  }
+
+  void _zoom(BuildContext context, Uint8List bytes) {
+    showDialog<void>(
+      context: context,
+      barrierColor: const Color(0xE6000000),
+      builder: (context) {
+        return SafeArea(
+          child: Stack(
+            children: [
+              Center(
+                child: InteractiveViewer(
+                  minScale: 1,
+                  maxScale: 4,
+                  child: Image.memory(bytes, fit: BoxFit.contain),
+                ),
+              ),
+              Align(
+                alignment: Alignment.topRight,
+                child: IconButton(
+                  tooltip: '关闭',
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.close, color: Colors.white),
+                ),
+              ),
+            ],
           ),
         );
       },

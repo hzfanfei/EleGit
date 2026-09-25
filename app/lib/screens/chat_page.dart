@@ -1334,7 +1334,7 @@ class _FinishedTurn extends StatelessWidget {
       voiceColor: Wx.text,
       railColor: Wx.hairline,
       railWidth: 2,
-      bottom: 32,
+      bottom: 16,
       footer: engineFootnote(message.engine).isEmpty
           ? null
           : Text(
@@ -1402,7 +1402,7 @@ class _LiveTurn extends StatelessWidget {
       voiceColor: Wx.text,
       railColor: Wx.hairline,
       railWidth: 2,
-      bottom: 32,
+      bottom: 16,
       footer: ValueListenableBuilder<String?>(
         valueListenable: engine,
         builder: (context, value, _) {
@@ -1476,50 +1476,15 @@ class _VoiceTurn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ask = voice == '你问';
-    return Padding(
-      padding: EdgeInsets.only(bottom: bottom),
-      child: IntrinsicHeight(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            ColoredBox(
-              color: railColor,
-              child: SizedBox(width: railWidth),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          voice,
-                          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                color: voiceColor,
-                                fontSize: ask ? 12 : 13,
-                                fontWeight: FontWeight.w600,
-                                letterSpacing: ask ? 0.4 : 0.8,
-                              ),
-                        ),
-                      ),
-                      if (trailing != null) trailing!,
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  child,
-                  if (footer != null) ...[
-                    const SizedBox(height: 10),
-                    footer!,
-                  ],
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
+    return WxReplyFrame(
+      label: voice,
+      labelColor: voiceColor,
+      railColor: railColor,
+      railWidth: railWidth,
+      bottom: bottom,
+      footer: footer,
+      trailing: trailing,
+      child: child,
     );
   }
 }
