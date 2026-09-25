@@ -17,6 +17,7 @@ import {
   createSessionStore,
   sanitizeAcpEngine,
   pickCursorVersionName,
+  claudeCodeSessionOptions,
   preferredAcpModeIds,
   selectPermissionOption,
 } from "../src/acp.js";
@@ -45,6 +46,14 @@ describe("sanitizeAcpEngine", () => {
     assert.equal(applyAcpEnginePreference("cursor"), "cursor");
     assert.equal(process.env.WENXIANG_ACP_ENGINE, "cursor");
     applyAcpEnginePreference("claude");
+  });
+});
+
+describe("claudeCodeSessionOptions", () => {
+  it("keeps user settings and turns superpowers off", () => {
+    const options = claudeCodeSessionOptions("MiniMax-M3");
+    assert.deepEqual(options.settingSources, ["user"]);
+    assert.equal(options.settings.enabledPlugins["superpowers@claude-plugins-official"], false);
   });
 });
 

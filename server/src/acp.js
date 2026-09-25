@@ -42,6 +42,20 @@ export function acpEnginePreference() {
   return sanitizeAcpEngine(process.env.WENXIANG_ACP_ENGINE) || "claude";
 }
 
+export function claudeCodeSessionOptions(model) {
+  return {
+    model,
+    permissionMode: "plan",
+    allowDangerouslySkipPermissions: true,
+    settingSources: ["user"],
+    settings: {
+      enabledPlugins: {
+        "superpowers@claude-plugins-official": false,
+      },
+    },
+  };
+}
+
 export function acpModelId() {
   const engine = acpEnginePreference();
   const raw = String(
@@ -532,12 +546,7 @@ export class AcpChannel {
               mcpServers: [],
               _meta: {
                 claudeCode: {
-                  options: {
-                    model: this.command?.model || acpModelId(),
-                    permissionMode: "plan",
-                    allowDangerouslySkipPermissions: true,
-                    settingSources: ["user"],
-                  },
+                  options: claudeCodeSessionOptions(this.command?.model || acpModelId()),
                 },
               },
             }
