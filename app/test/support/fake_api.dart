@@ -66,6 +66,7 @@ class FakeWenxiangApi extends WenxiangApi {
   List<ChatStreamEvent>? repoVoiceTurnEvents;
   String? lastSessionId;
   String? lastChatMessage;
+  final List<String> chatMessages = <String>[];
   String? lastBookTtsVoice;
   String? lastRepoTtsVoice;
   String? lastSetTtsVoice;
@@ -448,6 +449,7 @@ class FakeWenxiangApi extends WenxiangApi {
   }) async* {
     lastSessionId = sessionId;
     lastChatMessage = message;
+    chatMessages.add(message);
     if (streamThrows != null) throw streamThrows!;
     if (streamDelay > Duration.zero) {
       await Future<void>.delayed(streamDelay);

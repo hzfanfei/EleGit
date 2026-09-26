@@ -77,6 +77,8 @@ class _ChatPageState extends State<ChatPage> {
   String? _sessionId;
   bool _live = false;
   bool _busy = false;
+  int? _processingUserIndex;
+  final List<int> _queuedUserIndices = <int>[];
   bool _agentMode = false;
   int? _editingIndex;
   String? _lastUser;
@@ -692,13 +694,45 @@ class _ChatPageState extends State<ChatPage> {
     await _send(next);
   }
 
+  int get _queuedCount => _queuedUserIndices.length;
+
+  bool _isQueuedUserMessage(int index, ChatMessage message) {
+    if (message.role != 'user') return false;
+    if (_queuedUserIndices.contains(index)) return true;
+    final active = _processingUserIndex;
+    return _busy && active != null && index > active;
+  }
+
   Future<void> _send([String? preset]) async {
     final text = (preset ?? _input.text).trim();
-    if (text.isEmpty || _busy) return;
+    if (text.isEmpty) return;
     _editingIndex = null;
     _input.clear();
     _lastUser = text;
     HapticFeedback.selectionClick();
+
+    late int userIndex;
+    setState(() {
+      _messages.add(ChatMessage(role: 'user', content: text));
+      userIndex = _messages.length - 1;
+    });
+    unawaited(_persist());
+    _jumpToLatest(force: true);
+
+    if (_busy) {
+      setState(() => _queuedUserIndices.add(userIndex));
+      return;
+    }
+    await _runSendForUserIndex(userIndex);
+  }
+
+  Future<void> _runSendForUserIndex(int userIndex) async {
+    if (userIndex < 0 || userIndex >= _messages.length) {
+      _finishSendQueue();
+      return;
+    }
+    final text = _messages[userIndex].content;
+    _processingUserIndex = userIndex;
     _cancelStreamScrollFollow();
     _typewriter.reset();
     _liveEngine.value = null;
@@ -706,13 +740,15 @@ class _ChatPageState extends State<ChatPage> {
     _liveActivity.value = '';
     _startLivePhaseFallback();
     setState(() {
-      _messages.add(ChatMessage(role: 'user', content: text));
       _live = true;
       _busy = true;
     });
     _jumpToLatest(force: true);
 
-    final history = _messages.where((m) => m.role != 'error').toList();
+    final history = _messages
+        .sublist(0, userIndex + 1)
+        .where((m) => m.role != 'error')
+        .toList();
     var firstDelta = true;
 
     try {
@@ -812,17 +848,28 @@ class _ChatPageState extends State<ChatPage> {
       _typewriter.reset();
       await _persist();
     } finally {
+      _processingUserIndex = null;
       _stopLivePhaseFallback();
       _cancelStreamScrollFollow();
       if (mounted) {
-        setState(() {
-          _busy = false;
-          _live = false;
-        });
-        _mergeBackfill();
+        if (_queuedUserIndices.isNotEmpty) {
+          final next = _queuedUserIndices.removeAt(0);
+          unawaited(_runSendForUserIndex(next));
+        } else {
+          _finishSendQueue();
+        }
       }
       _jumpToLatest();
     }
+  }
+
+  void _finishSendQueue() {
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _live = false;
+    });
+    _mergeBackfill();
   }
 
   void _stop() {
@@ -1027,7 +1074,7 @@ class _ChatPageState extends State<ChatPage> {
               children: [
                 itemCount == 0
                     ? _EmptyChat(
-                        onPick: _busy || _preparingChat ? null : _send,
+                        onPick: _preparingChat ? null : _send,
                       )
                     : NotificationListener<ScrollNotification>(
                         onNotification: _onChatScrollNotification,
@@ -1044,8 +1091,12 @@ class _ChatPageState extends State<ChatPage> {
                         return _FinishedTurn(
                           key: ValueKey('m-$chronological-${message.role}'),
                           message: message,
+                          queued: _isQueuedUserMessage(chronological, message),
                           editing: _editingIndex == chronological,
-                          onEdit: message.role == 'user' && !_busy && !_live
+                          onEdit: message.role == 'user' &&
+                                  !_busy &&
+                                  !_live &&
+                                  !_isQueuedUserMessage(chronological, message)
                               ? () => _beginEdit(chronological)
                               : null,
                           onCancelEdit: _cancelEdit,
@@ -1081,6 +1132,7 @@ class _ChatPageState extends State<ChatPage> {
             controller: _input,
             focus: _focus,
             busy: _busy,
+            queueCount: _queuedCount,
             preparing: _preparingChat,
             voiceReady: _voiceReady,
             voiceInputMode: _voiceInputMode,
@@ -1250,6 +1302,7 @@ class _SuggestRow extends StatelessWidget {
 class _EditableUserTurn extends StatefulWidget {
   const _EditableUserTurn({
     required this.message,
+    this.queued = false,
     required this.editing,
     this.onEdit,
     this.onCancel,
@@ -1257,6 +1310,7 @@ class _EditableUserTurn extends StatefulWidget {
   });
 
   final ChatMessage message;
+  final bool queued;
   final bool editing;
   final VoidCallback? onEdit;
   final VoidCallback? onCancel;
@@ -1292,6 +1346,12 @@ class _EditableUserTurnState extends State<_EditableUserTurn> {
       railColor: Wx.accent,
       railWidth: 3,
       bottom: 20,
+      footer: widget.queued
+          ? Text(
+              '排队中',
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.muted),
+            )
+          : null,
       trailing: widget.editing || widget.onEdit == null
           ? null
           : IconButton(
@@ -1344,6 +1404,7 @@ class _FinishedTurn extends StatelessWidget {
   const _FinishedTurn({
     super.key,
     required this.message,
+    this.queued = false,
     this.editing = false,
     this.onEdit,
     this.onCancelEdit,
@@ -1351,6 +1412,7 @@ class _FinishedTurn extends StatelessWidget {
     this.onRetry,
   });
   final ChatMessage message;
+  final bool queued;
   final bool editing;
   final VoidCallback? onEdit;
   final VoidCallback? onCancelEdit;
@@ -1362,6 +1424,7 @@ class _FinishedTurn extends StatelessWidget {
     if (message.role == 'user') {
       return _EditableUserTurn(
         message: message,
+        queued: queued,
         editing: editing,
         onEdit: onEdit,
         onCancel: onCancelEdit,
@@ -1598,6 +1661,7 @@ class _Composer extends StatelessWidget {
     required this.controller,
     required this.focus,
     required this.busy,
+    this.queueCount = 0,
     this.preparing = false,
     required this.voiceReady,
     required this.voiceInputMode,
@@ -1619,6 +1683,7 @@ class _Composer extends StatelessWidget {
   final TextEditingController controller;
   final FocusNode focus;
   final bool busy;
+  final int queueCount;
   final bool preparing;
   final bool voiceReady;
   final bool voiceInputMode;
@@ -1639,7 +1704,6 @@ class _Composer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final voiceLocked = busy || preparing || sttBusy;
-    final inputLocked = busy || preparing;
     return ColoredBox(
       color: Wx.bg,
       child: SafeArea(
@@ -1650,6 +1714,14 @@ class _Composer extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              if (queueCount > 0)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    '还有 $queueCount 条排队，当前任务完成后自动执行',
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.muted),
+                  ),
+                ),
               if ((holding || sttBusy) && holdLive.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 10),
@@ -1699,7 +1771,7 @@ class _Composer extends StatelessWidget {
                             maxLines: 6,
                             textInputAction: TextInputAction.send,
                             onSubmitted: (_) {
-                              if (!inputLocked) onSend();
+                              if (!preparing) onSend();
                             },
                             enabled: !preparing,
                             decoration: InputDecoration(
@@ -1716,20 +1788,48 @@ class _Composer extends StatelessWidget {
                           ),
                   ),
                   const SizedBox(width: 8),
-                  SizedBox(
-                    width: Wx.tap,
-                    height: Wx.tap,
-                    child: busy
-                        ? IconButton(
-                            tooltip: '停止',
-                            onPressed: onStop,
-                            icon: const Icon(Icons.stop_circle_outlined, size: 26, color: Wx.accent),
-                          )
-                        : IconButton.filled(
-                            tooltip: '发送',
-                            onPressed: voiceInputMode || preparing ? null : onSend,
-                            icon: const Icon(Icons.arrow_upward, size: 20),
-                          ),
+                  ListenableBuilder(
+                    listenable: controller,
+                    builder: (context, _) {
+                      final draft = controller.text.trim();
+                      if (busy) {
+                        return Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            SizedBox(
+                              width: Wx.tap,
+                              height: Wx.tap,
+                              child: IconButton(
+                                key: const Key('wx-chat-stop'),
+                                tooltip: '停止当前',
+                                onPressed: onStop,
+                                icon: const Icon(Icons.stop_circle_outlined, size: 26, color: Wx.accent),
+                              ),
+                            ),
+                            SizedBox(
+                              width: Wx.tap,
+                              height: Wx.tap,
+                              child: IconButton.filled(
+                                key: const Key('wx-chat-send'),
+                                tooltip: draft.isEmpty ? '输入后排队' : '加入排队',
+                                onPressed: draft.isEmpty || preparing ? null : onSend,
+                                icon: const Icon(Icons.arrow_upward, size: 20),
+                              ),
+                            ),
+                          ],
+                        );
+                      }
+                      return SizedBox(
+                        width: Wx.tap,
+                        height: Wx.tap,
+                        child: IconButton.filled(
+                          key: const Key('wx-chat-send'),
+                          tooltip: '发送',
+                          onPressed: voiceInputMode || preparing ? null : onSend,
+                          icon: const Icon(Icons.arrow_upward, size: 20),
+                        ),
+                      );
+                    },
                   ),
                 ],
               ),

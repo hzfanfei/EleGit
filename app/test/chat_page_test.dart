@@ -228,8 +228,8 @@ void main() {
     await tester.tap(find.text('这个仓库最近在做什么？'));
     await tester.pump();
 
-    expect(find.byTooltip('停止'), findsOneWidget);
-    await tester.tap(find.byTooltip('停止'));
+    expect(find.byKey(const Key('wx-chat-stop')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('wx-chat-stop')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
     await tester.pump();
@@ -361,5 +361,58 @@ void main() {
     expect(find.text('按住 说话'), findsOneWidget);
     expect(find.byKey(const Key('wx-hold-speak')), findsOneWidget);
     expect(find.text('松手自动发送，上滑取消'), findsOneWidget);
+  });
+
+  testWidgets('busy chat enqueues further sends and runs them in order', (tester) async {
+    final api = FakeWenxiangApi(
+      streamPace: const Duration(milliseconds: 80),
+      streamEvents: [
+        ChatStreamEvent(type: 'start', engine: 'local-progress'),
+        ChatStreamEvent(type: 'delta', text: '第一条答完。'),
+        ChatStreamEvent(type: 'done', engine: 'local-progress', sessionId: 's1'),
+      ],
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: ChatPage(
+          api: api,
+          repo: sampleRepo(),
+          onBack: () {},
+        ),
+      ),
+    );
+    await tester.pump();
+    for (var i = 0; i < 30; i++) {
+      await tester.pump(const Duration(milliseconds: 20));
+      if (find.text('正在准备对话…').evaluate().isEmpty) break;
+    }
+    await tester.tap(find.text('这个仓库最近在做什么？'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 40));
+
+    await tester.enterText(find.byType(TextField), '第二条任务');
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('wx-chat-send')));
+    await tester.pump();
+
+    expect(find.text('第二条任务'), findsOneWidget);
+    expect(find.text('排队中'), findsOneWidget);
+    expect(find.textContaining('还有 1 条排队'), findsOneWidget);
+    expect(api.chatMessages, ['这个仓库最近在做什么？']);
+
+    for (var i = 0; i < 40; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+      if (api.chatMessages.length >= 2) break;
+    }
+    expect(api.chatMessages, [
+      '这个仓库最近在做什么？',
+      '第二条任务',
+    ]);
+    expect(find.textContaining('第一条答完'), findsOneWidget);
+    expect(find.text('排队中'), findsNothing);
+    for (var i = 0; i < 30; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
   });
 }
