@@ -61,6 +61,37 @@ void main() {
     expect(table.rows, isEmpty);
   });
 
+  test('highlights strings, comments, and keywords without dropping the line', () {
+    final span = wxHighlightedCode('const name = "问象"; // 备注');
+    expect(span.toPlainText(), 'const name = "问象"; // 备注');
+  });
+
+  testWidgets('renders task boxes, italics, links, and nested lists', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: const Scaffold(
+          body: WxReadableText(
+            '- [ ] 未做\n- [x] 已做\n- 父项\n  - 子项\n见 *斜体* 与 [文档](https://example.com)\n\n---\n\n> 一句引用',
+          ),
+        ),
+      ),
+    );
+    expect(find.byType(WxTaskBox), findsNWidgets(2));
+    expect(find.textContaining('[ ]'), findsNothing);
+    expect(find.textContaining('*斜体*'), findsNothing);
+    expect(find.textContaining('[文档]'), findsNothing);
+    expect(find.textContaining('未做'), findsOneWidget);
+    expect(find.textContaining('斜体'), findsOneWidget);
+    expect(find.textContaining('文档'), findsOneWidget);
+    expect(find.textContaining('一句引用'), findsOneWidget);
+    expect(find.textContaining('> '), findsNothing);
+    expect(find.byType(WxMarkdownRule), findsOneWidget);
+    final parent = tester.getTopLeft(find.textContaining('父项'));
+    final child = tester.getTopLeft(find.textContaining('子项'));
+    expect(child.dx, greaterThan(parent.dx + 8));
+  });
+
   testWidgets('renders headings and lists without raw markers', (tester) async {
     await tester.pumpWidget(
       MaterialApp(

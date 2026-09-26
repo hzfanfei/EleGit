@@ -24,9 +24,20 @@ class WxTableData {
 final _fence = RegExp(r'```([^\n]*)\n([\s\S]*?)```');
 final _openFence = RegExp(r'```([^\n]*)(?:\n|$)');
 final _heading = RegExp(r'^(#{1,3})\s+(.*)$');
+final _task = RegExp(r'^[-*]\s+\[([ xX])\]\s+(.*)$');
 final _bullet = RegExp(r'^[-*]\s+(.*)$');
+final _orderedTask = RegExp(r'^(\d+)\.\s+\[([ xX])\]\s+(.*)$');
 final _ordered = RegExp(r'^(\d+)\.\s+(.*)$');
+final _quote = RegExp(r'^>\s?(.*)$');
+final _rule = RegExp(r'^(?:-{3,}|\*{3,}|_{3,})$');
 final _sepCell = RegExp(r'^:?-+:?$');
+final _inlineToken = RegExp(
+  r'\*\*([^*]+)\*\*'
+  r'|\[([^\]\n]+)\]\(([^)\s]+)\)'
+  r'|`([^`]+)`'
+  r'|\*([^*\n]+)\*'
+  r'|(?<![A-Za-z0-9_])_([^_\n]+)_(?![A-Za-z0-9_])',
+);
 
 String _fenceLanguage(String raw) {
   final token = raw.trim().split(RegExp(r'\s+')).firstWhere(
@@ -149,13 +160,15 @@ class WxReadableText extends StatelessWidget {
   }
 }
 
-/// Headings, lists, or pipe tables — use structured renderers instead of plain text.
+/// Headings, lists, quotes, rules, or pipe tables — use structured renderers.
 bool looksLikeStructuredMarkdown(String text) {
   return text.split('\n').any((line) {
     final trimmed = line.trim();
     return _heading.hasMatch(trimmed) ||
         _bullet.hasMatch(trimmed) ||
         _ordered.hasMatch(trimmed) ||
+        _quote.hasMatch(trimmed) ||
+        _rule.hasMatch(trimmed) ||
         isMarkdownTableLine(trimmed);
   });
 }
@@ -251,49 +264,114 @@ Widget _prose(String text, Color color, bool selectable) {
 }
 
 Widget _structuredLine(String line, Color color, bool selectable) {
-  final trimmed = line.trimRight();
-  final heading = _heading.firstMatch(trimmed.trimLeft());
+  final indent = line.length - line.trimLeft().length;
+  final level = (indent ~/ 2).clamp(0, 8);
+  final trimmed = line.trimLeft();
+  if (_rule.hasMatch(trimmed)) return const WxMarkdownRule();
+  final heading = _heading.firstMatch(trimmed);
   if (heading != null) {
-    final level = heading.group(1)!.length;
-    final size = level == 1 ? 20.0 : level == 2 ? 18.0 : 16.0;
-    return _inline(
-      heading.group(2) ?? '',
-      color,
-      selectable,
-      size: size,
-      weight: FontWeight.w600,
+    final depth = heading.group(1)!.length;
+    final size = depth == 1 ? 20.0 : depth == 2 ? 18.0 : 16.0;
+    return _pad(
+      level,
+      _inline(
+        heading.group(2) ?? '',
+        color,
+        selectable,
+        size: size,
+        weight: FontWeight.w600,
+      ),
     );
   }
-  final bullet = _bullet.firstMatch(trimmed.trimLeft());
+  final task = _task.firstMatch(trimmed);
+  if (task != null) {
+    return _taskRow(
+      task.group(1)!.trim().isNotEmpty,
+      task.group(2) ?? '',
+      color,
+      selectable,
+      level,
+    );
+  }
+  final orderedTask = _orderedTask.firstMatch(trimmed);
+  if (orderedTask != null) {
+    return _taskRow(
+      orderedTask.group(2)!.trim().isNotEmpty,
+      orderedTask.group(3) ?? '',
+      color,
+      selectable,
+      level,
+    );
+  }
+  final bullet = _bullet.firstMatch(trimmed);
   if (bullet != null) {
-    return _listRow('·', bullet.group(1) ?? '', color, selectable);
+    return _listRow(level == 0 ? '•' : '◦', bullet.group(1) ?? '', color, selectable, level);
   }
-  final ordered = _ordered.firstMatch(trimmed.trimLeft());
+  final ordered = _ordered.firstMatch(trimmed);
   if (ordered != null) {
-    return _listRow('${ordered.group(1)}.', ordered.group(2) ?? '', color, selectable);
+    return _listRow('${ordered.group(1)}.', ordered.group(2) ?? '', color, selectable, level);
   }
-  if (trimmed.trim().isEmpty) return const SizedBox(height: 4);
-  return _inline(line, color, selectable);
-}
-
-Widget _listRow(String mark, String text, Color color, bool selectable) {
-  return Row(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      SizedBox(
-        width: 22,
-        child: Text(
-          mark,
-          style: const TextStyle(
-            color: Wx.muted,
-            fontSize: 16,
-            height: 1.55,
-            fontFamilyFallback: Wx.fontFallback,
+  final quote = _quote.firstMatch(trimmed);
+  if (quote != null) {
+    return _pad(
+      level,
+      DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border(
+            left: BorderSide(color: Wx.accent.withValues(alpha: 0.55), width: 2),
           ),
         ),
+        child: Padding(
+          padding: const EdgeInsets.only(left: 10),
+          child: _inline(quote.group(1) ?? '', Wx.muted, selectable),
+        ),
       ),
-      Expanded(child: _inline(text, color, selectable)),
-    ],
+    );
+  }
+  if (trimmed.isEmpty) return const SizedBox(height: 4);
+  return _pad(level, _inline(line, color, selectable));
+}
+
+Widget _pad(int level, Widget child) {
+  if (level <= 0) return child;
+  return Padding(padding: EdgeInsets.only(left: level * 14), child: child);
+}
+
+Widget _taskRow(bool checked, String text, Color color, bool selectable, int level) {
+  return _pad(
+    level,
+    Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        WxTaskBox(checked: checked),
+        const SizedBox(width: 6),
+        Expanded(child: _inline(text, color, selectable)),
+      ],
+    ),
+  );
+}
+
+Widget _listRow(String mark, String text, Color color, bool selectable, int level) {
+  return _pad(
+    level,
+    Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 22,
+          child: Text(
+            mark,
+            style: TextStyle(
+              color: level == 0 ? Wx.muted : Wx.faint,
+              fontSize: level == 0 ? 15 : 13,
+              height: 1.55,
+              fontFamilyFallback: Wx.fontFallback,
+            ),
+          ),
+        ),
+        Expanded(child: _inline(text, color, selectable)),
+      ],
+    ),
   );
 }
 
@@ -305,9 +383,8 @@ Widget _inline(
   FontWeight weight = FontWeight.w400,
 }) {
   final spans = <InlineSpan>[];
-  final token = RegExp(r'\*\*([^*]+)\*\*|`([^`]+)`');
   var cursor = 0;
-  for (final match in token.allMatches(text)) {
+  for (final match in _inlineToken.allMatches(text)) {
     if (match.start > cursor) {
       spans.add(TextSpan(text: breakLongRuns(text.substring(cursor, match.start))));
     }
@@ -316,15 +393,30 @@ Widget _inline(
         text: breakLongRuns(match.group(1)!),
         style: const TextStyle(fontWeight: FontWeight.w600),
       ));
-    } else {
+    } else if (match.group(2) != null) {
       spans.add(TextSpan(
         text: breakLongRuns(match.group(2)!),
+        style: TextStyle(
+          color: Wx.accent,
+          decoration: TextDecoration.underline,
+          decorationColor: Wx.accent.withValues(alpha: 0.45),
+        ),
+      ));
+    } else if (match.group(4) != null) {
+      spans.add(TextSpan(
+        text: breakLongRuns(match.group(4)!),
         style: const TextStyle(
           fontFamily: 'ui-monospace',
           fontFamilyFallback: ['SF Mono', 'Menlo', 'Consolas', 'monospace'],
-          backgroundColor: Color(0x221C1F24),
+          backgroundColor: Color(0x1F3E362F),
           fontSize: 14.5,
         ),
+      ));
+    } else {
+      final italic = match.group(5) ?? match.group(6) ?? '';
+      spans.add(TextSpan(
+        text: breakLongRuns(italic),
+        style: const TextStyle(fontStyle: FontStyle.italic),
       ));
     }
     cursor = match.end;
@@ -355,10 +447,141 @@ const _mono = TextStyle(
   color: Wx.text,
 );
 
+final _codeToken = RegExp([
+  r'"""[\s\S]*?"""',
+  r"'''[\s\S]*?'''",
+  r'"(?:\\.|[^"\\])*"',
+  r"'(?:\\.|[^'\\])*'",
+  r'//[^\n]*',
+  r'/\*[\s\S]*?\*/',
+  r'\b\d+(?:\.\d+)?\b',
+  r'\b(?:if|else|elif|return|class|import|const|final|var|let|function|def|true|false|null|void|for|while|switch|case|new|this|async|await|extends|implements|static|package|fn|pub|yield|break|continue|try|catch|throw)\b',
+].join('|'));
+
+/// Quiet highlighting: comments faint, strings ochre, numbers muted, keywords heavier.
+TextSpan wxHighlightedCode(String code, {TextStyle base = _mono}) {
+  if (code.isEmpty) return TextSpan(text: ' ', style: base);
+  final spans = <InlineSpan>[];
+  var cursor = 0;
+  for (final match in _codeToken.allMatches(code)) {
+    if (match.start > cursor) {
+      spans.add(TextSpan(text: breakLongRuns(code.substring(cursor, match.start))));
+    }
+    final token = match.group(0)!;
+    spans.add(TextSpan(text: breakLongRuns(token), style: _codeTokenStyle(token, base)));
+    cursor = match.end;
+  }
+  if (cursor < code.length) {
+    spans.add(TextSpan(text: breakLongRuns(code.substring(cursor))));
+  }
+  return TextSpan(style: base, children: spans);
+}
+
+TextStyle _codeTokenStyle(String token, TextStyle base) {
+  if (token.startsWith('"') || token.startsWith("'")) {
+    return base.copyWith(color: Wx.accent);
+  }
+  if (token.startsWith('//') || token.startsWith('/*')) {
+    return base.copyWith(color: Wx.faint);
+  }
+  if (RegExp(r'^\d').hasMatch(token)) {
+    return base.copyWith(color: Wx.muted);
+  }
+  return base.copyWith(fontWeight: FontWeight.w600);
+}
+
+/// Prose tail while a chat block is still streaming. Complete tokens only.
+class WxInlineMarkdown extends StatelessWidget {
+  const WxInlineMarkdown(
+    this.text, {
+    super.key,
+    this.color = Wx.text,
+    this.size = 16,
+    this.selectable = true,
+  });
+
+  final String text;
+  final Color color;
+  final double size;
+  final bool selectable;
+
+  @override
+  Widget build(BuildContext context) {
+    return _inline(text, color, selectable, size: size);
+  }
+}
+
+class WxMarkdownRule extends StatelessWidget {
+  const WxMarkdownRule({super.key, this.color = Wx.hairline});
+
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: SizedBox(
+        height: 1,
+        child: ColoredBox(color: color),
+      ),
+    );
+  }
+}
+
+class WxTaskBox extends StatelessWidget {
+  const WxTaskBox({super.key, required this.checked});
+
+  final bool checked;
+
+  @override
+  Widget build(BuildContext context) {
+    final ink = checked ? Wx.accent : Wx.muted;
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, right: 2),
+      child: SizedBox(
+        width: 14,
+        height: 14,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(2),
+            border: Border.all(color: ink),
+            color: checked ? Wx.accent.withValues(alpha: 0.18) : const Color(0x00000000),
+          ),
+          child: checked
+              ? const Center(child: Icon(Icons.check, size: 10, color: Wx.accent))
+              : null,
+        ),
+      ),
+    );
+  }
+}
+
 class _CodeBlock extends StatelessWidget {
   const _CodeBlock(this.code, {this.language = ''});
   final String code;
   final String language;
+
+  @override
+  Widget build(BuildContext context) {
+    return WxFencedCode(code: code, language: language);
+  }
+}
+
+class WxFencedCode extends StatelessWidget {
+  const WxFencedCode({
+    super.key,
+    required this.code,
+    this.language = '',
+    this.framed = true,
+    this.style = _mono,
+    this.blockKey = const Key('wx-code-block'),
+  });
+
+  final String code;
+  final String language;
+  final bool framed;
+  final TextStyle style;
+  final Key blockKey;
 
   Future<void> _copy(BuildContext context) async {
     await Clipboard.setData(ClipboardData(text: code));
@@ -370,55 +593,54 @@ class _CodeBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final body = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 2, 2, 0),
+          child: Row(
+            children: [
+              if (language.isNotEmpty)
+                Text(
+                  language,
+                  style: const TextStyle(
+                    color: Wx.muted,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.35,
+                    fontFamilyFallback: Wx.fontFallback,
+                  ),
+                ),
+              const Spacer(),
+              IconButton(
+                tooltip: '复制',
+                onPressed: () => _copy(context),
+                icon: const Icon(Icons.copy_outlined, size: 16, color: Wx.muted),
+                visualDensity: VisualDensity.compact,
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+              ),
+            ],
+          ),
+        ),
+        const ColoredBox(
+          color: Wx.hairline,
+          child: SizedBox(height: 1),
+        ),
+        Padding(
+          key: blockKey,
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+          child: SelectableText.rich(wxHighlightedCode(code, base: style)),
+        ),
+      ],
+    );
+    if (!framed) return body;
     return DecoratedBox(
       decoration: BoxDecoration(
         color: Wx.raised,
         borderRadius: BorderRadius.circular(Wx.radius),
         border: Border.all(color: Wx.hairline),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 2, 2, 0),
-            child: Row(
-              children: [
-                if (language.isNotEmpty)
-                  Text(
-                    language,
-                    style: const TextStyle(
-                      color: Wx.accent,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 0.35,
-                      fontFamilyFallback: Wx.fontFallback,
-                    ),
-                  ),
-                const Spacer(),
-                IconButton(
-                  tooltip: '复制',
-                  onPressed: () => _copy(context),
-                  icon: const Icon(Icons.copy_outlined, size: 16, color: Wx.muted),
-                  visualDensity: VisualDensity.compact,
-                  constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                ),
-              ],
-            ),
-          ),
-          const ColoredBox(
-            color: Wx.hairline,
-            child: SizedBox(height: 1),
-          ),
-          Padding(
-            key: const Key('wx-code-block'),
-            padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
-            child: SelectableText(
-              code.isEmpty ? ' ' : breakLongRuns(code),
-              style: _mono,
-            ),
-          ),
-        ],
-      ),
+      child: body,
     );
   }
 }

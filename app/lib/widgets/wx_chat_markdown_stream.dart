@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 
 import '../theme.dart';
-import '../utils/text_fit.dart';
 import 'wx_rich_text.dart';
 import 'wx_unified_markdown.dart';
 
@@ -328,9 +327,10 @@ class _PendingView extends StatelessWidget {
           height: 1.55,
           fontFamilyFallback: Wx.fontFallback,
         );
-    return SelectableText(
-      breakLongRuns(text),
-      style: style,
+    return WxInlineMarkdown(
+      text,
+      color: style?.color ?? Wx.text,
+      size: style?.fontSize ?? 16,
     );
   }
 }
@@ -432,7 +432,10 @@ MarkdownStyleSheet chatMarkdownStyle(ThemeData theme) {
       decoration: TextDecoration.lineThrough,
       color: Wx.muted,
     ),
-    listBullet: body,
+    listBullet: body.copyWith(color: Wx.muted, fontSize: 14, height: 1.4),
+    listIndent: 22,
+    listBulletPadding: const EdgeInsets.only(right: 4),
+    checkbox: body.copyWith(color: Wx.muted, fontSize: 16),
     blockquote: body.copyWith(color: Wx.muted, fontSize: 15.5),
     blockquotePadding: const EdgeInsets.fromLTRB(12, 8, 10, 8),
     blockquoteDecoration: BoxDecoration(
@@ -466,7 +469,6 @@ MarkdownStyleSheet chatMarkdownStyle(ThemeData theme) {
     tableCellsPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
     tableColumnWidth: const IntrinsicColumnWidth(),
     blockSpacing: 16,
-    listIndent: 22,
     horizontalRuleDecoration: BoxDecoration(
       border: Border(top: BorderSide(color: Wx.hairline, width: 0.6)),
     ),

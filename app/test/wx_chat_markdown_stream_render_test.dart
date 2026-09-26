@@ -3,6 +3,7 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wenxiang/theme.dart';
 import 'package:wenxiang/widgets/wx_chat_markdown_stream.dart';
+import 'package:wenxiang/widgets/wx_rich_text.dart';
 
 Future<void> _pumpWithSource(
   WidgetTester tester,
@@ -76,6 +77,8 @@ void main() {
       expect(find.textContaining('README'), findsOneWidget);
       expect(find.textContaining('npm start'), findsOneWidget);
       expect(find.textContaining('name: 问象'), findsOneWidget);
+      expect(find.text('yaml'), findsOneWidget);
+      expect(find.byKey(const Key('wx-md-code')), findsOneWidget);
       expect(find.textContaining('**'), findsNothing);
       expect(find.textContaining('```'), findsNothing);
     });
@@ -89,6 +92,37 @@ void main() {
       expect(find.textContaining('引用一句'), findsOneWidget);
       expect(find.textContaining('正文继续'), findsOneWidget);
       expect(find.textContaining('> 引用'), findsNothing);
+      expect(find.byType(WxMarkdownRule), findsOneWidget);
+    });
+
+    testWidgets('任务列表画成方框，嵌套列表不挤在同一列', (tester) async {
+      await _pumpWithSource(
+        tester,
+        '- [ ] 待办\n- [x] 完成\n- 父项\n  - 子项\n',
+      );
+      expect(tester.takeException(), isNull);
+      expect(find.byType(WxTaskBox), findsNWidgets(2));
+      expect(find.textContaining('[ ]'), findsNothing);
+      expect(find.textContaining('[x]'), findsNothing);
+      expect(find.textContaining('待办'), findsOneWidget);
+      expect(find.textContaining('完成'), findsOneWidget);
+      final parent = tester.getTopLeft(find.textContaining('父项'));
+      final child = tester.getTopLeft(find.textContaining('子项'));
+      expect(child.dx, greaterThan(parent.dx + 8));
+    });
+
+    testWidgets('流式尾部的斜体和链接不露出标记', (tester) async {
+      await _pumpWithSource(
+        tester,
+        '第一段已写完。\n\n这是 *斜体* 与 [文档](https://example.com)',
+        showCaret: true,
+      );
+      expect(tester.takeException(), isNull);
+      expect(find.byType(MarkdownBody), findsOneWidget);
+      expect(find.textContaining('*斜体*'), findsNothing);
+      expect(find.textContaining('[文档](https://'), findsNothing);
+      expect(find.textContaining('斜体'), findsOneWidget);
+      expect(find.textContaining('文档'), findsOneWidget);
     });
 
     testWidgets('流式：已完成块 Markdown，尾部纯文本', (tester) async {

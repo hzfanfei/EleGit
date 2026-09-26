@@ -44,7 +44,9 @@ MarkdownStyleSheet bookReaderMarkdownStyle({
       decoration: TextDecoration.lineThrough,
       color: palette.muted,
     ),
-    listBullet: body,
+    listBullet: body.copyWith(color: palette.muted, fontSize: (body.fontSize ?? 16) - 1, height: 1.4),
+    listBulletPadding: const EdgeInsets.only(right: 4),
+    checkbox: TextStyle(color: palette.muted, fontSize: 16),
     blockquote: body.copyWith(color: palette.muted, fontSize: settings.fontSize - 0.5),
     blockquotePadding: const EdgeInsets.fromLTRB(12, 8, 10, 8),
     blockquoteDecoration: BoxDecoration(
@@ -76,7 +78,7 @@ MarkdownStyleSheet bookReaderMarkdownStyle({
     tableCellsPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
     tableColumnWidth: const IntrinsicColumnWidth(),
     blockSpacing: 22,
-    listIndent: 24,
+    listIndent: 22,
     horizontalRuleDecoration: BoxDecoration(
       border: Border(top: BorderSide(color: palette.ink.withValues(alpha: 0.14), width: 0.6)),
     ),
