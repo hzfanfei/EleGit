@@ -196,6 +196,7 @@ class ChatStreamEvent {
     this.error,
     this.sessionId,
     this.phase,
+    this.detail,
     this.code,
     this.hint,
     this.pcm,
@@ -210,6 +211,7 @@ class ChatStreamEvent {
   final String? error;
   final String? sessionId;
   final String? phase;
+  final String? detail;
   final String? code;
   final String? hint;
   final Uint8List? pcm;
@@ -244,6 +246,7 @@ class ChatStreamEvent {
         error: json['error']?.toString(),
         sessionId: json['sessionId']?.toString(),
         phase: json['phase']?.toString(),
+        detail: json['detail']?.toString(),
         code: json['code']?.toString(),
         hint: json['hint']?.toString(),
         pcm: pcm,

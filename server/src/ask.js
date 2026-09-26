@@ -232,11 +232,13 @@ export async function* streamAnswer({
   const engine = detectEngine();
   if (engine && sessions && session) {
     yield { type: "start", engine: "acp" };
+    yield { type: "status", phase: "agent", detail: "正在调用本机 Agent…" };
     const queue = [];
     let notify;
     let finished = false;
     let fail = null;
     let full = "";
+    let lastActivity = "";
     sessions
       .prompt(session, {
         question,
@@ -249,7 +251,14 @@ export async function* streamAnswer({
         staticFiles,
         onDelta: (chunk) => {
           full += chunk;
-          queue.push(chunk);
+          queue.push({ kind: "delta", text: chunk });
+          notify?.();
+        },
+        onActivity: (detail) => {
+          const label = String(detail || "").trim();
+          if (!label || label === lastActivity) return;
+          lastActivity = label;
+          queue.push({ kind: "status", phase: "activity", detail: label });
           notify?.();
         },
       })
@@ -275,7 +284,12 @@ export async function* streamAnswer({
         continue;
       }
       const piece = queue.shift();
-      if (piece) yield { type: "delta", text: piece };
+      if (!piece) continue;
+      if (piece.kind === "status") {
+        yield { type: "status", phase: piece.phase, detail: piece.detail };
+      } else if (piece.text) {
+        yield { type: "delta", text: piece.text };
+      }
     }
     if (!fail && full) {
       if (workspaceRoot) {

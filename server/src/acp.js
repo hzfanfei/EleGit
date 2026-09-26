@@ -444,6 +444,70 @@ export function acpVisibleTextFromUpdate(update) {
   return sanitizeAcpUserVisibleText(text);
 }
 
+function acpActivityPath(update) {
+  const loc = update?.locations?.[0]?.path;
+  if (loc) return String(loc);
+  if (update?.path) return String(update.path);
+  if (update?.toolCall?.path) return String(update.toolCall.path);
+  return "";
+}
+
+function clipActivityLabel(text, max = 56) {
+  const raw = String(text || "").replace(/\s+/g, " ").trim();
+  if (raw.length <= max) return raw;
+  return `${raw.slice(0, max - 1)}…`;
+}
+
+function basenameForActivity(rawPath) {
+  const normalized = String(rawPath || "").replace(/\\/g, "/");
+  const base = path.basename(normalized);
+  return clipActivityLabel(base, 40);
+}
+
+/** Short Chinese status for tool / search phases (never includes reasoning text). */
+export function acpActivityLabelFromUpdate(update) {
+  if (!update || typeof update !== "object") return "";
+  const kind = String(update.sessionUpdate || "");
+  if (
+    kind === "agent_message_chunk" ||
+    kind === "agent_message" ||
+    kind === "usage_update" ||
+    ACP_HIDDEN_SESSION_UPDATES.has(kind)
+  ) {
+    return "";
+  }
+
+  const filePath = acpActivityPath(update);
+  const title = String(
+    update.title || update.toolCall?.title || update.toolCall?.name || "",
+  ).trim();
+  const toolKind = String(update.toolCall?.kind || update.kind || "").trim();
+  const hay = `${kind} ${title} ${toolKind}`.toLowerCase();
+
+  if (/read|glob|grep|search|ripgrep|list|file|semsearch|codebase|fetch/.test(hay)) {
+    if (filePath) return `正在查看 ${basenameForActivity(filePath)}`;
+    return "正在搜索或读取仓库…";
+  }
+  if (/write|edit|patch|apply|shell|run|terminal|command|bash|npm|git|delete/.test(hay)) {
+    if (filePath) return `正在修改 ${basenameForActivity(filePath)}`;
+    return "正在执行命令或修改文件…";
+  }
+  if (/tool|mcp|invoke|started|running|progress/.test(hay) || kind.includes("tool")) {
+    if (title) return clipActivityLabel(`正在执行：${title}`, 56);
+    return "正在调用工具…";
+  }
+  if (kind && !kind.startsWith("agent_")) {
+    if (title) return clipActivityLabel(title, 56);
+  }
+  return "";
+}
+
+export function acpActivityLabelFromFsRead(rawPath) {
+  const base = basenameForActivity(rawPath);
+  if (base) return `正在读取 ${base}`;
+  return "正在读取文件…";
+}
+
 function resolveUnderCwd(cwd, rawPath) {
   const abs = path.resolve(cwd, String(rawPath || ""));
   const root = path.resolve(cwd);
@@ -491,6 +555,7 @@ export class AcpChannel {
     this.idleTimer = null;
     this.prompting = 0;
     this.onDelta = null;
+    this.onActivity = null;
     this._lastDeltaAt = 0;
     this._usageAt = 0;
   }
@@ -612,15 +677,17 @@ export class AcpChannel {
     }
   }
 
-  async prompt(text, { onDelta, timeoutMs = acpPromptTimeoutMs() } = {}) {
+  async prompt(text, { onDelta, onActivity, timeoutMs = acpPromptTimeoutMs() } = {}) {
     if (!this.alive) await this.start();
     this.prompting += 1;
     this._touch();
     try {
       if (this.isClaudeProvider()) {
-        return await this._promptClaudeStream(text, { onDelta, timeoutMs });
+        return await this._promptClaudeStream(text, { onDelta, onActivity, timeoutMs });
       }
       this.onDelta = onDelta;
+      this.onActivity = onActivity;
+      onActivity?.("已提交问题，等待 Agent 响应…");
       const result = await this.request(
         "session/prompt",
         {
@@ -632,16 +699,19 @@ export class AcpChannel {
       return result;
     } finally {
       this.onDelta = null;
+      this.onActivity = null;
       this.prompting = Math.max(0, this.prompting - 1);
       this._touch();
     }
   }
 
-  async _promptClaudeStream(text, { onDelta, timeoutMs = acpPromptTimeoutMs() }) {
+  async _promptClaudeStream(text, { onDelta, onActivity, timeoutMs = acpPromptTimeoutMs() }) {
     this.onDelta = (chunk) => {
       this._lastDeltaAt = Date.now();
       onDelta?.(chunk);
     };
+    this.onActivity = onActivity;
+    onActivity?.("已提交问题，等待 Agent 响应…");
     try {
       // Wait for session/prompt to finish. Do not cancel on short SSE idle: Claude Code
       // often goes silent for seconds while listing/reading files during code review.
@@ -655,6 +725,7 @@ export class AcpChannel {
       );
     } finally {
       this.onDelta = null;
+      this.onActivity = null;
     }
   }
 
@@ -803,9 +874,13 @@ export class AcpChannel {
       }
       const text = acpVisibleTextFromUpdate(update);
       if (text) this.onDelta?.(text);
+      const activity = acpActivityLabelFromUpdate(update);
+      if (activity) this.onActivity?.(activity);
       return;
     }
     if (msg.method === "fs/read_text_file") {
+      const readLabel = acpActivityLabelFromFsRead(msg.params?.path);
+      if (readLabel) this.onActivity?.(readLabel);
       try {
         this.respond(msg.id, readTextUnderCwd(this.cwd, msg.params?.path));
       } catch (err) {
@@ -1028,7 +1103,18 @@ export function createSessionStore({
     return sessions.get(activeByRepo.get(repoKey(owner, repo)));
   }
 
-  async function prompt(session, { question, history, githubContext, bookContext, cwd, onDelta, buildPrompt, agentMode = false, staticFiles }) {
+  async function prompt(session, {
+    question,
+    history,
+    githubContext,
+    bookContext,
+    cwd,
+    onDelta,
+    onActivity,
+    buildPrompt,
+    agentMode = false,
+    staticFiles,
+  }) {
     const command = resolveCommand();
     if (!command) {
       const err = new Error("ACP agent not found");
@@ -1071,7 +1157,7 @@ export function createSessionStore({
       channel.agentMode = write;
       try {
         await channel.applySessionMode();
-        await channel.prompt(text, { onDelta });
+        await channel.prompt(text, { onDelta, onActivity });
         entry.primedSessionId = session.id;
       } finally {
         channel.agentMode = false;

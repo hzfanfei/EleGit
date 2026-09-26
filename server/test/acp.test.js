@@ -10,6 +10,8 @@ import {
   acpModelId,
   acpPromptTimeoutMs,
   claudeConfiguredModel,
+  acpActivityLabelFromFsRead,
+  acpActivityLabelFromUpdate,
   acpVisibleTextFromUpdate,
   applyAcpEnginePreference,
   sanitizeAcpUserVisibleText,
@@ -176,6 +178,34 @@ describe("selectPermissionOption", () => {
       ),
       "allow-always",
     );
+  });
+});
+
+describe("acpActivityLabelFromUpdate", () => {
+  it("describes tool and read activity without leaking thought text", () => {
+    assert.equal(
+      acpActivityLabelFromUpdate({
+        sessionUpdate: "tool_call_update",
+        toolCall: { title: "Grep", kind: "search" },
+      }),
+      "正在搜索或读取仓库…",
+    );
+    assert.equal(
+      acpActivityLabelFromUpdate({
+        sessionUpdate: "tool_call",
+        title: "Read chat_page.dart",
+        path: "app/lib/screens/chat_page.dart",
+      }),
+      "正在查看 chat_page.dart",
+    );
+    assert.equal(
+      acpActivityLabelFromUpdate({
+        sessionUpdate: "agent_thought_chunk",
+        content: { type: "text", text: "secret plan" },
+      }),
+      "",
+    );
+    assert.equal(acpActivityLabelFromFsRead("src/acp.js"), "正在读取 acp.js");
   });
 });
 

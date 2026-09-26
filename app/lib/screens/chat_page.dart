@@ -70,6 +70,7 @@ class _ChatPageState extends State<ChatPage> {
   late final WxTypewriterStream _typewriter;
   final ValueNotifier<String?> _liveEngine = ValueNotifier(null);
   final ValueNotifier<String> _livePhase = ValueNotifier('connect');
+  final ValueNotifier<String> _liveActivity = ValueNotifier('');
   Timer? _livePhaseTimer;
   Timer? _streamScrollTimer;
   double _lastFollowExtent = -1;
@@ -702,6 +703,7 @@ class _ChatPageState extends State<ChatPage> {
     _typewriter.reset();
     _liveEngine.value = null;
     _livePhase.value = 'connect';
+    _liveActivity.value = '';
     _startLivePhaseFallback();
     setState(() {
       _messages.add(ChatMessage(role: 'user', content: text));
@@ -726,8 +728,15 @@ class _ChatPageState extends State<ChatPage> {
         if (event.sessionId != null && event.sessionId!.isNotEmpty) {
           _rememberSessionId(event.sessionId);
         }
-        if (event.type == 'status' && event.phase != null && event.phase!.isNotEmpty) {
-          _setLivePhase(event.phase!);
+        if (event.type == 'status') {
+          final detail = event.detail?.trim();
+          if (detail != null && detail.isNotEmpty) {
+            _liveActivity.value = detail;
+          }
+          final phase = event.phase?.trim();
+          if (phase != null && phase.isNotEmpty && phase != 'activity') {
+            _setLivePhase(phase);
+          }
         } else if (event.type == 'delta' && event.text.isNotEmpty) {
           if (firstDelta) {
             firstDelta = false;
@@ -948,6 +957,7 @@ class _ChatPageState extends State<ChatPage> {
     _typewriter.dispose();
     _liveEngine.dispose();
     _livePhase.dispose();
+    _liveActivity.dispose();
     super.dispose();
   }
 
@@ -1049,6 +1059,7 @@ class _ChatPageState extends State<ChatPage> {
                         text: _typewriter.visible,
                         engine: _liveEngine,
                         phase: _livePhase,
+                        activity: _liveActivity,
                       );
                     },
                         ),
@@ -1402,6 +1413,8 @@ String _livePhaseLabel(String phase) {
   switch (phase) {
     case 'repo':
       return '读仓库、整理上下文…';
+    case 'agent':
+      return '连接本机 Agent…';
     case 'generate':
       return '生成回答…';
     case 'connect':
@@ -1415,10 +1428,12 @@ class _LiveTurn extends StatelessWidget {
     required this.text,
     required this.engine,
     required this.phase,
+    required this.activity,
   });
   final ValueNotifier<String> text;
   final ValueNotifier<String?> engine;
   final ValueNotifier<String> phase;
+  final ValueNotifier<String> activity;
 
   @override
   Widget build(BuildContext context) {
@@ -1442,30 +1457,63 @@ class _LiveTurn extends StatelessWidget {
       child: ValueListenableBuilder<String>(
         valueListenable: text,
         builder: (context, value, _) {
-          if (value.isEmpty) {
-            return ValueListenableBuilder<String>(
-              valueListenable: phase,
-              builder: (context, livePhase, _) {
-                return Semantics(
-                  liveRegion: true,
-                  child: Row(
-                    children: [
-                      Text(
-                        _livePhaseLabel(livePhase),
-                        style: const TextStyle(color: Wx.muted, fontSize: 16, height: 1.55),
-                      ),
-                      const SizedBox(width: 8),
-                      const _Caret(),
-                    ],
-                  ),
+          final body = value.isEmpty
+              ? ValueListenableBuilder<String>(
+                  valueListenable: phase,
+                  builder: (context, livePhase, _) {
+                    return ValueListenableBuilder<String>(
+                      valueListenable: activity,
+                      builder: (context, liveActivity, _) {
+                        final label = liveActivity.isNotEmpty
+                            ? liveActivity
+                            : _livePhaseLabel(livePhase);
+                        return Semantics(
+                          liveRegion: true,
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  label,
+                                  style: const TextStyle(color: Wx.muted, fontSize: 16, height: 1.55),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              const _Caret(),
+                            ],
+                          ),
+                        );
+                      },
+                    );
+                  },
+                )
+              : WxChatMarkdownStream(
+                  source: text,
+                  styleSheet: chatMarkdownStyle(Theme.of(context)),
+                  showCaret: true,
                 );
-              },
-            );
-          }
-          return WxChatMarkdownStream(
-            source: text,
-            styleSheet: chatMarkdownStyle(Theme.of(context)),
-            showCaret: true,
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              body,
+              ValueListenableBuilder<String>(
+                valueListenable: activity,
+                builder: (context, liveActivity, _) {
+                  if (liveActivity.isEmpty) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      liveActivity,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                            color: Wx.muted,
+                            height: 1.4,
+                          ),
+                    ),
+                  );
+                },
+              ),
+            ],
           );
         },
       ),
