@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { sampleMark, GRAPHITE, CLAY } from "../../scripts/wenxiang-mark.mjs";
+import { sampleMark, SURFACE, ACCENT } from "../../scripts/wenxiang-mark.mjs";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -12,12 +12,14 @@ function isPng(buf) {
 }
 
 describe("问象 launcher mark", () => {
-  it("paints graphite and clay, not Flutter blue", () => {
+  it("paints the seal in ink and ochre, not Flutter blue", () => {
     const shot = sampleMark(64);
-    assert.deepEqual(shot.center, GRAPHITE);
-    assert.ok(shot.hasClay);
+    assert.deepEqual(shot.center, ACCENT);
+    assert.deepEqual(shot.corner, SURFACE);
+    assert.ok(shot.hasAccent);
     assert.equal(shot.hasFlutterBlue, false);
-    assert.deepEqual(CLAY, [0xc9, 0x84, 0x5a, 0xff]);
+    assert.deepEqual(ACCENT, [0xa6, 0x7c, 0x52, 0xff]);
+    assert.deepEqual(SURFACE, [0x1a, 0x17, 0x14, 0xff]);
   });
 
   it("replaces Flutter default icons on shipped platforms", () => {

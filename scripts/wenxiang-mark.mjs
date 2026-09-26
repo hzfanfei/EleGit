@@ -1,8 +1,8 @@
 import { deflateSync } from "node:zlib";
 
-export const GRAPHITE = [0x16, 0x18, 0x1c, 0xff];
-export const CLAY = [0xc9, 0x84, 0x5a, 0xff];
-export const MUTED = [0x9a, 0x95, 0x8c, 0xff];
+/** Same ink and ochre as Wx.surface / Wx.accent. */
+export const SURFACE = [0x1a, 0x17, 0x14, 0xff];
+export const ACCENT = [0xa6, 0x7c, 0x52, 0xff];
 
 function crc32(buf) {
   let c = ~0;
@@ -76,13 +76,6 @@ function roundedRectCoverage(px, py, x, y, w, h, r) {
   return 1 - (d + 1) / 2;
 }
 
-function circleCoverage(px, py, cx, cy, r) {
-  const d = Math.hypot(px - cx, py - cy) - r;
-  if (d >= 1) return 0;
-  if (d <= -1) return 1;
-  return 1 - (d + 1) / 2;
-}
-
 function paintShape(rgba, size, coverageAt, color) {
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
@@ -92,29 +85,46 @@ function paintShape(rgba, size, coverageAt, color) {
   }
 }
 
-/** Clay ask-rail + muted form-dot on graphite — same mark as WxMark. */
+/** Square seal: ochre frame and center stroke on ink. Same geometry as WxMark. */
 export function renderMark(size, { maskable = false } = {}) {
   const rgba = Buffer.alloc(size * size * 4);
-  fill(rgba, GRAPHITE);
-  const inset = maskable ? 0.22 : 0.16;
+  fill(rgba, SURFACE);
+  const inset = maskable ? 0.24 : 0.16;
   const x0 = size * inset;
   const y0 = size * inset;
   const inner = size * (1 - inset * 2);
-  const barW = Math.max(2.2, inner * 0.09);
-  const barX = x0 + inner * 0.30;
-  const barY = y0 + inner * 0.20;
-  const barH = inner * 0.60;
-  const barR = barW / 2;
-  const dotR = Math.max(2.4, inner * 0.085);
-  const dotX = x0 + inner * 0.70;
-  const dotY = y0 + inner * 0.34;
+  const radius = inner * 0.08;
+  const stroke = Math.max(1, inner * 0.07);
+  paintShape(
+    rgba,
+    size,
+    (px, py) => {
+      const outer = roundedRectCoverage(px, py, x0, y0, inner, inner, radius);
+      const holeR = Math.max(0, radius - stroke);
+      const hole = roundedRectCoverage(
+        px,
+        py,
+        x0 + stroke,
+        y0 + stroke,
+        inner - stroke * 2,
+        inner - stroke * 2,
+        holeR,
+      );
+      return Math.max(0, outer - hole);
+    },
+    ACCENT,
+  );
+  const barW = Math.max(1.6, inner * 0.075);
+  const barH = inner * 0.48;
+  const barX = x0 + (inner - barW) / 2;
+  const barY = y0 + inner * 0.26;
+  const barR = Math.min(barW / 2, 0.8);
   paintShape(
     rgba,
     size,
     (px, py) => roundedRectCoverage(px, py, barX, barY, barW, barH, barR),
-    CLAY,
+    ACCENT,
   );
-  paintShape(rgba, size, (px, py) => circleCoverage(px, py, dotX, dotY, dotR), MUTED);
   return rgba;
 }
 
@@ -148,16 +158,20 @@ function near(r, g, b, color, tol = 28) {
 
 export function sampleMark(size) {
   const rgba = renderMark(size);
-  const mid = (Math.floor(size / 2) * size + Math.floor(size / 2)) * 4;
-  const center = [rgba[mid], rgba[mid + 1], rgba[mid + 2], rgba[mid + 3]];
-  let hasClay = false;
+  const at = (x, y) => {
+    const i = (y * size + x) * 4;
+    return [rgba[i], rgba[i + 1], rgba[i + 2], rgba[i + 3]];
+  };
+  const mid = Math.floor(size / 2);
+  const center = at(mid, mid);
+  let hasAccent = false;
   let hasFlutterBlue = false;
   for (let i = 0; i < rgba.length; i += 4) {
     const r = rgba[i];
     const g = rgba[i + 1];
     const b = rgba[i + 2];
-    if (near(r, g, b, CLAY)) hasClay = true;
+    if (near(r, g, b, ACCENT)) hasAccent = true;
     if (g > 160 && b > 200 && r < 130) hasFlutterBlue = true;
   }
-  return { center, hasClay, hasFlutterBlue };
+  return { center, corner: at(1, 1), hasAccent, hasFlutterBlue };
 }
