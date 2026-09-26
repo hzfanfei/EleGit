@@ -13,7 +13,7 @@ class Wx {
   static const accent = Color(0xFFCC5648);
   static const onAccent = Color(0xFF1A100C);
   static const serif = 'WenxiangSerif';
-  static const danger = Color(0xFFE3A090);
+  static const danger = Color(0xFFC97B8E);
   static const ok = Color(0xFF8A9A7B);
 
   /// Warm paper tone for long-form reading (slightly lifted from bg).

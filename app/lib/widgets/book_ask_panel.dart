@@ -1042,14 +1042,17 @@ class _AskBadge extends StatelessWidget {
       alignment: Alignment.center,
       decoration: BoxDecoration(
         color: live ? Wx.accent.withValues(alpha: 0.22) : Wx.surface,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(Wx.radius),
         border: Border.all(color: live ? Wx.accent.withValues(alpha: 0.55) : Wx.hairline),
       ),
       child: Text(
         '问',
         style: TextStyle(
+          fontFamily: Wx.serif,
+          fontFamilyFallback: Wx.fontFallback,
           fontSize: 15,
-          fontWeight: FontWeight.w700,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.4,
           color: live ? Wx.accent : Wx.muted,
           height: 1,
         ),

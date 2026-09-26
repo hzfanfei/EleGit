@@ -453,7 +453,7 @@ MarkdownStyleSheet chatMarkdownStyle(ThemeData theme) {
     codeblockPadding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
     codeblockDecoration: BoxDecoration(
       color: Wx.raised,
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: BorderRadius.circular(Wx.radius),
       border: Border.all(color: Wx.hairline),
     ),
     tableHead: TextStyle(

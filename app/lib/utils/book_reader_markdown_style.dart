@@ -26,12 +26,12 @@ MarkdownStyleSheet bookReaderMarkdownStyle({
       decoration: TextDecoration.underline,
       decorationColor: Wx.accent.withValues(alpha: 0.45),
     ),
-    h1: _heading(settings.fontSize + 8, palette, FontWeight.w700),
-    h2: _heading(settings.fontSize + 4, palette, FontWeight.w700),
-    h3: _heading(settings.fontSize + 2, palette, FontWeight.w600),
-    h4: _heading(settings.fontSize + 1, palette, FontWeight.w600),
-    h5: _heading(settings.fontSize, palette, FontWeight.w600),
-    h6: _heading(settings.fontSize, palette, FontWeight.w600),
+    h1: _heading(settings.fontSize + 8, palette),
+    h2: _heading(settings.fontSize + 4, palette),
+    h3: _heading(settings.fontSize + 2, palette),
+    h4: _heading(settings.fontSize + 1, palette),
+    h5: _heading(settings.fontSize, palette),
+    h6: _heading(settings.fontSize, palette),
     h1Padding: const EdgeInsets.only(top: 18, bottom: 6),
     h2Padding: const EdgeInsets.only(top: 16, bottom: 4),
     h3Padding: const EdgeInsets.only(top: 12, bottom: 2),
@@ -63,7 +63,7 @@ MarkdownStyleSheet bookReaderMarkdownStyle({
     codeblockPadding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
     codeblockDecoration: BoxDecoration(
       color: codeFill,
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: BorderRadius.circular(Wx.radius),
       border: Border.all(color: palette.ink.withValues(alpha: 0.12)),
     ),
     tableHead: TextStyle(
@@ -102,13 +102,15 @@ WxMarkdownTableTheme bookReaderMarkdownTableTheme({
   );
 }
 
-TextStyle _heading(double size, ReaderPalette palette, FontWeight weight) {
+TextStyle _heading(double size, ReaderPalette palette) {
   return TextStyle(
+    fontFamily: Wx.serif,
+    fontFamilyFallback: Wx.fontFallback,
     fontSize: size,
-    fontWeight: weight,
+    fontWeight: FontWeight.w600,
+    letterSpacing: size >= 24 ? 0.6 : 0.35,
     height: 1.35,
     color: palette.ink,
-    fontFamilyFallback: Wx.fontFallback,
   );
 }
 
@@ -116,5 +118,5 @@ TextStyle bookReaderChapterStyle({
   required ReaderPalette palette,
   required ReaderSettings settings,
 }) {
-  return _heading(settings.fontSize + 12, palette, FontWeight.w700);
+  return _heading(settings.fontSize + 12, palette);
 }

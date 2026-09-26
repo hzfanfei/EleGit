@@ -95,8 +95,6 @@ class BookReaderChrome extends StatelessWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: -0.2,
                               color: palette.ink,
                             ),
                           ),
