@@ -1848,7 +1848,11 @@ class _WorkRow extends StatelessWidget {
         children: [
           SizedBox(
             width: 18,
-            child: Center(child: active ? const _WorkingDots(dot: 3.5) : const _StepDot()),
+            child: Center(
+              child: active
+                  ? const WxLoading(key: Key('wx-working-mark'), size: 14)
+                  : const _StepDot(),
+            ),
           ),
           if (thought) ...[
             const Text(
@@ -1884,64 +1888,6 @@ class _StepDot extends StatelessWidget {
       width: 4,
       height: 4,
       decoration: const BoxDecoration(color: Wx.faint, shape: BoxShape.circle),
-    );
-  }
-}
-
-class _WorkingDots extends StatefulWidget {
-  const _WorkingDots({this.dot = 5});
-
-  final double dot;
-
-  @override
-  State<_WorkingDots> createState() => _WorkingDotsState();
-}
-
-class _WorkingDotsState extends State<_WorkingDots> with SingleTickerProviderStateMixin {
-  late final AnimationController _anim = AnimationController(
-    vsync: this,
-    duration: Wx.breath,
-  )..repeat();
-
-  @override
-  void dispose() {
-    _anim.dispose();
-    super.dispose();
-  }
-
-  double _opacity(int index) {
-    final t = (_anim.value + index * 0.22) % 1.0;
-    final wave = t < 0.5 ? t * 2 : (1 - t) * 2;
-    return 0.22 + 0.78 * wave;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _anim,
-      builder: (context, _) {
-        return Row(
-          key: const Key('wx-working-dots'),
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (var i = 0; i < 3; i++)
-              Padding(
-                padding: EdgeInsets.only(right: i == 2 ? 0 : (widget.dot <= 4 ? 2 : 4)),
-                child: Opacity(
-                  opacity: _opacity(i),
-                  child: Container(
-                    width: widget.dot,
-                    height: widget.dot,
-                    decoration: const BoxDecoration(
-                      color: Wx.accent,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                ),
-              ),
-          ],
-        );
-      },
     );
   }
 }

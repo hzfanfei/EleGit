@@ -237,7 +237,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 250));
 
     expect(find.text('读·README.md'), findsOneWidget);
-    expect(find.byKey(const Key('wx-working-dots')), findsOneWidget);
+    expect(find.byKey(const Key('wx-working-mark')), findsOneWidget);
     expect(find.byKey(const Key('wx-work-log')), findsOneWidget);
     expect(find.byKey(const Key('wx-work-toggle')), findsNothing);
 
