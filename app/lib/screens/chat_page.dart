@@ -1745,22 +1745,7 @@ class _VoiceTurn extends StatelessWidget {
   }
 }
 
-/// Latest step stays visible. Earlier tool lines stay folded until opened.
-({String headline, String extra}) _workCopy(String activity, String phaseLabel) {
-  final text = activity.trim();
-  if (text.isEmpty) return (headline: phaseLabel, extra: '');
-  final blocks = text.split(RegExp(r'\n{2,}'));
-  final last = blocks.last.trim();
-  final headline = last.split('\n').first.trim();
-  final restOfLast = last.split('\n').skip(1).join('\n').trim();
-  final earlier = blocks.length > 1 ? blocks.sublist(0, blocks.length - 1).join('\n\n').trim() : '';
-  final extra = [
-    if (earlier.isNotEmpty) earlier,
-    if (restOfLast.isNotEmpty) restOfLast,
-  ].join('\n\n');
-  if (headline.isEmpty) return (headline: phaseLabel, extra: extra);
-  return (headline: headline, extra: extra);
-}
+const _workPanelHeight = 80.0;
 
 class _WorkingNote extends StatefulWidget {
   const _WorkingNote({
@@ -1778,7 +1763,23 @@ class _WorkingNote extends StatefulWidget {
 }
 
 class _WorkingNoteState extends State<_WorkingNote> {
-  bool _open = false;
+  final ScrollController _scroll = ScrollController();
+  String _shown = '';
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  void _followEnd() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scroll.hasClients) return;
+      final max = _scroll.position.maxScrollExtent;
+      if (_scroll.offset == max) return;
+      _scroll.jumpTo(max);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1791,60 +1792,53 @@ class _WorkingNoteState extends State<_WorkingNote> {
             if (widget.hideWhenIdle && liveActivity.trim().isEmpty) {
               return const SizedBox.shrink();
             }
-            final copy = _workCopy(liveActivity, _livePhaseLabel(livePhase));
-            final theme = Theme.of(context);
+            final text = liveActivity.trim().isEmpty ? _livePhaseLabel(livePhase) : liveActivity.trim();
+            if (text != _shown) {
+              _shown = text;
+              _followEnd();
+            }
             return Semantics(
               liveRegion: true,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Padding(
-                        padding: EdgeInsets.only(top: 7),
-                        child: _WorkingDots(),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          copy.headline,
-                          style: const TextStyle(color: Wx.muted, fontSize: 15, height: 1.45),
+              child: DecoratedBox(
+                key: const Key('wx-work-log'),
+                decoration: BoxDecoration(
+                  color: Wx.surface,
+                  borderRadius: BorderRadius.circular(Wx.radius),
+                  border: Border.all(color: Wx.hairline),
+                ),
+                child: SizedBox(
+                  height: _workPanelHeight,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Padding(
+                          padding: EdgeInsets.only(top: 4),
+                          child: _WorkingDots(),
                         ),
-                      ),
-                      if (copy.extra.isNotEmpty)
-                        InkWell(
-                          key: const Key('wx-work-toggle'),
-                          onTap: () => setState(() => _open = !_open),
-                          borderRadius: BorderRadius.circular(6),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            child: Text(
-                              _open ? '收起' : '展开',
-                              style: theme.textTheme.labelSmall?.copyWith(color: Wx.accent),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: ScrollConfiguration(
+                            behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+                            child: SingleChildScrollView(
+                              controller: _scroll,
+                              physics: const NeverScrollableScrollPhysics(),
+                              child: Text(
+                                text,
+                                style: const TextStyle(
+                                  color: Wx.muted,
+                                  fontSize: 12,
+                                  height: 1.4,
+                                ),
+                              ),
                             ),
                           ),
                         ),
-                    ],
-                  ),
-                  if (_open && copy.extra.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(left: 25, top: 6),
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxHeight: 160),
-                        child: SingleChildScrollView(
-                          child: Text(
-                            copy.extra,
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: Wx.muted,
-                              height: 1.4,
-                            ),
-                          ),
-                        ),
-                      ),
+                      ],
                     ),
-                ],
+                  ),
+                ),
               ),
             );
           },

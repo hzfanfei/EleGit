@@ -238,6 +238,7 @@ void main() {
 
     expect(find.text('读·README.md'), findsOneWidget);
     expect(find.byKey(const Key('wx-working-dots')), findsOneWidget);
+    expect(find.byKey(const Key('wx-work-log')), findsOneWidget);
     expect(find.byKey(const Key('wx-work-toggle')), findsNothing);
 
     for (var i = 0; i < 20; i++) {
@@ -245,7 +246,7 @@ void main() {
     }
   });
 
-  testWidgets('earlier tool steps stay folded until opened', (tester) async {
+  testWidgets('thought and tool lines share one fixed log', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
         theme: wenxiangTheme(),
@@ -271,15 +272,12 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 250));
 
-    expect(find.text('改了登录页'), findsOneWidget);
-    expect(find.text('读·README.md'), findsNothing);
-    expect(find.text('展开'), findsOneWidget);
-
-    await tester.tap(find.byKey(const Key('wx-work-toggle')));
-    await tester.pump();
-
-    expect(find.text('读·README.md'), findsOneWidget);
-    expect(find.text('收起'), findsOneWidget);
+    expect(find.textContaining('改了登录页'), findsOneWidget);
+    expect(find.textContaining('读·README.md'), findsOneWidget);
+    expect(find.text('展开'), findsNothing);
+    expect(find.byKey(const Key('wx-work-log')), findsOneWidget);
+    final box = tester.getSize(find.byKey(const Key('wx-work-log')));
+    expect(box.height, 80);
 
     for (var i = 0; i < 20; i++) {
       await tester.pump(const Duration(milliseconds: 100));
