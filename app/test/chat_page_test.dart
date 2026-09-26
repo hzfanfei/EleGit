@@ -382,7 +382,7 @@ void main() {
     expect(find.text('松手自动发送，上滑取消'), findsOneWidget);
   });
 
-  testWidgets('voice mode still shows a text field while a reply is streaming', (tester) async {
+  testWidgets('voice mode can speak the next turn while a reply is streaming', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
         theme: wenxiangTheme(),
@@ -403,8 +403,13 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 40));
 
+    expect(find.text('按住说下一条'), findsOneWidget);
+    expect(find.byKey(const Key('wx-hold-speak')), findsOneWidget);
+    expect(find.text('按住说下一条，答完自动问'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('wx-voice-toggle')));
+    await tester.pump();
     expect(find.byKey(const Key('wx-chat-input')), findsOneWidget);
-    expect(find.text('可以先写下一条'), findsOneWidget);
     await tester.enterText(find.byKey(const Key('wx-chat-input')), '语音时也能先写下一条');
     await tester.pump();
     await tester.tap(find.text('排队'));

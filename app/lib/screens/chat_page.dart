@@ -291,12 +291,6 @@ class _ChatPageState extends State<ChatPage> {
         return;
       }
     }
-    if (_busy) {
-      if (_voiceInputMode) {
-        setState(() => _voiceInputMode = false);
-      }
-      return;
-    }
     if (_sttBusy || _holding) return;
     setState(() {
       _voiceInputMode = !_voiceInputMode;
@@ -305,7 +299,7 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _beginHold(double globalY) async {
-    if (_busy || _sttBusy || _holding || _holdPending || !_voiceReady) return;
+    if (_sttBusy || _holding || _holdPending || !_voiceReady) return;
     setState(() {
       _holdPending = true;
       _holdStartY = globalY;
@@ -1823,9 +1817,9 @@ class _Composer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final voiceToggleLocked = preparing || sttBusy || (busy && !voiceReady);
-    final showKeyboard = !voiceInputMode || busy;
-    final padEnabled = voiceReady && !preparing && !busy;
+    final voiceToggleLocked = preparing || sttBusy;
+    final showKeyboard = !voiceInputMode;
+    final padEnabled = voiceReady && !preparing;
     return ColoredBox(
       color: Wx.bg,
       child: SafeArea(
@@ -1851,14 +1845,12 @@ class _Composer extends StatelessWidget {
                     key: const Key('wx-voice-toggle'),
                     tooltip: !voiceReady
                         ? '语音未配置'
-                        : busy
-                            ? (voiceInputMode ? '改用键盘，先写下一条' : '回答中，先打字排队')
-                            : (voiceInputMode ? '键盘输入' : '按住说话'),
-                    onPressed: (voiceToggleLocked && voiceReady) || (busy && !voiceInputMode)
-                        ? null
-                        : () => onToggleVoiceInput(),
+                        : voiceInputMode
+                            ? '键盘输入'
+                            : (busy ? '按住说下一条' : '按住说话'),
+                    onPressed: voiceToggleLocked && voiceReady ? null : () => onToggleVoiceInput(),
                     icon: Icon(
-                      voiceInputMode && !busy ? Icons.keyboard_outlined : Icons.mic_none_outlined,
+                      voiceInputMode ? Icons.keyboard_outlined : Icons.mic_none_outlined,
                       color: !voiceReady ? Wx.faint : null,
                     ),
                   ),
@@ -1898,7 +1890,9 @@ class _Composer extends StatelessWidget {
                                     ? holdLive
                                     : holdHint.isNotEmpty
                                         ? holdHint
-                                        : (sttBusy ? '识别中，点按取消' : '按住 说话'),
+                                        : sttBusy
+                                            ? '识别中，点按取消'
+                                            : (busy ? '按住说下一条' : '按住 说话'),
                             onHoldStart: onHoldStart,
                             onHoldMove: onHoldMove,
                             onHoldEnd: onHoldEnd,
@@ -1938,7 +1932,11 @@ class _Composer extends StatelessWidget {
                             child: Text(
                               queueCount > 0
                                   ? '还有 $queueCount 条排队，答完自动问'
-                                  : '可以先写下一条',
+                                  : voiceInputMode
+                                      ? '按住说下一条，答完自动问'
+                                      : voiceReady
+                                          ? '可以先写下一条，或按住说话'
+                                          : '可以先写下一条',
                               style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.muted),
                             ),
                           ),
