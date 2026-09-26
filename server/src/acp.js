@@ -1196,6 +1196,10 @@ export class AcpChannel {
       return;
     }
     if (msg.method === "cursor/create_plan") {
+      if (!this.agentMode) {
+        this.respond(msg.id, { outcome: { outcome: "rejected", reason: "ask mode" } });
+        return;
+      }
       this._relayInteraction(msg, "plan");
     }
   }

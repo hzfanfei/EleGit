@@ -4,6 +4,7 @@ const rl = readline.createInterface({ input: process.stdin });
 const sessionId = "fake-acp-session";
 const seen = [];
 let askResume = null;
+let planOutcome = "";
 
 function write(obj) {
   process.stdout.write(`${JSON.stringify(obj)}\n`);
@@ -12,10 +13,10 @@ function write(obj) {
 rl.on("line", (line) => {
   if (!line.trim()) return;
   const msg = JSON.parse(line);
-  if (msg.id === 77 && msg.result && !msg.method) {
+  if (msg.result && !msg.method && askResume) {
     const resume = askResume;
     askResume = null;
-    resume?.();
+    resume(msg.result);
     return;
   }
   const reply = (result) => write({ jsonrpc: "2.0", id: msg.id, result });
@@ -48,6 +49,24 @@ rl.on("line", (line) => {
   }
   if (msg.method === "session/prompt") {
     const text = (msg.params?.prompt || []).map((p) => p.text || "").join("");
+    if (process.env.FAKE_ACP_PLAN === "1") {
+      write({
+        jsonrpc: "2.0",
+        id: 78,
+        method: "cursor/create_plan",
+        params: {
+          name: "改登录",
+          overview: "先改一处",
+          plan: "1. 改文件",
+          todos: [{ id: "t1", content: "改登录", status: "pending" }],
+        },
+      });
+      askResume = (result) => {
+        planOutcome = result?.outcome?.outcome || "";
+        answerPrompt(msg);
+      };
+      return;
+    }
     if (process.env.FAKE_ACP_ASK === "1" && text.includes("请选择")) {
       write({
         jsonrpc: "2.0",
@@ -102,6 +121,8 @@ function answerPrompt(msg) {
   }
   const recall = /restore after reconnect/i.test(text) ? "seeded" : seen.length > 1 ? "followup" : "first";
   const persona = /You are 问象/.test(text) ? "persona:" : "";
+  const planBit = planOutcome ? `plan:${planOutcome}:` : "";
+  planOutcome = "";
   write({
     jsonrpc: "2.0",
     method: "session/update",
@@ -120,7 +141,7 @@ function answerPrompt(msg) {
       sessionId,
       update: {
         sessionUpdate: "agent_message_chunk",
-        content: { type: "text", text: `${persona}${recall}:${seen.length}` },
+        content: { type: "text", text: `${persona}${planBit}${recall}:${seen.length}` },
       },
     },
   });

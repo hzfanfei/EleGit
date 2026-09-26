@@ -626,6 +626,60 @@ describe("session store", () => {
     assert.match(chunks.join(""), /first:1/);
     await store.resetAllChannels();
   });
+
+  it("relays create_plan only in agent mode", async () => {
+    const store = createSessionStore({
+      resolveCommand: () => ({
+        id: "acp",
+        path: process.execPath,
+        args: [fakeAcp],
+        mode: "ask",
+        transport: "stdio",
+      }),
+      spawnImpl: (file, args, opts) =>
+        spawn(file, args, {
+          ...opts,
+          env: { ...opts.env, FAKE_ACP_PLAN: "1" },
+        }),
+    });
+    const cwd = process.cwd();
+    const session = store.resolveForChat("hzfanfei", "fwechat", "");
+    const askChunks = [];
+    let asked = 0;
+    await store.prompt(session, {
+      question: "只读时出计划",
+      history: [],
+      cwd,
+      onDelta: (text) => askChunks.push(text),
+      onInteraction: () => {
+        asked += 1;
+      },
+    });
+    assert.equal(asked, 0);
+    assert.match(askChunks.join(""), /plan:rejected/);
+
+    const agentChunks = [];
+    await store.prompt(session, {
+      question: "Agent 时出计划",
+      history: [],
+      cwd,
+      agentMode: true,
+      onDelta: (text) => agentChunks.push(text),
+      onInteraction: (event) => {
+        assert.equal(event.kind, "plan");
+        assert.equal(event.title, "改登录");
+        assert.equal(
+          store.answerInteraction(session.id, event.requestId, {
+            kind: "plan",
+            accept: true,
+          }),
+          true,
+        );
+      },
+    });
+    assert.match(agentChunks.join(""), /plan:accepted/);
+    await store.resetAllChannels();
+  });
 });
 
 describe("AcpChannel", () => {
