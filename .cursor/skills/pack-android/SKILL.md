@@ -18,7 +18,7 @@ node scripts/build-android.mjs
 
 - 读取根目录 `.env`，把 `WENXIANG_PUBLIC_URL` 和 `WENXIANG_API_KEY` 编进安装包
 - 只打 arm64
-- 按 `app/pubspec.yaml` 的版本命名，复制到静态目录，例如 `问象-v0.1.0-1.apk`
+- 把 `app/pubspec.yaml` 的 build 号加 1，再按新版本命名，例如 `问象-v0.1.0-2.apk`。打包失败时 build 号退回
 
 `.env` 缺失或这两项为空时，脚本会失败。把失败原因告诉用户，不要改用裸的 `flutter build apk` 继续打。
 
