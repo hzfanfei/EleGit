@@ -1,7 +1,7 @@
 name: wenxiang
 description: 问象 — ask a local Cursor-backed server about GitHub repo progress.
 publish_to: "none"
-version: 0.1.0+10
+version: 0.1.0+11
 
 environment:
   sdk: ">=3.5.0 <4.0.0"
