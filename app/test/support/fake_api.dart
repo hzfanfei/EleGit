@@ -89,6 +89,9 @@ class FakeWenxiangApi extends WenxiangApi {
   @override
   Future<void> ping() async {}
 
+  @override
+  Future<void> preferLan(List<String> lanUrls) async {}
+
   final List<List<Map<String, dynamic>>> uploadedClientLogs = [];
 
   @override

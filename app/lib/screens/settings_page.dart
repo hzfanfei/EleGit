@@ -75,6 +75,11 @@ class _SettingsPageState extends State<SettingsPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_loadAppVersion());
     });
+    widget.api?.linkEpoch.addListener(_onLinkChanged);
+  }
+
+  void _onLinkChanged() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _loadAppVersion() async {
@@ -285,6 +290,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   void dispose() {
+    widget.api?.linkEpoch.removeListener(_onLinkChanged);
     _previewMedia.dispose();
     super.dispose();
   }
@@ -306,7 +312,7 @@ class _SettingsPageState extends State<SettingsPage> {
           WxPageHeader(
             title: '设置',
             subtitle:
-                '问书 ${askEngineChoiceLabel(_askEngineBook)} · 问象 ${askEngineChoiceLabel(_askEngineRepo)} · ${voiceEngineSummary(_voiceProfile)} · ${current.name}',
+                '${widget.api == null ? '' : '${widget.api!.linkLabel} · '}问书 ${askEngineChoiceLabel(_askEngineBook)} · 问象 ${askEngineChoiceLabel(_askEngineRepo)} · ${voiceEngineSummary(_voiceProfile)} · ${current.name}',
             onBack: widget.onBack ?? () => Navigator.of(context).maybePop(),
             backTooltip: '返回',
           ),

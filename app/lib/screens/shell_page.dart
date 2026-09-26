@@ -78,6 +78,7 @@ class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      unawaited(_refreshRoute());
       unawaited(_api.reportPresence('foreground'));
       _uploadClientErrors();
       if (NotificationCenter.instance.enabled.value) {
@@ -139,7 +140,12 @@ class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
       final memory = await _ensureMemory();
       await _api.ping();
       final status = await _api.status();
+      final before = _api.baseUrl;
+      await _api.preferLan(status.lanUrls);
       if (!mounted) return;
+      if (_api.baseUrl != before && NotificationCenter.instance.enabled.value) {
+        await NotificationCenter.instance.disconnect();
+      }
       setState(() {
         _booting = false;
         _githubConnected = status.githubConnected;
@@ -163,6 +169,22 @@ class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
         _step = AppStep.boot;
       });
     }
+  }
+
+  Future<void> _refreshRoute() async {
+    final before = _api.baseUrl;
+    try {
+      await _api.preferLan(const []);
+      final status = await _api.status();
+      await _api.preferLan(status.lanUrls);
+      if (_api.baseUrl != before && NotificationCenter.instance.enabled.value) {
+        await NotificationCenter.instance.disconnect();
+        unawaited(NotificationCenter.instance.connect());
+      }
+    } catch (_) {
+      await _api.preferLan(const []);
+    }
+    if (mounted) setState(() {});
   }
 
   Future<void> _onAuthorized() async {

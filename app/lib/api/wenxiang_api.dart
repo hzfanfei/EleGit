@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../copy/ask_engine.dart';
@@ -9,6 +10,7 @@ import '../models.dart';
 import '../models/diagnostics.dart';
 import '../utils/async_gate.dart';
 import '../voice/background_work.dart';
+import 'link_route.dart';
 
 bool chatEventHasVisibleText(ChatStreamEvent event) {
   if (event.pcm != null && event.pcm!.isNotEmpty) return true;
@@ -55,10 +57,98 @@ class OperationCancelled implements Exception {
 }
 
 class WenxiangApi {
-  WenxiangApi({required this.baseUrl, required this.apiKey});
+  WenxiangApi({required String baseUrl, required this.apiKey})
+      : baseUrl = normalizeBaseUrl(baseUrl),
+        _tunnelUrl = normalizeBaseUrl(baseUrl);
 
-  final String baseUrl;
+  String baseUrl;
+  final String _tunnelUrl;
   final String apiKey;
+  final ValueNotifier<int> linkEpoch = ValueNotifier(0);
+  Future<void>? _preferring;
+
+  String get linkLabel => linkRouteLabel(baseUrl);
+
+  void _useBase(String url) {
+    final next = normalizeBaseUrl(url);
+    if (next.isEmpty || next == baseUrl) {
+      linkEpoch.value++;
+      return;
+    }
+    baseUrl = next;
+    linkEpoch.value++;
+  }
+
+  /// Probe [lanUrls] and switch to the first one that answers. Otherwise stay
+  /// on the current address, or fall back to the baked tunnel URL if LAN died.
+  Future<void> preferLan(List<String> lanUrls) {
+    final running = _preferring;
+    if (running != null) return running;
+    final task = _preferLan(lanUrls);
+    _preferring = task;
+    return task.whenComplete(() {
+      if (identical(_preferring, task)) _preferring = null;
+    });
+  }
+
+  Future<void> _preferLan(List<String> lanUrls) async {
+    if (isLanBaseUrl(baseUrl)) {
+      if (await _healthOk(baseUrl, const Duration(milliseconds: 700))) {
+        linkEpoch.value++;
+        return;
+      }
+    }
+    final candidates = <String>[];
+    final seen = <String>{};
+    for (final raw in lanUrls) {
+      final url = normalizeBaseUrl(raw);
+      if (url.isEmpty || !isLanBaseUrl(url) || url == baseUrl) continue;
+      if (seen.add(url)) candidates.add(url);
+    }
+    if (candidates.isNotEmpty) {
+      final winner = await _firstHealthy(candidates);
+      if (winner != null) {
+        _useBase(winner);
+        return;
+      }
+    }
+    if (isLanBaseUrl(baseUrl) && baseUrl != _tunnelUrl) {
+      _useBase(_tunnelUrl);
+      return;
+    }
+    linkEpoch.value++;
+  }
+
+  Future<String?> _firstHealthy(List<String> urls) {
+    final done = Completer<String?>();
+    var pending = urls.length;
+    for (final url in urls) {
+      unawaited(_healthOk(url, const Duration(milliseconds: 700)).then((ok) {
+        if (ok && !done.isCompleted) done.complete(url);
+      }).whenComplete(() {
+        pending -= 1;
+        if (pending == 0 && !done.isCompleted) done.complete(null);
+      }));
+    }
+    return done.future;
+  }
+
+  Future<bool> _healthOk(String root, Duration timeout) async {
+    try {
+      final res = await http
+          .get(
+            Uri.parse('$root/health'),
+            headers: {
+              'X-Wenxiang-Key': apiKey,
+              'ngrok-skip-browser-warning': 'true',
+            },
+          )
+          .timeout(timeout);
+      return res.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
 
   Uri _uri(String path, [Map<String, String>? query]) {
     final root = baseUrl.replaceAll(RegExp(r'/$'), '');

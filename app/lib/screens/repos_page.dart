@@ -58,9 +58,14 @@ class ReposPageState extends State<ReposPage> {
   void initState() {
     super.initState();
     _query.addListener(_onQueryChanged);
+    widget.api.linkEpoch.addListener(_onLinkChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _loadRepos();
     });
+  }
+
+  void _onLinkChanged() {
+    if (mounted) setState(() {});
   }
 
   void _onQueryChanged() {
@@ -190,6 +195,7 @@ class ReposPageState extends State<ReposPage> {
     if (_cloning != null && _cloneError == null) {
       widget.api.cancelCheckout();
     }
+    widget.api.linkEpoch.removeListener(_onLinkChanged);
     _query.removeListener(_onQueryChanged);
     _query.dispose();
     super.dispose();
@@ -211,9 +217,10 @@ class ReposPageState extends State<ReposPage> {
     }
 
     final blocked = _cloning != null && _cloneError == null;
-    final subtitle = widget.githubConnected
+    final home = widget.githubConnected
         ? (widget.githubLogin.isEmpty ? '选一个仓库问进度' : widget.githubLogin)
         : (_localOnly ? '本机 ~/问象 仓库' : '选一个仓库问进度');
+    final subtitle = '${widget.api.linkLabel} · $home';
     return Scaffold(
       body: Column(
         children: [
