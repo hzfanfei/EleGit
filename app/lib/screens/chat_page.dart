@@ -1678,39 +1678,11 @@ class _LiveTurn extends StatelessWidget {
         valueListenable: text,
         builder: (context, value, _) {
           final body = value.isEmpty
-              ? ValueListenableBuilder<String>(
-                  valueListenable: phase,
-                  builder: (context, livePhase, _) {
-                    return ValueListenableBuilder<String>(
-                      valueListenable: activity,
-                      builder: (context, liveActivity, _) {
-                        final label = liveActivity.isNotEmpty
-                            ? liveActivity
-                            : _livePhaseLabel(livePhase);
-                        return Semantics(
-                          liveRegion: true,
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  label,
-                                  style: const TextStyle(color: Wx.muted, fontSize: 16, height: 1.55),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              const _Caret(),
-                            ],
-                          ),
-                        );
-                      },
-                    );
-                  },
-                )
+              ? _WorkingNote(phase: phase, activity: activity)
               : WxChatMarkdownStream(
                   source: text,
                   styleSheet: chatMarkdownStyle(Theme.of(context)),
-                  showCaret: true,
+                  showCaret: false,
                 );
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1718,21 +1690,13 @@ class _LiveTurn extends StatelessWidget {
             children: [
               body,
               if (value.isNotEmpty)
-                ValueListenableBuilder<String>(
-                  valueListenable: activity,
-                  builder: (context, liveActivity, _) {
-                    if (liveActivity.isEmpty) return const SizedBox.shrink();
-                    return Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Text(
-                        liveActivity,
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                              color: Wx.muted,
-                              height: 1.4,
-                            ),
-                      ),
-                    );
-                  },
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: _WorkingNote(
+                    phase: phase,
+                    activity: activity,
+                    hideWhenIdle: true,
+                  ),
                 ),
             ],
           );
@@ -1781,18 +1745,127 @@ class _VoiceTurn extends StatelessWidget {
   }
 }
 
-class _Caret extends StatefulWidget {
-  const _Caret();
-
-  @override
-  State<_Caret> createState() => _CaretState();
+/// Latest step stays visible. Earlier tool lines stay folded until opened.
+({String headline, String extra}) _workCopy(String activity, String phaseLabel) {
+  final text = activity.trim();
+  if (text.isEmpty) return (headline: phaseLabel, extra: '');
+  final blocks = text.split(RegExp(r'\n{2,}'));
+  final last = blocks.last.trim();
+  final headline = last.split('\n').first.trim();
+  final restOfLast = last.split('\n').skip(1).join('\n').trim();
+  final earlier = blocks.length > 1 ? blocks.sublist(0, blocks.length - 1).join('\n\n').trim() : '';
+  final extra = [
+    if (earlier.isNotEmpty) earlier,
+    if (restOfLast.isNotEmpty) restOfLast,
+  ].join('\n\n');
+  if (headline.isEmpty) return (headline: phaseLabel, extra: extra);
+  return (headline: headline, extra: extra);
 }
 
-class _CaretState extends State<_Caret> with SingleTickerProviderStateMixin {
+class _WorkingNote extends StatefulWidget {
+  const _WorkingNote({
+    required this.phase,
+    required this.activity,
+    this.hideWhenIdle = false,
+  });
+
+  final ValueNotifier<String> phase;
+  final ValueNotifier<String> activity;
+  final bool hideWhenIdle;
+
+  @override
+  State<_WorkingNote> createState() => _WorkingNoteState();
+}
+
+class _WorkingNoteState extends State<_WorkingNote> {
+  bool _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<String>(
+      valueListenable: widget.phase,
+      builder: (context, livePhase, _) {
+        return ValueListenableBuilder<String>(
+          valueListenable: widget.activity,
+          builder: (context, liveActivity, _) {
+            if (widget.hideWhenIdle && liveActivity.trim().isEmpty) {
+              return const SizedBox.shrink();
+            }
+            final copy = _workCopy(liveActivity, _livePhaseLabel(livePhase));
+            final theme = Theme.of(context);
+            return Semantics(
+              liveRegion: true,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Padding(
+                        padding: EdgeInsets.only(top: 7),
+                        child: _WorkingDots(),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          copy.headline,
+                          style: const TextStyle(color: Wx.muted, fontSize: 15, height: 1.45),
+                        ),
+                      ),
+                      if (copy.extra.isNotEmpty)
+                        InkWell(
+                          key: const Key('wx-work-toggle'),
+                          onTap: () => setState(() => _open = !_open),
+                          borderRadius: BorderRadius.circular(6),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            child: Text(
+                              _open ? '收起' : '展开',
+                              style: theme.textTheme.labelSmall?.copyWith(color: Wx.accent),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  if (_open && copy.extra.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 25, top: 6),
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxHeight: 160),
+                        child: SingleChildScrollView(
+                          child: Text(
+                            copy.extra,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: Wx.muted,
+                              height: 1.4,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+class _WorkingDots extends StatefulWidget {
+  const _WorkingDots();
+
+  @override
+  State<_WorkingDots> createState() => _WorkingDotsState();
+}
+
+class _WorkingDotsState extends State<_WorkingDots> with SingleTickerProviderStateMixin {
   late final AnimationController _anim = AnimationController(
     vsync: this,
     duration: Wx.breath,
-  )..repeat(reverse: true);
+  )..repeat();
 
   @override
   void dispose() {
@@ -1800,19 +1873,39 @@ class _CaretState extends State<_Caret> with SingleTickerProviderStateMixin {
     super.dispose();
   }
 
+  double _opacity(int index) {
+    final t = (_anim.value + index * 0.22) % 1.0;
+    final wave = t < 0.5 ? t * 2 : (1 - t) * 2;
+    return 0.22 + 0.78 * wave;
+  }
+
   @override
   Widget build(BuildContext context) {
-    return FadeTransition(
-      opacity: _anim,
-      child: Container(
-        width: 2,
-        height: 15,
-        margin: const EdgeInsets.only(bottom: 2),
-        decoration: BoxDecoration(
-          color: Wx.accent,
-          borderRadius: BorderRadius.circular(1),
-        ),
-      ),
+    return AnimatedBuilder(
+      animation: _anim,
+      builder: (context, _) {
+        return Row(
+          key: const Key('wx-working-dots'),
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (var i = 0; i < 3; i++)
+              Padding(
+                padding: EdgeInsets.only(right: i == 2 ? 0 : 4),
+                child: Opacity(
+                  opacity: _opacity(i),
+                  child: Container(
+                    width: 5,
+                    height: 5,
+                    decoration: const BoxDecoration(
+                      color: Wx.accent,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 }

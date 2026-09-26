@@ -25,6 +25,7 @@ class AgentDecisionCard extends StatefulWidget {
 class _AgentDecisionCardState extends State<AgentDecisionCard> {
   final Map<String, Set<String>> _picked = {};
   bool _sending = false;
+  bool _open = false;
   String? _error;
 
   Map<String, dynamic> get _payload => widget.event.payload ?? const {};
@@ -37,8 +38,11 @@ class _AgentDecisionCardState extends State<AgentDecisionCard> {
     if (prev != next) {
       _picked.clear();
       _error = null;
+      _open = false;
     }
   }
+
+  void _toggle() => setState(() => _open = !_open);
 
   Future<void> _send({
     required bool skip,
@@ -77,38 +81,40 @@ class _AgentDecisionCardState extends State<AgentDecisionCard> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(title, style: theme.textTheme.titleSmall),
-            if (overview.isNotEmpty) ...[
-              const SizedBox(height: 6),
-              Text(overview, style: theme.textTheme.bodyMedium?.copyWith(color: Wx.muted, height: 1.4)),
-            ],
-            if (plan.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 220),
-                child: SingleChildScrollView(
-                  child: Text(plan, style: theme.textTheme.bodyMedium?.copyWith(height: 1.45)),
-                ),
-              ),
-            ],
-            if (_error != null) ...[
-              const SizedBox(height: 6),
-              Text(_error!, style: theme.textTheme.bodySmall?.copyWith(color: Wx.danger)),
-            ],
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                TextButton(
-                  onPressed: _sending ? null : () => _send(skip: true, accept: false),
-                  child: const Text('先不用'),
-                ),
-                const Spacer(),
-                FilledButton(
-                  onPressed: _sending ? null : () => _send(skip: false, accept: true),
-                  child: Text(_sending ? '发送中…' : '按这个做'),
+            _FoldHeader(title: title, open: _open, onToggle: _toggle),
+            if (_open) ...[
+              if (overview.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(overview, style: theme.textTheme.bodyMedium?.copyWith(color: Wx.muted, height: 1.4)),
+              ],
+              if (plan.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 220),
+                  child: SingleChildScrollView(
+                    child: Text(plan, style: theme.textTheme.bodyMedium?.copyWith(height: 1.45)),
+                  ),
                 ),
               ],
-            ),
+              if (_error != null) ...[
+                const SizedBox(height: 6),
+                Text(_error!, style: theme.textTheme.bodySmall?.copyWith(color: Wx.danger)),
+              ],
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  TextButton(
+                    onPressed: _sending ? null : () => _send(skip: true, accept: false),
+                    child: const Text('先不用'),
+                  ),
+                  const Spacer(),
+                  FilledButton(
+                    onPressed: _sending ? null : () => _send(skip: false, accept: true),
+                    child: Text(_sending ? '发送中…' : '按这个做'),
+                  ),
+                ],
+              ),
+            ],
           ],
         ),
       );
@@ -120,44 +126,51 @@ class _AgentDecisionCardState extends State<AgentDecisionCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(title.isEmpty ? '需要你选一下' : title, style: theme.textTheme.titleSmall),
-          for (final raw in questions)
-            if (raw is Map) _QuestionBlock(
-              question: Map<String, dynamic>.from(raw),
-              picked: _picked,
-              enabled: !_sending,
-              onChanged: () => setState(() {}),
-            ),
-          if (_error != null) ...[
-            const SizedBox(height: 6),
-            Text(_error!, style: theme.textTheme.bodySmall?.copyWith(color: Wx.danger)),
-          ],
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              TextButton(
-                onPressed: _sending ? null : () => _send(skip: true, accept: false),
-                child: const Text('跳过'),
-              ),
-              const Spacer(),
-              FilledButton(
-                onPressed: _sending
-                    ? null
-                    : () {
-                        final answers = <Map<String, dynamic>>[];
-                        for (final raw in questions) {
-                          if (raw is! Map) continue;
-                          final id = (raw['id'] ?? '').toString();
-                          final ids = _picked[id]?.toList() ?? const <String>[];
-                          if (id.isEmpty || ids.isEmpty) continue;
-                          answers.add({'questionId': id, 'selectedOptionIds': ids});
-                        }
-                        _send(skip: answers.isEmpty, accept: false, answers: answers);
-                      },
-                child: Text(_sending ? '发送中…' : '确定'),
-              ),
-            ],
+          _FoldHeader(
+            title: title.isEmpty ? '需要你选一下' : title,
+            open: _open,
+            onToggle: _toggle,
           ),
+          if (_open) ...[
+            for (final raw in questions)
+              if (raw is Map)
+                _QuestionBlock(
+                  question: Map<String, dynamic>.from(raw),
+                  picked: _picked,
+                  enabled: !_sending,
+                  onChanged: () => setState(() {}),
+                ),
+            if (_error != null) ...[
+              const SizedBox(height: 6),
+              Text(_error!, style: theme.textTheme.bodySmall?.copyWith(color: Wx.danger)),
+            ],
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                TextButton(
+                  onPressed: _sending ? null : () => _send(skip: true, accept: false),
+                  child: const Text('跳过'),
+                ),
+                const Spacer(),
+                FilledButton(
+                  onPressed: _sending
+                      ? null
+                      : () {
+                          final answers = <Map<String, dynamic>>[];
+                          for (final raw in questions) {
+                            if (raw is! Map) continue;
+                            final id = (raw['id'] ?? '').toString();
+                            final ids = _picked[id]?.toList() ?? const <String>[];
+                            if (id.isEmpty || ids.isEmpty) continue;
+                            answers.add({'questionId': id, 'selectedOptionIds': ids});
+                          }
+                          _send(skip: answers.isEmpty, accept: false, answers: answers);
+                        },
+                  child: Text(_sending ? '发送中…' : '确定'),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -223,6 +236,46 @@ class _QuestionBlock extends StatelessWidget {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _FoldHeader extends StatelessWidget {
+  const _FoldHeader({
+    required this.title,
+    required this.open,
+    required this.onToggle,
+  });
+
+  final String title;
+  final bool open;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return InkWell(
+      key: const Key('wx-decision-toggle'),
+      onTap: onToggle,
+      borderRadius: BorderRadius.circular(6),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(
+          children: [
+            Expanded(child: Text(title, style: theme.textTheme.titleSmall)),
+            const SizedBox(width: 8),
+            Text(
+              open ? '收起' : '展开',
+              style: theme.textTheme.labelSmall?.copyWith(color: Wx.accent),
+            ),
+            Icon(
+              open ? Icons.expand_less : Icons.expand_more,
+              size: 18,
+              color: Wx.accent,
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -237,6 +237,49 @@ void main() {
     await tester.pump(const Duration(milliseconds: 250));
 
     expect(find.text('读·README.md'), findsOneWidget);
+    expect(find.byKey(const Key('wx-working-dots')), findsOneWidget);
+    expect(find.byKey(const Key('wx-work-toggle')), findsNothing);
+
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+  });
+
+  testWidgets('earlier tool steps stay folded until opened', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: ChatPage(
+          api: FakeWenxiangApi(
+            streamPace: const Duration(milliseconds: 200),
+            streamEvents: [
+              ChatStreamEvent(
+                type: 'status',
+                phase: 'activity',
+                detail: '读·README.md\n\n改了登录页',
+              ),
+              ChatStreamEvent(type: 'done', engine: 'local-progress', sessionId: 's1'),
+            ],
+          ),
+          repo: sampleRepo(),
+          onBack: () {},
+        ),
+      ),
+    );
+    await _pumpUntilChatReady(tester);
+    await tester.tap(find.text('这个仓库最近在做什么？'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
+
+    expect(find.text('改了登录页'), findsOneWidget);
+    expect(find.text('读·README.md'), findsNothing);
+    expect(find.text('展开'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('wx-work-toggle')));
+    await tester.pump();
+
+    expect(find.text('读·README.md'), findsOneWidget);
+    expect(find.text('收起'), findsOneWidget);
 
     for (var i = 0; i < 20; i++) {
       await tester.pump(const Duration(milliseconds: 100));
