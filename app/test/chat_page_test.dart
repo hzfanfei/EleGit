@@ -382,7 +382,26 @@ void main() {
     expect(find.text('松手自动发送，上滑取消'), findsOneWidget);
   });
 
-  testWidgets('voice mode can speak the next turn while a reply is streaming', (tester) async {
+  testWidgets('repo chat reopens in the last voice input mode', (tester) async {
+    SharedPreferences.setMockInitialValues({'wx.chatVoiceInput': true});
+    final memory = AppMemory(await SharedPreferences.getInstance());
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: ChatPage(
+          api: FakeWenxiangApi(voiceReady: true),
+          repo: sampleRepo(),
+          memory: memory,
+          onBack: () {},
+        ),
+      ),
+    );
+    await _pumpUntilChatReady(tester);
+    expect(find.byKey(const Key('wx-hold-speak')), findsOneWidget);
+    expect(find.byKey(const Key('wx-chat-input')), findsNothing);
+  });
+
+  testWidgets('a text question keeps the next turn on the keyboard', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
         theme: wenxiangTheme(),
@@ -403,18 +422,13 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 40));
 
-    expect(find.text('按住说下一条'), findsOneWidget);
-    expect(find.byKey(const Key('wx-hold-speak')), findsOneWidget);
-    expect(find.text('按住说下一条，答完自动问'), findsOneWidget);
+    expect(find.byKey(const Key('wx-chat-input')), findsOneWidget);
+    expect(find.text('可以先写下一条，或按住说话'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('wx-voice-toggle')));
     await tester.pump();
-    expect(find.byKey(const Key('wx-chat-input')), findsOneWidget);
-    await tester.enterText(find.byKey(const Key('wx-chat-input')), '语音时也能先写下一条');
-    await tester.pump();
-    await tester.tap(find.text('排队'));
-    await tester.pump();
-    expect(find.text('排队中'), findsOneWidget);
+    expect(find.text('按住说下一条'), findsOneWidget);
+    expect(find.byKey(const Key('wx-hold-speak')), findsOneWidget);
 
     for (var i = 0; i < 20; i++) {
       await tester.pump(const Duration(milliseconds: 100));

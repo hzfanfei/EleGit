@@ -17,6 +17,7 @@ class AppMemory {
   static const githubLoginKey = 'wx.githubLogin';
   static const recentReposKey = 'wx.recentRepos';
   static const voiceHoldTipDismissedKey = 'wx.voiceHoldTipDismissed';
+  static const chatVoiceInputKey = 'wx.chatVoiceInput';
   static const ttsVoiceKey = 'wx.ttsVoice';
   static const askEngineKey = 'wx.askEngine';
   static const askEngineBookKey = 'wx.askEngine.book';
@@ -34,6 +35,10 @@ class AppMemory {
   }
 
   bool voiceHoldTipDismissed() => prefs.getBool(voiceHoldTipDismissedKey) ?? false;
+
+  bool chatVoiceInput() => prefs.getBool(chatVoiceInputKey) ?? false;
+
+  Future<void> saveChatVoiceInput(bool voice) => prefs.setBool(chatVoiceInputKey, voice);
 
   Future<void> dismissVoiceHoldTip() => prefs.setBool(voiceHoldTipDismissedKey, true);
 

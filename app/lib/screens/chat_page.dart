@@ -121,6 +121,7 @@ class _ChatPageState extends State<ChatPage> {
   @override
   void initState() {
     super.initState();
+    _voiceInputMode = widget.memory?.chatVoiceInput() ?? false;
     _typewriter = WxTypewriterStream(
       onReveal: () {
         if (mounted && _live) _followTypewriterTail();
@@ -148,6 +149,7 @@ class _ChatPageState extends State<ChatPage> {
       }) async {
         if (!mounted) return;
         setState(() {
+          _rememberInputMode(true);
           _messages.addAll([
             ChatMessage(role: 'user', content: question, via: 'voice'),
             ChatMessage(role: 'assistant', content: answer, engine: engine, via: 'voice'),
@@ -296,6 +298,7 @@ class _ChatPageState extends State<ChatPage> {
       _voiceInputMode = !_voiceInputMode;
       if (_voiceInputMode) _focus.unfocus();
     });
+    unawaited(widget.memory?.saveChatVoiceInput(_voiceInputMode));
   }
 
   Future<void> _beginHold(double globalY) async {
@@ -416,6 +419,7 @@ class _ChatPageState extends State<ChatPage> {
       });
       if (text.isNotEmpty) {
         unawaited(_dismissVoiceHoldTip());
+        _composeFromVoice = true;
         unawaited(_send(text));
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -753,8 +757,17 @@ class _ChatPageState extends State<ChatPage> {
     await _persist();
   }
 
+  bool _composeFromVoice = false;
+
+  void _rememberInputMode(bool voice) {
+    _voiceInputMode = voice;
+    unawaited(widget.memory?.saveChatVoiceInput(voice));
+  }
+
   Future<void> _send([String? preset]) async {
     final text = (preset ?? _input.text).trim();
+    final voice = _composeFromVoice;
+    _composeFromVoice = false;
     if (text.isEmpty) return;
     _editingIndex = null;
     _input.clear();
@@ -763,7 +776,8 @@ class _ChatPageState extends State<ChatPage> {
 
     late int userIndex;
     setState(() {
-      _messages.add(ChatMessage(role: 'user', content: text));
+      _rememberInputMode(voice);
+      _messages.add(ChatMessage(role: 'user', content: text, via: voice ? 'voice' : null));
       userIndex = _messages.length - 1;
     });
     unawaited(_persist());
