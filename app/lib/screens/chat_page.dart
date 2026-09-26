@@ -21,6 +21,7 @@ import '../copy/voice_stt_copy.dart';
 import '../voice/voice_stt_client.dart';
 import '../widgets/book_quick_voice_fab.dart';
 import '../widgets/wx_chat_markdown_stream.dart';
+import '../widgets/agent_decision_card.dart';
 import '../widgets/wx_chrome.dart';
 import '../widgets/wx_hold_to_speak.dart';
 import '../widgets/wx_rich_text.dart';
@@ -80,6 +81,7 @@ class _ChatPageState extends State<ChatPage> {
   int? _processingUserIndex;
   final List<int> _queuedUserIndices = <int>[];
   bool _agentMode = false;
+  ChatStreamEvent? _decision;
   int? _editingIndex;
   String? _lastUser;
   bool _voiceReady = false;
@@ -780,6 +782,29 @@ class _ChatPageState extends State<ChatPage> {
     await _runSendForUserIndex(userIndex);
   }
 
+  Future<void> _submitDecision({
+    required String kind,
+    required bool skip,
+    required bool accept,
+    required List<Map<String, dynamic>> answers,
+  }) async {
+    final requestId = _decision?.payload?['requestId']?.toString() ?? '';
+    final sessionId = (_decision?.sessionId ?? _sessionId ?? '').trim();
+    if (requestId.isEmpty || sessionId.isEmpty) {
+      throw StateError('missing interaction');
+    }
+    await widget.api.replyInteraction(
+      sessionId: sessionId,
+      requestId: requestId,
+      kind: kind,
+      accept: accept,
+      skip: skip,
+      answers: answers,
+    );
+    if (!mounted) return;
+    setState(() => _decision = null);
+  }
+
   Future<void> _runSendForUserIndex(int userIndex) async {
     if (userIndex < 0 || userIndex >= _messages.length) {
       _finishSendQueue();
@@ -792,6 +817,7 @@ class _ChatPageState extends State<ChatPage> {
     _liveEngine.value = null;
     _livePhase.value = 'connect';
     _liveActivity.value = '';
+    _decision = null;
     _startLivePhaseFallback();
     setState(() {
       _live = true;
@@ -819,14 +845,18 @@ class _ChatPageState extends State<ChatPage> {
           _rememberSessionId(event.sessionId);
         }
         if (event.type == 'status') {
-          final detail = event.detail?.trim();
-          if (detail != null && detail.isNotEmpty) {
+          final phase = event.phase?.trim();
+          final detail = event.detail?.trim() ?? '';
+          if (phase == 'activity') {
+            _liveActivity.value = detail;
+          } else if (detail.isNotEmpty) {
             _liveActivity.value = detail;
           }
-          final phase = event.phase?.trim();
           if (phase != null && phase.isNotEmpty && phase != 'activity') {
             _setLivePhase(phase);
           }
+        } else if (event.type == 'ask' || event.type == 'plan') {
+          setState(() => _decision = event);
         } else if (event.type == 'delta' && event.text.isNotEmpty) {
           if (firstDelta) {
             firstDelta = false;
@@ -1194,6 +1224,11 @@ class _ChatPageState extends State<ChatPage> {
             ),
           ),
           const WxHairline(),
+          if (_decision != null)
+            AgentDecisionCard(
+              event: _decision!,
+              onSubmit: _submitDecision,
+            ),
           _Composer(
             controller: _input,
             focus: _focus,

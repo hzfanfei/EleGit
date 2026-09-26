@@ -169,6 +169,31 @@ class WenxiangApi {
     unawaited(_postChatCancel(id));
   }
 
+  Future<void> replyInteraction({
+    required String sessionId,
+    required String requestId,
+    required String kind,
+    bool accept = false,
+    bool skip = false,
+    List<Map<String, dynamic>> answers = const [],
+  }) async {
+    final res = await http
+        .post(
+          _uri('/v1/chat/interact'),
+          headers: _headers,
+          body: jsonEncode({
+            'sessionId': sessionId,
+            'requestId': requestId,
+            'kind': kind,
+            'accept': accept,
+            'skip': skip,
+            'answers': answers,
+          }),
+        )
+        .timeout(const Duration(seconds: 20));
+    _json(res, fallback: '提交选择失败');
+  }
+
   Future<void> _postChatCancel(String sessionId) async {
     try {
       await http

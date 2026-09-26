@@ -16,6 +16,7 @@ import '../utils/ask_live_phase.dart';
 import '../voice/hold_to_speak_session.dart';
 import '../voice/voice_stt_client.dart';
 import 'wx_hold_to_speak.dart';
+import 'agent_decision_card.dart';
 import 'wx_rich_text.dart';
 import 'wx_typewriter_stream.dart';
 
@@ -161,6 +162,7 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
   late final HoldToSpeakSession _hold;
   late final AnimationController _pulse;
   final _livePhase = ValueNotifier<String>('connect');
+  final _liveActivity = ValueNotifier<String>('');
   final _phaseElapsed = ValueNotifier<int>(0);
   Timer? _livePhaseTimer;
   String _livePhaseChapter = '';
@@ -171,6 +173,7 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
   bool _voiceInputMode = false;
   String _voiceHint = '';
   String? _peekAnswer;
+  ChatStreamEvent? _decision;
   BookChatStore _store = BookChatStore.empty();
   String _anchorId = 'start';
   BookReadingPlace _place = const BookReadingPlace();
@@ -376,6 +379,29 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
     return buf.toString();
   }
 
+  Future<void> _submitDecision({
+    required String kind,
+    required bool skip,
+    required bool accept,
+    required List<Map<String, dynamic>> answers,
+  }) async {
+    final requestId = _decision?.payload?['requestId']?.toString() ?? '';
+    final sessionId = (_decision?.sessionId ?? _sessionId ?? '').trim();
+    if (requestId.isEmpty || sessionId.isEmpty) {
+      throw StateError('missing interaction');
+    }
+    await widget.api.replyInteraction(
+      sessionId: sessionId,
+      requestId: requestId,
+      kind: kind,
+      accept: accept,
+      skip: skip,
+      answers: answers,
+    );
+    if (!mounted) return;
+    setState(() => _decision = null);
+  }
+
   Future<void> _send([String? text]) async {
     final raw = (text ?? _input.text).trim();
     if (raw.isEmpty || _busy) return;
@@ -384,6 +410,7 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
     _input.clear();
     _livePhaseChapter = _place.chapter.trim();
     _livePhase.value = 'book';
+    _liveActivity.value = '';
     _phaseElapsed.value = 0;
     _startLivePhaseFallback();
     setState(() {
@@ -391,6 +418,7 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
       _busy = true;
       _live = true;
       _peekAnswer = null;
+      _decision = null;
     });
     if (!_expanded) _expandForAnswer();
     _scrollToEnd();
@@ -410,7 +438,17 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
         switch (event.type) {
           case 'status':
             final phase = event.phase?.trim() ?? '';
-            if (phase.isNotEmpty) _livePhase.value = phase;
+            final detail = event.detail?.trim() ?? '';
+            if (phase == 'activity') {
+              _liveActivity.value = detail;
+            } else if (phase.isNotEmpty) {
+              _livePhase.value = phase;
+              if (detail.isNotEmpty) _liveActivity.value = detail;
+            }
+            break;
+          case 'ask':
+          case 'plan':
+            setState(() => _decision = event);
             break;
           case 'delta':
             _typewriter.push(event.text);
@@ -676,6 +714,7 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
     unawaited(_persistStore());
     widget.sheetSize.removeListener(_onSheetSize);
     _livePhase.dispose();
+    _liveActivity.dispose();
     _phaseElapsed.dispose();
     _pulse.dispose();
     _hold.dispose();
@@ -816,6 +855,7 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
                               live: _live,
                               typewriter: _typewriter,
                               phase: _livePhase,
+                              activity: _liveActivity,
                               elapsed: _phaseElapsed,
                               chapter: _livePhaseChapter,
                               onDeleteTurn: _confirmDeleteTurn,
@@ -832,6 +872,7 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
                                     child: _BookAskLiveText(
                                       typewriter: _typewriter,
                                       phase: _livePhase,
+                                      activity: _liveActivity,
                                       elapsed: _phaseElapsed,
                                       chapter: _livePhaseChapter,
                                     ),
@@ -859,6 +900,11 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
                           onCancelRecognize:
                               _hold.sttBusy ? () => unawaited(_hold.cancelRecognition()) : null,
                         ),
+                      ),
+                    if (_decision != null)
+                      AgentDecisionCard(
+                        event: _decision!,
+                        onSubmit: _submitDecision,
                       ),
                     Padding(
                       padding: EdgeInsets.fromLTRB(
@@ -1250,12 +1296,14 @@ class _BookAskLiveText extends StatelessWidget {
   const _BookAskLiveText({
     required this.typewriter,
     required this.phase,
+    required this.activity,
     required this.elapsed,
     required this.chapter,
   });
 
   final WxTypewriterStream typewriter;
   final ValueNotifier<String> phase;
+  final ValueNotifier<String> activity;
   final ValueNotifier<int> elapsed;
   final String chapter;
 
@@ -1266,35 +1314,74 @@ class _BookAskLiveText extends StatelessWidget {
       valueListenable: typewriter.visible,
       builder: (_, text, __) {
         if (text.isNotEmpty) {
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Expanded(child: WxReadableText(text)),
-              const SizedBox(width: 6),
-              _JumpToEndButton(typewriter: typewriter),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Expanded(child: WxReadableText(text)),
+                  const SizedBox(width: 6),
+                  _JumpToEndButton(typewriter: typewriter),
+                ],
+              ),
+              ValueListenableBuilder<String>(
+                valueListenable: activity,
+                builder: (_, liveActivity, __) {
+                  if (liveActivity.isEmpty) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text(
+                      liveActivity,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: Wx.muted,
+                        height: 1.4,
+                      ),
+                    ),
+                  );
+                },
+              ),
             ],
           );
         }
         return ValueListenableBuilder<String>(
-          valueListenable: phase,
-          builder: (_, livePhase, __) {
-            return ValueListenableBuilder<int>(
-              valueListenable: elapsed,
-              builder: (_, elapsedSec, __) {
-                return Semantics(
-                  liveRegion: true,
-                  child: Text(
-                    askLivePhaseLabel(
-                      livePhase,
-                      book: true,
-                      chapter: chapter,
-                      secondsElapsed: elapsedSec,
-                    ),
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: Wx.muted,
-                      height: 1.45,
-                    ),
+          valueListenable: activity,
+          builder: (_, liveActivity, __) {
+            if (liveActivity.isNotEmpty) {
+              return Semantics(
+                liveRegion: true,
+                child: Text(
+                  liveActivity,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: Wx.muted,
+                    height: 1.45,
                   ),
+                ),
+              );
+            }
+            return ValueListenableBuilder<String>(
+              valueListenable: phase,
+              builder: (_, livePhase, __) {
+                return ValueListenableBuilder<int>(
+                  valueListenable: elapsed,
+                  builder: (_, elapsedSec, __) {
+                    return Semantics(
+                      liveRegion: true,
+                      child: Text(
+                        askLivePhaseLabel(
+                          livePhase,
+                          book: true,
+                          chapter: chapter,
+                          secondsElapsed: elapsedSec,
+                        ),
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: Wx.muted,
+                          height: 1.45,
+                        ),
+                      ),
+                    );
+                  },
                 );
               },
             );
@@ -1484,6 +1571,7 @@ class _AllQaHistoryList extends StatelessWidget {
     required this.live,
     required this.typewriter,
     required this.phase,
+    required this.activity,
     required this.elapsed,
     required this.chapter,
     required this.onDeleteTurn,
@@ -1494,6 +1582,7 @@ class _AllQaHistoryList extends StatelessWidget {
   final bool live;
   final WxTypewriterStream typewriter;
   final ValueNotifier<String> phase;
+  final ValueNotifier<String> activity;
   final ValueNotifier<int> elapsed;
   final String chapter;
   final Future<void> Function(BookQaTurn turn) onDeleteTurn;
@@ -1529,6 +1618,7 @@ class _AllQaHistoryList extends StatelessWidget {
               child: _BookAskLiveText(
                 typewriter: typewriter,
                 phase: phase,
+                activity: activity,
                 elapsed: elapsed,
                 chapter: chapter,
               ),

@@ -1078,6 +1078,30 @@ app.post("/v1/chat/cancel", async (req, res) => {
   res.json({ ok: true });
 });
 
+app.post("/v1/chat/interact", (req, res) => {
+  const sessionId = String(req.body?.sessionId || "").trim();
+  const requestId = String(req.body?.requestId || "").trim();
+  if (!sessionId || !requestId) {
+    res.status(400).json({ error: "sessionId and requestId are required" });
+    return;
+  }
+  const body = {
+    kind: req.body?.kind === "plan" ? "plan" : "ask",
+    accept: req.body?.accept === true,
+    skip: req.body?.skip === true,
+    reason: req.body?.reason,
+    answers: req.body?.answers,
+  };
+  const ok =
+    sessions.answerInteraction(sessionId, requestId, body) ||
+    bookSessions.answerInteraction(sessionId, requestId, body);
+  if (!ok) {
+    res.status(404).json({ error: "没有等待回复的问题或计划" });
+    return;
+  }
+  res.json({ ok: true });
+});
+
 app.post("/v1/chat", async (req, res) => {
   let turn;
   let turnSessionId = "";

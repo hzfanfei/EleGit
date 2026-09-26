@@ -7,6 +7,7 @@ import '../api/wenxiang_api.dart';
 import '../copy/errors.dart';
 import '../models.dart';
 import '../theme.dart';
+import '../widgets/agent_decision_card.dart';
 import '../widgets/wx_chat_markdown_stream.dart';
 import '../widgets/wx_chrome.dart';
 import '../widgets/wx_typewriter_stream.dart';
@@ -38,9 +39,11 @@ class _BookChatPageState extends State<BookChatPage> {
   final _scroll = ScrollController();
   final List<ChatMessage> _messages = [];
   late final WxTypewriterStream _typewriter;
+  final _liveActivity = ValueNotifier<String>('');
   String? _sessionId;
   bool _live = false;
   bool _busy = false;
+  ChatStreamEvent? _decision;
 
   @override
   void initState() {
@@ -67,6 +70,29 @@ class _BookChatPageState extends State<BookChatPage> {
     } catch (_) {}
   }
 
+  Future<void> _submitDecision({
+    required String kind,
+    required bool skip,
+    required bool accept,
+    required List<Map<String, dynamic>> answers,
+  }) async {
+    final requestId = _decision?.payload?['requestId']?.toString() ?? '';
+    final sessionId = (_decision?.sessionId ?? _sessionId ?? '').trim();
+    if (requestId.isEmpty || sessionId.isEmpty) {
+      throw StateError('missing interaction');
+    }
+    await widget.api.replyInteraction(
+      sessionId: sessionId,
+      requestId: requestId,
+      kind: kind,
+      accept: accept,
+      skip: skip,
+      answers: answers,
+    );
+    if (!mounted) return;
+    setState(() => _decision = null);
+  }
+
   Future<void> _send([String? text]) async {
     final message = (text ?? _input.text).trim();
     if (message.isEmpty || _busy) return;
@@ -76,7 +102,9 @@ class _BookChatPageState extends State<BookChatPage> {
       _messages.add(ChatMessage(role: 'user', content: message));
       _busy = true;
       _live = true;
+      _decision = null;
     });
+    _liveActivity.value = '';
     _jumpToLatest();
     _typewriter.reset();
     try {
@@ -91,6 +119,17 @@ class _BookChatPageState extends State<BookChatPage> {
           _sessionId = event.sessionId;
         }
         switch (event.type) {
+          case 'status':
+            final phase = event.phase?.trim() ?? '';
+            final detail = event.detail?.trim() ?? '';
+            if (phase == 'activity' || detail.isNotEmpty) {
+              _liveActivity.value = detail;
+            }
+            break;
+          case 'ask':
+          case 'plan':
+            setState(() => _decision = event);
+            break;
           case 'delta':
             _typewriter.push(event.text);
             break;
@@ -163,6 +202,7 @@ class _BookChatPageState extends State<BookChatPage> {
     _input.dispose();
     _scroll.dispose();
     _typewriter.dispose();
+    _liveActivity.dispose();
     super.dispose();
   }
 
@@ -197,10 +237,48 @@ class _BookChatPageState extends State<BookChatPage> {
                 if (_live && index == base + _messages.length) {
                   return _Bubble(
                     role: 'assistant',
-                    child: WxChatMarkdownStream(
-                      source: _typewriter.visible,
-                      styleSheet: chatMarkdownStyle(Theme.of(context)),
-                      showCaret: true,
+                    child: ValueListenableBuilder<String>(
+                      valueListenable: _typewriter.visible,
+                      builder: (context, text, _) {
+                        if (text.isEmpty) {
+                          return ValueListenableBuilder<String>(
+                            valueListenable: _liveActivity,
+                            builder: (context, activity, _) {
+                              return Text(
+                                activity.isEmpty ? '正在问书…' : activity,
+                                style: const TextStyle(color: Wx.muted, height: 1.45),
+                              );
+                            },
+                          );
+                        }
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            WxChatMarkdownStream(
+                              source: _typewriter.visible,
+                              styleSheet: chatMarkdownStyle(Theme.of(context)),
+                              showCaret: true,
+                            ),
+                            ValueListenableBuilder<String>(
+                              valueListenable: _liveActivity,
+                              builder: (context, activity, _) {
+                                if (activity.isEmpty) return const SizedBox.shrink();
+                                return Padding(
+                                  padding: const EdgeInsets.only(top: 6),
+                                  child: Text(
+                                    activity,
+                                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                          color: Wx.muted,
+                                          height: 1.4,
+                                        ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ],
+                        );
+                      },
                     ),
                   );
                 }
@@ -231,6 +309,11 @@ class _BookChatPageState extends State<BookChatPage> {
                     )
                     .toList(),
               ),
+            ),
+          if (_decision != null)
+            AgentDecisionCard(
+              event: _decision!,
+              onSubmit: _submitDecision,
             ),
           SafeArea(
             top: false,

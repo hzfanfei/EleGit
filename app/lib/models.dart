@@ -220,6 +220,7 @@ class ChatStreamEvent {
     this.sampleRate,
     this.audioFormat,
     this.codec,
+    this.payload,
   });
 
   final String type;
@@ -237,6 +238,8 @@ class ChatStreamEvent {
   final String? audioFormat;
   /// `gzip` when PCM payload is compressed.
   final String? codec;
+  /// Raw SSE object for ask/plan cards.
+  final Map<String, dynamic>? payload;
 
   static ChatStreamEvent? fromSse(String raw) {
     final lines = raw.split('\n');
@@ -256,8 +259,9 @@ class ChatStreamEvent {
       } else if (audioRaw is String && audioRaw.isNotEmpty) {
         pcm = base64Decode(audioRaw);
       }
+      final type = (json['type'] ?? '').toString();
       return ChatStreamEvent(
-        type: (json['type'] ?? '').toString(),
+        type: type,
         text: (json['text'] ?? json['answer'] ?? '').toString(),
         engine: json['engine']?.toString(),
         error: json['error']?.toString(),
@@ -270,6 +274,7 @@ class ChatStreamEvent {
         sampleRate: json['rate'] is int ? json['rate'] as int : int.tryParse('${json['rate']}'),
         audioFormat: json['format']?.toString(),
         codec: json['codec']?.toString(),
+        payload: type == 'ask' || type == 'plan' ? Map<String, dynamic>.from(json) : null,
       );
     } catch (_) {
       return null;

@@ -238,7 +238,6 @@ export async function* streamAnswer({
     let finished = false;
     let fail = null;
     let full = "";
-    let lastActivity = "";
     sessions
       .prompt(session, {
         question,
@@ -255,10 +254,12 @@ export async function* streamAnswer({
           notify?.();
         },
         onActivity: (detail) => {
-          const label = String(detail || "").trim();
-          if (!label || label === lastActivity) return;
-          lastActivity = label;
+          const label = String(detail ?? "").trim();
           queue.push({ kind: "status", phase: "activity", detail: label });
+          notify?.();
+        },
+        onInteraction: (event) => {
+          queue.push({ kind: "interaction", event });
           notify?.();
         },
       })
@@ -287,6 +288,18 @@ export async function* streamAnswer({
       if (!piece) continue;
       if (piece.kind === "status") {
         yield { type: "status", phase: piece.phase, detail: piece.detail };
+      } else if (piece.kind === "interaction") {
+        const event = piece.event || {};
+        yield {
+          type: event.kind === "plan" ? "plan" : "ask",
+          requestId: event.requestId,
+          sessionId: event.sessionId || session.id,
+          title: event.title,
+          overview: event.overview,
+          plan: event.plan,
+          todos: event.todos,
+          questions: event.questions,
+        };
       } else if (piece.text) {
         yield { type: "delta", text: piece.text };
       }

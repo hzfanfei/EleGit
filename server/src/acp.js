@@ -24,7 +24,7 @@ export function acpPromptTimeoutMs(env = process.env) {
 
 const WRITE_TOOL = /edit|write|delete|move|apply_patch|overwrite|commit/i;
 
-export const DEFAULT_ACP_MODEL = "composer-2.5-fast";
+export const DEFAULT_ACP_MODEL = "grok-4.7-high-fast";
 
 export function sanitizeAcpEngine(raw) {
   const value = String(raw || "").trim().toLowerCase();
@@ -328,6 +328,51 @@ export function buildAcpPrompt({
   return lines.join("\n");
 }
 
+export function interactionOutcome(body = {}) {
+  if (body.kind === "plan") {
+    if (body.accept === true) return { outcome: "accepted" };
+    return { outcome: "rejected", reason: String(body.reason || "不用这个计划") };
+  }
+  const answers = (Array.isArray(body.answers) ? body.answers : [])
+    .map((item) => ({
+      questionId: String(item?.questionId || ""),
+      selectedOptionIds: (Array.isArray(item?.selectedOptionIds) ? item.selectedOptionIds : [])
+        .map((id) => String(id))
+        .filter(Boolean),
+    }))
+    .filter((item) => item.questionId && item.selectedOptionIds.length);
+  if (body.skip === true || !answers.length) {
+    return { outcome: "skipped", reason: String(body.reason || "skipped") };
+  }
+  return { outcome: "answered", answers };
+}
+
+export function publicInteraction(kind, params = {}) {
+  if (kind === "plan") {
+    return {
+      title: String(params.name || params.title || "计划"),
+      overview: String(params.overview || ""),
+      plan: String(params.plan || "").slice(0, 20000),
+      todos: (Array.isArray(params.todos) ? params.todos : []).map((item) => ({
+        id: String(item?.id || ""),
+        content: String(item?.content || ""),
+      })),
+    };
+  }
+  return {
+    title: String(params.title || ""),
+    questions: (Array.isArray(params.questions) ? params.questions : []).map((item) => ({
+      id: String(item?.id || ""),
+      prompt: String(item?.prompt || ""),
+      allowMultiple: item?.allowMultiple === true,
+      options: (Array.isArray(item?.options) ? item.options : []).map((option) => ({
+        id: String(option?.id || ""),
+        label: String(option?.label || option?.id || ""),
+      })),
+    })),
+  };
+}
+
 /** Root instructions: model must not narrate process (read/search/thinking) in the reply. */
 export const BOOK_DIRECT_ANSWER_RULES = [
   "You are 问象·问书. Ask mode only. Do not edit files.",
@@ -413,13 +458,20 @@ const ACP_HIDDEN_SESSION_UPDATES = new Set([
 
 function textFromAcpContentBlock(content) {
   if (!content) return "";
+  if (typeof content === "string") return content;
   if (Array.isArray(content)) {
     return content
-      .filter((b) => b?.type === "text" && b.text != null)
-      .map((b) => String(b.text))
+      .map((b) => {
+        if (!b) return "";
+        if (typeof b === "string") return b;
+        if (b.text != null) return String(b.text);
+        return "";
+      })
       .join("");
   }
-  if (content.type === "text" && content.text != null) return String(content.text);
+  if (typeof content === "object") {
+    if (content.text != null) return String(content.text);
+  }
   return "";
 }
 
@@ -461,8 +513,11 @@ export function acpVisibleTextFromUpdate(update) {
   const kind = String(update.sessionUpdate || "");
   if (ACP_HIDDEN_SESSION_UPDATES.has(kind)) return "";
   let text = "";
-  if (kind === "agent_message_chunk") text = textFromAcpContentBlock(update.content);
-  else if (kind === "agent_message") text = textFromAcpContentBlock(update.content);
+  if (kind === "agent_message_chunk" || kind === "agent_message") {
+    text = textFromAcpContentBlock(update.content);
+  }
+  if (!text && update.text != null) text = String(update.text);
+  if (!text && update.delta != null) text = String(update.delta);
   return sanitizeAcpUserVisibleText(text);
 }
 
@@ -486,6 +541,59 @@ function basenameForActivity(rawPath) {
   return clipActivityLabel(base, 40);
 }
 
+function acpPlanActivityLabel(update) {
+  const entries = Array.isArray(update?.entries) ? update.entries : [];
+  const active =
+    entries.find((e) => e?.status === "in_progress") ||
+    entries.find((e) => e?.status === "pending");
+  const line = String(active?.content || active?.description || "").trim();
+  if (line) return clipActivityLabel(`规划·${line}`, 48);
+  if (entries.length) return `规划 ${entries.length} 步…`;
+  return "规划中…";
+}
+
+/** Short Chinese line for a tool phase (never includes reasoning text). */
+function acpToolActivityLabel({ title = "", toolKind = "", filePath = "", sessionKind = "" }) {
+  const t = String(title || "").trim();
+  const k = String(toolKind || "").trim().toLowerCase();
+  const hay = `${t} ${k}`.toLowerCase();
+  const base = filePath ? basenameForActivity(filePath) : "";
+
+  if (/grep|ripgrep|search|codebase|semantic|glob|list|rg/.test(hay) || k === "search") {
+    if (t) return clipActivityLabel(`搜索·${t}`, 40);
+    if (base) return `搜·${base}`;
+    return "搜索中…";
+  }
+  if (/read|file|fetch|cat|open/.test(hay) || k === "read") {
+    if (base) return `读·${base}`;
+    if (t) return clipActivityLabel(`读·${t}`, 40);
+    return "读文件…";
+  }
+  if (/write|edit|patch|delete|apply|create|replace/.test(hay) || /write|edit|delete/.test(k)) {
+    if (base) return `改·${base}`;
+    if (t) return clipActivityLabel(`改·${t}`, 40);
+    return "改文件…";
+  }
+  if (/shell|terminal|bash|command|run|npm|git|exec|pnpm|node|python/.test(hay)) {
+    if (t) return clipActivityLabel(`终端·${t}`, 40);
+    return "跑命令…";
+  }
+  if (/mcp|invoke/.test(hay)) {
+    return t ? clipActivityLabel(t, 40) : "扩展工具…";
+  }
+  if (sessionKind === "tool_call") {
+    if (t) return clipActivityLabel(t, 40);
+    if (base) return clipActivityLabel(base, 40);
+    return "工具…";
+  }
+  if (sessionKind === "tool_call_update") {
+    if (t) return clipActivityLabel(t, 40);
+    if (base) return clipActivityLabel(base, 40);
+    return "";
+  }
+  return "";
+}
+
 /** Short Chinese status for tool / search phases (never includes reasoning text). */
 export function acpActivityLabelFromUpdate(update) {
   if (!update || typeof update !== "object") return "";
@@ -494,40 +602,197 @@ export function acpActivityLabelFromUpdate(update) {
     kind === "agent_message_chunk" ||
     kind === "agent_message" ||
     kind === "usage_update" ||
+    kind === "config_option_update" ||
+    kind === "current_mode_update" ||
+    kind === "available_commands_update" ||
+    kind === "session_info_update" ||
     ACP_HIDDEN_SESSION_UPDATES.has(kind)
   ) {
     return "";
   }
 
+  if (kind === "plan") return acpPlanActivityLabel(update);
+
   const filePath = acpActivityPath(update);
   const title = String(
-    update.title || update.toolCall?.title || update.toolCall?.name || "",
+    update.title || update.toolCall?.title || update.toolCall?.name || update.name || "",
   ).trim();
   const toolKind = String(update.toolCall?.kind || update.kind || "").trim();
-  const hay = `${kind} ${title} ${toolKind}`.toLowerCase();
 
-  if (/read|glob|grep|search|ripgrep|list|file|semsearch|codebase|fetch/.test(hay)) {
-    if (filePath) return `正在查看 ${basenameForActivity(filePath)}`;
-    return "正在搜索或读取仓库…";
+  if (kind === "tool_call" || kind === "tool_call_update") {
+    return acpToolActivityLabel({ title, toolKind, filePath, sessionKind: kind });
   }
-  if (/write|edit|patch|apply|shell|run|terminal|command|bash|npm|git|delete/.test(hay)) {
-    if (filePath) return `正在修改 ${basenameForActivity(filePath)}`;
-    return "正在执行命令或修改文件…";
-  }
-  if (/tool|mcp|invoke|started|running|progress/.test(hay) || kind.includes("tool")) {
-    if (title) return clipActivityLabel(`正在执行：${title}`, 56);
-    return "正在调用工具…";
-  }
-  if (kind && !kind.startsWith("agent_")) {
-    if (title) return clipActivityLabel(title, 56);
-  }
+
+  if (title) return clipActivityLabel(title, 40);
   return "";
 }
 
 export function acpActivityLabelFromFsRead(rawPath) {
   const base = basenameForActivity(rawPath);
-  if (base) return `正在读取 ${base}`;
-  return "正在读取文件…";
+  if (base) return `读·${base}`;
+  return "读文件…";
+}
+
+const TOOL_ACTIVITY_CAP = 4;
+
+function clipToolOutput(text) {
+  const lines = String(text || "")
+    .split(/\r?\n/)
+    .map((line) => line.replace(/[ \t]+/g, " ").trim())
+    .filter(Boolean)
+    .slice(0, 2);
+  const joined = lines.join("\n");
+  if (joined.length <= 180) return joined;
+  return `${joined.slice(0, 179)}…`;
+}
+
+function textFromToolContent(content) {
+  const direct = textFromAcpContentBlock(content);
+  if (direct.trim()) return direct;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((block) => {
+      if (!block || typeof block !== "object") return "";
+      if (block.type === "diff") return "";
+      if (block.content) return textFromAcpContentBlock(block.content);
+      return "";
+    })
+    .join("");
+}
+
+function rawInputOf(update) {
+  const input = update?.rawInput ?? update?.toolCall?.rawInput;
+  return input && typeof input === "object" && !Array.isArray(input) ? input : {};
+}
+
+function explicitToolTitle(update) {
+  return String(update?.title || update?.toolCall?.title || update?.toolCall?.name || "").trim();
+}
+
+/** Command, pattern, or path the tool actually ran. Empty when the update has no input. */
+function asActivityText(value) {
+  if (Array.isArray(value)) return value.map((part) => String(part ?? "")).join(" ");
+  if (value == null || typeof value === "object") return "";
+  return String(value);
+}
+
+function toolCommandFromUpdate(update) {
+  const input = rawInputOf(update);
+  if (!Object.keys(input).length) return "";
+  const command = asActivityText(input.command);
+  if (command) return clipActivityLabel(command, 180);
+  if (input.pattern || input.globPattern) {
+    const pattern = clipActivityLabel(input.pattern || input.globPattern, 120);
+    const where = input.path ? basenameForActivity(input.path) : "";
+    return where ? `${pattern} · ${where}` : pattern;
+  }
+  if (input.query) return clipActivityLabel(input.query, 180);
+  if (input.searchTerm) return clipActivityLabel(input.searchTerm, 180);
+  if (input.url) return clipActivityLabel(input.url, 180);
+  if (input.toolName) {
+    const who = input.providerIdentifier ? `${input.providerIdentifier}/` : "";
+    return clipActivityLabel(`${who}${input.toolName}`, 80);
+  }
+  if (input.description) return clipActivityLabel(input.description, 180);
+  if (Array.isArray(input.paths) && input.paths.length) {
+    const first = basenameForActivity(input.paths[0]);
+    return input.paths.length > 1 ? `${first} 等 ${input.paths.length} 个` : first;
+  }
+  if (input.path) return basenameForActivity(input.path);
+  return "";
+}
+
+/** One or two lines of tool result. Never the whole file, diff, or reasoning. */
+function toolOutputFromUpdate(update) {
+  const raw = update?.rawOutput ?? update?.toolCall?.rawOutput;
+  let text = "";
+  if (typeof raw === "string") text = raw;
+  else if (raw && typeof raw === "object") {
+    if (raw.stdout || raw.stderr || (raw.exitCode != null && Number(raw.exitCode) !== 0)) {
+      const chunks = [];
+      if (raw.exitCode != null && Number(raw.exitCode) !== 0) chunks.push(`exit ${raw.exitCode}`);
+      if (raw.stdout) chunks.push(String(raw.stdout));
+      if (raw.stderr) chunks.push(String(raw.stderr));
+      text = chunks.join("\n");
+    } else if (typeof raw.content === "string") text = raw.content;
+    else if (raw.error) text = String(raw.error);
+    else if (raw.totalMatches != null) {
+      text = raw.truncated ? `${raw.totalMatches} 处（已截断）` : `${raw.totalMatches} 处`;
+    } else if (raw.resultCount != null) text = `${raw.resultCount} 条`;
+    else if (raw.totalDiagnostics != null) text = `${raw.totalDiagnostics} 条诊断`;
+    else if (raw.totalFiles != null) {
+      text = raw.truncated ? `${raw.totalFiles} 个文件（已截断）` : `${raw.totalFiles} 个文件`;
+    }
+  }
+  if (!text && update?.sessionUpdate === "tool_call_update") {
+    text = textFromToolContent(update.content);
+  }
+  return clipToolOutput(text);
+}
+
+function renderToolItem(item) {
+  const lines = [];
+  if (item.title) lines.push(item.title);
+  if (item.command && !item.title.includes(item.command)) lines.push(item.command);
+  if (item.output) lines.push(item.output);
+  return lines.join("\n");
+}
+
+function renderToolLog(log) {
+  return log.items.map(renderToolItem).filter(Boolean).join("\n\n");
+}
+
+/**
+ * Fold one ACP tool/plan update into a short bubble log.
+ * Returns the text to show, or "" when this update is not a visible tool step.
+ * Thoughts stay out. The log is display-only and is never sent back to the agent.
+ */
+export function pushAcpToolActivity(log, update) {
+  if (!log || !Array.isArray(log.items) || !update || typeof update !== "object") return "";
+  const kind = String(update.sessionUpdate || "");
+  if (kind === "plan") {
+    const title = acpPlanActivityLabel(update);
+    let item = log.items.find((entry) => entry.id === "plan");
+    if (!item) {
+      item = { id: "plan", title, command: "", output: "" };
+      log.items.push(item);
+    } else {
+      item.title = title;
+    }
+    if (log.items.length > TOOL_ACTIVITY_CAP) {
+      log.items.splice(0, log.items.length - TOOL_ACTIVITY_CAP);
+    }
+    return renderToolLog(log);
+  }
+  if (kind !== "tool_call" && kind !== "tool_call_update") return "";
+
+  const id = String(update.toolCallId || update.toolCall?.toolCallId || "");
+  const title = explicitToolTitle(update) ? acpActivityLabelFromUpdate(update) : "";
+  const command = toolCommandFromUpdate(update);
+  const output = toolOutputFromUpdate(update);
+  let item = id ? log.items.find((entry) => entry.id === id) : null;
+  if (!item && kind === "tool_call_update" && log.items.length) {
+    item = log.items[log.items.length - 1];
+  }
+  if (!item) {
+    const createdTitle = title || acpActivityLabelFromUpdate(update);
+    if (!createdTitle && !command && !output) return renderToolLog(log);
+    item = {
+      id: id || `tool-${log.items.length + 1}`,
+      title: createdTitle,
+      command,
+      output,
+    };
+    log.items.push(item);
+  } else {
+    if (title) item.title = title;
+    if (command) item.command = command;
+    if (output) item.output = output;
+  }
+  if (log.items.length > TOOL_ACTIVITY_CAP) {
+    log.items.splice(0, log.items.length - TOOL_ACTIVITY_CAP);
+  }
+  return renderToolLog(log);
 }
 
 function resolveUnderCwd(cwd, rawPath) {
@@ -578,6 +843,7 @@ export class AcpChannel {
     this.prompting = 0;
     this.onDelta = null;
     this.onActivity = null;
+    this._toolLog = { items: [] };
     this._lastDeltaAt = 0;
     this._usageAt = 0;
   }
@@ -704,36 +970,21 @@ export class AcpChannel {
     this.prompting += 1;
     this._touch();
     try {
-      if (this.isClaudeProvider()) {
-        return await this._promptClaudeStream(text, { onDelta, onActivity, timeoutMs });
-      }
-      this.onDelta = onDelta;
-      this.onActivity = onActivity;
-      onActivity?.("已提交问题，等待 Agent 响应…");
-      const result = await this.request(
-        "session/prompt",
-        {
-          sessionId: this.sessionId,
-          prompt: [{ type: "text", text }],
-        },
-        timeoutMs,
-      );
-      return result;
+      return await this._promptStream(text, { onDelta, onActivity, timeoutMs });
     } finally {
-      this.onDelta = null;
-      this.onActivity = null;
       this.prompting = Math.max(0, this.prompting - 1);
       this._touch();
     }
   }
 
-  async _promptClaudeStream(text, { onDelta, onActivity, timeoutMs = acpPromptTimeoutMs() }) {
+  async _promptStream(text, { onDelta, onActivity, timeoutMs = acpPromptTimeoutMs() }) {
+    this._toolLog = { items: [] };
     this.onDelta = (chunk) => {
       this._lastDeltaAt = Date.now();
       onDelta?.(chunk);
     };
     this.onActivity = onActivity;
-    onActivity?.("已提交问题，等待 Agent 响应…");
+    onActivity?.("Agent 处理中…");
     try {
       // Wait for session/prompt to finish. Do not cancel on short SSE idle: Claude Code
       // often goes silent for seconds while listing/reading files during code review.
@@ -895,14 +1146,23 @@ export class AcpChannel {
         this._usageAt = Date.now();
       }
       const text = acpVisibleTextFromUpdate(update);
-      if (text) this.onDelta?.(text);
-      const activity = acpActivityLabelFromUpdate(update);
-      if (activity) this.onActivity?.(activity);
+      if (text) {
+        this.onDelta?.(text);
+        if (!this._toolLog.items.length) this.onActivity?.("");
+      }
+      const traced = pushAcpToolActivity(this._toolLog, update);
+      if (traced) this.onActivity?.(traced);
       return;
     }
     if (msg.method === "fs/read_text_file") {
-      const readLabel = acpActivityLabelFromFsRead(msg.params?.path);
-      if (readLabel) this.onActivity?.(readLabel);
+      const traced = pushAcpToolActivity(this._toolLog, {
+        sessionUpdate: "tool_call",
+        toolCallId: `fs-read:${String(msg.params?.path || "")}`,
+        title: "Read",
+        kind: "read",
+        rawInput: { path: msg.params?.path || "" },
+      });
+      if (traced) this.onActivity?.(traced);
       try {
         this.respond(msg.id, readTextUnderCwd(this.cwd, msg.params?.path));
       } catch (err) {
@@ -932,12 +1192,32 @@ export class AcpChannel {
       return;
     }
     if (msg.method === "cursor/ask_question") {
-      this.respond(msg.id, { outcome: { outcome: "skipped", reason: "phone client" } });
+      this._relayInteraction(msg, "ask");
       return;
     }
     if (msg.method === "cursor/create_plan") {
-      this.respond(msg.id, { outcome: { outcome: "cancelled" } });
+      this._relayInteraction(msg, "plan");
     }
+  }
+
+  _relayInteraction(msg, kind) {
+    const deliver = this.onInteraction;
+    const skipped =
+      kind === "plan"
+        ? { outcome: "rejected", reason: "phone client" }
+        : { outcome: "skipped", reason: "phone client" };
+    if (!deliver) {
+      this.respond(msg.id, { outcome: skipped });
+      return;
+    }
+    Promise.resolve()
+      .then(() => deliver({ kind, params: msg.params || {} }))
+      .then((outcome) => {
+        this.respond(msg.id, { outcome: outcome || skipped });
+      })
+      .catch(() => {
+        this.respond(msg.id, { outcome: skipped });
+      });
   }
 
   _touch() {
@@ -1023,24 +1303,53 @@ export function createSessionStore({
     return publicView(session);
   }
 
-  const repoChannels = new Map();
+  const channels = new Map();
+  const pendingInteractions = new Map();
 
-  function repoEntry(owner, repo, cwd) {
-    const key = repoKey(owner, repo);
+  function rejectPendingForSession(sessionId) {
+    for (const [requestId, row] of pendingInteractions) {
+      if (row.sessionId !== sessionId) continue;
+      pendingInteractions.delete(requestId);
+      row.reject(new Error("cancelled"));
+    }
+  }
+
+  function beginInteraction(sessionId) {
+    const requestId = randomUUID();
+    let resolve;
+    let reject;
+    const promise = new Promise((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    pendingInteractions.set(requestId, { sessionId, resolve, reject });
+    return { requestId, promise };
+  }
+
+  function answerInteraction(sessionId, requestId, body) {
+    const row = pendingInteractions.get(String(requestId || ""));
+    if (!row || row.sessionId !== sessionId) return false;
+    pendingInteractions.delete(String(requestId || ""));
+    row.resolve(interactionOutcome(body));
+    return true;
+  }
+
+  function takeEntry(sessionId, cwd) {
     const root = String(cwd || "").trim();
-    let entry = repoChannels.get(key);
+    let entry = channels.get(sessionId);
     if (!entry || (root && entry.cwd && entry.cwd !== root)) {
       if (entry?.channel) entry.channel.close().catch(() => {});
+      rejectPendingForSession(sessionId);
       entry = {
         cwd: root,
         channel: null,
         warmPromise: null,
         lock: Promise.resolve(),
-        promptingSessionId: null,
-        primedSessionId: null,
+        primed: false,
+        announcedAgentMode: null,
         epoch: channelEpoch,
       };
-      repoChannels.set(key, entry);
+      channels.set(sessionId, entry);
     } else if (root && !entry.cwd) {
       entry.cwd = root;
     }
@@ -1061,11 +1370,11 @@ export function createSessionStore({
     }
   }
 
-  async function warmRepo(owner, repo, cwd) {
-    const command = resolveCommand();
+  async function warmSession(session, cwd) {
+    const resolved = resolveCommand();
     const root = String(cwd || "").trim();
-    if (!command || !root) return { warmed: false };
-    const entry = repoEntry(owner, repo, root);
+    if (!session?.id || !resolved || !root) return { warmed: false };
+    const entry = takeEntry(session.id, root);
     if (entry.channel?.alive && entry.epoch === channelEpoch) return { warmed: true, reused: true };
     if (entry.warmPromise) {
       await entry.warmPromise;
@@ -1077,14 +1386,15 @@ export function createSessionStore({
       let channel = null;
       try {
         if (entry.channel) await entry.channel.close().catch(() => {});
-        channel = new AcpChannel({ command, cwd: root, spawnImpl, idleMs });
+        channel = new AcpChannel({ command: resolved, cwd: root, spawnImpl, idleMs });
         await channel.start();
         if (epoch !== channelEpoch) {
           await channel.close().catch(() => {});
           return;
         }
         entry.channel = channel;
-        entry.primedSessionId = null;
+        entry.primed = false;
+        entry.announcedAgentMode = null;
       } catch (err) {
         await channel?.close().catch(() => {});
         throw err;
@@ -1097,8 +1407,19 @@ export function createSessionStore({
     return { warmed: Boolean(entry.channel?.alive), reused: false };
   }
 
+  async function warmRepo(owner, repo, cwd) {
+    const id = activeByRepo.get(repoKey(owner, repo));
+    const session = id && sessions.get(id);
+    if (!session) return { warmed: false, reason: "no_session" };
+    return warmSession(session, cwd);
+  }
+
   async function close(owner, repo, id) {
     const session = requireSession(owner, repo, id);
+    rejectPendingForSession(id);
+    const entry = channels.get(id);
+    if (entry?.channel) await entry.channel.close().catch(() => {});
+    channels.delete(id);
     sessions.delete(id);
     if (activeByRepo.get(repoKey(owner, repo)) === id) {
       const next = [...sessions.values()]
@@ -1133,6 +1454,7 @@ export function createSessionStore({
     cwd,
     onDelta,
     onActivity,
+    onInteraction,
     buildPrompt,
     agentMode = false,
     staticFiles,
@@ -1149,8 +1471,8 @@ export function createSessionStore({
       err.code = "checkout_missing";
       throw err;
     }
-    await warmRepo(session.owner, session.repo, root);
-    const entry = repoEntry(session.owner, session.repo, root);
+    await warmSession(session, root);
+    const entry = takeEntry(session.id, root);
     const channel = entry.channel;
     if (!channel?.alive) {
       const err = new Error("ACP channel failed to start");
@@ -1160,31 +1482,52 @@ export function createSessionStore({
     const hasHistory = (history || []).some(
       (m) => m?.content && (m.role === "user" || m.role === "assistant"),
     );
-    const seedHistory = hasHistory && !entry.primedSessionId;
     const makePrompt =
       buildPrompt ||
       (bookContext ? buildBookAcpPrompt : buildAcpPrompt);
-    const text = makePrompt({
-      question,
-      history,
-      githubContext,
-      bookContext,
-      seedHistory,
-      agentMode: Boolean(agentMode) && !bookContext,
-      staticFiles: bookContext ? undefined : staticFiles,
-    });
+    const write = Boolean(agentMode) && !bookContext;
+    let text;
+    if (!entry.primed) {
+      text = makePrompt({
+        question,
+        history,
+        githubContext,
+        bookContext,
+        seedHistory: hasHistory,
+        agentMode: write,
+        staticFiles: bookContext ? undefined : staticFiles,
+      });
+    } else if (entry.announcedAgentMode !== write) {
+      const note = write
+        ? "You are now in agent mode for this checkout. Edit files in this checkout when that is what the user asked for."
+        : "You are now in ask mode. Do not edit files or change the working tree.";
+      text = `${note}\n\n${question}`;
+    } else {
+      text = String(question || "");
+    }
     await withRepoLock(entry, async () => {
-      entry.promptingSessionId = session.id;
-      const write = Boolean(agentMode) && !bookContext;
       channel.agentMode = write;
+      channel.onInteraction = onInteraction
+        ? async (spec) => {
+            const { requestId, promise } = beginInteraction(session.id);
+            onInteraction({
+              kind: spec.kind,
+              requestId,
+              sessionId: session.id,
+              ...publicInteraction(spec.kind, spec.params),
+            });
+            return promise;
+          }
+        : null;
       try {
         await channel.applySessionMode();
         await channel.prompt(text, { onDelta, onActivity });
-        entry.primedSessionId = session.id;
+        entry.primed = true;
+        entry.announcedAgentMode = write;
       } finally {
+        channel.onInteraction = null;
         channel.agentMode = false;
         if (write) await channel.applySessionMode().catch(() => {});
-        if (entry.promptingSessionId === session.id) entry.promptingSessionId = null;
       }
     });
     session.turns += 1;
@@ -1197,10 +1540,9 @@ export function createSessionStore({
 
   async function cancel(session) {
     if (!session) return;
-    const entry = repoChannels.get(repoKey(session.owner, session.repo));
-    if (entry?.promptingSessionId === session.id && entry.channel) {
-      await entry.channel.cancel();
-    }
+    rejectPendingForSession(session.id);
+    const entry = channels.get(session.id);
+    if (entry?.channel) await entry.channel.cancel();
   }
 
   async function cancelById(id) {
@@ -1211,19 +1553,20 @@ export function createSessionStore({
   }
 
   async function warm(session, cwd) {
-    return warmRepo(session.owner, session.repo, cwd);
+    return warmSession(session, cwd);
   }
 
   async function resetAllChannels() {
     channelEpoch += 1;
     const pending = [];
-    for (const entry of repoChannels.values()) {
+    for (const [sessionId, entry] of channels) {
+      rejectPendingForSession(sessionId);
       entry.epoch = channelEpoch;
       if (entry.channel) pending.push(entry.channel.close().catch(() => {}));
       entry.channel = null;
       entry.warmPromise = null;
-      entry.promptingSessionId = null;
-      entry.primedSessionId = null;
+      entry.primed = false;
+      entry.announcedAgentMode = null;
     }
     await Promise.all(pending);
   }
@@ -1236,6 +1579,7 @@ export function createSessionStore({
     prompt,
     cancel,
     cancelById,
+    answerInteraction,
     warm,
     warmRepo,
     resetAllChannels,

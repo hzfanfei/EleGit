@@ -12,6 +12,7 @@ import {
   claudeConfiguredModel,
   acpActivityLabelFromFsRead,
   acpActivityLabelFromUpdate,
+  pushAcpToolActivity,
   acpVisibleTextFromUpdate,
   applyAcpEnginePreference,
   acpEnginePreference,
@@ -103,7 +104,7 @@ describe("acpModelId", () => {
     }
   });
 
-  it("defaults to composer-2.5-fast for cursor engine", () => {
+  it("defaults to grok-4.7-high-fast for cursor engine", () => {
     const prev = process.env.WENXIANG_CURSOR_MODEL;
     const prev2 = process.env.CURSOR_MODEL;
     const prevEngine = process.env.WENXIANG_ACP_ENGINE;
@@ -113,8 +114,8 @@ describe("acpModelId", () => {
     delete process.env.WENXIANG_ACP_MODEL;
     process.env.WENXIANG_ACP_ENGINE = "cursor";
     try {
-      assert.equal(acpModelId(), "composer-2.5-fast");
-      assert.equal(DEFAULT_ACP_MODEL, "composer-2.5-fast");
+      assert.equal(acpModelId(), "grok-4.7-high-fast");
+      assert.equal(DEFAULT_ACP_MODEL, "grok-4.7-high-fast");
     } finally {
       if (prev !== undefined) process.env.WENXIANG_CURSOR_MODEL = prev;
       if (prev2 !== undefined) process.env.CURSOR_MODEL = prev2;
@@ -199,7 +200,7 @@ describe("acpActivityLabelFromUpdate", () => {
         sessionUpdate: "tool_call_update",
         toolCall: { title: "Grep", kind: "search" },
       }),
-      "正在搜索或读取仓库…",
+      "搜索·Grep",
     );
     assert.equal(
       acpActivityLabelFromUpdate({
@@ -207,7 +208,13 @@ describe("acpActivityLabelFromUpdate", () => {
         title: "Read chat_page.dart",
         path: "app/lib/screens/chat_page.dart",
       }),
-      "正在查看 chat_page.dart",
+      "读·chat_page.dart",
+    );
+    assert.equal(
+      acpActivityLabelFromUpdate({
+        sessionUpdate: "tool_call_update",
+      }),
+      "",
     );
     assert.equal(
       acpActivityLabelFromUpdate({
@@ -216,7 +223,59 @@ describe("acpActivityLabelFromUpdate", () => {
       }),
       "",
     );
-    assert.equal(acpActivityLabelFromFsRead("src/acp.js"), "正在读取 acp.js");
+    assert.equal(acpActivityLabelFromFsRead("src/acp.js"), "读·acp.js");
+  });
+});
+
+describe("pushAcpToolActivity", () => {
+  it("shows the tool name, command, and a short output without reasoning", () => {
+    const log = { items: [] };
+    const started = pushAcpToolActivity(log, {
+      sessionUpdate: "tool_call",
+      toolCallId: "sh1",
+      title: "Shell",
+      kind: "execute",
+      rawInput: { command: "npm test" },
+    });
+    assert.match(started, /Shell/);
+    assert.match(started, /npm test/);
+
+    const done = pushAcpToolActivity(log, {
+      sessionUpdate: "tool_call_update",
+      toolCallId: "sh1",
+      status: "completed",
+      rawOutput: { exitCode: 0, stdout: "3 passed\nsecond line\nthird line should drop" },
+    });
+    assert.match(done, /npm test/);
+    assert.match(done, /3 passed/);
+    assert.match(done, /second line/);
+    assert.doesNotMatch(done, /third line/);
+    assert.equal(log.items.length, 1);
+
+    const searched = pushAcpToolActivity(log, {
+      sessionUpdate: "tool_call",
+      toolCallId: "g1",
+      title: "Grep",
+      kind: "search",
+      rawInput: { pattern: "acpActivity", path: "server/src/acp.js" },
+    });
+    assert.match(searched, /Grep/);
+    assert.match(searched, /acpActivity/);
+    const counted = pushAcpToolActivity(log, {
+      sessionUpdate: "tool_call_update",
+      toolCallId: "g1",
+      rawOutput: { totalMatches: 4 },
+    });
+    assert.match(counted, /4 处/);
+
+    assert.equal(
+      pushAcpToolActivity(log, {
+        sessionUpdate: "agent_thought_chunk",
+        content: { type: "text", text: "secret plan" },
+      }),
+      "",
+    );
+    assert.doesNotMatch(counted, /secret plan/);
   });
 });
 
@@ -385,7 +444,8 @@ describe("session store", () => {
     assert.notEqual(afterRestart.id, first.id);
   });
 
-  it("warms a shared repo ACP channel across sessions", async () => {
+  it("warms one ACP process per phone chat", async () => {
+    let spawns = 0;
     const store = createSessionStore({
       resolveCommand: () => ({
         id: "acp",
@@ -394,17 +454,14 @@ describe("session store", () => {
         mode: "ask",
         transport: "stdio",
       }),
-      spawnImpl: spawn,
+      spawnImpl: (file, args, opts) => {
+        spawns += 1;
+        return spawn(file, args, opts);
+      },
     });
     const cwd = process.cwd();
-    const first = await store.warmRepo("hzfanfei", "fwechat", cwd);
-    assert.equal(first.warmed, true);
-    assert.equal(first.reused, false);
-    const second = await store.warmRepo("hzfanfei", "fwechat", cwd);
-    assert.equal(second.warmed, true);
-    assert.equal(second.reused, true);
-    const session = store.resolveForChat("hzfanfei", "fwechat", "");
-    await store.prompt(session, {
+    const first = store.resolveForChat("hzfanfei", "fwechat", "");
+    await store.prompt(first, {
       question: "hello",
       history: [],
       githubContext: "",
@@ -419,7 +476,16 @@ describe("session store", () => {
       cwd,
       onDelta: () => {},
     });
-    await store.close("hzfanfei", "fwechat", session.id);
+    assert.equal(spawns, 2);
+    await store.prompt(first, {
+      question: "third",
+      history: [],
+      githubContext: "",
+      cwd,
+      onDelta: () => {},
+    });
+    assert.equal(spawns, 2);
+    await store.close("hzfanfei", "fwechat", first.id);
     await store.close("hzfanfei", "fwechat", other.id);
   });
 
@@ -447,6 +513,7 @@ describe("session store", () => {
       },
     });
     const cwd = process.cwd();
+    store.resolveForChat("hzfanfei", "fwechat", "");
     const firstWarm = store.warmRepo("hzfanfei", "fwechat", cwd);
     await new Promise((resolve) => setTimeout(resolve, 30));
     engine = "cursor";
@@ -485,6 +552,7 @@ describe("session store", () => {
       onDelta: (text) => first.push(text),
     });
     assert.match(first.join(""), /seeded/);
+    assert.match(first.join(""), /persona:/);
 
     const second = [];
     await store.prompt(session, {
@@ -500,6 +568,7 @@ describe("session store", () => {
     });
     assert.match(second.join(""), /followup/);
     assert.doesNotMatch(second.join(""), /seeded/);
+    assert.doesNotMatch(second.join(""), /persona:/);
 
     await store.resetAllChannels();
     const restored = [];
@@ -515,6 +584,46 @@ describe("session store", () => {
       onDelta: (text) => restored.push(text),
     });
     assert.match(restored.join(""), /seeded/);
+    assert.match(restored.join(""), /persona:/);
+    await store.resetAllChannels();
+  });
+
+  it("waits for the phone to answer ask_question", async () => {
+    const store = createSessionStore({
+      resolveCommand: () => ({
+        id: "acp",
+        path: process.execPath,
+        args: [fakeAcp],
+        mode: "ask",
+        transport: "stdio",
+      }),
+      spawnImpl: (file, args, opts) =>
+        spawn(file, args, {
+          ...opts,
+          env: { ...opts.env, FAKE_ACP_ASK: "1" },
+        }),
+    });
+    const cwd = process.cwd();
+    const session = store.resolveForChat("hzfanfei", "fwechat", "");
+    const chunks = [];
+    await store.prompt(session, {
+      question: "请选择方案",
+      history: [],
+      cwd,
+      onDelta: (text) => chunks.push(text),
+      onInteraction: (event) => {
+        assert.equal(event.kind, "ask");
+        assert.equal(event.questions[0].id, "q1");
+        assert.equal(
+          store.answerInteraction(session.id, event.requestId, {
+            kind: "ask",
+            answers: [{ questionId: "q1", selectedOptionIds: ["a"] }],
+          }),
+          true,
+        );
+      },
+    });
+    assert.match(chunks.join(""), /first:1/);
     await store.resetAllChannels();
   });
 });
