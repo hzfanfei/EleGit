@@ -128,6 +128,39 @@ void main() {
       expect(find.textContaining('| ---'), findsNothing);
     });
 
+    testWidgets('长链接与长代码在窄列内可换行展示', (tester) async {
+      final longUrl = 'https://example.com/${'segment/' * 12}end';
+      final longCode = 'const token = "${'x' * 64}";';
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: wenxiangTheme(),
+          home: Scaffold(
+            backgroundColor: Wx.bg,
+            body: SingleChildScrollView(
+              child: SizedBox(
+                width: 180,
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: WxChatMarkdownStream(
+                    source: ValueNotifier<String>(
+                      '见 $longUrl\n\n```js\n$longCode\n```\n',
+                    ),
+                    styleSheet: chatMarkdownStyle(wenxiangTheme()),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 250));
+      expect(tester.takeException(), isNull);
+      expect(find.textContaining('见'), findsOneWidget);
+      expect(find.textContaining('const token'), findsOneWidget);
+      expect(find.byType(MarkdownBody), findsWidgets);
+    });
+
     testWidgets('流式表格尾部仍走表格渲染', (tester) async {
       await _pumpWithSource(
         tester,

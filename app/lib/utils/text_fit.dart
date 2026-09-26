@@ -17,3 +17,32 @@ String breakLongRuns(String text, {int every = 8}) {
   }
   return buf.toString();
 }
+
+/// Soft-wrap long ASCII in chat markdown prose without touching tables or
+/// fenced code (those use dedicated renderers).
+String prepareChatMarkdownForDisplay(
+  String data, {
+  bool Function(String line)? isTableLine,
+}) {
+  if (data.isEmpty) return data;
+  final tableLine = isTableLine ?? (_) => false;
+  var inFence = false;
+  final out = <String>[];
+  for (final line in data.split('\n')) {
+    final trimmed = line.trimLeft();
+    if (trimmed.startsWith('```')) {
+      inFence = !inFence;
+      out.add(line);
+      continue;
+    }
+    if (inFence ||
+        line.trim().isEmpty ||
+        tableLine(line) ||
+        trimmed.startsWith('|')) {
+      out.add(line);
+      continue;
+    }
+    out.add(breakLongRuns(line));
+  }
+  return out.join('\n');
+}

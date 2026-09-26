@@ -284,12 +284,49 @@ class _BlockView extends StatefulWidget {
   State<_BlockView> createState() => _BlockViewState();
 }
 
+class _ChatWrappingCodeBlock extends MarkdownElementBuilder {
+  _ChatWrappingCodeBlock(this.style);
+
+  final TextStyle style;
+
+  @override
+  Widget? visitText(dynamic text, TextStyle? preferredStyle) {
+    return const SizedBox.shrink();
+  }
+
+  @override
+  Widget? visitElementAfterWithContext(
+    BuildContext context,
+    dynamic element,
+    TextStyle? preferredStyle,
+    TextStyle? parentStyle,
+  ) {
+    final code = (element.textContent as String).replaceAll(RegExp(r'\s+$'), '');
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      child: SelectableText(
+        breakLongRuns(code),
+        style: style,
+      ),
+    );
+  }
+}
+
 class _BlockViewState extends State<_BlockView> {
   Widget _markdownBody(String data) {
+    final sheet = widget.styleSheet;
+    final codeStyle = (sheet.code ?? const TextStyle()).copyWith(backgroundColor: null);
+    final prepared = prepareChatMarkdownForDisplay(
+      data,
+      isTableLine: isMarkdownTableLine,
+    );
     return MarkdownBody(
-      data: data,
+      data: prepared,
       selectable: true,
-      styleSheet: widget.styleSheet,
+      styleSheet: sheet,
+      builders: {
+        'pre': _ChatWrappingCodeBlock(codeStyle),
+      },
       onTapLink: (text, href, title) {
         final target = (href ?? '').trim();
         if (target.isEmpty) return;
