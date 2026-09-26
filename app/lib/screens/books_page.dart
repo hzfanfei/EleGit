@@ -143,9 +143,9 @@ class _BookCard extends StatelessWidget {
     final theme = Theme.of(context);
     return Material(
       color: Wx.surface,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(Wx.radius),
       child: InkWell(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(Wx.radius),
         onTap: onRead,
         child: Padding(
           padding: const EdgeInsets.all(10),

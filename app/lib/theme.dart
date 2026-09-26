@@ -1,18 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-/// Quiet graphite workspace. One warm-clay accent — not Material purple, not AI gold.
+/// Night ink. Cinnabar is the one accent. Titles use the bundled Song face.
 class Wx {
-  static const bg = Color(0xFF0C0D0F);
-  static const surface = Color(0xFF16181C);
-  static const raised = Color(0xFF1C1F24);
-  static const hairline = Color(0xFF2C3036);
+  static const bg = Color(0xFF100E0C);
+  static const surface = Color(0xFF1A1714);
+  static const raised = Color(0xFF221E1A);
+  static const hairline = Color(0xFF3E362F);
   static const text = Color(0xFFEDEBE6);
   static const muted = Color(0xFF9A958C);
   static const faint = Color(0xFF6B675F);
-  static const accent = Color(0xFFC9845A);
-  static const onAccent = Color(0xFF1A120C);
-  static const danger = Color(0xFFD27A6C);
+  static const accent = Color(0xFFCC5648);
+  static const onAccent = Color(0xFF1A100C);
+  static const serif = 'WenxiangSerif';
+  static const danger = Color(0xFFE3A090);
   static const ok = Color(0xFF8A9A7B);
 
   /// Warm paper tone for long-form reading (slightly lifted from bg).
@@ -34,36 +35,45 @@ class Wx {
 
   static const inset = 16.0;
   static const pagePadding = EdgeInsets.fromLTRB(inset, 16, inset, 24);
-  static const radius = 16.0;
+  static const radius = 8.0;
   static const tap = 48.0;
 }
 
 ThemeData wenxiangTheme() {
   const textTheme = TextTheme(
     displaySmall: TextStyle(
+      fontFamily: Wx.serif,
+      fontFamilyFallback: Wx.fontFallback,
       fontSize: 34,
       fontWeight: FontWeight.w600,
-      letterSpacing: -0.7,
-      height: 1.15,
+      letterSpacing: 1,
+      height: 1.2,
       color: Wx.text,
     ),
     headlineMedium: TextStyle(
+      fontFamily: Wx.serif,
+      fontFamilyFallback: Wx.fontFallback,
       fontSize: 22,
       fontWeight: FontWeight.w600,
-      letterSpacing: -0.3,
-      height: 1.25,
-      color: Wx.text,
-    ),
-    titleLarge: TextStyle(
-      fontSize: 18,
-      fontWeight: FontWeight.w600,
-      letterSpacing: -0.2,
+      letterSpacing: 0.6,
       height: 1.3,
       color: Wx.text,
     ),
+    titleLarge: TextStyle(
+      fontFamily: Wx.serif,
+      fontFamilyFallback: Wx.fontFallback,
+      fontSize: 18,
+      fontWeight: FontWeight.w600,
+      letterSpacing: 0.4,
+      height: 1.35,
+      color: Wx.text,
+    ),
     titleMedium: TextStyle(
+      fontFamily: Wx.serif,
+      fontFamilyFallback: Wx.fontFallback,
       fontSize: 16,
       fontWeight: FontWeight.w600,
+      letterSpacing: 0.3,
       height: 1.35,
       color: Wx.text,
     ),
@@ -125,10 +135,11 @@ ThemeData wenxiangTheme() {
       centerTitle: false,
       titleSpacing: 8,
       titleTextStyle: TextStyle(
+        fontFamily: Wx.serif,
         fontFamilyFallback: Wx.fontFallback,
         fontSize: 17,
         fontWeight: FontWeight.w600,
-        letterSpacing: -0.2,
+        letterSpacing: 0.4,
         color: Wx.text,
       ),
       iconTheme: IconThemeData(color: Wx.text, size: 22),
@@ -146,15 +157,15 @@ ThemeData wenxiangTheme() {
       hintStyle: const TextStyle(color: Wx.faint, fontSize: 15, height: 1.4),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(Wx.radius),
         borderSide: const BorderSide(color: Wx.hairline),
       ),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(Wx.radius),
         borderSide: const BorderSide(color: Wx.hairline),
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(Wx.radius),
         borderSide: const BorderSide(color: Wx.accent, width: 1.2),
       ),
     ),
@@ -164,7 +175,7 @@ ThemeData wenxiangTheme() {
         foregroundColor: Wx.onAccent,
         minimumSize: const Size(64, Wx.tap),
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Wx.radius)),
         textStyle: const TextStyle(
           fontFamilyFallback: Wx.fontFallback,
           fontSize: 15,
@@ -192,7 +203,7 @@ ThemeData wenxiangTheme() {
     snackBarTheme: SnackBarThemeData(
       backgroundColor: Wx.raised,
       contentTextStyle: const TextStyle(color: Wx.text, height: 1.4),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Wx.radius)),
       behavior: SnackBarBehavior.floating,
     ),
   );

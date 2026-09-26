@@ -28,7 +28,7 @@ class WxHoldLiveChip extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
         decoration: BoxDecoration(
           color: Wx.raised,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(Wx.radius),
           border: Border.all(
             color: recognizing ? Wx.accent.withValues(alpha: 0.45) : Wx.hairline,
           ),
@@ -83,7 +83,7 @@ class WxHoldLiveChip extends StatelessWidget {
                   HapticFeedback.selectionClick();
                   onCancelRecognize!();
                 },
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(Wx.radius),
                 child: body,
               ),
             )
@@ -232,7 +232,7 @@ class _WxHoldToSpeakPadState extends State<WxHoldToSpeakPad>
           alignment: Alignment.center,
           decoration: BoxDecoration(
             color: bg,
-            borderRadius: BorderRadius.circular(24),
+            borderRadius: BorderRadius.circular(Wx.radius),
             border: Border.all(color: border, width: holding || sttBusy ? 1.5 : 1),
             boxShadow: holding && !cancel
                 ? [

@@ -240,7 +240,7 @@ class _Shell extends StatelessWidget {
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: Wx.surface,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(Wx.radius),
           border: Border.all(color: Wx.hairline),
         ),
         child: Padding(

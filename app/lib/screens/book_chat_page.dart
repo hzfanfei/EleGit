@@ -366,7 +366,7 @@ class _Bubble extends StatelessWidget {
           color: isError
               ? Wx.danger.withValues(alpha: 0.12)
               : (isUser ? Wx.accent.withValues(alpha: 0.14) : Wx.hairline.withValues(alpha: 0.35)),
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(Wx.radius),
         ),
         child: child,
       ),

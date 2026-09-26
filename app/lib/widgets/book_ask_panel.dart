@@ -731,7 +731,7 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
     final hasPeek = _peekAnswer != null || _live;
 
     return ClipRRect(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(widget.fullscreen ? 0 : 22)),
+      borderRadius: BorderRadius.vertical(top: Radius.circular(widget.fullscreen ? 0 : Wx.radius)),
       child: BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 28, sigmaY: 28),
         child: DecoratedBox(
@@ -1110,11 +1110,11 @@ class _AnswerPeekCard extends StatelessWidget {
           color: Colors.transparent,
           child: InkWell(
             onTap: onTap,
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(Wx.radius),
             child: Ink(
               decoration: BoxDecoration(
                 color: Wx.surface.withValues(alpha: 0.85),
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(Wx.radius),
                 border: Border.all(color: Wx.accent.withValues(alpha: glow)),
               ),
               child: child,
@@ -1201,7 +1201,7 @@ class _ComposerIsland extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: Wx.surface.withValues(alpha: 0.92),
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(Wx.radius),
         border: Border.all(color: Wx.hairline),
       ),
       child: Padding(
@@ -1439,10 +1439,10 @@ class _AskBubble extends StatelessWidget {
                   ? Wx.accent.withValues(alpha: 0.16)
                   : Wx.hairline.withValues(alpha: 0.45)),
           borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(14),
-            topRight: const Radius.circular(14),
-            bottomLeft: Radius.circular(isUser ? 14 : 4),
-            bottomRight: Radius.circular(isUser ? 4 : 14),
+            topLeft: const Radius.circular(Wx.radius),
+            topRight: const Radius.circular(Wx.radius),
+            bottomLeft: Radius.circular(isUser ? Wx.radius : 3),
+            bottomRight: Radius.circular(isUser ? 3 : Wx.radius),
           ),
           border: streaming
               ? Border.all(color: Wx.accent.withValues(alpha: 0.35))
@@ -1469,10 +1469,10 @@ class _ScopeChip extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       color: selected ? Wx.accent.withValues(alpha: 0.2) : Wx.surface,
-      borderRadius: BorderRadius.circular(20),
+      borderRadius: BorderRadius.circular(Wx.radius),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(Wx.radius),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
           child: Text(
@@ -1669,7 +1669,7 @@ class _QaTurnCardState extends State<_QaTurnCard> {
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
         color: Wx.surface.withValues(alpha: 0.65),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(Wx.radius),
         border: Border.all(color: Wx.hairline),
       ),
       child: Column(
@@ -1682,8 +1682,8 @@ class _QaTurnCardState extends State<_QaTurnCard> {
                 child: InkWell(
                   onTap: () => setState(() => _open = !_open),
                   borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(14),
-                    bottomLeft: Radius.circular(14),
+                    topLeft: Radius.circular(Wx.radius),
+                    bottomLeft: Radius.circular(Wx.radius),
                   ),
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(12, 10, 4, 10),

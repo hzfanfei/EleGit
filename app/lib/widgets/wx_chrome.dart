@@ -23,33 +23,30 @@ class WxMark extends StatelessWidget {
 class _MarkPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
-    final r = RRect.fromRectAndRadius(
-      Rect.fromLTWH(0.5, 0.5, size.width - 1, size.height - 1),
-      const Radius.circular(9),
+    final radius = Radius.circular(size.shortestSide * 0.05);
+    final rect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(0.7, 0.7, size.width - 1.4, size.height - 1.4),
+      radius,
     );
+    canvas.drawRRect(rect, Paint()..color = Wx.surface);
     canvas.drawRRect(
-      r,
+      rect,
       Paint()
-        ..color = Wx.surface
-        ..style = PaintingStyle.fill,
-    );
-    canvas.drawRRect(
-      r,
-      Paint()
-        ..color = Wx.hairline
+        ..color = Wx.accent
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1,
+        ..strokeWidth = 1.2,
     );
+    final barW = size.width * 0.075;
     final bar = RRect.fromRectAndRadius(
-      Rect.fromLTWH(size.width * 0.32, size.height * 0.22, 2.4, size.height * 0.56),
-      const Radius.circular(1.2),
+      Rect.fromLTWH(
+        (size.width - barW) / 2,
+        size.height * 0.26,
+        barW,
+        size.height * 0.48,
+      ),
+      const Radius.circular(0.4),
     );
     canvas.drawRRect(bar, Paint()..color = Wx.accent);
-    canvas.drawCircle(
-      Offset(size.width * 0.68, size.height * 0.36),
-      2.1,
-      Paint()..color = Wx.muted,
-    );
   }
 
   @override

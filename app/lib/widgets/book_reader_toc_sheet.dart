@@ -20,7 +20,7 @@ class BookReaderTocSheet extends StatelessWidget {
     final theme = Theme.of(context);
     return Material(
       color: Wx.raised,
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(Wx.radius)),
       clipBehavior: Clip.antiAlias,
       child: SizedBox(
         height: MediaQuery.sizeOf(context).height * 0.72,

@@ -28,3 +28,8 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  fonts:
+    - family: WenxiangSerif
+      fonts:
+        - asset: fonts/NotoSerifSC-SemiBold.ttf
+          weight: 600

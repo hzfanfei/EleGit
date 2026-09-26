@@ -1021,7 +1021,7 @@ class _ChatPageState extends State<ChatPage> {
       backgroundColor: Wx.surface,
       showDragHandle: false,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(Wx.radius)),
       ),
       builder: (context) {
         return StatefulBuilder(
@@ -1343,10 +1343,10 @@ class _SessionRow extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 6),
       child: Material(
         color: selected ? Wx.raised : Colors.transparent,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(Wx.radius),
         child: InkWell(
           onTap: onOpen,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(Wx.radius),
           child: ConstrainedBox(
             constraints: const BoxConstraints(minHeight: 52),
             child: Padding(
@@ -1396,10 +1396,10 @@ class _SuggestRow extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 8),
       child: Material(
         color: Wx.surface,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(Wx.radius),
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(Wx.radius),
           child: ConstrainedBox(
             constraints: const BoxConstraints(minHeight: 48),
             child: Padding(
@@ -2064,15 +2064,15 @@ class _NewMessagesPill extends StatelessWidget {
       color: Wx.raised,
       elevation: 0,
       shadowColor: Colors.transparent,
-      borderRadius: BorderRadius.circular(20),
+      borderRadius: BorderRadius.circular(Wx.radius),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(Wx.radius),
         child: Container(
           key: const Key('wx-new-messages-pill'),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(Wx.radius),
             border: Border.all(color: Wx.hairline),
           ),
           child: Row(

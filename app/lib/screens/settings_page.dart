@@ -409,7 +409,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 Material(
                   color: Wx.surface,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(Wx.radius),
                     side: const BorderSide(color: Wx.hairline),
                   ),
                   clipBehavior: Clip.antiAlias,
@@ -479,7 +479,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   Material(
                     color: Wx.surface,
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(Wx.radius),
                       side: const BorderSide(color: Wx.hairline),
                     ),
                     clipBehavior: Clip.antiAlias,
@@ -542,7 +542,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       return Material(
                         color: Wx.surface,
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: BorderRadius.circular(Wx.radius),
                           side: const BorderSide(color: Wx.hairline),
                         ),
                         child: const Padding(
@@ -557,7 +557,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     return Material(
                       color: Wx.surface,
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(Wx.radius),
                         side: const BorderSide(color: Wx.hairline),
                       ),
                       clipBehavior: Clip.antiAlias,
@@ -598,7 +598,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 Material(
                   color: Wx.surface,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(Wx.radius),
                     side: const BorderSide(color: Wx.hairline),
                   ),
                   clipBehavior: Clip.antiAlias,
@@ -655,7 +655,7 @@ class _ProbeResultCard extends StatelessWidget {
     return Material(
       color: Wx.raised,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(Wx.radius),
         side: const BorderSide(color: Wx.hairline),
       ),
       child: Padding(
@@ -834,7 +834,7 @@ class _AskEnginePicker extends StatelessWidget {
     return Material(
       color: Wx.surface,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(Wx.radius),
         side: const BorderSide(color: Wx.hairline),
       ),
       clipBehavior: Clip.antiAlias,

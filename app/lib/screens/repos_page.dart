@@ -440,7 +440,7 @@ class _RepoTile extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: enabled ? onTap : null,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(Wx.radius),
         child: ConstrainedBox(
           constraints: const BoxConstraints(minHeight: 64),
             child: Padding(
@@ -454,7 +454,7 @@ class _RepoTile extends StatelessWidget {
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
                     color: Wx.raised,
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(4),
                     border: Border.all(color: Wx.hairline),
                   ),
                   child: Text(

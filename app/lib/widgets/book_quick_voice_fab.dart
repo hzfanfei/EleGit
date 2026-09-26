@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../persist/book_reader_prefs.dart';
+import '../theme.dart';
 import '../voice/book_quick_voice_session.dart';
 import 'voice_caption_panel.dart';
 import 'wx_hold_to_speak.dart';
@@ -246,11 +247,11 @@ class _BookQuickVoiceFabState extends State<BookQuickVoiceFab>
                       elevation: 2,
                       shadowColor: Colors.black26,
                       color: widget.palette.paper.withValues(alpha: 0.96),
-                      borderRadius: BorderRadius.circular(20),
+                      borderRadius: BorderRadius.circular(Wx.radius),
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                         decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(20),
+                          borderRadius: BorderRadius.circular(Wx.radius),
                           border: Border.all(color: accent.withValues(alpha: 0.35)),
                         ),
                         child: Row(

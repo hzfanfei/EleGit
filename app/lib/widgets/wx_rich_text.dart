@@ -373,7 +373,7 @@ class _CodeBlock extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: Wx.raised,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(Wx.radius),
         border: Border.all(color: Wx.hairline),
       ),
       child: Column(

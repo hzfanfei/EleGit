@@ -38,7 +38,7 @@ class _BookReaderSettingsSheetState extends State<BookReaderSettingsSheet> {
     return Container(
       decoration: BoxDecoration(
         color: Wx.raised,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(Wx.radius)),
       ),
       child: SafeArea(
         top: false,
@@ -119,7 +119,7 @@ class _BookReaderSettingsSheetState extends State<BookReaderSettingsSheet> {
               DecoratedBox(
                 decoration: BoxDecoration(
                   color: palette.paper,
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(Wx.radius),
                   border: Border.all(color: Wx.hairline),
                 ),
                 child: Padding(
@@ -163,14 +163,14 @@ class _ThemeChip extends StatelessWidget {
     return Expanded(
       child: Material(
         color: preview,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(Wx.radius),
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(Wx.radius),
           child: Container(
             padding: const EdgeInsets.symmetric(vertical: 12),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(Wx.radius),
               border: Border.all(
                 color: selected ? Wx.accent : Wx.hairline,
                 width: selected ? 2 : 1,

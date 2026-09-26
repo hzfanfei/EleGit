@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../persist/book_reader_prefs.dart';
+import '../theme.dart';
 
 /// Subtitle for the TTS chunk currently playing (one speak segment from the server).
 class VoiceCaptionPanel extends StatelessWidget {
@@ -21,7 +22,7 @@ class VoiceCaptionPanel extends StatelessWidget {
       child: Material(
         elevation: 4,
         shadowColor: Colors.black38,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(Wx.radius),
         color: palette.ink.withValues(alpha: 0.82),
         child: Container(
           key: const Key('wx-voice-caption'),
