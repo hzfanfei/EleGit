@@ -606,6 +606,7 @@ class WxReplyFrame extends StatelessWidget {
     this.railColor = Wx.hairline,
     this.railWidth = 2,
     this.bottom = 16,
+    this.lead = 12,
   });
 
   final String label;
@@ -616,6 +617,7 @@ class WxReplyFrame extends StatelessWidget {
   final Color railColor;
   final double railWidth;
   final double bottom;
+  final double lead;
 
   @override
   Widget build(BuildContext context) {
@@ -625,7 +627,7 @@ class WxReplyFrame extends StatelessWidget {
       child: CustomPaint(
         painter: _ReplyRailPainter(color: railColor, width: railWidth),
         child: Padding(
-          padding: EdgeInsets.only(left: railWidth + 12),
+          padding: EdgeInsets.only(left: railWidth + lead),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,

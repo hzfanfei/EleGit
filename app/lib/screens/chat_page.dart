@@ -1183,7 +1183,7 @@ class _ChatPageState extends State<ChatPage> {
                           key: const Key('wx-chat-list'),
                           controller: _scroll,
                           reverse: true,
-                          padding: const EdgeInsets.fromLTRB(Wx.inset, 20, Wx.inset, 16),
+                          padding: const EdgeInsets.fromLTRB(4, 20, 4, 16),
                           itemCount: itemCount,
                           itemBuilder: (context, index) {
                       final chronological = itemCount - 1 - index;
@@ -1296,7 +1296,7 @@ class _EmptyChat extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView(
-      padding: const EdgeInsets.fromLTRB(Wx.inset, 36, Wx.inset, 16),
+      padding: const EdgeInsets.fromLTRB(8, 36, 8, 16),
       children: [
         Text('从进度问起。', style: Theme.of(context).textTheme.headlineMedium),
         const SizedBox(height: 8),
@@ -1721,6 +1721,7 @@ class _VoiceTurn extends StatelessWidget {
     this.footer,
     this.trailing,
     this.bottom = 24,
+    this.lead = 6,
   });
 
   final String voice;
@@ -1731,6 +1732,7 @@ class _VoiceTurn extends StatelessWidget {
   final Widget? footer;
   final Widget? trailing;
   final double bottom;
+  final double lead;
 
   @override
   Widget build(BuildContext context) {
@@ -1740,6 +1742,7 @@ class _VoiceTurn extends StatelessWidget {
       railColor: railColor,
       railWidth: railWidth,
       bottom: bottom,
+      lead: lead,
       footer: footer,
       trailing: trailing,
       child: child,
@@ -1840,7 +1843,7 @@ class _Composer extends StatelessWidget {
       child: SafeArea(
         top: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(Wx.inset, 10, 12, 10),
+          padding: const EdgeInsets.fromLTRB(0, 8, 0, 8),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
