@@ -27,6 +27,10 @@ void main() {
     expect(find.textContaining('正在克隆'), findsNothing);
     expect(find.byType(WxLoading), findsOneWidget);
     expect(find.byType(LinearProgressIndicator), findsNothing);
+    final title = tester.getRect(find.text('正在更新'));
+    final mark = tester.getRect(find.byType(WxLoading));
+    expect(mark.left, greaterThan(title.right));
+    expect((mark.center.dy - title.center.dy).abs(), lessThan(8));
   });
 
   testWidgets('clone failure shows the real error, not a false not-on-disk title', (tester) async {

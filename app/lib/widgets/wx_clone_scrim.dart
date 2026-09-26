@@ -132,15 +132,25 @@ class _WxCloneScrimState extends State<WxCloneScrim> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    failed
-                        ? (widget.mode == WxCloneMode.sync
-                            ? '更新失败'
-                            : widget.mode == WxCloneMode.open
-                                ? '打开失败'
-                                : '克隆失败')
-                        : _stages[_stage],
-                    style: Theme.of(context).textTheme.titleLarge,
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          failed
+                              ? (widget.mode == WxCloneMode.sync
+                                  ? '更新失败'
+                                  : widget.mode == WxCloneMode.open
+                                      ? '打开失败'
+                                      : '克隆失败')
+                              : _stages[_stage],
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                      ),
+                      if (!failed) ...[
+                        const SizedBox(width: 12),
+                        const WxLoading(size: 22),
+                      ],
+                    ],
                   ),
                   const SizedBox(height: 8),
                   Text(
@@ -152,10 +162,6 @@ class _WxCloneScrimState extends State<WxCloneScrim> {
                     _path,
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
-                  if (!failed) ...[
-                    const SizedBox(height: 18),
-                    const Center(child: WxLoading(size: 28)),
-                  ],
                   if (failed) ...[
                     const SizedBox(height: 16),
                     WxErrorPanel(
