@@ -215,6 +215,75 @@ bool _skipParagraphIndent(String trimmed) {
   return false;
 }
 
+bool _isStructuralLine(String line) {
+  final trimmed = line.trimLeft();
+  if (trimmed.isEmpty) return false;
+  if (trimmed.startsWith('#')) return true;
+  if (trimmed.startsWith('>')) return true;
+  if (trimmed.startsWith('|')) return true;
+  if (trimmed.startsWith('- ') || trimmed.startsWith('* ') || trimmed.startsWith('+ ')) return true;
+  if (RegExp(r'^\d+\.\s').hasMatch(trimmed)) return true;
+  if (RegExp(r'^(```+|~~~+)').hasMatch(trimmed)) return true;
+  if (RegExp(r'^(?:\*{3,}|-{3,}|_{3,})[ \t]*$').hasMatch(trimmed)) return true;
+  return false;
+}
+
+/// Plain EPUB fallback stores each `<p>` as one line joined by a single
+/// newline. The reader collapses that newline into a space, so a chapter
+/// becomes one block. Put a blank line between those lines.
+String separateLooseParagraphs(String markdown) {
+  return mapMarkdownOutsideFences(markdown, (prose) {
+    return prose.split(RegExp(r'\n{2,}')).map(_separateLooseBlock).join('\n\n');
+  });
+}
+
+String _separateLooseBlock(String block) {
+  final lines = block.split('\n').where((line) => line.trim().isNotEmpty).toList();
+  if (lines.length < 2) return block;
+  if (lines.every(_isStructuralLine)) return block;
+
+  final out = <String>[];
+  final verse = <String>[];
+  final structural = <String>[];
+
+  void flushVerse() {
+    if (verse.isEmpty) return;
+    final trimmed = verse.map((line) => line.trim()).toList();
+    if (_looksLikeVerse(trimmed)) {
+      // Hard breaks stay on their own rows. A plain newline is collapsed to a space.
+      out.add(trimmed.join('  \n'));
+    } else {
+      out.addAll(trimmed);
+    }
+    verse.clear();
+  }
+
+  void flushStructural() {
+    if (structural.isEmpty) return;
+    out.add(structural.join('\n'));
+    structural.clear();
+  }
+
+  for (final line in lines) {
+    final text = line.trim();
+    if (_isStructuralLine(text)) {
+      flushVerse();
+      structural.add(text);
+      continue;
+    }
+    flushStructural();
+    if (text.runes.length <= 18) {
+      verse.add(text);
+      continue;
+    }
+    flushVerse();
+    out.add(text);
+  }
+  flushVerse();
+  flushStructural();
+  return out.join('\n\n');
+}
+
 String indentChineseParagraphs(String markdown) {
   return mapMarkdownOutsideFences(markdown, (prose) {
     return prose.split(RegExp(r'\n{2,}')).map(_indentBlock).join('\n\n');
@@ -387,7 +456,8 @@ String normalizeBookMarkdown(String markdown) {
     (prose) => mapOutsideInlineCode(prose, _normalizeBookProse),
   ).replaceAll(RegExp(r'\n{3,}'), '\n\n');
   final relaxed = relaxBookLineBreaks(converted).replaceAll(RegExp(r'\n{3,}'), '\n\n');
-  return indentChineseParagraphs(softenBookMarkdown(decorateBookLinks(relaxed)))
+  final separated = separateLooseParagraphs(relaxed);
+  return indentChineseParagraphs(softenBookMarkdown(decorateBookLinks(separated)))
       .replaceAll(RegExp(r'\n{3,}'), '\n\n')
       .replaceAll(RegExp(r'^\n+|\n+$'), '');
 }

@@ -111,7 +111,22 @@ void main() {
       isNot(contains('这是一句\n很长')),
     );
     final verse = normalizeBookMarkdown('<p>床前明月光<br>疑是地上霜<br>举头望明月<br>低头思故乡</p>');
-    expect(verse, contains('床前明月光\n疑是地上霜\n举头望明月\n低头思故乡'));
+    expect(verse, contains('床前明月光  \n疑是地上霜  \n举头望明月  \n低头思故乡'));
+  });
+
+  test('splits plain-converter single newlines into paragraphs', () {
+    const raw = '# 4\n\n'
+        '4\n'
+        ' 那名男子来电，是在康晴找一成商量雪穗母亲一事的三天之后。\n'
+        ' 男子自称姓笹垣，一成对这个姓氏全然陌生。\n'
+        ' “你在哪里？”';
+    final cleaned = normalizeBookMarkdown(raw);
+    expect(
+      cleaned,
+      contains('　　那名男子来电，是在康晴找一成商量雪穗母亲一事的三天之后。\n\n　　男子自称姓笹垣，一成对这个姓氏全然陌生。'),
+    );
+    expect(cleaned, contains('　　“你在哪里？”'));
+    expect(cleaned, isNot(contains('之后。\n 男子')));
   });
 
   test('drops a repeated chapter heading and indents chinese prose', () {

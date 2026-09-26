@@ -307,9 +307,11 @@ function stripHtml(html) {
       .replace(/<script[\s\S]*?<\/script>/gi, " ")
       .replace(/<style[\s\S]*?<\/style>/gi, " ")
       .replace(/<br\s*\/?>/gi, "\n")
-      .replace(/<\/p>/gi, "\n")
+      .replace(/<\/(?:p|div|section|article|header|footer|h[1-6]|li|blockquote|tr)>/gi, "\n\n")
+      .replace(/<(?:p|div|section|article|header|footer|h[1-6]|li|blockquote|tr)\b[^>]*>/gi, "\n\n")
       .replace(/<[^>]+>/g, " ")
-      .replace(/\s+\n/g, "\n")
+      .replace(/[ \t]*\n[ \t]*/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
       .replace(/[ \t]{2,}/g, " ")
       .trim(),
   );
