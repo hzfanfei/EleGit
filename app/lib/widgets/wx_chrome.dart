@@ -4,8 +4,9 @@ import '../copy/errors.dart';
 import '../theme.dart';
 
 class WxMark extends StatelessWidget {
-  const WxMark({super.key, this.size = 36});
+  const WxMark({super.key, this.size = 36, this.color});
   final double size;
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
@@ -14,13 +15,68 @@ class WxMark extends StatelessWidget {
       child: SizedBox(
         width: size,
         height: size,
-        child: CustomPaint(painter: _MarkPainter()),
+        child: CustomPaint(painter: _MarkPainter(color: color ?? Wx.accent)),
+      ),
+    );
+  }
+}
+
+/// The seal, with the center stroke breathing. Used wherever a wait used to spin.
+class WxLoading extends StatefulWidget {
+  const WxLoading({super.key, this.size = 22, this.color});
+
+  final double size;
+  final Color? color;
+
+  @override
+  State<WxLoading> createState() => _WxLoadingState();
+}
+
+class _WxLoadingState extends State<WxLoading> with SingleTickerProviderStateMixin {
+  late final AnimationController _anim = AnimationController(
+    vsync: this,
+    duration: Wx.breath,
+  )..repeat();
+
+  @override
+  void dispose() {
+    _anim.dispose();
+    super.dispose();
+  }
+
+  double _strokeOpacity() {
+    final t = _anim.value;
+    final wave = t < 0.5 ? t * 2 : (1 - t) * 2;
+    return 0.28 + 0.72 * wave;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = widget.color ?? Wx.accent;
+    return Semantics(
+      label: '正在加载',
+      child: SizedBox(
+        width: widget.size,
+        height: widget.size,
+        child: AnimatedBuilder(
+          animation: _anim,
+          builder: (context, _) {
+            return CustomPaint(
+              painter: _MarkPainter(color: color, barOpacity: _strokeOpacity()),
+            );
+          },
+        ),
       ),
     );
   }
 }
 
 class _MarkPainter extends CustomPainter {
+  _MarkPainter({required this.color, this.barOpacity = 1});
+
+  final Color color;
+  final double barOpacity;
+
   @override
   void paint(Canvas canvas, Size size) {
     final radius = Radius.circular(size.shortestSide * 0.05);
@@ -32,7 +88,7 @@ class _MarkPainter extends CustomPainter {
     canvas.drawRRect(
       rect,
       Paint()
-        ..color = Wx.accent
+        ..color = color
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1.2,
     );
@@ -46,11 +102,13 @@ class _MarkPainter extends CustomPainter {
       ),
       const Radius.circular(0.4),
     );
-    canvas.drawRRect(bar, Paint()..color = Wx.accent);
+    canvas.drawRRect(bar, Paint()..color = color.withValues(alpha: barOpacity));
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant _MarkPainter oldDelegate) {
+    return oldDelegate.barOpacity != barOpacity || oldDelegate.color != color;
+  }
 }
 
 class WxPageHeader extends StatelessWidget {
@@ -306,11 +364,7 @@ class WxBusy extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const SizedBox(
-            width: 22,
-            height: 22,
-            child: CircularProgressIndicator(strokeWidth: 2),
-          ),
+          const WxLoading(size: 28),
           if (label != null) ...[
             const SizedBox(height: 14),
             Text(label!, style: Theme.of(context).textTheme.bodyMedium),

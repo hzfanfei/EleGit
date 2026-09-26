@@ -786,9 +786,7 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
                               if (itemIndex >= span) {
                                 return const Padding(
                                   padding: EdgeInsets.symmetric(vertical: 24),
-                                  child: Center(
-                                    child: CircularProgressIndicator(strokeWidth: 2),
-                                  ),
+                                  child: Center(child: WxLoading()),
                                 );
                               }
                               final chapterIndex = _rangeFirst + itemIndex;
@@ -796,9 +794,7 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
                               if (md == null) {
                                 return const Padding(
                                   padding: EdgeInsets.symmetric(vertical: 24),
-                                  child: Center(
-                                    child: CircularProgressIndicator(strokeWidth: 2),
-                                  ),
+                                  child: Center(child: WxLoading()),
                                 );
                               }
                               final chapter = manifest?.chapters[chapterIndex];

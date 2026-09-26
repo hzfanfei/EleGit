@@ -996,11 +996,7 @@ class _VoiceTile extends StatelessWidget {
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
               icon: previewLoading
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
+                  ? const WxLoading(size: 18)
                   : const Icon(Icons.volume_up_rounded, size: 22, color: Wx.muted),
             ),
           if (selected) const Icon(Icons.check_rounded, color: Wx.accent, size: 20),

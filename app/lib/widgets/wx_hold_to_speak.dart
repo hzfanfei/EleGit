@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../theme.dart';
+import 'wx_chrome.dart';
 
 /// Live partial STT text above the composer — chip/bubble, not plain body text.
 class WxHoldLiveChip extends StatelessWidget {
@@ -235,13 +236,9 @@ class _WxHoldToSpeakPadState extends State<WxHoldToSpeakPad>
             mainAxisSize: MainAxisSize.min,
             children: [
               if (sttBusy) ...[
-                SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2.2,
-                    color: enabled ? Wx.accent : Wx.faint,
-                  ),
+                WxLoading(
+                  size: 18,
+                  color: enabled ? Wx.accent : Wx.faint,
                 ),
                 const SizedBox(width: 10),
               ] else if (holding && !cancel) ...[

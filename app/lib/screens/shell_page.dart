@@ -444,7 +444,7 @@ class _BootPane extends StatelessWidget {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const WxMark(size: 44),
+                  busy ? const WxLoading(size: 44) : const WxMark(size: 44),
                   const SizedBox(height: 22),
                   Text('问象', style: Theme.of(context).textTheme.displaySmall),
                   const SizedBox(height: 10),
@@ -455,15 +455,10 @@ class _BootPane extends StatelessWidget {
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
-                  const SizedBox(height: 28),
-                  if (busy)
-                    const SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  else if (error != null)
+                  if (error != null && !busy) ...[
+                    const SizedBox(height: 28),
                     WxErrorPanel(error: error!, onRetry: onRetry),
+                  ],
                 ],
               ),
             ),

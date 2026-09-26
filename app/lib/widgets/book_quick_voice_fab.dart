@@ -8,6 +8,7 @@ import '../persist/book_reader_prefs.dart';
 import '../theme.dart';
 import '../voice/book_quick_voice_session.dart';
 import 'voice_caption_panel.dart';
+import 'wx_chrome.dart';
 import 'wx_hold_to_speak.dart';
 
 /// Outer padding under the mic, the mic itself, and a gap so the last line
@@ -126,38 +127,14 @@ class _BookQuickVoiceFabState extends State<BookQuickVoiceFab>
     if (hold.holding && phase == BookQuickVoicePhase.listening && !hold.holdCancel) {
       return WxVoiceWaveBars(color: widget.palette.ink, animation: _wave);
     }
-    if (phase == BookQuickVoicePhase.recognizing || hold.sttBusy) {
-      return SizedBox(
-        width: 14,
-        height: 14,
-        child: CircularProgressIndicator(
-          strokeWidth: 2,
-          color: widget.palette.ink.withValues(alpha: 0.85),
-        ),
-      );
-    }
-    if (phase == BookQuickVoicePhase.thinking) {
-      return SizedBox(
-        width: 14,
-        height: 14,
-        child: CircularProgressIndicator(
-          strokeWidth: 2,
-          color: widget.palette.ink.withValues(alpha: 0.75),
-        ),
-      );
+    if (phase == BookQuickVoicePhase.recognizing ||
+        hold.sttBusy ||
+        phase == BookQuickVoicePhase.thinking ||
+        hold.holdPending) {
+      return const WxLoading(size: 16);
     }
     if (phase == BookQuickVoicePhase.speaking) {
       return Icon(Icons.graphic_eq_rounded, size: 16, color: widget.palette.ink);
-    }
-    if (hold.holdPending) {
-      return SizedBox(
-        width: 14,
-        height: 14,
-        child: CircularProgressIndicator(
-          strokeWidth: 2,
-          color: widget.palette.muted,
-        ),
-      );
     }
     return null;
   }

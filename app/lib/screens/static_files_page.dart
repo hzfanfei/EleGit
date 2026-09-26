@@ -169,11 +169,7 @@ class _StaticFilesPageState extends State<StaticFilesPage> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (deleting)
-                  const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
+                  const WxLoading(size: 20)
                 else
                   IconButton(
                     tooltip: '删除',

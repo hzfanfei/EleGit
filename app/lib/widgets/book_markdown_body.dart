@@ -7,6 +7,7 @@ import '../api/wenxiang_api.dart';
 import '../theme.dart';
 import '../utils/book_markdown_assets.dart';
 import '../utils/book_markdown_markup.dart';
+import 'wx_chrome.dart';
 import 'wx_rich_text.dart';
 import 'wx_unified_markdown.dart';
 
@@ -276,16 +277,13 @@ class _BookMarkdownImageState extends State<_BookMarkdownImage> {
       return SizedBox(
         width: dw,
         height: dh,
-        child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+        child: const Center(child: WxLoading()),
       );
     }
     return const SizedBox(
       width: 36,
       height: 36,
-      child: Padding(
-        padding: EdgeInsets.all(8),
-        child: CircularProgressIndicator(strokeWidth: 2),
-      ),
+      child: Center(child: WxLoading(size: 20)),
     );
   }
 
