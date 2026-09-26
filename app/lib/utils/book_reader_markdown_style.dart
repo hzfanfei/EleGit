@@ -77,7 +77,9 @@ MarkdownStyleSheet bookReaderMarkdownStyle({
     tableBorder: TableBorder.all(color: palette.ink.withValues(alpha: 0.12), width: 0.6),
     tableCellsPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
     tableColumnWidth: const IntrinsicColumnWidth(),
-    blockSpacing: 22,
+    // A full line between blocks. 22px sat inside the line box, so long
+    // chapters still read as one wall of text.
+    blockSpacing: settings.fontSize * settings.lineHeight,
     listIndent: 22,
     horizontalRuleDecoration: BoxDecoration(
       border: Border(top: BorderSide(color: palette.ink.withValues(alpha: 0.14), width: 0.6)),

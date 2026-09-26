@@ -152,7 +152,7 @@ void main() {
     );
     expect(sheet.a?.backgroundColor, isNull);
     expect(sheet.tableColumnWidth, isA<IntrinsicColumnWidth>());
-    expect(sheet.blockSpacing, greaterThanOrEqualTo(20));
+    expect(sheet.blockSpacing, closeTo(19 * 1.72, 0.01));
     expect(sheet.h1!.fontSize!, greaterThan(sheet.h2!.fontSize!));
     expect(sheet.h2!.fontSize!, greaterThan(sheet.h3!.fontSize!));
     final chapter = bookReaderChapterStyle(
@@ -279,5 +279,43 @@ void main() {
     final rect = tester.getRect(find.textContaining('铺满屏幕宽度'));
     expect(rect.left, lessThan(20));
     expect(rect.right, greaterThan(360));
+  });
+
+  testWidgets('paragraphs keep a blank line and the opening indent', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(390, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    const settings = ReaderSettings();
+    final sheet = bookReaderMarkdownStyle(
+      theme: wenxiangTheme(),
+      palette: ReaderPalette.forMode(ReaderThemeMode.dark),
+      settings: settings,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: Scaffold(
+          body: SizedBox(
+            width: 390,
+            child: BookMarkdownBody(
+              api: FakeWenxiangApi(),
+              bookId: 'book',
+              chapterFile: '001.md',
+              data: '　　第一段从这里开始，写满一行再换到下一行，看看段和段之间到底空出多少。\n\n'
+                  '　　第二段紧跟着，如果两段贴在一起，中间就没有空行。',
+              styleSheet: sheet,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final texts = tester.widgetList<SelectableText>(find.byType(SelectableText)).toList();
+    expect(texts, hasLength(2));
+    expect(texts.first.textSpan!.toPlainText(), startsWith('\u3000\u3000第一段'));
+    expect(texts.last.textSpan!.toPlainText(), startsWith('\u3000\u3000第二段'));
+    final first = tester.getRect(find.byWidget(texts.first));
+    final second = tester.getRect(find.byWidget(texts.last));
+    expect(second.top - first.bottom, greaterThanOrEqualTo(settings.fontSize * settings.lineHeight - 0.5));
   });
 }

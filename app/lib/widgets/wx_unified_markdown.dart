@@ -23,7 +23,9 @@ List<_MdPiece> _splitRules(String data) {
   var fence = false;
 
   void flush() {
-    final text = buf.toString().trim();
+    // ASCII edges only. String.trim also drops 全角空格, which is the
+    // opening paragraph's first-line indent.
+    final text = buf.toString().replaceAll(RegExp(r'^[ \t\r\n]+|[ \t\r\n]+$'), '');
     buf.clear();
     if (text.isNotEmpty) pieces.add(_MdPiece.text(text));
   }
