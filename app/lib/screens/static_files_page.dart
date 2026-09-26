@@ -156,8 +156,12 @@ class _StaticFilesPageState extends State<StaticFilesPage> {
             contentPadding: const EdgeInsets.symmetric(horizontal: 4),
             title: Text(file.name, maxLines: 1, overflow: TextOverflow.ellipsis),
             subtitle: Text(
-              '${file.path} · ${_formatBytes(file.size)}',
-              maxLines: 1,
+              [
+                file.path,
+                _formatBytes(file.size),
+                if (_formatMtime(file.mtime) case final t?) t,
+              ].join(' · '),
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
             trailing: Row(
@@ -190,4 +194,15 @@ String _formatBytes(int size) {
   if (size < 1024) return '$size B';
   if (size < 1024 * 1024) return '${(size / 1024).toStringAsFixed(1)} KB';
   return '${(size / (1024 * 1024)).toStringAsFixed(1)} MB';
+}
+
+String? _formatMtime(String? iso) {
+  final raw = iso?.trim();
+  if (raw == null || raw.isEmpty) return null;
+  final dt = DateTime.tryParse(raw);
+  if (dt == null) return null;
+  final local = dt.toLocal();
+  String two(int n) => n.toString().padLeft(2, '0');
+  return '${local.year}-${two(local.month)}-${two(local.day)} '
+      '${two(local.hour)}:${two(local.minute)}';
 }

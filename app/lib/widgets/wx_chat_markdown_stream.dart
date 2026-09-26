@@ -220,7 +220,15 @@ class _WxChatMarkdownStreamState extends State<WxChatMarkdownStream> {
               onTapLink: widget.onTapLink,
               isNew: i >= _renderedHashes.length - (_renderedHashes.length - _completedCountAtLastRender()),
             ),
-          if (_pendingText.isNotEmpty) _PendingView(text: _pendingText),
+          if (_pendingText.isNotEmpty)
+            widget.showCaret
+                ? _PendingView(text: _pendingText)
+                : _BlockView(
+                    key: ValueKey(_pendingHash),
+                    source: _pendingText,
+                    styleSheet: widget.styleSheet,
+                    onTapLink: widget.onTapLink,
+                  ),
           if (widget.showCaret && _pendingText.isNotEmpty)
             const Padding(
               padding: EdgeInsets.only(top: 2),
