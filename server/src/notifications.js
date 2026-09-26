@@ -5,7 +5,7 @@
 // are pushed as `{type:"inbox", item}` messages. Heartbeats every 25s
 // to keep intermediate proxies (ngrok etc.) from idling the socket.
 
-import { appendInboxItem, markInboxRead } from "./inbox.js";
+import { appendInboxItem } from "./inbox.js";
 import { WebSocketServer } from "ws";
 
 const HEARTBEAT_MS = 25_000;
@@ -85,7 +85,7 @@ export async function publishInboxNotice(workspaceRoot, notice) {
   if (!workspaceRoot || !notice) return null;
   const item = await appendInboxItem(workspaceRoot, notice);
   if (!item) return null;
-  if (broadcastInboxItem(item)) await markInboxRead(workspaceRoot, item.id);
+  broadcastInboxItem(item);
   return item;
 }
 

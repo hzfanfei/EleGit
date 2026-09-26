@@ -122,7 +122,7 @@ class NotificationCenter {
     enabled.value = want;
     if (want) {
       if (!await _ensurePermission()) return;
-      await BackgroundSync.acquire();
+      await BackgroundSync.acquire(api);
       await connect();
       await fetchAndShowUnread();
     } else {
@@ -254,13 +254,32 @@ class NotificationCenter {
       final res = await api.fetchInbox();
       final list = (res['items'] as List?) ?? const [];
       var unread = 0;
+      var backfilled = 0;
       for (final entry in list) {
-        if (entry is Map) {
-          final item = InboxItem.fromJson(Map<String, dynamic>.from(entry));
-          if (!item.read) {
-            unread++;
-            await _showItem(item);
-          }
+        if (entry is! Map) continue;
+        final item = InboxItem.fromJson(Map<String, dynamic>.from(entry));
+        if (!item.read) {
+          unread++;
+          await _showItem(item);
+          continue;
+        }
+        // The background service already posted the system notification, and
+        // fetching the inbox marks the row read. Merge the answer anyway.
+        if (backfilled >= 20) continue;
+        backfilled++;
+        final answer = (item.answer ?? '').trim();
+        if (answer.isEmpty) continue;
+        try {
+          await backfillChatFromNotice(
+            sessionId: item.sessionId ?? '',
+            answer: answer,
+            question: item.question ?? '',
+            owner: item.owner ?? '',
+            repo: item.repo ?? '',
+            bookId: item.bookId ?? '',
+          );
+        } catch (err) {
+          debugPrint('Chat backfill failed: $err');
         }
       }
       unreadCount.value = unread;

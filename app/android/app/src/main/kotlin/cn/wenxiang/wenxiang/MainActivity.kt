@@ -8,6 +8,16 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
+    override fun onResume() {
+        super.onResume()
+        SyncService.activityVisible = true
+    }
+
+    override fun onPause() {
+        SyncService.activityVisible = false
+        super.onPause()
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(
@@ -60,6 +70,8 @@ class MainActivity : FlutterActivity() {
             when (call.method) {
                 "start" -> {
                     val intent = Intent(this, SyncService::class.java)
+                        .putExtra("baseUrl", call.argument<String>("baseUrl"))
+                        .putExtra("apiKey", call.argument<String>("apiKey"))
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                         startForegroundService(intent)
                     } else {

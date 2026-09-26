@@ -11,6 +11,7 @@ import '../diagnostics/client_error_log.dart';
 import '../models.dart';
 import '../persist/app_memory.dart';
 import '../theme.dart';
+import '../utils/background_sync.dart';
 import '../utils/notification_center.dart';
 import '../widgets/wx_chrome.dart';
 import '../widgets/wx_edge_back.dart';
@@ -85,6 +86,9 @@ class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
     } else if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden) {
       unawaited(_api.reportPresence('background'));
+      if (NotificationCenter.instance.enabled.value) {
+        unawaited(BackgroundSync.acquire(_api));
+      }
       _uploadClientErrors();
     }
   }

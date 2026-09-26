@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 
+import '../api/wenxiang_api.dart';
+
 /// Holds the Android process in a `dataSync` foreground service while the
 /// user has local notifications enabled, so the WebSocket listener can keep
 /// receiving inbox pushes (answer-completion, build, Claude Code task) when
@@ -15,11 +17,13 @@ class BackgroundSync {
   static const _channel = MethodChannel('cn.wenxiang.wenxiang/background_sync');
   static bool _started = false;
 
-  static Future<void> acquire() async {
+  static Future<void> acquire(WenxiangApi api) async {
     if (!Platform.isAndroid) return;
-    if (_started) return;
     try {
-      await _channel.invokeMethod<void>('start');
+      await _channel.invokeMethod<void>('start', {
+        'baseUrl': api.baseUrl,
+        'apiKey': api.apiKey,
+      });
       _started = true;
     } catch (_) {
       // best-effort; the WS retry path will keep notifications flowing even
