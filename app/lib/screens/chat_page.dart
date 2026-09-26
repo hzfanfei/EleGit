@@ -292,9 +292,9 @@ class _ChatPageState extends State<ChatPage> {
       }
     }
     if (_busy) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('正在生成回答，稍后再用语音')),
-      );
+      if (_voiceInputMode) {
+        setState(() => _voiceInputMode = false);
+      }
       return;
     }
     if (_sttBusy || _holding) return;
@@ -1254,19 +1254,20 @@ class _ChatPageState extends State<ChatPage> {
           ),
             ],
           ),
-          Positioned(
-            left: 8,
-            right: 0,
-            bottom: MediaQuery.of(context).padding.bottom + 92,
-            child: Align(
-              alignment: Alignment.bottomRight,
-              child: BookQuickVoiceFab(
-                session: _quickVoice,
-                palette: _quickVoicePalette,
-                enabled: _voiceReady && !_busy && !_live && !_preparingChat,
+          if (!_busy && !_live)
+            Positioned(
+              left: 8,
+              right: 0,
+              bottom: MediaQuery.of(context).padding.bottom + 92,
+              child: Align(
+                alignment: Alignment.bottomRight,
+                child: BookQuickVoiceFab(
+                  session: _quickVoice,
+                  palette: _quickVoicePalette,
+                  enabled: _voiceReady && !_preparingChat,
+                ),
               ),
             ),
-          ),
           if (_preparingChat)
             const ColoredBox(
               color: Color(0x990C0D0F),
@@ -1822,8 +1823,9 @@ class _Composer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final voiceToggleLocked = busy || preparing || sttBusy;
-    final padEnabled = voiceReady && ((!busy && !preparing) || sttBusy);
+    final voiceToggleLocked = preparing || sttBusy || (busy && !voiceReady);
+    final showKeyboard = !voiceInputMode || busy;
+    final padEnabled = voiceReady && !preparing && !busy;
     return ColoredBox(
       color: Wx.bg,
       child: SafeArea(
@@ -1834,14 +1836,6 @@ class _Composer extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (queueCount > 0)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Text(
-                    '还有 $queueCount 条排队，当前任务完成后自动执行',
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.muted),
-                  ),
-                ),
               if (sttBusy || (holding && holdLive.isNotEmpty))
                 Padding(
                   padding: const EdgeInsets.only(bottom: 10),
@@ -1859,34 +1853,20 @@ class _Composer extends StatelessWidget {
                     tooltip: !voiceReady
                         ? '语音未配置'
                         : busy
-                            ? '生成中，暂不可用'
+                            ? (voiceInputMode ? '改用键盘，先写下一条' : '回答中，先打字排队')
                             : (voiceInputMode ? '键盘输入' : '按住说话'),
-                    onPressed: voiceToggleLocked && voiceReady ? null : () => onToggleVoiceInput(),
+                    onPressed: (voiceToggleLocked && voiceReady) || (busy && !voiceInputMode)
+                        ? null
+                        : () => onToggleVoiceInput(),
                     icon: Icon(
-                      voiceInputMode ? Icons.keyboard_outlined : Icons.mic_none_outlined,
+                      voiceInputMode && !busy ? Icons.keyboard_outlined : Icons.mic_none_outlined,
                       color: !voiceReady ? Wx.faint : null,
                     ),
                   ),
                   Expanded(
-                    child: voiceInputMode
-                        ? WxHoldToSpeakPad(
-                            enabled: padEnabled,
-                            holding: holding,
-                            holdCancel: holdCancel,
-                            sttBusy: sttBusy,
-                            hint: !voiceReady
-                                ? '语音未就绪'
-                                : busy
-                                    ? '生成中，稍后再说'
-                                    : holdHint.isNotEmpty
-                                        ? holdHint
-                                        : (sttBusy ? '识别中，点按取消' : '按住 说话'),
-                            onHoldStart: onHoldStart,
-                            onHoldMove: onHoldMove,
-                            onHoldEnd: onHoldEnd,
-                            onCancelRecognize: sttBusy ? onCancelRecognize : null,
-                          )
-                        : TextField(
+                    child: showKeyboard
+                        ? TextField(
+                            key: const Key('wx-chat-input'),
                             controller: controller,
                             focusNode: focus,
                             minLines: 1,
@@ -1900,61 +1880,86 @@ class _Composer extends StatelessWidget {
                               hintText: preparing
                                   ? '正在准备对话…'
                                   : busy
-                                      ? '生成中，可先写下一条'
+                                      ? '写下一条，答完自动问'
                                       : agentMode
                                           ? '让 Agent 改这个仓库'
                                           : '问这个仓库的进度',
                               filled: true,
                               fillColor: Wx.surface,
                             ),
+                          )
+                        : WxHoldToSpeakPad(
+                            enabled: padEnabled,
+                            holding: holding,
+                            holdCancel: holdCancel,
+                            sttBusy: sttBusy,
+                            hint: !voiceReady
+                                ? '语音未就绪'
+                                : holdHint.isNotEmpty
+                                    ? holdHint
+                                    : (sttBusy ? '识别中，点按取消' : '按住 说话'),
+                            onHoldStart: onHoldStart,
+                            onHoldMove: onHoldMove,
+                            onHoldEnd: onHoldEnd,
+                            onCancelRecognize: sttBusy ? onCancelRecognize : null,
                           ),
                   ),
-                  const SizedBox(width: 8),
-                  ListenableBuilder(
+                  if (!busy) ...[
+                    const SizedBox(width: 8),
+                    ListenableBuilder(
+                      listenable: controller,
+                      builder: (context, _) {
+                        return SizedBox(
+                          width: Wx.tap,
+                          height: Wx.tap,
+                          child: IconButton.filled(
+                            key: const Key('wx-chat-send'),
+                            tooltip: '发送',
+                            onPressed: voiceInputMode || preparing ? null : onSend,
+                            icon: const Icon(Icons.arrow_upward, size: 20),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ],
+              ),
+              if (busy)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: ListenableBuilder(
                     listenable: controller,
                     builder: (context, _) {
                       final draft = controller.text.trim();
-                      if (busy) {
-                        return Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            SizedBox(
-                              width: Wx.tap,
-                              height: Wx.tap,
-                              child: IconButton(
-                                key: const Key('wx-chat-stop'),
-                                tooltip: '停止当前',
-                                onPressed: onStop,
-                                icon: const Icon(Icons.stop_circle_outlined, size: 26, color: Wx.accent),
-                              ),
+                      return Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              queueCount > 0
+                                  ? '还有 $queueCount 条排队，答完自动问'
+                                  : '可以先写下一条',
+                              style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.muted),
                             ),
-                            SizedBox(
-                              width: Wx.tap,
-                              height: Wx.tap,
-                              child: IconButton.filled(
-                                key: const Key('wx-chat-send'),
-                                tooltip: draft.isEmpty ? '输入后排队' : '加入排队',
-                                onPressed: draft.isEmpty || preparing ? null : onSend,
-                                icon: const Icon(Icons.arrow_upward, size: 20),
-                              ),
-                            ),
-                          ],
-                        );
-                      }
-                      return SizedBox(
-                        width: Wx.tap,
-                        height: Wx.tap,
-                        child: IconButton.filled(
-                          key: const Key('wx-chat-send'),
-                          tooltip: '发送',
-                          onPressed: voiceInputMode || preparing ? null : onSend,
-                          icon: const Icon(Icons.arrow_upward, size: 20),
-                        ),
+                          ),
+                          IconButton(
+                            key: const Key('wx-chat-stop'),
+                            tooltip: '停止当前',
+                            visualDensity: VisualDensity.compact,
+                            onPressed: onStop,
+                            icon: const Icon(Icons.stop_circle_outlined, size: 26, color: Wx.accent),
+                          ),
+                          const SizedBox(width: 4),
+                          FilledButton.icon(
+                            key: const Key('wx-chat-send'),
+                            onPressed: draft.isEmpty || preparing ? null : onSend,
+                            icon: const Icon(Icons.arrow_upward, size: 18),
+                            label: const Text('排队'),
+                          ),
+                        ],
                       );
                     },
                   ),
-                ],
-              ),
+                ),
               if (voiceInputMode &&
                   voiceReady &&
                   voiceHoldTipVisible &&

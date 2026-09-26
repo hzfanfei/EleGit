@@ -222,8 +222,9 @@ void main() {
     await tester.tap(find.text('这个仓库最近在做什么？'));
     await tester.pump();
 
-    expect(find.textContaining('生成中'), findsOneWidget);
-    await tester.enterText(find.byType(TextField), '先记下下一问');
+    expect(find.text('可以先写下一条'), findsOneWidget);
+    expect(find.byKey(const Key('wx-chat-input')), findsOneWidget);
+    await tester.enterText(find.byKey(const Key('wx-chat-input')), '先记下下一问');
     expect(find.text('先记下下一问'), findsOneWidget);
     for (var i = 0; i < 15; i++) {
       await tester.pump(const Duration(milliseconds: 100));
@@ -381,6 +382,40 @@ void main() {
     expect(find.text('松手自动发送，上滑取消'), findsOneWidget);
   });
 
+  testWidgets('voice mode still shows a text field while a reply is streaming', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: ChatPage(
+          api: FakeWenxiangApi(
+            voiceReady: true,
+            streamDelay: const Duration(milliseconds: 400),
+          ),
+          repo: sampleRepo(),
+          onBack: () {},
+        ),
+      ),
+    );
+    await _pumpUntilChatReady(tester);
+    await tester.tap(find.byKey(const Key('wx-voice-toggle')));
+    await tester.pump();
+    await tester.tap(find.text('这个仓库最近在做什么？'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 40));
+
+    expect(find.byKey(const Key('wx-chat-input')), findsOneWidget);
+    expect(find.text('可以先写下一条'), findsOneWidget);
+    await tester.enterText(find.byKey(const Key('wx-chat-input')), '语音时也能先写下一条');
+    await tester.pump();
+    await tester.tap(find.text('排队'));
+    await tester.pump();
+    expect(find.text('排队中'), findsOneWidget);
+
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+  });
+
   testWidgets('busy chat enqueues further sends and runs them in order', (tester) async {
     final api = FakeWenxiangApi(
       streamPace: const Duration(milliseconds: 80),
@@ -413,6 +448,8 @@ void main() {
     expect(find.text('第二条任务'), findsOneWidget);
     expect(find.text('排队中'), findsOneWidget);
     expect(find.textContaining('还有 1 条排队'), findsOneWidget);
+    expect(find.byKey(const Key('wx-chat-input')), findsOneWidget);
+    expect(find.text('排队'), findsOneWidget);
     expect(api.chatMessages, ['这个仓库最近在做什么？']);
 
     for (var i = 0; i < 40; i++) {
