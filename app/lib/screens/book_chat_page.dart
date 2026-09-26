@@ -7,8 +7,8 @@ import '../api/wenxiang_api.dart';
 import '../copy/errors.dart';
 import '../models.dart';
 import '../theme.dart';
+import '../widgets/wx_chat_markdown_stream.dart';
 import '../widgets/wx_chrome.dart';
-import '../widgets/wx_rich_text.dart';
 import '../widgets/wx_typewriter_stream.dart';
 
 class BookChatPage extends StatefulWidget {
@@ -197,16 +197,21 @@ class _BookChatPageState extends State<BookChatPage> {
                 if (_live && index == base + _messages.length) {
                   return _Bubble(
                     role: 'assistant',
-                    child: ValueListenableBuilder<String>(
-                      valueListenable: _typewriter.visible,
-                      builder: (context, text, _) => WxReadableText(text),
+                    child: WxChatMarkdownStream(
+                      source: _typewriter.visible,
+                      styleSheet: chatMarkdownStyle(Theme.of(context)),
+                      showCaret: true,
                     ),
                   );
                 }
                 final msg = _messages[index - base];
                 return _Bubble(
                   role: msg.role,
-                  child: WxReadableText(msg.content),
+                  child: WxChatMarkdownStream(
+                    source: ValueNotifier<String>(msg.content),
+                    styleSheet: chatMarkdownStyle(Theme.of(context)),
+                    showCaret: false,
+                  ),
                 );
               },
             ),

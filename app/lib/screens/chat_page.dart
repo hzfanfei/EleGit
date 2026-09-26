@@ -20,6 +20,7 @@ import '../voice/voice_media.dart';
 import '../copy/voice_stt_copy.dart';
 import '../voice/voice_stt_client.dart';
 import '../widgets/book_quick_voice_fab.dart';
+import '../widgets/wx_chat_markdown_stream.dart';
 import '../widgets/wx_chrome.dart';
 import '../widgets/wx_hold_to_speak.dart';
 import '../widgets/wx_rich_text.dart';
@@ -1386,30 +1387,17 @@ class _FinishedTurn extends StatelessWidget {
             const SnackBar(content: Text('已复制回答')),
           );
         },
-        child: WxReadableText(message.content),
+        child: WxChatMarkdownStream(
+          source: ValueNotifier<String>(message.content),
+          styleSheet: chatMarkdownStyle(Theme.of(context)),
+          showCaret: false,
+        ),
       ),
     );
   }
 }
 
 /// Plain text while streaming — avoids markdown relayout jitter before the turn finishes.
-class _StreamingAssistantText extends StatelessWidget {
-  const _StreamingAssistantText(this.text);
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      text,
-      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-            color: Wx.text,
-            height: 1.55,
-          ),
-    );
-  }
-}
-
 String _livePhaseLabel(String phase) {
   switch (phase) {
     case 'repo':
@@ -1474,15 +1462,10 @@ class _LiveTurn extends StatelessWidget {
               },
             );
           }
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Expanded(child: _StreamingAssistantText(value)),
-              const Padding(
-                padding: EdgeInsets.only(left: 2, bottom: 3),
-                child: _Caret(),
-              ),
-            ],
+          return WxChatMarkdownStream(
+            source: text,
+            styleSheet: chatMarkdownStyle(Theme.of(context)),
+            showCaret: true,
           );
         },
       ),
