@@ -8,6 +8,7 @@ import '../copy/time.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../widgets/wx_chrome.dart';
+import '../widgets/wx_link_route.dart';
 import '../repo_open.dart';
 import '../widgets/wx_clone_scrim.dart';
 import 'login_page.dart';
@@ -220,7 +221,7 @@ class ReposPageState extends State<ReposPage> {
     final home = widget.githubConnected
         ? (widget.githubLogin.isEmpty ? '选一个仓库问进度' : widget.githubLogin)
         : (_localOnly ? '本机 ~/问象 仓库' : '选一个仓库问进度');
-    final subtitle = '${widget.api.linkLabel} · $home';
+    final subtitle = home;
     return Scaffold(
       body: Column(
         children: [
@@ -230,6 +231,7 @@ class ReposPageState extends State<ReposPage> {
             subtitle: subtitle,
             onBrandTap: blocked ? null : widget.onOpenSettings,
             trailing: [
+              WxLinkRouteMark(baseUrl: widget.api.baseUrl),
               if (widget.onOpenFiles != null)
                 IconButton(
                   tooltip: '资源',

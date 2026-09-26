@@ -23,6 +23,7 @@ import '../widgets/book_quick_voice_fab.dart';
 import '../widgets/wx_chat_markdown_stream.dart';
 import '../widgets/agent_decision_card.dart';
 import '../widgets/wx_chrome.dart';
+import '../widgets/wx_link_route.dart';
 import '../widgets/wx_hold_to_speak.dart';
 import '../widgets/wx_rich_text.dart';
 import '../widgets/wx_typewriter_stream.dart';
@@ -121,6 +122,7 @@ class _ChatPageState extends State<ChatPage> {
   @override
   void initState() {
     super.initState();
+    widget.api.linkEpoch.addListener(_onLinkChanged);
     _voiceInputMode = widget.memory?.chatVoiceInput() ?? false;
     _typewriter = WxTypewriterStream(
       onReveal: () {
@@ -1089,8 +1091,13 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
+  void _onLinkChanged() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
+    widget.api.linkEpoch.removeListener(_onLinkChanged);
     chatBackfillTick.removeListener(_onChatBackfill);
     _quickVoice.dispose();
     _disposeStt();
@@ -1130,6 +1137,7 @@ class _ChatPageState extends State<ChatPage> {
             title: widget.repo.fullName,
             subtitle: subtitle,
             trailing: [
+              WxLinkRouteMark(baseUrl: widget.api.baseUrl),
               Tooltip(
                 message: _agentMode ? '只改 ${widget.repo.name}' : '${widget.repo.name} 只读',
                 child: Row(
