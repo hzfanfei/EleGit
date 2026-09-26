@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
+import '../copy/ask_engine.dart';
 import '../models.dart';
 import '../models/diagnostics.dart';
 import '../utils/async_gate.dart';
@@ -308,12 +309,12 @@ class WenxiangApi {
     }
   }
 
-  Future<void> setAskEngine(String engine) async {
+  Future<void> setAskEngine(String engine, {required AskEngineScope scope}) async {
     final res = await http
         .put(
           _uri('/v1/settings/ask-engine'),
           headers: _headers,
-          body: jsonEncode({'engine': engine}),
+          body: jsonEncode({'engine': engine, 'scope': askEngineScopeId(scope)}),
         )
         .timeout(const Duration(seconds: 20));
     if (res.statusCode >= 400) {

@@ -13,6 +13,8 @@ class ServerStatus {
     required this.cursorAvailable,
     required this.cursorEngine,
     required this.askEnginePreference,
+    required this.askEngineBookPreference,
+    required this.askEngineRepoPreference,
     required this.tunnelUrl,
     required this.tunnelRunning,
     required this.tunnelError,
@@ -32,6 +34,8 @@ class ServerStatus {
   final bool cursorAvailable;
   final String cursorEngine;
   final String askEnginePreference;
+  final String askEngineBookPreference;
+  final String askEngineRepoPreference;
   final String tunnelUrl;
   final bool tunnelRunning;
   final String tunnelError;
@@ -64,6 +68,15 @@ class ServerStatus {
       cursorEngine: (cursor['engine'] ?? cursor['fallback'] ?? 'local-progress')
           .toString(),
       askEnginePreference: (cursor['preference'] ?? 'claude').toString(),
+      askEngineBookPreference: ((cursor['preferences'] as Map?)?['book'] ??
+              (json['books'] as Map?)?['preference'] ??
+              cursor['preference'] ??
+              'claude')
+          .toString(),
+      askEngineRepoPreference: ((cursor['preferences'] as Map?)?['repo'] ??
+              cursor['preference'] ??
+              'claude')
+          .toString(),
       tunnelUrl: (tunnel['publicUrl'] ?? '').toString(),
       tunnelRunning: tunnel['running'] == true,
       tunnelError: (tunnel['error'] ?? '').toString(),

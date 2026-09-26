@@ -4,7 +4,8 @@ import cors from "cors";
 import { corsOptions } from "./cors.js";
 import { loadLocalEnv } from "./env.js";
 import {
-  applyAcpEnginePreference,
+  setAcpEnginePreferences,
+  resolveAgentCommand,
   buildBookAcpPrompt,
   createSessionStore,
   detectCursorEngine,
@@ -105,16 +106,30 @@ const PORT = Number(process.env.WENXIANG_PORT || 8787);
 const BIND = process.env.WENXIANG_BIND || "0.0.0.0";
 
 const store = await loadStore();
-const savedAcpEngine =
-  sanitizeAcpEngine(store.config.acpEngine) ||
-  sanitizeAcpEngine(process.env.WENXIANG_ACP_ENGINE) ||
-  "claude";
-store.config.acpEngine = savedAcpEngine;
-applyAcpEnginePreference(savedAcpEngine);
+
+function syncAcpEngineConfig(config) {
+  const legacy = sanitizeAcpEngine(config.acpEngine);
+  const envFallback = sanitizeAcpEngine(process.env.WENXIANG_ACP_ENGINE);
+  const book =
+    sanitizeAcpEngine(config.acpEngineBook) || legacy || envFallback || "claude";
+  const repo =
+    sanitizeAcpEngine(config.acpEngineRepo) || legacy || envFallback || "claude";
+  config.acpEngineBook = book;
+  config.acpEngineRepo = repo;
+  config.acpEngine = repo;
+  setAcpEnginePreferences({ book, repo });
+  return { book, repo };
+}
+
+syncAcpEngineConfig(store.config);
 setPreferredVoiceStack(store.config.voiceStack);
 
-const sessions = createSessionStore();
-const bookSessions = createSessionStore();
+const sessions = createSessionStore({
+  resolveCommand: () => resolveAgentCommand("repo"),
+});
+const bookSessions = createSessionStore({
+  resolveCommand: () => resolveAgentCommand("book"),
+});
 const chatCancels = new Map();
 
 function beginChatTurn(sessionId) {
@@ -290,7 +305,8 @@ function requireGithub(req, res, next) {
 }
 
 app.get("/v1/status", (_req, res) => {
-  const cursor = detectCursorEngine();
+  const cursorRepo = detectCursorEngine("repo");
+  const cursorBook = detectCursorEngine("book");
   const lans = lanUrls(PORT);
   const tunnelStatus = tunnel.status();
   res.json({
@@ -313,21 +329,26 @@ app.get("/v1/status", (_req, res) => {
       staticDir: staticDir(store.config.workspaceRoot),
     },
     cursor: {
-      available: Boolean(cursor),
-      engine: cursor?.id || null,
-      mode: cursor?.mode || null,
-      model: cursor?.model || null,
-      transport: cursor?.transport || null,
-      preference: store.config.acpEngine || "claude",
+      available: Boolean(cursorRepo),
+      engine: cursorRepo?.id || null,
+      mode: cursorRepo?.mode || null,
+      model: cursorRepo?.model || null,
+      transport: cursorRepo?.transport || null,
+      preference: store.config.acpEngineRepo || "claude",
+      preferences: {
+        book: store.config.acpEngineBook || "claude",
+        repo: store.config.acpEngineRepo || "claude",
+      },
       fallback: "local-progress",
     },
     voice: publicVoiceStatus(withTtsVoice(resolveVoiceConfig(), store.config.ttsVoice)),
     books: (() => {
-      const acp = detectCursorEngine();
+      const acp = cursorBook;
       return {
         engine: "acp",
         ready: Boolean(acp),
         model: acp?.model || null,
+        preference: store.config.acpEngineBook || "claude",
       };
     })(),
     tunnel: tunnelStatus,
@@ -500,7 +521,7 @@ app.post("/v1/repos/:owner/:repo/checkout", async (req, res) => {
       repo,
       requestSignal(req, res),
     );
-    if (detectCursorEngine()) {
+    if (detectCursorEngine("repo")) {
       sessions.warmRepo(owner, repo, dest).catch(() => {});
     }
     res.json({
@@ -708,9 +729,9 @@ app.post("/v1/books/:bookId/sessions", (req, res) => {
 
 app.post("/v1/books/:bookId/sessions/warm", async (req, res) => {
   try {
-    if (!detectCursorEngine()) {
+    if (!detectCursorEngine("book")) {
       res.status(503).json({
-        error: "问书需要本机 Cursor Agent（ACP）。请安装 agent 并 login。",
+        error: "问书需要本机 Claude Code 或 Cursor Agent（ACP）。请安装并登录所选助手。",
         code: "acp_unconfigured",
       });
       return;
@@ -862,13 +883,32 @@ app.put("/v1/settings/ask-engine", async (req, res) => {
       res.status(400).json({ error: "engine must be claude or cursor" });
       return;
     }
-    store.config.acpEngine = engine;
-    applyAcpEnginePreference(engine);
+    const scope = String(req.body?.scope || "").trim().toLowerCase();
+    if (scope === "book") {
+      store.config.acpEngineBook = engine;
+    } else if (scope === "repo") {
+      store.config.acpEngineRepo = engine;
+      store.config.acpEngine = engine;
+    } else {
+      store.config.acpEngineBook = engine;
+      store.config.acpEngineRepo = engine;
+      store.config.acpEngine = engine;
+    }
+    syncAcpEngineConfig(store.config);
     await store.save();
-    await Promise.all([sessions.resetAllChannels(), bookSessions.resetAllChannels()]);
-    const active = detectCursorEngine();
+    const resets = [];
+    if (!scope || scope === "repo") resets.push(sessions.resetAllChannels());
+    if (!scope || scope === "book") resets.push(bookSessions.resetAllChannels());
+    await Promise.all(resets);
+    const activeScope = scope === "book" ? "book" : "repo";
+    const active = detectCursorEngine(activeScope);
     res.json({
       engine,
+      scope: scope || "all",
+      preferences: {
+        book: store.config.acpEngineBook,
+        repo: store.config.acpEngineRepo,
+      },
       available: Boolean(active),
       activeEngine: active?.provider || active?.id || null,
       model: active?.model || null,
@@ -918,10 +958,10 @@ app.post("/v1/books/chat", async (req, res) => {
     turn = beginChatTurn(session.id);
     turnSessionId = session.id;
     const signal = turn.signal;
-    const acp = detectCursorEngine();
+    const acp = detectCursorEngine("book");
     if (!acp) {
       res.status(503).json({
-        error: "问书需要本机 Cursor Agent（ACP）。请安装 agent 并 login。",
+        error: "问书需要本机 Claude Code 或 Cursor Agent（ACP）。请安装并登录所选助手。",
         code: "acp_unconfigured",
       });
       return;
@@ -968,6 +1008,7 @@ app.post("/v1/books/chat", async (req, res) => {
         buildBookAcpPrompt({ ...opts, currentChapter: chapter || undefined }),
       synthesize: (opts) =>
         synthesizeBookAnswer({ ...opts, question: message, book, bookContext, local }),
+      detectEngine: () => detectCursorEngine("book"),
       signal,
       workspaceRoot: store.config.workspaceRoot,
       bookId: book.id,
@@ -1059,14 +1100,14 @@ app.post("/v1/chat", async (req, res) => {
     res.on("error", () => {});
     const unwatched = trackUnwatched(res);
     writeSse(res, { type: "meta", sessionId: session.id });
-    if (detectCursorEngine()) {
+    if (detectCursorEngine("repo")) {
       writeSse(res, { type: "start", engine: "acp" });
     }
     writeSse(res, { type: "status", phase: "repo" });
     const destGuess = checkoutPath(store.config.workspaceRoot, owner, repo);
     const present = isCheckoutPresent(store.config.workspaceRoot, owner, repo);
     const warmPromise =
-      present && detectCursorEngine()
+      present && detectCursorEngine("repo")
         ? sessions.warmRepo(owner, repo, destGuess).catch(() => {})
         : Promise.resolve();
     let progress;
@@ -1081,7 +1122,7 @@ app.post("/v1/chat", async (req, res) => {
         progress = emptyRepoProgress(owner, repo, local.branch || "main");
       } else {
         ({ progress, dest, local } = await checkoutRepo(owner, repo, signal, { fast: true }));
-        if (detectCursorEngine()) {
+        if (detectCursorEngine("repo")) {
           await sessions.warmRepo(owner, repo, dest).catch(() => {});
         }
       }
@@ -1090,7 +1131,7 @@ app.post("/v1/chat", async (req, res) => {
         checkoutRepo(owner, repo, signal, { fast: true }),
         warmPromise,
       ]).then(([checkout]) => checkout));
-      if (detectCursorEngine()) {
+      if (detectCursorEngine("repo")) {
         await sessions.warmRepo(owner, repo, dest).catch(() => {});
       }
     }
@@ -1124,6 +1165,7 @@ app.post("/v1/chat", async (req, res) => {
       agentMode,
       staticFiles: staticFilesPrompt(store.config),
       workspaceRoot: store.config.workspaceRoot,
+      detectEngine: () => detectCursorEngine("repo"),
     })) {
       if (event.type === "notification") notified = true;
       if (event.type === "done") {
@@ -1301,11 +1343,17 @@ function logCompanionStartup() {
   );
   console.log(`Node executable: ${resolveNodeExecutable()}`);
   console.log(`Git executable: ${resolveGitExecutable()}`);
-  const cursor = detectCursorEngine();
+  const bookAcp = detectCursorEngine("book");
+  const repoAcp = detectCursorEngine("repo");
   console.log(
-    cursor
-      ? `Cursor engine: ${cursor.id} (${cursor.path})`
-      : "Cursor engine: not found — chat will use local checkout + GitHub adapter",
+    bookAcp
+      ? `问书 Agent (${store.config.acpEngineBook}): ${bookAcp.id} (${bookAcp.path})`
+      : `问书 Agent (${store.config.acpEngineBook}): not found`,
+  );
+  console.log(
+    repoAcp
+      ? `问象 Agent (${store.config.acpEngineRepo}): ${repoAcp.id} (${repoAcp.path})`
+      : `问象 Agent (${store.config.acpEngineRepo}): not found — chat may use local checkout + GitHub adapter`,
   );
   const voice = publicVoiceStatus(resolveVoiceConfig());
   console.log(voice.ready ? "Voice STT: ready" : "Voice STT: 还没配语音密钥");

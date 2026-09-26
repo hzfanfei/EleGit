@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:wenxiang/api/wenxiang_api.dart';
+import 'package:wenxiang/copy/ask_engine.dart';
 import 'package:wenxiang/models.dart';
 import 'package:wenxiang/models/diagnostics.dart';
 import 'package:wenxiang/voice/cosyvoice_tts_voices.dart';
@@ -72,6 +73,7 @@ class FakeWenxiangApi extends WenxiangApi {
   String? lastRepoTtsVoice;
   String? lastSetTtsVoice;
   String? lastSetAskEngine;
+  String? lastSetAskEngineScope;
   String? lastSetVoiceStack;
   int createSessionCalls = 0;
   final List<ChatSession> sessions = [
@@ -117,8 +119,9 @@ class FakeWenxiangApi extends WenxiangApi {
   }
 
   @override
-  Future<void> setAskEngine(String engine) async {
+  Future<void> setAskEngine(String engine, {required AskEngineScope scope}) async {
     lastSetAskEngine = engine;
+    lastSetAskEngineScope = askEngineScopeId(scope);
   }
 
   @override
@@ -266,6 +269,8 @@ class FakeWenxiangApi extends WenxiangApi {
       cursorAvailable: false,
       cursorEngine: 'local-progress',
       askEnginePreference: 'claude',
+      askEngineBookPreference: 'claude',
+      askEngineRepoPreference: 'claude',
       tunnelUrl: '',
       tunnelRunning: false,
       tunnelError: '',

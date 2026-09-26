@@ -32,14 +32,31 @@ export function sanitizeAcpEngine(raw) {
   return null;
 }
 
-export function applyAcpEnginePreference(engine) {
-  const value = sanitizeAcpEngine(engine) || "claude";
-  process.env.WENXIANG_ACP_ENGINE = value;
-  return value;
+const acpEngines = { book: "claude", repo: "claude" };
+
+export function setAcpEnginePreferences(prefs = {}) {
+  for (const scope of ["book", "repo"]) {
+    const value = sanitizeAcpEngine(prefs[scope]);
+    if (value) acpEngines[scope] = value;
+  }
+  return { ...acpEngines };
 }
 
-export function acpEnginePreference() {
-  return sanitizeAcpEngine(process.env.WENXIANG_ACP_ENGINE) || "claude";
+/** @param {"book"|"repo"} [scope] */
+export function acpEnginePreference(scope = "repo") {
+  const key = scope === "book" ? "book" : "repo";
+  return (
+    acpEngines[key] ||
+    sanitizeAcpEngine(process.env.WENXIANG_ACP_ENGINE) ||
+    "claude"
+  );
+}
+
+export function applyAcpEnginePreference(engine) {
+  const value = sanitizeAcpEngine(engine) || "claude";
+  setAcpEnginePreferences({ book: value, repo: value });
+  process.env.WENXIANG_ACP_ENGINE = value;
+  return value;
 }
 
 export function claudeCodeSessionOptions(model) {
@@ -68,8 +85,11 @@ export function readClaudeUserSettings(filePath = path.join(os.homedir(), ".clau
   }
 }
 
-export function acpModelId(env = process.env, settings) {
-  const engine = sanitizeAcpEngine(env.WENXIANG_ACP_ENGINE) || "claude";
+export function acpModelId(env = process.env, settings, engineOverride) {
+  const engine =
+    sanitizeAcpEngine(engineOverride) ||
+    sanitizeAcpEngine(env.WENXIANG_ACP_ENGINE) ||
+    "claude";
   const explicit = String(env.WENXIANG_ACP_MODEL || "").trim();
   if (explicit) return explicit;
   if (engine === "claude") {
@@ -81,8 +101,8 @@ export function acpModelId(env = process.env, settings) {
   return String(env.WENXIANG_CURSOR_MODEL || env.CURSOR_MODEL || "").trim() || DEFAULT_ACP_MODEL;
 }
 
-function modelArgs() {
-  return ["--model", acpModelId()];
+function modelArgs(enginePref) {
+  return ["--model", acpModelId(process.env, undefined, enginePref)];
 }
 
 function claudeAgentAcpScriptPath() {
@@ -94,7 +114,7 @@ function claudeAgentAcpScriptPath() {
   return candidates.find((script) => existsSync(script)) || "";
 }
 
-export function resolveClaudeAgentCommand() {
+export function resolveClaudeAgentCommand(enginePref = "claude") {
   const script = claudeAgentAcpScriptPath();
   if (!script) return null;
   return {
@@ -103,7 +123,7 @@ export function resolveClaudeAgentCommand() {
     path: resolveNodeExecutable(),
     args: [script],
     mode: "ask",
-    model: acpModelId(),
+    model: acpModelId(process.env, undefined, enginePref),
     transport: "stdio",
     provider: "claude",
   };
@@ -156,15 +176,15 @@ function resolveCursorNodeLaunch() {
   return null;
 }
 
-export function resolveCursorAgentCommand() {
+export function resolveCursorAgentCommand(enginePref = "cursor") {
   const launch = resolveCursorNodeLaunch();
-  const model = acpModelId();
+  const model = acpModelId(process.env, undefined, enginePref);
   if (launch) {
     return {
       id: "cursor-acp",
       bin: "agent",
       path: launch.node,
-      args: [launch.index, ...authArgs(), ...modelArgs(), "acp"],
+      args: [launch.index, ...authArgs(), ...modelArgs(enginePref), "acp"],
       mode: "ask",
       model,
       transport: "stdio",
@@ -178,7 +198,7 @@ export function resolveCursorAgentCommand() {
         id: "cursor-acp",
         bin: candidate.bin,
         path: resolved,
-        args: [...authArgs(), ...modelArgs(), ...candidate.args],
+        args: [...authArgs(), ...modelArgs(enginePref), ...candidate.args],
         mode: "ask",
         model,
         transport: "stdio",
@@ -189,10 +209,11 @@ export function resolveCursorAgentCommand() {
   return null;
 }
 
-export function resolveAgentCommand() {
-  const pref = acpEnginePreference();
-  const claude = resolveClaudeAgentCommand();
-  const cursor = resolveCursorAgentCommand();
+/** @param {"book"|"repo"} [scope] */
+export function resolveAgentCommand(scope = "repo") {
+  const pref = acpEnginePreference(scope);
+  const claude = resolveClaudeAgentCommand("claude");
+  const cursor = resolveCursorAgentCommand("cursor");
   if (pref === "cursor") return cursor || claude;
   return claude || cursor;
 }
@@ -207,8 +228,9 @@ function authArgs() {
   return args;
 }
 
-export function detectCursorEngine() {
-  return resolveAgentCommand();
+/** @param {"book"|"repo"} [scope] */
+export function detectCursorEngine(scope = "repo") {
+  return resolveAgentCommand(scope);
 }
 
 export function preferredAcpModeIds(agentMode, isClaude) {

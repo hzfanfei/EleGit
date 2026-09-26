@@ -19,6 +19,8 @@ class AppMemory {
   static const voiceHoldTipDismissedKey = 'wx.voiceHoldTipDismissed';
   static const ttsVoiceKey = 'wx.ttsVoice';
   static const askEngineKey = 'wx.askEngine';
+  static const askEngineBookKey = 'wx.askEngine.book';
+  static const askEngineRepoKey = 'wx.askEngine.repo';
 
   static String chatsKey(String fullName) => 'wx.chats.$fullName';
   static String bookChatsKey(String bookId) => 'wx.bookChats.$bookId';
@@ -37,10 +39,31 @@ class AppMemory {
 
   String ttsVoice() => resolveVolcTtsVoice(prefs.getString(ttsVoiceKey)).id;
 
-  AskEngineChoice askEngine() => parseAskEngineChoice(prefs.getString(askEngineKey));
+  AskEngineChoice _readAskEngine(String? primary, String? fallback) {
+    return parseAskEngineChoice(primary ?? fallback);
+  }
+
+  AskEngineChoice askEngineBook() =>
+      _readAskEngine(prefs.getString(askEngineBookKey), prefs.getString(askEngineKey));
+
+  AskEngineChoice askEngineRepo() =>
+      _readAskEngine(prefs.getString(askEngineRepoKey), prefs.getString(askEngineKey));
+
+  /// Legacy alias for repo scope.
+  AskEngineChoice askEngine() => askEngineRepo();
+
+  Future<void> saveAskEngineFor(AskEngineScope scope, AskEngineChoice choice) {
+    final id = askEngineChoiceId(choice);
+    switch (scope) {
+      case AskEngineScope.book:
+        return prefs.setString(askEngineBookKey, id);
+      case AskEngineScope.repo:
+        return prefs.setString(askEngineRepoKey, id);
+    }
+  }
 
   Future<void> saveAskEngine(AskEngineChoice choice) {
-    return prefs.setString(askEngineKey, askEngineChoiceId(choice));
+    return saveAskEngineFor(AskEngineScope.repo, choice);
   }
 
   Future<void> saveTtsVoice(String voice) {

@@ -14,6 +14,8 @@ import {
   acpActivityLabelFromUpdate,
   acpVisibleTextFromUpdate,
   applyAcpEnginePreference,
+  acpEnginePreference,
+  setAcpEnginePreferences,
   sanitizeAcpUserVisibleText,
   buildAcpPrompt,
   buildBookAcpPrompt,
@@ -49,6 +51,15 @@ describe("sanitizeAcpEngine", () => {
     assert.equal(applyAcpEnginePreference("cursor"), "cursor");
     assert.equal(process.env.WENXIANG_ACP_ENGINE, "cursor");
     applyAcpEnginePreference("claude");
+  });
+});
+
+describe("setAcpEnginePreferences", () => {
+  it("keeps book and repo engines independent", () => {
+    setAcpEnginePreferences({ book: "cursor", repo: "claude" });
+    assert.equal(acpEnginePreference("book"), "cursor");
+    assert.equal(acpEnginePreference("repo"), "claude");
+    setAcpEnginePreferences({ book: "claude", repo: "claude" });
   });
 });
 

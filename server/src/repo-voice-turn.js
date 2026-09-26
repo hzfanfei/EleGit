@@ -62,7 +62,7 @@ export async function resolveRepoChatRuntime({
   const destGuess = checkoutPath(store.config.workspaceRoot, owner, repo);
   const present = isCheckoutPresent(store.config.workspaceRoot, owner, repo);
   const warmPromise =
-    present && detectCursorEngine()
+    present && detectCursorEngine("repo")
       ? sessions.warmRepo(owner, repo, destGuess).catch(() => {})
       : Promise.resolve();
 
@@ -78,7 +78,7 @@ export async function resolveRepoChatRuntime({
       progress = emptyRepoProgress(owner, repo, local.branch || "main");
     } else {
       ({ progress, dest, local } = await checkoutRepo(owner, repo, signal, { fast: true }));
-      if (detectCursorEngine()) {
+      if (detectCursorEngine("repo")) {
         await sessions.warmRepo(owner, repo, dest).catch(() => {});
       }
     }
@@ -87,7 +87,7 @@ export async function resolveRepoChatRuntime({
       checkoutRepo(owner, repo, signal, { fast: true }),
       warmPromise,
     ]).then(([checkout]) => checkout));
-    if (detectCursorEngine()) {
+    if (detectCursorEngine("repo")) {
       await sessions.warmRepo(owner, repo, dest).catch(() => {});
     }
   }

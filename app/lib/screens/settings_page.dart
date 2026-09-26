@@ -33,12 +33,15 @@ class _SettingsPageState extends State<SettingsPage> {
   AppMemory? _memory;
   late String _voiceId;
   VoiceServiceProfile _voiceProfile = const VoiceServiceProfile();
-  late AskEngineChoice _askEngine;
+  late AskEngineChoice _askEngineBook;
+  late AskEngineChoice _askEngineRepo;
   bool _saving = false;
-  bool _savingAskEngine = false;
+  bool _savingAskEngineBook = false;
+  bool _savingAskEngineRepo = false;
   bool _savingVoiceStack = false;
   String? _saveError;
-  String? _askEngineSaveError;
+  String? _askEngineBookSaveError;
+  String? _askEngineRepoSaveError;
   String? _voiceStackError;
   bool _probing = false;
   DiagnosticsProbeResult? _probeResult;
@@ -55,7 +58,8 @@ class _SettingsPageState extends State<SettingsPage> {
     super.initState();
     _memory = widget.memory;
     _voiceId = _memory?.ttsVoice() ?? kDefaultVolcTtsVoice;
-    _askEngine = _memory?.askEngine() ?? kDefaultAskEngine;
+    _askEngineBook = _memory?.askEngineBook() ?? kDefaultAskEngine;
+    _askEngineRepo = _memory?.askEngineRepo() ?? kDefaultAskEngine;
     if (_memory == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) unawaited(_loadMemory());
@@ -118,7 +122,8 @@ class _SettingsPageState extends State<SettingsPage> {
       setState(() {
         _memory = AppMemory(prefs);
         _voiceId = _memory!.ttsVoice();
-        _askEngine = _memory!.askEngine();
+        _askEngineBook = _memory!.askEngineBook();
+        _askEngineRepo = _memory!.askEngineRepo();
       });
       unawaited(_alignAskEngineWithServer());
       unawaited(_loadVoiceProfile());
@@ -129,28 +134,61 @@ class _SettingsPageState extends State<SettingsPage> {
     if (widget.api == null || _memory == null) return;
     try {
       final status = await widget.api!.status();
-      final remote = parseAskEngineChoice(status.askEnginePreference);
-      final local = _memory!.askEngine();
-      if (remote == local) return;
-      await widget.api!.setAskEngine(askEngineChoiceId(local));
+      final bookRemote = parseAskEngineChoice(status.askEngineBookPreference);
+      final repoRemote = parseAskEngineChoice(status.askEngineRepoPreference);
+      final bookLocal = _memory!.askEngineBook();
+      final repoLocal = _memory!.askEngineRepo();
+      if (bookRemote != bookLocal) {
+        await widget.api!.setAskEngine(
+          askEngineChoiceId(bookLocal),
+          scope: AskEngineScope.book,
+        );
+      }
+      if (repoRemote != repoLocal) {
+        await widget.api!.setAskEngine(
+          askEngineChoiceId(repoLocal),
+          scope: AskEngineScope.repo,
+        );
+      }
     } catch (_) {}
   }
 
-  Future<void> _selectAskEngine(AskEngineChoice choice) async {
+  Future<void> _selectAskEngine(AskEngineScope scope, AskEngineChoice choice) async {
+    final savingBook = scope == AskEngineScope.book;
     setState(() {
-      _askEngine = choice;
-      _askEngineSaveError = null;
-      _savingAskEngine = true;
+      if (savingBook) {
+        _askEngineBook = choice;
+        _askEngineBookSaveError = null;
+        _savingAskEngineBook = true;
+      } else {
+        _askEngineRepo = choice;
+        _askEngineRepoSaveError = null;
+        _savingAskEngineRepo = true;
+      }
     });
-    await _memory?.saveAskEngine(choice);
+    await _memory?.saveAskEngineFor(scope, choice);
     try {
-      await widget.api?.setAskEngine(askEngineChoiceId(choice));
+      await widget.api?.setAskEngine(askEngineChoiceId(choice), scope: scope);
     } catch (err) {
       if (mounted) {
-        setState(() => _askEngineSaveError = err.toString());
+        setState(() {
+          if (savingBook) {
+            _askEngineBookSaveError = err.toString();
+          } else {
+            _askEngineRepoSaveError = err.toString();
+          }
+        });
       }
     } finally {
-      if (mounted) setState(() => _savingAskEngine = false);
+      if (mounted) {
+        setState(() {
+          if (savingBook) {
+            _savingAskEngineBook = false;
+          } else {
+            _savingAskEngineRepo = false;
+          }
+        });
+      }
     }
   }
 
@@ -258,7 +296,7 @@ class _SettingsPageState extends State<SettingsPage> {
           WxPageHeader(
             title: '设置',
             subtitle:
-                '问答 · ${askEngineChoiceLabel(_askEngine)} · ${voiceEngineSummary(_voiceProfile)} · ${current.name}',
+                '问书 ${askEngineChoiceLabel(_askEngineBook)} · 问象 ${askEngineChoiceLabel(_askEngineRepo)} · ${voiceEngineSummary(_voiceProfile)} · ${current.name}',
             onBack: widget.onBack ?? () => Navigator.of(context).maybePop(),
             backTooltip: '返回',
           ),
@@ -270,40 +308,52 @@ class _SettingsPageState extends State<SettingsPage> {
                 Text('智能问答', style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 6),
                 Text(
-                  '问书与仓库进度由本机服务调用所选助手。默认 Claude Code。',
+                  '问书与问象可分别选择 Claude Code 或 Cursor，由本机服务调用。',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.muted),
                 ),
-                if (_savingAskEngine) ...[
-                  const SizedBox(height: 10),
-                  Text('正在同步到本机服务…', style: Theme.of(context).textTheme.labelSmall),
+                const SizedBox(height: 16),
+                Text(
+                  askEngineScopeTitle(AskEngineScope.book),
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+                if (_savingAskEngineBook) ...[
+                  const SizedBox(height: 6),
+                  Text('正在同步问书…', style: Theme.of(context).textTheme.labelSmall),
                 ],
-                if (_askEngineSaveError != null) ...[
-                  const SizedBox(height: 10),
+                if (_askEngineBookSaveError != null) ...[
+                  const SizedBox(height: 6),
                   Text(
-                    '已记在手机上，但还没同步到本机服务。$_askEngineSaveError',
+                    '问书已记在手机上，但还没同步到本机服务。$_askEngineBookSaveError',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.danger),
                   ),
                 ],
-                const SizedBox(height: 12),
-                Material(
-                  color: Wx.surface,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    side: const BorderSide(color: Wx.hairline),
+                const SizedBox(height: 8),
+                _AskEnginePicker(
+                  scope: AskEngineScope.book,
+                  selected: _askEngineBook,
+                  onSelect: (c) => _selectAskEngine(AskEngineScope.book, c),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  askEngineScopeTitle(AskEngineScope.repo),
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+                if (_savingAskEngineRepo) ...[
+                  const SizedBox(height: 6),
+                  Text('正在同步问象…', style: Theme.of(context).textTheme.labelSmall),
+                ],
+                if (_askEngineRepoSaveError != null) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    '问象已记在手机上，但还没同步到本机服务。$_askEngineRepoSaveError',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.danger),
                   ),
-                  clipBehavior: Clip.antiAlias,
-                  child: Column(
-                    children: [
-                      for (var i = 0; i < AskEngineChoice.values.length; i++) ...[
-                        if (i > 0) const WxHairline(),
-                        _AskEngineTile(
-                          choice: AskEngineChoice.values[i],
-                          selected: AskEngineChoice.values[i] == _askEngine,
-                          onTap: () => _selectAskEngine(AskEngineChoice.values[i]),
-                        ),
-                      ],
-                    ],
-                  ),
+                ],
+                const SizedBox(height: 8),
+                _AskEnginePicker(
+                  scope: AskEngineScope.repo,
+                  selected: _askEngineRepo,
+                  onSelect: (c) => _selectAskEngine(AskEngineScope.repo, c),
                 ),
                 const SizedBox(height: 28),
                 Text('语音', style: Theme.of(context).textTheme.titleMedium),
@@ -687,13 +737,52 @@ class _ProbeLine extends StatelessWidget {
   }
 }
 
+class _AskEnginePicker extends StatelessWidget {
+  const _AskEnginePicker({
+    required this.scope,
+    required this.selected,
+    required this.onSelect,
+  });
+
+  final AskEngineScope scope;
+  final AskEngineChoice selected;
+  final ValueChanged<AskEngineChoice> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Wx.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: Wx.hairline),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          for (var i = 0; i < AskEngineChoice.values.length; i++) ...[
+            if (i > 0) const WxHairline(),
+            _AskEngineTile(
+              scope: scope,
+              choice: AskEngineChoice.values[i],
+              selected: AskEngineChoice.values[i] == selected,
+              onTap: () => onSelect(AskEngineChoice.values[i]),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 class _AskEngineTile extends StatelessWidget {
   const _AskEngineTile({
+    required this.scope,
     required this.choice,
     required this.selected,
     required this.onTap,
   });
 
+  final AskEngineScope scope;
   final AskEngineChoice choice;
   final bool selected;
   final VoidCallback onTap;
@@ -716,7 +805,9 @@ class _AskEngineTile extends StatelessWidget {
                   Text(askEngineChoiceLabel(choice), style: Theme.of(context).textTheme.titleSmall),
                   const SizedBox(height: 2),
                   Text(
-                    isDefault ? '默认 · ${askEngineChoiceBlurb(choice)}' : askEngineChoiceBlurb(choice),
+                    isDefault
+                        ? '默认 · ${askEngineChoiceBlurb(choice, scope)}'
+                        : askEngineChoiceBlurb(choice, scope),
                     style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.faint),
                   ),
                 ],

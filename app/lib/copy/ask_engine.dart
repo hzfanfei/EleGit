@@ -4,6 +4,11 @@ enum AskEngineChoice {
   cursor,
 }
 
+enum AskEngineScope {
+  book,
+  repo,
+}
+
 const kDefaultAskEngine = AskEngineChoice.claude;
 
 AskEngineChoice parseAskEngineChoice(String? raw) {
@@ -25,6 +30,15 @@ String askEngineChoiceId(AskEngineChoice choice) {
   }
 }
 
+String askEngineScopeId(AskEngineScope scope) {
+  switch (scope) {
+    case AskEngineScope.book:
+      return 'book';
+    case AskEngineScope.repo:
+      return 'repo';
+  }
+}
+
 String askEngineChoiceLabel(AskEngineChoice choice) {
   switch (choice) {
     case AskEngineChoice.cursor:
@@ -34,11 +48,30 @@ String askEngineChoiceLabel(AskEngineChoice choice) {
   }
 }
 
-String askEngineChoiceBlurb(AskEngineChoice choice) {
-  switch (choice) {
-    case AskEngineChoice.cursor:
-      return '使用 Cursor 本机 Agent 回答问书与仓库进度。';
-    case AskEngineChoice.claude:
-      return '使用 Claude Code 本机 Agent 回答问书与仓库进度。';
+String askEngineScopeTitle(AskEngineScope scope) {
+  switch (scope) {
+    case AskEngineScope.book:
+      return '问书';
+    case AskEngineScope.repo:
+      return '问象（仓库进度）';
+  }
+}
+
+String askEngineChoiceBlurb(AskEngineChoice choice, AskEngineScope scope) {
+  switch (scope) {
+    case AskEngineScope.book:
+      switch (choice) {
+        case AskEngineChoice.cursor:
+          return '读书问答走 Cursor 本机 Agent。';
+        case AskEngineChoice.claude:
+          return '读书问答走 Claude Code 本机 Agent。';
+      }
+    case AskEngineScope.repo:
+      switch (choice) {
+        case AskEngineChoice.cursor:
+          return '仓库聊天与 Agent 模式走 Cursor。';
+        case AskEngineChoice.claude:
+          return '仓库聊天与 Agent 模式走 Claude Code。';
+      }
   }
 }

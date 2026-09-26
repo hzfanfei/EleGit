@@ -39,10 +39,10 @@ void main() {
 
     expect(find.text('设置'), findsOneWidget);
     expect(find.text('智能问答'), findsOneWidget);
-    expect(find.text('Claude Code'), findsOneWidget);
-    expect(find.text('语音音色'), findsOneWidget);
-    expect(find.textContaining('小何'), findsWidgets);
-
+    expect(find.text('Claude Code'), findsWidgets);
+    expect(find.text('问书'), findsOneWidget);
+    expect(find.text('问象（仓库进度）'), findsOneWidget);
+    expect(find.text('语音'), findsOneWidget);
     final yunzhou = find.textContaining('云舟');
     await _reveal(tester, yunzhou);
     await tester.tap(yunzhou.first);
@@ -86,6 +86,7 @@ void main() {
     expect(find.text('火山'), findsOneWidget);
     expect(find.textContaining('FunASR'), findsWidgets);
 
+    await _reveal(tester, find.text('火山'));
     await tester.tap(find.text('火山'));
     await tester.pumpAndSettle();
 
@@ -109,6 +110,7 @@ void main() {
     expect(find.text('小米'), findsOneWidget);
     expect(find.text('小米识别，小米合成。'), findsOneWidget);
 
+    await _reveal(tester, find.text('小米'));
     await tester.tap(find.text('小米'));
     await tester.pumpAndSettle();
 
@@ -130,10 +132,11 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Cursor'));
+    await tester.tap(find.text('Cursor').last);
     await tester.pumpAndSettle();
-    expect(memory.askEngine(), AskEngineChoice.cursor);
+    expect(memory.askEngineRepo(), AskEngineChoice.cursor);
     expect(api.lastSetAskEngine, 'cursor');
+    expect(api.lastSetAskEngineScope, 'repo');
   });
 
   testWidgets('settings page runs diagnostics probe', (tester) async {
