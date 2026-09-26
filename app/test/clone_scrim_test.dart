@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wenxiang/api/wenxiang_api.dart';
 import 'package:wenxiang/theme.dart';
+import 'package:wenxiang/widgets/wx_chrome.dart';
 import 'package:wenxiang/widgets/wx_clone_scrim.dart';
 
 import 'support/fake_api.dart';
@@ -24,6 +25,8 @@ void main() {
     await tester.pump(const Duration(milliseconds: 900));
     expect(find.textContaining('正在更新'), findsWidgets);
     expect(find.textContaining('正在克隆'), findsNothing);
+    expect(find.byType(WxLoading), findsOneWidget);
+    expect(find.byType(LinearProgressIndicator), findsNothing);
   });
 
   testWidgets('clone failure shows the real error, not a false not-on-disk title', (tester) async {

@@ -154,9 +154,7 @@ class _WxCloneScrimState extends State<WxCloneScrim> {
                   ),
                   if (!failed) ...[
                     const SizedBox(height: 18),
-                    const ClipRRect(
-                      child: LinearProgressIndicator(minHeight: 2),
-                    ),
+                    const Center(child: WxLoading(size: 28)),
                   ],
                   if (failed) ...[
                     const SizedBox(height: 16),
