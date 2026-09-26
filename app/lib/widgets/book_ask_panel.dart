@@ -891,14 +891,6 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
                               },
                             ),
                     ),
-                    if (!_hold.sttBusy && _hold.holding && _hold.holdLive.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(Wx.inset, 0, Wx.inset, 6),
-                        child: WxHoldLiveChip(
-                          text: _hold.holdLive,
-                          recognizing: false,
-                        ),
-                      ),
                     if (_decision != null)
                       AgentDecisionCard(
                         event: _decision!,

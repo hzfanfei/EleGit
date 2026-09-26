@@ -1844,14 +1844,6 @@ class _Composer extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (!sttBusy && holding && holdLive.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: WxHoldLiveChip(
-                    text: holdLive,
-                    recognizing: false,
-                  ),
-                ),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
