@@ -232,6 +232,20 @@ class ReposPageState extends State<ReposPage> {
             status: WxLinkRouteMark(baseUrl: widget.api.baseUrl),
             onBrandTap: blocked ? null : widget.onOpenSettings,
             trailing: [
+              if (widget.onOpenFiles != null)
+                IconButton(
+                  key: const Key('wx-home-files'),
+                  tooltip: '资源',
+                  onPressed: blocked ? null : widget.onOpenFiles,
+                  icon: const Icon(Icons.folder_outlined),
+                ),
+              if (widget.onOpenBooks != null)
+                IconButton(
+                  key: const Key('wx-home-books'),
+                  tooltip: '问书',
+                  onPressed: blocked ? null : widget.onOpenBooks,
+                  icon: const Icon(Icons.menu_book_outlined),
+                ),
               PopupMenuButton<String>(
                 key: const Key('wx-home-more'),
                 tooltip: '更多',
@@ -240,20 +254,9 @@ class ReposPageState extends State<ReposPage> {
                 surfaceTintColor: Colors.transparent,
                 icon: const Icon(Icons.more_horiz),
                 onSelected: (value) {
-                  switch (value) {
-                    case 'files':
-                      widget.onOpenFiles?.call();
-                    case 'books':
-                      widget.onOpenBooks?.call();
-                    case 'github':
-                      setState(() => _reauth = true);
-                  }
+                  if (value == 'github') setState(() => _reauth = true);
                 },
                 itemBuilder: (context) => [
-                  if (widget.onOpenFiles != null)
-                    const PopupMenuItem(value: 'files', child: Text('资源')),
-                  if (widget.onOpenBooks != null)
-                    const PopupMenuItem(value: 'books', child: Text('问书')),
                   PopupMenuItem(
                     value: 'github',
                     child: Text(widget.githubConnected ? 'GitHub' : '连接 GitHub'),

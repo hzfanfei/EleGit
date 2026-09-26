@@ -101,6 +101,8 @@ void main() {
           githubConnected: false,
           onOpen: (_) {},
           onAuthorized: () async {},
+          onOpenFiles: () {},
+          onOpenBooks: () {},
         ),
       ),
     );
@@ -108,6 +110,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('问象'), findsOneWidget);
     expect(find.text('demo'), findsOneWidget);
+    expect(find.byTooltip('资源'), findsOneWidget);
+    expect(find.byTooltip('问书'), findsOneWidget);
     expect(find.text('连接 GitHub'), findsNothing);
     await tester.tap(find.byTooltip('更多'));
     await tester.pumpAndSettle();

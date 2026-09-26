@@ -150,7 +150,7 @@ class _BrandTitle extends StatelessWidget {
     final theme = Theme.of(context);
     // The icon sits on the title line. A long subtitle stays underneath and
     // ellipsizes, so it cannot shove the icon into the trailing actions.
-    return Column(
+    final brand = Column(
       mainAxisAlignment: MainAxisAlignment.center,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -163,12 +163,10 @@ class _BrandTitle extends StatelessWidget {
                 child: const WxMark(size: 22),
               ),
             Flexible(
-              child: _tap(
-                Text(
-                  title,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleMedium,
-                ),
+              child: Text(
+                title,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.titleMedium,
               ),
             ),
             if (status != null) ...[
@@ -179,15 +177,14 @@ class _BrandTitle extends StatelessWidget {
           ],
         ),
         if (subtitle != null && subtitle!.isNotEmpty)
-          _tap(
-            Text(
-              subtitle!,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.labelSmall,
-            ),
+          Text(
+            subtitle!,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.labelSmall,
           ),
       ],
     );
+    return _tap(brand);
   }
 }
 
