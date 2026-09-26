@@ -9,6 +9,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/status.dart' as ws_status;
 
 import '../api/wenxiang_api.dart';
+import 'background_sync.dart';
 
 /// A single inbox notification item delivered by the companion.
 class InboxItem {
@@ -108,9 +109,11 @@ class NotificationCenter {
     enabled.value = want;
     if (want) {
       if (!await _ensurePermission()) return;
+      await BackgroundSync.acquire();
       await connect();
       await fetchAndShowUnread();
     } else {
+      await BackgroundSync.release();
       await disconnect();
     }
   }

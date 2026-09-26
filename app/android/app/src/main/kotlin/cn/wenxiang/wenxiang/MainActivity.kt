@@ -53,5 +53,26 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "cn.wenxiang.wenxiang/background_sync",
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "start" -> {
+                    val intent = Intent(this, SyncService::class.java)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        startForegroundService(intent)
+                    } else {
+                        startService(intent)
+                    }
+                    result.success(null)
+                }
+                "stop" -> {
+                    stopService(Intent(this, SyncService::class.java))
+                    result.success(null)
+                }
+                else -> result.notImplemented()
+            }
+        }
     }
 }
