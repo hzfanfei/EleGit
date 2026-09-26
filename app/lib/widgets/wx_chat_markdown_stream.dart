@@ -221,8 +221,8 @@ class _WxChatMarkdownStreamState extends State<WxChatMarkdownStream> {
   @override
   Widget build(BuildContext context) {
     return AnimatedSize(
-      duration: const Duration(milliseconds: 180),
-      curve: Curves.easeOutCubic,
+      duration: Wx.motion,
+      curve: Wx.motionCurve,
       alignment: Alignment.topCenter,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -299,8 +299,8 @@ class _BlockViewState extends State<_BlockView> {
     if (!widget.isNew) return body;
     return TweenAnimationBuilder<double>(
       tween: Tween<double>(begin: 0, end: 1),
-      duration: const Duration(milliseconds: 220),
-      curve: Curves.easeOut,
+      duration: Wx.motion,
+      curve: Wx.motionCurve,
       child: body,
       builder: (context, value, child) {
         return Opacity(
@@ -348,7 +348,7 @@ class _BlinkingCaretState extends State<_BlinkingCaret>
     with SingleTickerProviderStateMixin {
   late final AnimationController _anim = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 520),
+    duration: Wx.breath,
   )..repeat(reverse: true);
 
   @override

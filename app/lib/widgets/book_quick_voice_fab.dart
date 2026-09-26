@@ -33,7 +33,7 @@ class _BookQuickVoiceFabState extends State<BookQuickVoiceFab>
     with TickerProviderStateMixin {
   late final AnimationController _pulse = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 900),
+    duration: Wx.breath,
   )..repeat(reverse: true);
 
   late final AnimationController _wave = AnimationController(
@@ -206,8 +206,8 @@ class _BookQuickVoiceFabState extends State<BookQuickVoiceFab>
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           AnimatedSize(
-            duration: const Duration(milliseconds: 220),
-            curve: Curves.easeOutCubic,
+            duration: Wx.motion,
+            curve: Wx.motionCurve,
             alignment: Alignment.bottomCenter,
             child: showCaption
                 ? Padding(
@@ -225,8 +225,8 @@ class _BookQuickVoiceFabState extends State<BookQuickVoiceFab>
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
           AnimatedSize(
-            duration: const Duration(milliseconds: 200),
-            curve: Curves.easeOutCubic,
+            duration: Wx.motion,
+            curve: Wx.motionCurve,
             alignment: Alignment.centerRight,
             child: showStatus && label.isNotEmpty
                 ? Padding(
@@ -317,12 +317,11 @@ class _BookQuickVoiceFabState extends State<BookQuickVoiceFab>
               child: AnimatedBuilder(
                 animation: _pulse,
                 builder: (context, child) {
-                  final scale = pulseActive ? 1.0 + _pulse.value * 0.06 : 1.0;
-                  return Transform.scale(scale: scale, child: child);
+                  final opacity = pulseActive ? 0.72 + _pulse.value * 0.28 : 1.0;
+                  return Opacity(opacity: opacity, child: child);
                 },
                 child: Material(
-                  elevation: active ? 4 : 2,
-                  shadowColor: Colors.black26,
+                  elevation: 0,
                   color: widget.palette.paper.withValues(alpha: 0.94),
                   shape: CircleBorder(
                     side: BorderSide(

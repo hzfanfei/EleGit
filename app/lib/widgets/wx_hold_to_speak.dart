@@ -187,8 +187,6 @@ class _WxHoldToSpeakPadState extends State<WxHoldToSpeakPad>
       labelColor = Wx.text;
     }
 
-    final scale = holding && !sttBusy ? 0.98 : 1.0;
-
     return Listener(
       key: const Key('wx-hold-speak'),
       behavior: HitTestBehavior.opaque,
@@ -221,28 +219,15 @@ class _WxHoldToSpeakPadState extends State<WxHoldToSpeakPad>
               widget.onHoldEnd();
             }
           : null,
-      child: AnimatedScale(
-        scale: scale,
-        duration: const Duration(milliseconds: 120),
-        curve: Curves.easeOutCubic,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 160),
-          curve: Curves.easeOutCubic,
+      child: AnimatedContainer(
+          duration: Wx.motion,
+          curve: Wx.motionCurve,
           constraints: const BoxConstraints(minHeight: 48),
           alignment: Alignment.center,
           decoration: BoxDecoration(
             color: bg,
             borderRadius: BorderRadius.circular(Wx.radius),
             border: Border.all(color: border, width: holding || sttBusy ? 1.5 : 1),
-            boxShadow: holding && !cancel
-                ? [
-                    BoxShadow(
-                      color: Wx.accent.withValues(alpha: 0.18),
-                      blurRadius: 12,
-                      offset: const Offset(0, 2),
-                    ),
-                  ]
-                : null,
           ),
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
           child: Row(
@@ -277,7 +262,6 @@ class _WxHoldToSpeakPadState extends State<WxHoldToSpeakPad>
             ],
           ),
         ),
-      ),
     );
   }
 }

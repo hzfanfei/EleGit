@@ -16,6 +16,7 @@ import '../utils/ask_live_phase.dart';
 import '../voice/hold_to_speak_session.dart';
 import '../voice/voice_stt_client.dart';
 import 'wx_hold_to_speak.dart';
+import 'wx_motion.dart';
 import 'agent_decision_card.dart';
 import 'wx_rich_text.dart';
 import 'wx_typewriter_stream.dart';
@@ -174,6 +175,7 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
   String _voiceHint = '';
   String? _peekAnswer;
   ChatStreamEvent? _decision;
+  int? _appearUserAt;
   BookChatStore _store = BookChatStore.empty();
   String _anchorId = 'start';
   BookReadingPlace _place = const BookReadingPlace();
@@ -190,7 +192,7 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
     super.initState();
     _restoreLocal();
     widget.readingPlace?.addListener(_onReadingPlaceChanged);
-    _pulse = AnimationController(vsync: this, duration: const Duration(milliseconds: 1400))
+    _pulse = AnimationController(vsync: this, duration: Wx.breath)
       ..repeat(reverse: true);
     _typewriter = WxTypewriterStream(onReveal: () {
       if (mounted) setState(() {});
@@ -318,6 +320,7 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
       _messages
         ..clear()
         ..addAll(base);
+      _appearUserAt = _messages.length >= 2 ? _messages.length - 2 : null;
       _peekAnswer = answer;
       _place = place;
     }
@@ -415,6 +418,7 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
     _startLivePhaseFallback();
     setState(() {
       _messages.add(ChatMessage(role: 'user', content: raw));
+      _appearUserAt = _messages.length - 1;
       _busy = true;
       _live = true;
       _peekAnswer = null;
@@ -516,8 +520,8 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
       if (!widget.scrollController.hasClients) return;
       widget.scrollController.animateTo(
         widget.scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 180),
-        curve: Curves.easeOut,
+        duration: Wx.motion,
+        curve: Wx.motionCurve,
       );
     });
   }
@@ -880,7 +884,7 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
                                 }
                                 final msgIndex = index;
                                 final msg = _messages[msgIndex];
-                                return _ChapterMessageRow(
+                                final row = _ChapterMessageRow(
                                   message: msg,
                                   onDelete: msg.role == 'user' && !_busy
                                       ? () =>
@@ -888,13 +892,20 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
                                       : null,
                                   child: _MessageBody(message: msg),
                                 );
+                                if (msg.role == 'user' && msgIndex == _appearUserAt) {
+                                  return WxAppear(child: row);
+                                }
+                                return row;
                               },
                             ),
                     ),
                     if (_decision != null)
-                      AgentDecisionCard(
-                        event: _decision!,
-                        onSubmit: _submitDecision,
+                      WxAppear(
+                        key: ValueKey('book-decision-${_decision!.payload?['requestId'] ?? _decision.hashCode}'),
+                        child: AgentDecisionCard(
+                          event: _decision!,
+                          onSubmit: _submitDecision,
+                        ),
                       ),
                     Padding(
                       padding: EdgeInsets.fromLTRB(
@@ -1036,7 +1047,8 @@ class _AskBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 220),
+      duration: Wx.motion,
+      curve: Wx.motionCurve,
       width: 32,
       height: 32,
       alignment: Alignment.center,
@@ -1225,7 +1237,13 @@ class _ComposerIsland extends StatelessWidget {
               ),
             ),
             Expanded(
-              child: voiceInputMode
+              child: AnimatedSize(
+                duration: Wx.motion,
+                curve: Wx.motionCurve,
+                alignment: Alignment.bottomCenter,
+                child: WxAppear(
+                  key: ValueKey(voiceInputMode ? 'voice' : 'keyboard'),
+                  child: voiceInputMode
                   ? WxHoldToSpeakPad(
                       enabled: voiceReady && ((!busy) || hold.sttBusy),
                       holding: hold.holding,
@@ -1259,6 +1277,8 @@ class _ComposerIsland extends StatelessWidget {
                         contentPadding: EdgeInsets.symmetric(horizontal: 4, vertical: 12),
                       ),
                     ),
+                ),
+              ),
             ),
             const SizedBox(width: 2),
             SizedBox(
@@ -1697,23 +1717,33 @@ class _QaTurnCardState extends State<_QaTurnCard> {
                           role: 'user',
                           child: _MessageBody(message: turn.user),
                         ),
-                        if (_open)
-                          for (final reply in turn.replies)
-                            _AskBubble(
-                              role: reply.role,
-                              child: _MessageBody(message: reply),
-                            )
-                        else if (turn.replies.isNotEmpty)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 2),
-                            child: Text(
-                              '展开回答',
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                color: Wx.faint,
-                                letterSpacing: 0.2,
-                              ),
-                            ),
+                        AnimatedSize(
+                          duration: Wx.motion,
+                          curve: Wx.motionCurve,
+                          alignment: Alignment.topCenter,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              if (_open)
+                                for (final reply in turn.replies)
+                                  _AskBubble(
+                                    role: reply.role,
+                                    child: _MessageBody(message: reply),
+                                  )
+                              else if (turn.replies.isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 2),
+                                  child: Text(
+                                    '展开回答',
+                                    style: theme.textTheme.labelSmall?.copyWith(
+                                      color: Wx.faint,
+                                      letterSpacing: 0.2,
+                                    ),
+                                  ),
+                                ),
+                            ],
                           ),
+                        ),
                       ],
                     ),
                   ),

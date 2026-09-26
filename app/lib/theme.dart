@@ -37,6 +37,14 @@ class Wx {
   static const pagePadding = EdgeInsets.fromLTRB(inset, 16, inset, 24);
   static const radius = 8.0;
   static const tap = 48.0;
+
+  /// Scene changes: fade, and rise at most [motionRise].
+  static const motion = Duration(milliseconds: 220);
+  static const motionCurve = Curves.easeOutCubic;
+  static const motionRise = 6.0;
+
+  /// Listening, thinking, and the caret. Opacity only.
+  static const breath = Duration(milliseconds: 1200);
 }
 
 ThemeData wenxiangTheme() {

@@ -23,6 +23,7 @@ import '../widgets/book_quick_voice_fab.dart';
 import '../widgets/wx_chat_markdown_stream.dart';
 import '../widgets/agent_decision_card.dart';
 import '../widgets/wx_chrome.dart';
+import '../widgets/wx_motion.dart';
 import '../widgets/wx_link_route.dart';
 import '../widgets/wx_hold_to_speak.dart';
 import '../widgets/wx_rich_text.dart';
@@ -83,6 +84,7 @@ class _ChatPageState extends State<ChatPage> {
   final List<int> _queuedUserIndices = <int>[];
   bool _agentMode = false;
   ChatStreamEvent? _decision;
+  String? _appearUserKey;
   int? _editingIndex;
   String? _lastUser;
   bool _voiceReady = false;
@@ -156,6 +158,7 @@ class _ChatPageState extends State<ChatPage> {
             ChatMessage(role: 'user', content: question, via: 'voice'),
             ChatMessage(role: 'assistant', content: answer, engine: engine, via: 'voice'),
           ]);
+          _appearUserKey = '${_sessionId ?? ''}:${_messages.length - 2}';
         });
         if (sessionId != null && sessionId.isNotEmpty) {
           _rememberSessionId(sessionId);
@@ -781,6 +784,7 @@ class _ChatPageState extends State<ChatPage> {
       _rememberInputMode(voice);
       _messages.add(ChatMessage(role: 'user', content: text, via: voice ? 'voice' : null));
       userIndex = _messages.length - 1;
+      _appearUserKey = '${_sessionId ?? ''}:$userIndex';
     });
     unawaited(_persist());
     _jumpToLatest(force: true);
@@ -1201,6 +1205,8 @@ class _ChatPageState extends State<ChatPage> {
                         final message = _messages[chronological];
                         return _FinishedTurn(
                           key: ValueKey('m-$chronological-${message.role}'),
+                          appear: message.role == 'user' &&
+                              _appearUserKey == '${_sessionId ?? ''}:$chronological',
                           message: message,
                           queued: _isQueuedUserMessage(chronological, message),
                           editing: _editingIndex == chronological,
@@ -1243,9 +1249,12 @@ class _ChatPageState extends State<ChatPage> {
           ),
           const WxHairline(),
           if (_decision != null)
-            AgentDecisionCard(
-              event: _decision!,
-              onSubmit: _submitDecision,
+            WxAppear(
+              key: ValueKey('decision-${_decision!.payload?['requestId'] ?? _decision.hashCode}'),
+              child: AgentDecisionCard(
+                event: _decision!,
+                onSubmit: _submitDecision,
+              ),
             ),
           _Composer(
             controller: _input,
@@ -1537,6 +1546,7 @@ class _FinishedTurn extends StatelessWidget {
   const _FinishedTurn({
     super.key,
     required this.message,
+    this.appear = false,
     this.queued = false,
     this.editing = false,
     this.onEdit,
@@ -1546,6 +1556,7 @@ class _FinishedTurn extends StatelessWidget {
     this.onRetry,
   });
   final ChatMessage message;
+  final bool appear;
   final bool queued;
   final bool editing;
   final VoidCallback? onEdit;
@@ -1557,7 +1568,7 @@ class _FinishedTurn extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (message.role == 'user') {
-      return _EditableUserTurn(
+      final turn = _EditableUserTurn(
         message: message,
         queued: queued,
         editing: editing,
@@ -1566,6 +1577,8 @@ class _FinishedTurn extends StatelessWidget {
         onSubmit: onSubmitEdit,
         onRemoveQueue: onRemoveQueue,
       );
+      if (!appear) return turn;
+      return WxAppear(child: turn);
     }
     if (message.role == 'error') {
       return Padding(
@@ -1770,7 +1783,7 @@ class _Caret extends StatefulWidget {
 class _CaretState extends State<_Caret> with SingleTickerProviderStateMixin {
   late final AnimationController _anim = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 520),
+    duration: Wx.breath,
   )..repeat(reverse: true);
 
   @override
@@ -1820,7 +1833,9 @@ class _AgentModeChip extends StatelessWidget {
           key: const Key('wx-agent-mode'),
           onTap: enabled ? () => onChanged(!agentMode) : null,
           borderRadius: BorderRadius.circular(8),
-          child: Container(
+          child: AnimatedContainer(
+            duration: Wx.motion,
+            curve: Wx.motionCurve,
             height: 28,
             alignment: Alignment.center,
             padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -1828,14 +1843,16 @@ class _AgentModeChip extends StatelessWidget {
               borderRadius: BorderRadius.circular(8),
               border: Border.all(color: agentMode ? Wx.accent : Wx.hairline),
             ),
-            child: Text(
-              label,
+            child: AnimatedDefaultTextStyle(
+              duration: Wx.motion,
+              curve: Wx.motionCurve,
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
                 height: 1,
                 color: agentMode ? Wx.accent : Wx.muted,
               ),
+              child: Text(label),
             ),
           ),
         ),
@@ -1923,7 +1940,13 @@ class _Composer extends StatelessWidget {
                     ),
                   ),
                   Expanded(
-                    child: showKeyboard
+                    child: AnimatedSize(
+                      duration: Wx.motion,
+                      curve: Wx.motionCurve,
+                      alignment: Alignment.bottomCenter,
+                      child: WxAppear(
+                        key: ValueKey(showKeyboard ? 'keyboard' : 'voice'),
+                        child: showKeyboard
                         ? TextField(
                             key: const Key('wx-chat-input'),
                             controller: controller,
@@ -1966,6 +1989,8 @@ class _Composer extends StatelessWidget {
                             onHoldEnd: onHoldEnd,
                             onCancelRecognize: sttBusy ? onCancelRecognize : null,
                           ),
+                      ),
+                    ),
                   ),
                   if (!busy) ...[
                     const SizedBox(width: 8),

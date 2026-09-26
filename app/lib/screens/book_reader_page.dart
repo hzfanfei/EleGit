@@ -850,7 +850,8 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
                       behavior: HitTestBehavior.opaque,
                       onTap: () => unawaited(_collapseAskSheet()),
                       child: AnimatedOpacity(
-                        duration: const Duration(milliseconds: 220),
+                        duration: Wx.motion,
+                        curve: Wx.motionCurve,
                         opacity: _scrimOpacity(fraction),
                         child: const ColoredBox(color: Colors.black),
                       ),
@@ -858,15 +859,16 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
                   ),
                 ),
                 AnimatedPositioned(
-                  duration: const Duration(milliseconds: 260),
-                  curve: Curves.easeOutCubic,
+                  duration: Wx.motion,
+                  curve: Wx.motionCurve,
                   top: 0,
                   left: 0,
                   right: 0,
                   child: IgnorePointer(
                     ignoring: !_chromeVisible,
                     child: AnimatedOpacity(
-                      duration: const Duration(milliseconds: 200),
+                      duration: Wx.motion,
+                      curve: Wx.motionCurve,
                       opacity: _chromeVisible ? 1 : 0,
                       child: BookReaderChrome(
                         title: widget.book.title,

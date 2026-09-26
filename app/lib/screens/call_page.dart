@@ -45,7 +45,7 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
   StreamSubscription<Uint8List>? _micSub;
   late final AnimationController _orb = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 1400),
+    duration: Wx.breath,
   );
 
   static const _bargeHold = Duration(milliseconds: 480);
@@ -328,26 +328,26 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
                     const Spacer(),
                     AnimatedBuilder(
                       animation: _orb,
-                      builder: (context, _) {
-                        final pulse = speaking
-                            ? 0.78 + (_orb.value * 0.22)
+                      builder: (context, child) {
+                        final opacity = speaking
+                            ? 0.55 + (_orb.value * 0.45)
                             : listening
-                                ? 0.88 + (_orb.value * 0.08)
-                                : 0.92;
-                        final size = 168.0 * pulse;
-                        return Container(
-                          width: size,
-                          height: size,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: speaking ? const Color(0x38C9845A) : Wx.raised,
-                            border: Border.all(
-                              color: speaking ? Wx.accent : Wx.hairline,
-                              width: speaking ? 2 : 1,
-                            ),
-                          ),
-                        );
+                                ? 0.72 + (_orb.value * 0.28)
+                                : 1.0;
+                        return Opacity(opacity: opacity, child: child);
                       },
+                      child: Container(
+                        width: 168,
+                        height: 168,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: speaking ? const Color(0x38C9845A) : Wx.raised,
+                          border: Border.all(
+                            color: speaking ? Wx.accent : Wx.hairline,
+                            width: speaking ? 2 : 1,
+                          ),
+                        ),
+                      ),
                     ),
                     const SizedBox(height: 28),
                     Text(

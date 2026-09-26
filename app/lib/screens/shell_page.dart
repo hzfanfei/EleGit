@@ -15,6 +15,7 @@ import '../utils/background_sync.dart';
 import '../utils/notification_center.dart';
 import '../widgets/wx_chrome.dart';
 import '../widgets/wx_edge_back.dart';
+import '../widgets/wx_motion.dart';
 import 'book_reader_page.dart';
 import 'books_page.dart';
 import 'chat_page.dart';
@@ -340,7 +341,7 @@ class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
         )),
       ),
       if (_step == AppStep.files)
-        MaterialPage<void>(
+        WxFadePage<void>(
           key: const ValueKey('files'),
           name: 'files',
           child: _fit(StaticFilesPage(
@@ -349,7 +350,7 @@ class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
           )),
         ),
       if (_step == AppStep.books)
-        MaterialPage<void>(
+        WxFadePage<void>(
           key: const ValueKey('books'),
           name: 'books',
           child: _fit(BooksPage(
@@ -360,7 +361,7 @@ class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
           )),
         ),
       if (_step == AppStep.bookRead && _book != null)
-        MaterialPage<void>(
+        WxFadePage<void>(
           key: ValueKey('book-read-${_book!.id}'),
           name: 'bookRead',
           child: _fit(BookReaderPage(
@@ -373,7 +374,7 @@ class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
           )),
         ),
       if (_step == AppStep.chat && _repo != null)
-        MaterialPage<void>(
+        WxFadePage<void>(
           key: ValueKey('chat-${_repo!.fullName}'),
           name: 'chat',
           child: _fit(ChatPage(
