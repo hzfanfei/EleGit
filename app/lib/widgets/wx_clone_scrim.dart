@@ -134,7 +134,7 @@ class _WxCloneScrimState extends State<WxCloneScrim> {
                 children: [
                   Row(
                     children: [
-                      Expanded(
+                      Flexible(
                         child: Text(
                           failed
                               ? (widget.mode == WxCloneMode.sync
@@ -143,11 +143,13 @@ class _WxCloneScrimState extends State<WxCloneScrim> {
                                       ? '打开失败'
                                       : '克隆失败')
                               : _stages[_stage],
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: Theme.of(context).textTheme.titleLarge,
                         ),
                       ),
                       if (!failed) ...[
-                        const SizedBox(width: 12),
+                        const SizedBox(width: 6),
                         const WxLoading(size: 22),
                       ],
                     ],

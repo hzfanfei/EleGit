@@ -30,6 +30,7 @@ void main() {
     final title = tester.getRect(find.text('正在更新'));
     final mark = tester.getRect(find.byType(WxLoading));
     expect(mark.left, greaterThan(title.right));
+    expect(mark.left - title.right, lessThan(14));
     expect((mark.center.dy - title.center.dy).abs(), lessThan(8));
   });
 
