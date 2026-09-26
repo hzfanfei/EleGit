@@ -850,12 +850,14 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
                               },
                             ),
                     ),
-                    if (showLive)
+                    if (_hold.sttBusy || (_hold.holding && _hold.holdLive.isNotEmpty))
                       Padding(
                         padding: const EdgeInsets.fromLTRB(Wx.inset, 0, Wx.inset, 6),
                         child: WxHoldLiveChip(
-                          text: _hold.holdLive,
+                          text: _hold.holdLive.isNotEmpty ? _hold.holdLive : '…',
                           recognizing: _hold.sttBusy,
+                          onCancelRecognize:
+                              _hold.sttBusy ? () => unawaited(_hold.cancelRecognition()) : null,
                         ),
                       ),
                     Padding(
@@ -1186,7 +1188,7 @@ class _ComposerIsland extends StatelessWidget {
             Expanded(
               child: voiceInputMode
                   ? WxHoldToSpeakPad(
-                      enabled: voiceReady && !busy && !hold.sttBusy,
+                      enabled: voiceReady && ((!busy) || hold.sttBusy),
                       holding: hold.holding,
                       holdCancel: hold.holdCancel,
                       sttBusy: hold.sttBusy,
@@ -1196,10 +1198,12 @@ class _ComposerIsland extends StatelessWidget {
                               ? '回答中…'
                               : hold.holdHint.isNotEmpty
                                   ? hold.holdHint
-                                  : (hold.sttBusy ? '识别中…' : '按住 说话'),
+                                  : (hold.sttBusy ? '识别中，点按取消' : '按住 说话'),
                       onHoldStart: hold.beginHold,
                       onHoldMove: hold.moveHold,
                       onHoldEnd: hold.endHold,
+                      onCancelRecognize:
+                          hold.sttBusy ? () => unawaited(hold.cancelRecognition()) : null,
                     )
                   : TextField(
                       controller: input,

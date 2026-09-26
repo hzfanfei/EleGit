@@ -11,17 +11,18 @@ class WxHoldLiveChip extends StatelessWidget {
     super.key,
     required this.text,
     required this.recognizing,
+    this.onCancelRecognize,
   });
 
   final String text;
   final bool recognizing;
+  final VoidCallback? onCancelRecognize;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Container(
+    final canCancel = recognizing && onCancelRecognize != null;
+    final body = Container(
         key: const Key('wx-hold-live-chip'),
         constraints: const BoxConstraints(maxWidth: 520, maxHeight: 220),
         padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
@@ -36,13 +37,24 @@ class WxHoldLiveChip extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              recognizing ? '识别中' : '听到',
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: recognizing ? Wx.accent : Wx.muted,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 0.3,
-              ),
+            Row(
+              children: [
+                Text(
+                  recognizing ? '识别中' : '听到',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: recognizing ? Wx.accent : Wx.muted,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+                if (canCancel) ...[
+                  const Spacer(),
+                  Text(
+                    '点按取消',
+                    style: theme.textTheme.labelSmall?.copyWith(color: Wx.muted),
+                  ),
+                ],
+              ],
             ),
             const SizedBox(height: 4),
             ConstrainedBox(
@@ -60,7 +72,22 @@ class WxHoldLiveChip extends StatelessWidget {
             ),
           ],
         ),
-      ),
+      );
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: canCancel
+          ? Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  onCancelRecognize!();
+                },
+                borderRadius: BorderRadius.circular(16),
+                child: body,
+              ),
+            )
+          : body,
     );
   }
 }
@@ -77,6 +104,7 @@ class WxHoldToSpeakPad extends StatefulWidget {
     required this.onHoldStart,
     required this.onHoldMove,
     required this.onHoldEnd,
+    this.onCancelRecognize,
   });
 
   final bool enabled;
@@ -87,6 +115,7 @@ class WxHoldToSpeakPad extends StatefulWidget {
   final Future<void> Function(double globalY) onHoldStart;
   final void Function(double globalY) onHoldMove;
   final Future<void> Function() onHoldEnd;
+  final VoidCallback? onCancelRecognize;
 
   @override
   State<WxHoldToSpeakPad> createState() => _WxHoldToSpeakPadState();
@@ -95,24 +124,33 @@ class WxHoldToSpeakPad extends StatefulWidget {
 class _WxHoldToSpeakPadState extends State<WxHoldToSpeakPad>
     with SingleTickerProviderStateMixin {
   bool _pointerActive = false;
-  late final AnimationController _wave = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 720),
-  );
+  AnimationController? _wave;
+
+  @override
+  void initState() {
+    super.initState();
+    _wave = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 720),
+    );
+  }
 
   @override
   void didUpdateWidget(covariant WxHoldToSpeakPad oldWidget) {
     super.didUpdateWidget(oldWidget);
+    final wave = _wave;
+    if (wave == null) return;
     if (widget.holding && !widget.holdCancel && !widget.sttBusy) {
-      if (!_wave.isAnimating) _wave.repeat();
+      if (!wave.isAnimating) wave.repeat();
     } else {
-      if (_wave.isAnimating) _wave.stop();
+      if (wave.isAnimating) wave.stop();
     }
   }
 
   @override
   void dispose() {
-    _wave.dispose();
+    _wave?.dispose();
+    _wave = null;
     super.dispose();
   }
 
@@ -154,13 +192,18 @@ class _WxHoldToSpeakPadState extends State<WxHoldToSpeakPad>
     return Listener(
       key: const Key('wx-hold-speak'),
       behavior: HitTestBehavior.opaque,
-      onPointerDown: enabled && !sttBusy
-          ? (event) {
-              _pointerActive = true;
-              HapticFeedback.lightImpact();
-              widget.onHoldStart(event.position.dy);
+      onPointerDown: enabled && sttBusy && widget.onCancelRecognize != null
+          ? (_) {
+              HapticFeedback.selectionClick();
+              widget.onCancelRecognize!();
             }
-          : null,
+          : enabled && !sttBusy
+              ? (event) {
+                  _pointerActive = true;
+                  HapticFeedback.lightImpact();
+                  widget.onHoldStart(event.position.dy);
+                }
+              : null,
       onPointerMove: enabled && _pointerActive
           ? (event) {
               widget.onHoldMove(event.position.dy);
@@ -217,7 +260,7 @@ class _WxHoldToSpeakPadState extends State<WxHoldToSpeakPad>
                 ),
                 const SizedBox(width: 10),
               ] else if (holding && !cancel) ...[
-                WxVoiceWaveBars(color: labelColor, animation: _wave),
+                WxVoiceWaveBars(color: labelColor, animation: _wave!),
                 const SizedBox(width: 10),
               ],
               Flexible(

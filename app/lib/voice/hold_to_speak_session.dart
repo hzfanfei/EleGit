@@ -128,9 +128,15 @@ class HoldToSpeakSession {
       return;
     }
     sttBusy = true;
-    holdHint = '识别中…';
+    holdHint = '识别中，点按取消';
     onChanged();
     _stt?.stop();
+  }
+
+  /// Cancel in-flight recognition after [endHold] (tap pad or live chip).
+  Future<void> cancelRecognition() async {
+    if (!sttBusy && _stt == null) return;
+    await abortHold();
   }
 
   void _onSttEvent(VoiceEvent event) {

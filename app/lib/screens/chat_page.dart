@@ -377,9 +377,22 @@ class _ChatPageState extends State<ChatPage> {
     }
     setState(() {
       _sttBusy = true;
-      _holdHint = '识别中…';
+      _holdHint = '识别中，点按取消';
     });
     _stt?.stop();
+  }
+
+  void _cancelSttRecognition() {
+    if (!_sttBusy && _stt == null) return;
+    HapticFeedback.selectionClick();
+    _stt?.cancel();
+    _disposeStt();
+    if (!mounted) return;
+    setState(() {
+      _sttBusy = false;
+      _holdLive = '';
+      _holdHint = '';
+    });
   }
 
   void _onSttEvent(VoiceEvent event) {
@@ -1147,6 +1160,7 @@ class _ChatPageState extends State<ChatPage> {
             onHoldStart: _beginHold,
             onHoldMove: _moveHold,
             onHoldEnd: _endHold,
+            onCancelRecognize: _cancelSttRecognition,
             onSend: _send,
             onStop: _stop,
           ),
@@ -1676,6 +1690,7 @@ class _Composer extends StatelessWidget {
     required this.onHoldStart,
     required this.onHoldMove,
     required this.onHoldEnd,
+    required this.onCancelRecognize,
     required this.onSend,
     required this.onStop,
   });
@@ -1698,12 +1713,14 @@ class _Composer extends StatelessWidget {
   final Future<void> Function(double globalY) onHoldStart;
   final void Function(double globalY) onHoldMove;
   final Future<void> Function() onHoldEnd;
+  final VoidCallback onCancelRecognize;
   final Future<void> Function() onSend;
   final VoidCallback onStop;
 
   @override
   Widget build(BuildContext context) {
-    final voiceLocked = busy || preparing || sttBusy;
+    final voiceToggleLocked = busy || preparing || sttBusy;
+    final padEnabled = voiceReady && ((!busy && !preparing) || sttBusy);
     return ColoredBox(
       color: Wx.bg,
       child: SafeArea(
@@ -1722,12 +1739,13 @@ class _Composer extends StatelessWidget {
                     style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.muted),
                   ),
                 ),
-              if ((holding || sttBusy) && holdLive.isNotEmpty)
+              if (sttBusy || (holding && holdLive.isNotEmpty))
                 Padding(
                   padding: const EdgeInsets.only(bottom: 10),
                   child: WxHoldLiveChip(
-                    text: holdLive,
+                    text: holdLive.isNotEmpty ? holdLive : '…',
                     recognizing: sttBusy,
+                    onCancelRecognize: sttBusy ? onCancelRecognize : null,
                   ),
                 ),
               Row(
@@ -1740,7 +1758,7 @@ class _Composer extends StatelessWidget {
                         : busy
                             ? '生成中，暂不可用'
                             : (voiceInputMode ? '键盘输入' : '按住说话'),
-                    onPressed: voiceLocked && voiceReady ? null : () => onToggleVoiceInput(),
+                    onPressed: voiceToggleLocked && voiceReady ? null : () => onToggleVoiceInput(),
                     icon: Icon(
                       voiceInputMode ? Icons.keyboard_outlined : Icons.mic_none_outlined,
                       color: !voiceReady ? Wx.faint : null,
@@ -1749,7 +1767,7 @@ class _Composer extends StatelessWidget {
                   Expanded(
                     child: voiceInputMode
                         ? WxHoldToSpeakPad(
-                            enabled: voiceReady && !voiceLocked,
+                            enabled: padEnabled,
                             holding: holding,
                             holdCancel: holdCancel,
                             sttBusy: sttBusy,
@@ -1759,10 +1777,11 @@ class _Composer extends StatelessWidget {
                                     ? '生成中，稍后再说'
                                     : holdHint.isNotEmpty
                                         ? holdHint
-                                        : (sttBusy ? '识别中…' : '按住 说话'),
+                                        : (sttBusy ? '识别中，点按取消' : '按住 说话'),
                             onHoldStart: onHoldStart,
                             onHoldMove: onHoldMove,
                             onHoldEnd: onHoldEnd,
+                            onCancelRecognize: sttBusy ? onCancelRecognize : null,
                           )
                         : TextField(
                             controller: controller,
