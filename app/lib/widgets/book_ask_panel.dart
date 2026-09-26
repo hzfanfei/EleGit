@@ -891,14 +891,12 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
                               },
                             ),
                     ),
-                    if (_hold.sttBusy || (_hold.holding && _hold.holdLive.isNotEmpty))
+                    if (!_hold.sttBusy && _hold.holding && _hold.holdLive.isNotEmpty)
                       Padding(
                         padding: const EdgeInsets.fromLTRB(Wx.inset, 0, Wx.inset, 6),
                         child: WxHoldLiveChip(
-                          text: _hold.holdLive.isNotEmpty ? _hold.holdLive : '…',
-                          recognizing: _hold.sttBusy,
-                          onCancelRecognize:
-                              _hold.sttBusy ? () => unawaited(_hold.cancelRecognition()) : null,
+                          text: _hold.holdLive,
+                          recognizing: false,
                         ),
                       ),
                     if (_decision != null)
@@ -1242,9 +1240,11 @@ class _ComposerIsland extends StatelessWidget {
                           ? '语音未就绪'
                           : busy
                               ? '回答中…'
-                              : hold.holdHint.isNotEmpty
-                                  ? hold.holdHint
-                                  : (hold.sttBusy ? '识别中，点按取消' : '按住 说话'),
+                              : (hold.sttBusy && hold.holdLive.isNotEmpty)
+                                  ? hold.holdLive
+                                  : hold.holdHint.isNotEmpty
+                                      ? hold.holdHint
+                                      : (hold.sttBusy ? '识别中，点按取消' : '按住 说话'),
                       onHoldStart: hold.beginHold,
                       onHoldMove: hold.moveHold,
                       onHoldEnd: hold.endHold,

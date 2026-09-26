@@ -1836,13 +1836,12 @@ class _Composer extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (sttBusy || (holding && holdLive.isNotEmpty))
+              if (!sttBusy && holding && holdLive.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 10),
                   child: WxHoldLiveChip(
-                    text: holdLive.isNotEmpty ? holdLive : '…',
-                    recognizing: sttBusy,
-                    onCancelRecognize: sttBusy ? onCancelRecognize : null,
+                    text: holdLive,
+                    recognizing: false,
                   ),
                 ),
               Row(
@@ -1895,9 +1894,11 @@ class _Composer extends StatelessWidget {
                             sttBusy: sttBusy,
                             hint: !voiceReady
                                 ? '语音未就绪'
-                                : holdHint.isNotEmpty
-                                    ? holdHint
-                                    : (sttBusy ? '识别中，点按取消' : '按住 说话'),
+                                : (sttBusy && holdLive.isNotEmpty)
+                                    ? holdLive
+                                    : holdHint.isNotEmpty
+                                        ? holdHint
+                                        : (sttBusy ? '识别中，点按取消' : '按住 说话'),
                             onHoldStart: onHoldStart,
                             onHoldMove: onHoldMove,
                             onHoldEnd: onHoldEnd,
