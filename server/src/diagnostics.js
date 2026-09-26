@@ -35,14 +35,16 @@ function probeCwd(workspaceRoot) {
   return os.tmpdir();
 }
 
-export async function probeAskCli({ cwd } = {}) {
+/** @param {{ cwd?: string, scope?: "book"|"repo" }} [opts] */
+export async function probeAskCli({ cwd, scope = "repo" } = {}) {
   const started = Date.now();
-  const command = detectCursorEngine();
+  const command = detectCursorEngine(scope);
   if (!command) {
     return {
       ok: false,
       ms: msSince(started),
-      preference: acpEnginePreference(),
+      scope,
+      preference: acpEnginePreference(scope),
       engine: null,
       error: "未找到本机问答助手（Claude Code 或 Cursor Agent）",
     };
@@ -54,14 +56,16 @@ export async function probeAskCli({ cwd } = {}) {
     return {
       ok: true,
       ms: msSince(started),
-      preference: acpEnginePreference(),
+      scope,
+      preference: acpEnginePreference(scope),
       engine: command.id,
     };
   } catch (err) {
     return {
       ok: false,
       ms: msSince(started),
-      preference: acpEnginePreference(),
+      scope,
+      preference: acpEnginePreference(scope),
       engine: command.id,
       error: humanizeProbeError(err.message || err),
     };
@@ -70,13 +74,16 @@ export async function probeAskCli({ cwd } = {}) {
   }
 }
 
-export async function probeAskModel({ cwd } = {}) {
+/** @param {{ cwd?: string, scope?: "book"|"repo" }} [opts] */
+export async function probeAskModel({ cwd, scope = "repo" } = {}) {
   const started = Date.now();
-  const command = detectCursorEngine();
+  const command = detectCursorEngine(scope);
   if (!command) {
     return {
       ok: false,
       ms: msSince(started),
+      scope,
+      preference: acpEnginePreference(scope),
       error: "未找到本机问答助手",
     };
   }
@@ -95,6 +102,8 @@ export async function probeAskModel({ cwd } = {}) {
     return {
       ok: text.length > 0,
       ms: msSince(started),
+      scope,
+      preference: acpEnginePreference(scope),
       snippet: text.slice(0, 8),
       error: text.length > 0 ? null : "模型未返回可见文字",
     };
@@ -102,6 +111,8 @@ export async function probeAskModel({ cwd } = {}) {
     return {
       ok: false,
       ms: msSince(started),
+      scope,
+      preference: acpEnginePreference(scope),
       snippet: snippet.slice(0, 8),
       error: humanizeProbeError(err.message || err),
     };
@@ -298,13 +309,21 @@ export async function runDiagnosticsProbe({
 } = {}) {
   const cwd = probeCwd(workspaceRoot);
   const out = { at: new Date().toISOString() };
-  if (askCli) out.askCli = await probeAskCli({ cwd });
-  if (askModel) out.askModel = await probeAskModel({ cwd });
+  if (askCli) {
+    out.askCliBook = await probeAskCli({ cwd, scope: "book" });
+    out.askCliRepo = await probeAskCli({ cwd, scope: "repo" });
+    out.askCli = out.askCliRepo;
+  }
+  if (askModel) {
+    out.askModelBook = await probeAskModel({ cwd, scope: "book" });
+    out.askModelRepo = await probeAskModel({ cwd, scope: "repo" });
+    out.askModel = out.askModelRepo;
+  }
   if (voiceTts) out.voiceTts = await probeVoiceTts({ ttsVoice, signal });
   if (voiceStt) out.voiceStt = await probeVoiceStt({ signal });
   out.ok =
-    (!askCli || out.askCli?.ok === true) &&
-    (!askModel || out.askModel?.ok === true) &&
+    (!askCli || (out.askCliBook?.ok === true && out.askCliRepo?.ok === true)) &&
+    (!askModel || (out.askModelBook?.ok === true && out.askModelRepo?.ok === true)) &&
     (!voiceTts || out.voiceTts?.ok === true) &&
     (!voiceStt || out.voiceStt?.ok === true);
   return out;

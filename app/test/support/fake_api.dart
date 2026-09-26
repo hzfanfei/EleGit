@@ -145,8 +145,10 @@ class FakeWenxiangApi extends WenxiangApi {
     return DiagnosticsProbeResult(
       ok: true,
       at: DateTime.now().toUtc().toIso8601String(),
-      askCli: DiagnosticsStep(ok: true, ms: 40),
-      askModel: DiagnosticsStep(ok: true, ms: 900, snippet: '通'),
+      askCliBook: DiagnosticsStep(ok: true, ms: 40),
+      askCliRepo: DiagnosticsStep(ok: true, ms: 42),
+      askModelBook: DiagnosticsStep(ok: true, ms: 880, snippet: '通'),
+      askModelRepo: DiagnosticsStep(ok: true, ms: 900, snippet: '通'),
       voiceTts: DiagnosticsVoiceTtsStep(ok: voiceReady, ms: 120, bytes: voiceReady ? 480 : 0),
       voiceStt: DiagnosticsVoiceSttStep(ok: voiceReady, ms: 80),
     );

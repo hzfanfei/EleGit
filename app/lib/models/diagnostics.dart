@@ -3,7 +3,11 @@ class DiagnosticsProbeResult {
     required this.ok,
     required this.at,
     this.askCli,
+    this.askCliBook,
+    this.askCliRepo,
     this.askModel,
+    this.askModelBook,
+    this.askModelRepo,
     this.voiceTts,
     this.voiceStt,
   });
@@ -11,16 +15,26 @@ class DiagnosticsProbeResult {
   final bool ok;
   final String at;
   final DiagnosticsStep? askCli;
+  final DiagnosticsStep? askCliBook;
+  final DiagnosticsStep? askCliRepo;
   final DiagnosticsStep? askModel;
+  final DiagnosticsStep? askModelBook;
+  final DiagnosticsStep? askModelRepo;
   final DiagnosticsVoiceTtsStep? voiceTts;
   final DiagnosticsVoiceSttStep? voiceStt;
 
   factory DiagnosticsProbeResult.fromJson(Map<String, dynamic> json) {
+    final askCliRepo = DiagnosticsStep.fromJson(json['askCliRepo'] ?? json['askCli']);
+    final askModelRepo = DiagnosticsStep.fromJson(json['askModelRepo'] ?? json['askModel']);
     return DiagnosticsProbeResult(
       ok: json['ok'] == true,
       at: (json['at'] ?? '').toString(),
-      askCli: DiagnosticsStep.fromJson(json['askCli']),
-      askModel: DiagnosticsStep.fromJson(json['askModel']),
+      askCli: askCliRepo,
+      askCliBook: DiagnosticsStep.fromJson(json['askCliBook']),
+      askCliRepo: askCliRepo,
+      askModel: askModelRepo,
+      askModelBook: DiagnosticsStep.fromJson(json['askModelBook']),
+      askModelRepo: askModelRepo,
       voiceTts: DiagnosticsVoiceTtsStep.fromJson(json['voiceTts']),
       voiceStt: DiagnosticsVoiceSttStep.fromJson(json['voiceStt']),
     );

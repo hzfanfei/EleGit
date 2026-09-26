@@ -156,7 +156,27 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('全部通过'), findsOneWidget);
-    expect(find.text('模型回复'), findsOneWidget);
+    expect(find.text('问书模型'), findsOneWidget);
+    expect(find.text('问象模型'), findsOneWidget);
     expect(find.text('语音合成'), findsOneWidget);
+  });
+
+  testWidgets('settings page saves ask engine for 问书', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final memory = AppMemory(await SharedPreferences.getInstance());
+    final api = FakeWenxiangApi();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme().copyWith(splashFactory: NoSplash.splashFactory),
+        home: SettingsPage(api: api, memory: memory),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Cursor').first);
+    await tester.pumpAndSettle();
+    expect(memory.askEngineBook(), AskEngineChoice.cursor);
+    expect(api.lastSetAskEngine, 'cursor');
+    expect(api.lastSetAskEngineScope, 'book');
   });
 }

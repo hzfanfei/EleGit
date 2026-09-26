@@ -194,9 +194,14 @@ class _StatusCard extends StatelessWidget {
             if (status.workspaceRoot.isNotEmpty)
               Text('工作区：${status.workspaceRoot}'),
             Text(
+              status.bookAskReady
+                  ? '问书：已就绪（${askEngineChoiceLabel(parseAskEngineChoice(status.askEngineBookPreference))}）'
+                  : '问书：助手未就绪（${askEngineChoiceLabel(parseAskEngineChoice(status.askEngineBookPreference))}）',
+            ),
+            Text(
               status.cursorAvailable
-                  ? '智能问答：已就绪（${askEngineChoiceLabel(parseAskEngineChoice(status.askEnginePreference))}）'
-                  : '智能问答：仅本地进度摘要',
+                  ? '问象：已就绪（${askEngineChoiceLabel(parseAskEngineChoice(status.askEngineRepoPreference))}）'
+                  : '问象：仅本地进度摘要（${askEngineChoiceLabel(parseAskEngineChoice(status.askEngineRepoPreference))}）',
             ),
             Text(
               status.tunnelRunning

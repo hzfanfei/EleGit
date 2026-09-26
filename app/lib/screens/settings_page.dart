@@ -138,13 +138,23 @@ class _SettingsPageState extends State<SettingsPage> {
       final repoRemote = parseAskEngineChoice(status.askEngineRepoPreference);
       final bookLocal = _memory!.askEngineBook();
       final repoLocal = _memory!.askEngineRepo();
-      if (bookRemote != bookLocal) {
+      if (!_memory!.askEngineBookIsExplicit()) {
+        if (bookRemote != bookLocal) {
+          await _memory!.saveAskEngineFor(AskEngineScope.book, bookRemote);
+          if (mounted) setState(() => _askEngineBook = bookRemote);
+        }
+      } else if (bookRemote != bookLocal) {
         await widget.api!.setAskEngine(
           askEngineChoiceId(bookLocal),
           scope: AskEngineScope.book,
         );
       }
-      if (repoRemote != repoLocal) {
+      if (!_memory!.askEngineRepoIsExplicit()) {
+        if (repoRemote != repoLocal) {
+          await _memory!.saveAskEngineFor(AskEngineScope.repo, repoRemote);
+          if (mounted) setState(() => _askEngineRepo = repoRemote);
+        }
+      } else if (repoRemote != repoLocal) {
         await widget.api!.setAskEngine(
           askEngineChoiceId(repoLocal),
           scope: AskEngineScope.repo,
@@ -636,14 +646,24 @@ class _ProbeResultCard extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             _ProbeLine(
-              label: '问答助手',
-              ok: result.askCli?.ok == true,
-              detail: _stepDetail(result.askCli),
+              label: '问书助手',
+              ok: (result.askCliBook ?? result.askCli)?.ok == true,
+              detail: _stepDetail(result.askCliBook ?? result.askCli),
             ),
             _ProbeLine(
-              label: '模型回复',
-              ok: result.askModel?.ok == true,
-              detail: _modelDetail(result.askModel),
+              label: '问象助手',
+              ok: (result.askCliRepo ?? result.askCli)?.ok == true,
+              detail: _stepDetail(result.askCliRepo ?? result.askCli),
+            ),
+            _ProbeLine(
+              label: '问书模型',
+              ok: (result.askModelBook ?? result.askModel)?.ok == true,
+              detail: _modelDetail(result.askModelBook ?? result.askModel),
+            ),
+            _ProbeLine(
+              label: '问象模型',
+              ok: (result.askModelRepo ?? result.askModel)?.ok == true,
+              detail: _modelDetail(result.askModelRepo ?? result.askModel),
             ),
             _ProbeLine(
               label: '语音合成',

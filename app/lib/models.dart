@@ -15,6 +15,7 @@ class ServerStatus {
     required this.askEnginePreference,
     required this.askEngineBookPreference,
     required this.askEngineRepoPreference,
+    this.bookAskReady = false,
     required this.tunnelUrl,
     required this.tunnelRunning,
     required this.tunnelError,
@@ -36,6 +37,7 @@ class ServerStatus {
   final String askEnginePreference;
   final String askEngineBookPreference;
   final String askEngineRepoPreference;
+  final bool bookAskReady;
   final String tunnelUrl;
   final bool tunnelRunning;
   final String tunnelError;
@@ -53,6 +55,7 @@ class ServerStatus {
     final tunnel = json['tunnel'] as Map<String, dynamic>? ?? {};
     final workspace = json['workspace'] as Map<String, dynamic>? ?? {};
     final voice = json['voice'] as Map<String, dynamic>? ?? {};
+    final books = json['books'] as Map<String, dynamic>? ?? {};
     final tunnelHealth = json['tunnelHealth'] as Map<String, dynamic>? ?? {};
     final reachable = tunnelHealth['reachable'] ?? tunnel['publicReachable'];
     return ServerStatus(
@@ -77,6 +80,7 @@ class ServerStatus {
               cursor['preference'] ??
               'claude')
           .toString(),
+      bookAskReady: books['ready'] == true,
       tunnelUrl: (tunnel['publicUrl'] ?? '').toString(),
       tunnelRunning: tunnel['running'] == true,
       tunnelError: (tunnel['error'] ?? '').toString(),

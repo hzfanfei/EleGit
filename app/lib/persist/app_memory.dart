@@ -43,6 +43,18 @@ class AppMemory {
     return parseAskEngineChoice(primary ?? fallback);
   }
 
+  bool hasLegacyAskEngineKey() => prefs.containsKey(askEngineKey);
+
+  bool hasAskEngineBookKey() => prefs.containsKey(askEngineBookKey);
+
+  bool hasAskEngineRepoKey() => prefs.containsKey(askEngineRepoKey);
+
+  /// True when the user (or legacy single switch) picked 问书 engine on this device.
+  bool askEngineBookIsExplicit() => hasAskEngineBookKey() || hasLegacyAskEngineKey();
+
+  /// True when the user (or legacy single switch) picked 问象 engine on this device.
+  bool askEngineRepoIsExplicit() => hasAskEngineRepoKey() || hasLegacyAskEngineKey();
+
   AskEngineChoice askEngineBook() =>
       _readAskEngine(prefs.getString(askEngineBookKey), prefs.getString(askEngineKey));
 
