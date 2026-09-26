@@ -12,7 +12,8 @@ import {
 } from "./acp.js";
 import { handleBookVoiceTurn } from "./book-voice-turn.js";
 import { handleRepoVoiceTurn } from "./repo-voice-turn.js";
-import { streamAnswer, synthesizeBookAnswer } from "./ask.js";
+import { streamAnswer, synthesizeBookAnswer, answerReadyNotice } from "./ask.js";
+import { setPhoneForeground, phoneInForeground } from "./phone-presence.js";
 import { openSse, writeSse, writeSseSafe } from "./sse.js";
 import {
   emptyRepoProgress,
@@ -93,8 +94,8 @@ import {
   staticFilesPrompt,
   contentTypeForStatic,
 } from "./static-files.js";
-import { appendInboxItem, clearInbox, listInbox, markInboxRead } from "./inbox.js";
-import { attachNotifications, broadcastInboxItem } from "./notifications.js";
+import { clearInbox, listInbox, markInboxRead } from "./inbox.js";
+import { attachNotifications, publishInboxNotice } from "./notifications.js";
 import { stat } from "node:fs/promises";
 
 loadLocalEnv();
@@ -126,6 +127,26 @@ function beginChatTurn(sessionId) {
 
 function endChatTurn(sessionId, ac) {
   if (chatCancels.get(sessionId) === ac) chatCancels.delete(sessionId);
+}
+
+function trackUnwatched(res) {
+  let gone = false;
+  res.on("close", () => {
+    if (!res.writableEnded) gone = true;
+  });
+  return () => gone || !phoneInForeground();
+}
+
+async function notifyFinishedAnswer({ notified, aborted, unwatched, answer, session, question, bookId }) {
+  if (notified || aborted || !unwatched) return;
+  try {
+    await publishInboxNotice(
+      store.config.workspaceRoot,
+      answerReadyNotice(answer, { session, question, bookId }),
+    );
+  } catch {
+    /* notification is best-effort */
+  }
 }
 const oauth = createOAuthSessions();
 const tunnel = createTunnelManager({
@@ -907,6 +928,7 @@ app.post("/v1/books/chat", async (req, res) => {
     }
     openSse(res);
     res.on("error", () => {});
+    const unwatched = trackUnwatched(res);
     writeSse(res, { type: "meta", sessionId: session.id, bookId: book.id, engine: "acp" });
     writeSse(res, { type: "status", phase: "connect" });
     writeSse(res, { type: "status", phase: "book" });
@@ -932,6 +954,7 @@ app.post("/v1/books/chat", async (req, res) => {
     writeSse(res, { type: "status", phase: "generate" });
     let finalEngine = "local-progress";
     let finalAnswer = "";
+    let notified = false;
     for await (const event of streamAnswer({
       question: message,
       history,
@@ -949,6 +972,7 @@ app.post("/v1/books/chat", async (req, res) => {
       workspaceRoot: store.config.workspaceRoot,
       bookId: book.id,
     })) {
+      if (event.type === "notification") notified = true;
       if (event.type === "done") {
         finalEngine = event.engine;
         finalAnswer = event.answer || "";
@@ -965,6 +989,15 @@ app.post("/v1/books/chat", async (req, res) => {
         writeSseSafe(res, event);
       }
     }
+    await notifyFinishedAnswer({
+      notified,
+      aborted: signal.aborted,
+      unwatched: unwatched(),
+      answer: finalAnswer,
+      session,
+      question: message,
+      bookId: book.id,
+    });
     if (signal.aborted) {
       try { res.end(); } catch { /* already gone */ }
       return;
@@ -1024,6 +1057,7 @@ app.post("/v1/chat", async (req, res) => {
     const signal = turn.signal;
     openSse(res);
     res.on("error", () => {});
+    const unwatched = trackUnwatched(res);
     writeSse(res, { type: "meta", sessionId: session.id });
     if (detectCursorEngine()) {
       writeSse(res, { type: "start", engine: "acp" });
@@ -1076,6 +1110,7 @@ app.post("/v1/chat", async (req, res) => {
     writeSse(res, { type: "status", phase: "generate" });
     let finalEngine = "local-progress";
     let finalAnswer = "";
+    let notified = false;
     for await (const event of streamAnswer({
       question: message,
       history,
@@ -1090,6 +1125,7 @@ app.post("/v1/chat", async (req, res) => {
       staticFiles: staticFilesPrompt(store.config),
       workspaceRoot: store.config.workspaceRoot,
     })) {
+      if (event.type === "notification") notified = true;
       if (event.type === "done") {
         finalEngine = event.engine;
         finalAnswer = event.answer;
@@ -1105,6 +1141,14 @@ app.post("/v1/chat", async (req, res) => {
         writeSseSafe(res, event);
       }
     }
+    await notifyFinishedAnswer({
+      notified,
+      aborted: signal.aborted,
+      unwatched: unwatched(),
+      answer: finalAnswer,
+      session,
+      question: message,
+    });
     if (signal.aborted) {
       try { res.end(); } catch { /* already gone */ }
       return;
@@ -1146,6 +1190,16 @@ app.post("/v1/tunnel/start", (_req, res) => {
 
 app.post("/v1/tunnel/stop", (_req, res) => {
   res.json(tunnel.stop());
+});
+
+app.post("/v1/presence", (req, res) => {
+  const state = String(req.body?.state || "").trim();
+  if (state !== "foreground" && state !== "background") {
+    res.status(400).json({ error: "state must be foreground or background" });
+    return;
+  }
+  setPhoneForeground(state === "foreground");
+  res.json({ ok: true, foreground: state === "foreground" });
 });
 
 app.get("/v1/inbox", async (_req, res) => {
@@ -1194,7 +1248,7 @@ app.post("/v1/inbox", async (req, res) => {
   const repo = body.repo ? String(body.repo).slice(0, 128) : undefined;
   const bookId = body.bookId ? String(body.bookId).slice(0, 128) : undefined;
   try {
-    const item = await appendInboxItem(store.config.workspaceRoot, {
+    const item = await publishInboxNotice(store.config.workspaceRoot, {
       kind,
       title: title.slice(0, 128),
       body: text.slice(0, 280),
@@ -1205,7 +1259,6 @@ app.post("/v1/inbox", async (req, res) => {
       repo,
       bookId,
     });
-    broadcastInboxItem(item);
     res.json({ ok: true, item });
   } catch (err) {
     sendError(res, err);

@@ -1014,6 +1014,18 @@ class WenxiangApi {
     return _json(res, fallback: '停止隧道失败');
   }
 
+  Future<void> reportPresence(String state) async {
+    try {
+      await http
+          .post(
+            _uri('/v1/presence'),
+            headers: _headers,
+            body: jsonEncode({'state': state}),
+          )
+          .timeout(const Duration(seconds: 8));
+    } catch (_) {}
+  }
+
   Future<Map<String, dynamic>> fetchInbox() async {
     final res = await http
         .get(_uri('/v1/inbox'), headers: _headers)

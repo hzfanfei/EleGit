@@ -1,6 +1,5 @@
 import { detectCursorEngine } from "./acp.js";
-import { appendInboxItem } from "./inbox.js";
-import { broadcastInboxItem } from "./notifications.js";
+import { publishInboxNotice } from "./notifications.js";
 
 export { detectCursorEngine } from "./acp.js";
 export { whichSync } from "./which.js";
@@ -37,6 +36,29 @@ export function taskCompletionNotice(full, { session, question, bookId } = {}) {
   } else if (session?.owner && session?.repo) {
     notice.owner = session.owner;
     notice.repo = session.repo;
+  }
+  return notice;
+}
+
+/** Inbox payload for a finished answer, with or without the task marker. */
+export function answerReadyNotice(full, ctx = {}) {
+  const marked = taskCompletionNotice(full, ctx);
+  if (marked) return marked;
+  const answer = String(full || "").trim().slice(0, CHAT_ANSWER_CAP);
+  if (!answer) return null;
+  const notice = {
+    kind: "agent-notification",
+    title: "回答已就绪",
+    body: answer.slice(0, 280),
+    answer,
+    sessionId: ctx.session?.id,
+    question: String(ctx.question || "").slice(0, 200),
+  };
+  if (ctx.bookId) {
+    notice.bookId = String(ctx.bookId);
+  } else if (ctx.session?.owner && ctx.session?.repo) {
+    notice.owner = ctx.session.owner;
+    notice.repo = ctx.session.repo;
   }
   return notice;
 }
@@ -260,11 +282,8 @@ export async function* streamAnswer({
         const notice = taskCompletionNotice(full, { session, question, bookId });
         if (notice) {
           try {
-            const item = await appendInboxItem(workspaceRoot, notice);
-            if (item) {
-              broadcastInboxItem(item);
-              yield { type: "notification", item };
-            }
+            const item = await publishInboxNotice(workspaceRoot, notice);
+            if (item) yield { type: "notification", item };
           } catch {
             /* inbox is best-effort; never break the answer stream */
           }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildCursorPrompt, detectCursorEngine, streamAnswer, streamText, synthesizeLocalAnswer, taskCompletionNotice } from "../src/ask.js";
+import { answerReadyNotice, buildCursorPrompt, detectCursorEngine, streamAnswer, streamText, synthesizeLocalAnswer, taskCompletionNotice } from "../src/ask.js";
 
 const sampleProgress = {
   repo: {
@@ -124,6 +124,18 @@ describe("taskCompletionNotice", () => {
     assert.equal(notice.answer, answer.trim());
     assert.ok(notice.body.length <= 280);
     assert.equal(notice.body, answer.trim().slice(0, 280));
+  });
+
+  it("notifies a normal answer when there is no task marker", () => {
+    const notice = answerReadyNotice("登录超时已经修好。", {
+      session: { id: "s1", owner: "acme", repo: "widget" },
+      question: "修一下",
+    });
+    assert.equal(notice.title, "回答已就绪");
+    assert.equal(notice.answer, "登录超时已经修好。");
+    assert.equal(notice.owner, "acme");
+    assert.equal(notice.repo, "widget");
+    assert.equal(taskCompletionNotice("普通回答", { session: { id: "s1" } }), null);
   });
 
   it("tags book chats and ignores replies without the marker", () => {

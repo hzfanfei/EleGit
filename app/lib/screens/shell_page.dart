@@ -77,12 +77,14 @@ class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      unawaited(_api.reportPresence('foreground'));
       _uploadClientErrors();
       if (NotificationCenter.instance.enabled.value) {
         unawaited(NotificationCenter.instance.fetchAndShowUnread());
       }
     } else if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden) {
+      unawaited(_api.reportPresence('background'));
       _uploadClientErrors();
     }
   }
