@@ -143,24 +143,31 @@ void main() {
     await _pumpUntilChatReady(tester);
 
     expect(find.byType(AppBar), findsNothing);
-    expect(find.byTooltip('新建会话'), findsOneWidget);
-    expect(find.byTooltip('历史会话'), findsOneWidget);
+    expect(find.byKey(const Key('wx-agent-mode')), findsOneWidget);
+    expect(find.byTooltip('更多'), findsOneWidget);
     expect(find.byKey(const Key('wx-call')), findsNothing);
     expect(find.byKey(const Key('wx-voice-toggle')), findsOneWidget);
 
-    await tester.tap(find.byTooltip('新建会话'));
-    await tester.pump();
-    expect(find.textContaining('从进度问起'), findsOneWidget);
-
-    await tester.tap(find.byTooltip('历史会话'));
+    await tester.tap(find.byTooltip('更多'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
-    expect(find.text('历史会话'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('wx-chat-new-session')).hitTestable());
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.textContaining('从进度问起'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('更多'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.byKey(const Key('wx-chat-history')).hitTestable());
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byKey(const Key('wx-session-sheet')), findsOneWidget);
     expect(find.text('新会话'), findsWidgets);
 
     await tester.tap(find.byTooltip('关闭会话').first);
     await tester.pump();
-    expect(find.text('历史会话'), findsOneWidget);
+    expect(find.byKey(const Key('wx-session-sheet')), findsOneWidget);
   });
 
   testWidgets('editing a sent user turn forks from there like AI chat', (tester) async {

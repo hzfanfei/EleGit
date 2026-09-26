@@ -32,7 +32,7 @@ class Wx {
     'sans-serif',
   ];
 
-  static const inset = 20.0;
+  static const inset = 16.0;
   static const pagePadding = EdgeInsets.fromLTRB(inset, 16, inset, 24);
   static const radius = 16.0;
   static const tap = 48.0;

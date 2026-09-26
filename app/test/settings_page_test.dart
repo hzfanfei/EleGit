@@ -64,7 +64,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('CosyVoice3'), findsWidgets);
-    expect(find.textContaining('小何'), findsWidgets);
+    final xiaohe = find.textContaining('小何');
+    await _reveal(tester, xiaohe);
+    expect(xiaohe, findsWidgets);
     await _reveal(tester, find.textContaining('云舟'));
     expect(find.textContaining('云舟'), findsOneWidget);
   });

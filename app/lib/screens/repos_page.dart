@@ -229,24 +229,36 @@ class ReposPageState extends State<ReposPage> {
             showMark: true,
             title: '问象',
             subtitle: subtitle,
+            status: WxLinkRouteMark(baseUrl: widget.api.baseUrl),
             onBrandTap: blocked ? null : widget.onOpenSettings,
             trailing: [
-              WxLinkRouteMark(baseUrl: widget.api.baseUrl),
-              if (widget.onOpenFiles != null)
-                IconButton(
-                  tooltip: '资源',
-                  onPressed: blocked ? null : widget.onOpenFiles,
-                  icon: const Icon(Icons.folder_outlined),
-                ),
-              if (widget.onOpenBooks != null)
-                IconButton(
-                  tooltip: '问书',
-                  onPressed: blocked ? null : widget.onOpenBooks,
-                  icon: const Icon(Icons.menu_book_outlined),
-                ),
-              TextButton(
-                onPressed: blocked ? null : () => setState(() => _reauth = true),
-                child: Text(widget.githubConnected ? 'GitHub' : '连接 GitHub'),
+              PopupMenuButton<String>(
+                key: const Key('wx-home-more'),
+                tooltip: '更多',
+                enabled: !blocked,
+                color: Wx.surface,
+                surfaceTintColor: Colors.transparent,
+                icon: const Icon(Icons.more_horiz),
+                onSelected: (value) {
+                  switch (value) {
+                    case 'files':
+                      widget.onOpenFiles?.call();
+                    case 'books':
+                      widget.onOpenBooks?.call();
+                    case 'github':
+                      setState(() => _reauth = true);
+                  }
+                },
+                itemBuilder: (context) => [
+                  if (widget.onOpenFiles != null)
+                    const PopupMenuItem(value: 'files', child: Text('资源')),
+                  if (widget.onOpenBooks != null)
+                    const PopupMenuItem(value: 'books', child: Text('问书')),
+                  PopupMenuItem(
+                    value: 'github',
+                    child: Text(widget.githubConnected ? 'GitHub' : '连接 GitHub'),
+                  ),
+                ],
               ),
             ],
           ),
@@ -431,8 +443,8 @@ class _RepoTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(14),
         child: ConstrainedBox(
           constraints: const BoxConstraints(minHeight: 64),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(4, 12, 0, 12),
+            child: Padding(
+            padding: const EdgeInsets.fromLTRB(0, 12, 0, 12),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [

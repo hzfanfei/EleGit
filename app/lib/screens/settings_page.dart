@@ -17,6 +17,7 @@ import '../voice/volc_tts_voices.dart';
 import '../voice/xiaomi_tts_voices.dart';
 import '../widgets/wx_chrome.dart';
 import '../widgets/wx_edge_back.dart';
+import '../widgets/wx_link_route.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key, this.api, this.memory, this.onBack});
@@ -311,8 +312,6 @@ class _SettingsPageState extends State<SettingsPage> {
         children: [
           WxPageHeader(
             title: '设置',
-            subtitle:
-                '${widget.api == null ? '' : '${widget.api!.linkLabel} · '}问书 ${askEngineChoiceLabel(_askEngineBook)} · 问象 ${askEngineChoiceLabel(_askEngineRepo)} · ${voiceEngineSummary(_voiceProfile)} · ${current.name}',
             onBack: widget.onBack ?? () => Navigator.of(context).maybePop(),
             backTooltip: '返回',
           ),
@@ -321,6 +320,19 @@ class _SettingsPageState extends State<SettingsPage> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(Wx.inset, 18, Wx.inset, 32),
               children: [
+                if (widget.api != null) ...[
+                  Row(
+                    children: [
+                      WxLinkRouteMark(baseUrl: widget.api!.baseUrl),
+                      const SizedBox(width: 8),
+                      Text(
+                        widget.api!.linkLabel,
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 22),
+                ],
                 Text('智能问答', style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 6),
                 Text(
@@ -328,9 +340,9 @@ class _SettingsPageState extends State<SettingsPage> {
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.muted),
                 ),
                 const SizedBox(height: 16),
-                Text(
-                  askEngineScopeTitle(AskEngineScope.book),
-                  style: Theme.of(context).textTheme.titleSmall,
+                _SectionLabel(
+                  title: askEngineScopeTitle(AskEngineScope.book),
+                  value: askEngineChoiceLabel(_askEngineBook),
                 ),
                 if (_savingAskEngineBook) ...[
                   const SizedBox(height: 6),
@@ -350,9 +362,9 @@ class _SettingsPageState extends State<SettingsPage> {
                   onSelect: (c) => _selectAskEngine(AskEngineScope.book, c),
                 ),
                 const SizedBox(height: 20),
-                Text(
-                  askEngineScopeTitle(AskEngineScope.repo),
-                  style: Theme.of(context).textTheme.titleSmall,
+                _SectionLabel(
+                  title: askEngineScopeTitle(AskEngineScope.repo),
+                  value: askEngineChoiceLabel(_askEngineRepo),
                 ),
                 if (_savingAskEngineRepo) ...[
                   const SizedBox(height: 6),
@@ -372,7 +384,11 @@ class _SettingsPageState extends State<SettingsPage> {
                   onSelect: (c) => _selectAskEngine(AskEngineScope.repo, c),
                 ),
                 const SizedBox(height: 28),
-                Text('语音', style: Theme.of(context).textTheme.titleMedium),
+                _SectionLabel(
+                  title: '语音',
+                  value: voiceEngineSummary(_voiceProfile),
+                  prominent: true,
+                ),
                 const SizedBox(height: 6),
                 Text(
                   '识别和合成一起切换。',
@@ -412,14 +428,18 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                 ),
                 const SizedBox(height: 28),
-                Text('语音音色', style: Theme.of(context).textTheme.titleMedium),
+                _SectionLabel(
+                  title: '语音音色',
+                  value: current.name,
+                  prominent: true,
+                ),
                 const SizedBox(height: 6),
                 Text(
                   _voiceProfile.usesXiaomiTts
-                      ? '快问快答使用小米 MiMo 语音。当前 ${current.name}。'
+                      ? '快问快答使用小米 MiMo 语音。'
                       : _voiceProfile.usesCosyvoiceTts
-                          ? '快问快答使用本机 ${_voiceProfile.ttsEngine} 合成（${voiceEngineSummary(_voiceProfile)}）。当前 ${current.name}。'
-                          : '快问快答使用火山引擎音色。当前 ${current.name}。',
+                          ? '快问快答使用本机 ${_voiceProfile.ttsEngine} 合成。'
+                          : '快问快答使用火山引擎音色。',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.muted),
                 ),
                 if (_voiceProfile.usesCosyvoiceTts) ...[
@@ -759,6 +779,41 @@ class _ProbeLine extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _SectionLabel extends StatelessWidget {
+  const _SectionLabel({
+    required this.title,
+    required this.value,
+    this.prominent = false,
+  });
+
+  final String title;
+  final String value;
+  final bool prominent;
+
+  @override
+  Widget build(BuildContext context) {
+    final titleStyle = prominent
+        ? Theme.of(context).textTheme.titleMedium
+        : Theme.of(context).textTheme.titleSmall;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.baseline,
+      textBaseline: TextBaseline.alphabetic,
+      children: [
+        Text(title, style: titleStyle),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            value,
+            textAlign: TextAlign.end,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.muted),
+          ),
+        ),
+      ],
     );
   }
 }

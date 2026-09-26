@@ -67,6 +67,7 @@ class WxPageHeader extends StatelessWidget {
     this.brandTooltip = '设置',
     required this.title,
     this.subtitle,
+    this.status,
     this.trailing,
   });
 
@@ -78,6 +79,7 @@ class WxPageHeader extends StatelessWidget {
   final String brandTooltip;
   final String title;
   final String? subtitle;
+  final Widget? status;
   final List<Widget>? trailing;
 
   @override
@@ -105,6 +107,7 @@ class WxPageHeader extends StatelessWidget {
                   padMark: onBack == null,
                   title: title,
                   subtitle: hasSubtitle ? subtitle : null,
+                  status: status,
                   onTap: onBrandTap,
                   tooltip: brandTooltip,
                 ),
@@ -124,6 +127,7 @@ class _BrandTitle extends StatelessWidget {
     required this.padMark,
     required this.title,
     required this.subtitle,
+    required this.status,
     required this.onTap,
     required this.tooltip,
   });
@@ -132,19 +136,21 @@ class _BrandTitle extends StatelessWidget {
   final bool padMark;
   final String title;
   final String? subtitle;
+  final Widget? status;
   final VoidCallback? onTap;
   final String tooltip;
 
   @override
   Widget build(BuildContext context) {
-    final row = Row(
+    final brand = Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
         if (showMark)
           Padding(
             padding: EdgeInsets.only(left: padMark ? Wx.inset : 0, right: 10),
             child: const WxMark(size: 22),
           ),
-        Expanded(
+        Flexible(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -165,13 +171,23 @@ class _BrandTitle extends StatelessWidget {
         ),
       ],
     );
-    if (onTap == null) return row;
-    return Tooltip(
-      message: tooltip,
-      child: InkWell(
-        onTap: onTap,
-        child: row,
-      ),
+    final tappable = onTap == null
+        ? brand
+        : Tooltip(
+            message: tooltip,
+            child: InkWell(
+              onTap: onTap,
+              child: brand,
+            ),
+          );
+    return Row(
+      children: [
+        Flexible(child: tappable),
+        if (status != null) ...[
+          const SizedBox(width: 6),
+          status!,
+        ],
+      ],
     );
   }
 }

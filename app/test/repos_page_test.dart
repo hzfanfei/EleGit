@@ -107,6 +107,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('问象'), findsOneWidget);
     expect(find.text('demo'), findsOneWidget);
+    expect(find.text('连接 GitHub'), findsNothing);
+    await tester.tap(find.byTooltip('更多'));
+    await tester.pumpAndSettle();
     expect(find.text('连接 GitHub'), findsOneWidget);
     expect(find.textContaining('出了点问题'), findsNothing);
   });

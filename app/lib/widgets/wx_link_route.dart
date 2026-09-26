@@ -15,15 +15,12 @@ class WxLinkRouteMark extends StatelessWidget {
     final label = linkRouteLabel(baseUrl);
     return Tooltip(
       message: label,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4),
-        child: Icon(
-          lan ? Icons.wifi : Icons.cloud_outlined,
-          key: Key(lan ? 'wx-link-lan' : 'wx-link-tunnel'),
-          size: 22,
-          color: lan ? Wx.ok : Wx.accent,
-          semanticLabel: label,
-        ),
+      child: Icon(
+        lan ? Icons.wifi : Icons.cloud_outlined,
+        key: Key(lan ? 'wx-link-lan' : 'wx-link-tunnel'),
+        size: 16,
+        color: lan ? Wx.ok : Wx.accent,
+        semanticLabel: label,
       ),
     );
   }

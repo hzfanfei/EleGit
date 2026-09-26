@@ -1045,7 +1045,11 @@ class _ChatPageState extends State<ChatPage> {
                   Row(
                     children: [
                       Expanded(
-                        child: Text('历史会话', style: Theme.of(context).textTheme.titleMedium),
+                        child: Text(
+                          '历史会话',
+                          key: const Key('wx-session-sheet'),
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
                       ),
                       TextButton.icon(
                         onPressed: _busy
@@ -1136,43 +1140,41 @@ class _ChatPageState extends State<ChatPage> {
             backTooltip: '返回仓库',
             title: widget.repo.fullName,
             subtitle: subtitle,
+            status: WxLinkRouteMark(baseUrl: widget.api.baseUrl),
             trailing: [
-              WxLinkRouteMark(baseUrl: widget.api.baseUrl),
-              Tooltip(
-                message: _agentMode ? '只改 ${widget.repo.name}' : '${widget.repo.name} 只读',
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      _agentMode ? 'Agent' : '只读',
-                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                            color: _agentMode ? Wx.accent : Wx.muted,
-                            fontWeight: FontWeight.w600,
-                          ),
-                    ),
-                    Switch(
-                      key: const Key('wx-agent-mode'),
-                      value: _agentMode,
-                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      onChanged: _busy || _preparingChat
-                          ? null
-                          : (value) {
-                              setState(() => _agentMode = value);
-                              widget.memory?.saveAgentMode(widget.repo.fullName, value);
-                            },
-                    ),
-                  ],
-                ),
+              _AgentModeChip(
+                agentMode: _agentMode,
+                repoName: widget.repo.name,
+                enabled: !_busy && !_preparingChat,
+                onChanged: (value) {
+                  setState(() => _agentMode = value);
+                  widget.memory?.saveAgentMode(widget.repo.fullName, value);
+                },
               ),
-              IconButton(
-                tooltip: '新建会话',
-                onPressed: _busy || _preparingChat ? null : _newSession,
-                icon: const Icon(Icons.add_comment_outlined),
-              ),
-              IconButton(
-                tooltip: '历史会话',
-                onPressed: _preparingChat ? null : _openSessions,
-                icon: const Icon(Icons.history),
+              PopupMenuButton<String>(
+                key: const Key('wx-chat-more'),
+                tooltip: '更多',
+                enabled: !_preparingChat,
+                color: Wx.surface,
+                surfaceTintColor: Colors.transparent,
+                icon: const Icon(Icons.more_horiz),
+                onSelected: (value) {
+                  if (value == 'new') _newSession();
+                  if (value == 'history') _openSessions();
+                },
+                itemBuilder: (context) => [
+                  PopupMenuItem(
+                    key: const Key('wx-chat-new-session'),
+                    value: 'new',
+                    enabled: !_busy && !_preparingChat,
+                    child: const Text('新建会话'),
+                  ),
+                  const PopupMenuItem(
+                    key: Key('wx-chat-history'),
+                    value: 'history',
+                    child: Text('历史会话'),
+                  ),
+                ],
               ),
             ],
           ),
@@ -1191,7 +1193,7 @@ class _ChatPageState extends State<ChatPage> {
                           key: const Key('wx-chat-list'),
                           controller: _scroll,
                           reverse: true,
-                          padding: const EdgeInsets.fromLTRB(4, 20, 4, 16),
+                          padding: const EdgeInsets.fromLTRB(Wx.inset, 20, Wx.inset, 16),
                           itemCount: itemCount,
                           itemBuilder: (context, index) {
                       final chronological = itemCount - 1 - index;
@@ -1304,7 +1306,7 @@ class _EmptyChat extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView(
-      padding: const EdgeInsets.fromLTRB(8, 36, 8, 16),
+      padding: const EdgeInsets.fromLTRB(Wx.inset, 36, Wx.inset, 16),
       children: [
         Text('从进度问起。', style: Theme.of(context).textTheme.headlineMedium),
         const SizedBox(height: 8),
@@ -1463,9 +1465,9 @@ class _EditableUserTurnState extends State<_EditableUserTurn> {
   Widget build(BuildContext context) {
     return _VoiceTurn(
       voice: '你问',
-      voiceColor: Wx.accent,
-      railColor: Wx.accent,
-      railWidth: 3,
+      voiceColor: Wx.muted,
+      railColor: Wx.hairline,
+      railWidth: 2,
       bottom: 20,
       footer: widget.queued
           ? Text(
@@ -1794,6 +1796,54 @@ class _CaretState extends State<_Caret> with SingleTickerProviderStateMixin {
   }
 }
 
+class _AgentModeChip extends StatelessWidget {
+  const _AgentModeChip({
+    required this.agentMode,
+    required this.repoName,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  final bool agentMode;
+  final String repoName;
+  final bool enabled;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = agentMode ? 'Agent' : '只读';
+    return Tooltip(
+      message: agentMode ? '只改 $repoName' : '$repoName 只读',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          key: const Key('wx-agent-mode'),
+          onTap: enabled ? () => onChanged(!agentMode) : null,
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            height: 28,
+            alignment: Alignment.center,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: agentMode ? Wx.accent : Wx.hairline),
+            ),
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                height: 1,
+                color: agentMode ? Wx.accent : Wx.muted,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _Composer extends StatelessWidget {
   const _Composer({
     required this.controller,
@@ -1851,7 +1901,7 @@ class _Composer extends StatelessWidget {
       child: SafeArea(
         top: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(0, 8, 0, 8),
+          padding: const EdgeInsets.fromLTRB(Wx.inset, 8, Wx.inset, 8),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1963,7 +2013,7 @@ class _Composer extends StatelessWidget {
                             tooltip: '停止当前',
                             visualDensity: VisualDensity.compact,
                             onPressed: onStop,
-                            icon: const Icon(Icons.stop_circle_outlined, size: 26, color: Wx.accent),
+                            icon: const Icon(Icons.stop_circle_outlined, size: 26, color: Wx.text),
                           ),
                           const SizedBox(width: 4),
                           FilledButton.icon(
@@ -2036,7 +2086,7 @@ class _NewMessagesPill extends StatelessWidget {
                     ),
               ),
               const SizedBox(width: 4),
-              Icon(Icons.south, size: 16, color: Wx.accent),
+              const Icon(Icons.south, size: 16, color: Wx.muted),
             ],
           ),
         ),
