@@ -92,9 +92,9 @@ class WxTypewriterStream {
       final ticksLeft = (ms / tick.inMilliseconds).ceil().clamp(1, 48);
       return (lag / ticksLeft).ceil().clamp(1, lag);
     }
-    if (lag > 160) return 10;
-    if (lag > 64) return 5;
-    if (lag > 20) return 2;
+    if (lag > 160) return 20;
+    if (lag > 64) return 8;
+    if (lag > 20) return 3;
     return 1;
   }
 

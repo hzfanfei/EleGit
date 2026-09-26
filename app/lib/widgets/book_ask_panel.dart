@@ -161,7 +161,9 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
   late final HoldToSpeakSession _hold;
   late final AnimationController _pulse;
   final _livePhase = ValueNotifier<String>('connect');
+  final _phaseElapsed = ValueNotifier<int>(0);
   Timer? _livePhaseTimer;
+  String _livePhaseChapter = '';
   String? _sessionId;
   bool _live = false;
   bool _busy = false;
@@ -380,7 +382,9 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
     final message = _withReadingContext(raw);
     HapticFeedback.lightImpact();
     _input.clear();
-    _livePhase.value = 'connect';
+    _livePhaseChapter = _place.chapter.trim();
+    _livePhase.value = 'book';
+    _phaseElapsed.value = 0;
     _startLivePhaseFallback();
     setState(() {
       _messages.add(ChatMessage(role: 'user', content: raw));
@@ -647,9 +651,11 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
         timer.cancel();
         return;
       }
+      final elapsed = DateTime.now().difference(sentAt);
+      _phaseElapsed.value = elapsed.inSeconds;
       final next = nextAskLiveFallbackPhase(
         current: _livePhase.value,
-        elapsed: DateTime.now().difference(sentAt),
+        elapsed: elapsed,
         book: true,
       );
       if (next != null) _setLivePhase(next);
@@ -659,6 +665,8 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
   void _stopLivePhaseFallback() {
     _livePhaseTimer?.cancel();
     _livePhaseTimer = null;
+    _phaseElapsed.value = 0;
+    _livePhaseChapter = '';
   }
 
   @override
@@ -669,6 +677,7 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
     unawaited(_persistStore());
     widget.sheetSize.removeListener(_onSheetSize);
     _livePhase.dispose();
+    _phaseElapsed.dispose();
     _pulse.dispose();
     _hold.dispose();
     _input.dispose();
@@ -822,6 +831,8 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
                                     child: _BookAskLiveText(
                                       typewriter: _typewriter,
                                       phase: _livePhase,
+                                      elapsed: _phaseElapsed,
+                                      chapter: _livePhaseChapter,
                                     ),
                                   );
                                 }
@@ -1234,10 +1245,14 @@ class _BookAskLiveText extends StatelessWidget {
   const _BookAskLiveText({
     required this.typewriter,
     required this.phase,
+    required this.elapsed,
+    required this.chapter,
   });
 
   final WxTypewriterStream typewriter;
   final ValueNotifier<String> phase;
+  final ValueNotifier<int> elapsed;
+  final String chapter;
 
   @override
   Widget build(BuildContext context) {
@@ -1245,23 +1260,69 @@ class _BookAskLiveText extends StatelessWidget {
     return ValueListenableBuilder<String>(
       valueListenable: typewriter.visible,
       builder: (_, text, __) {
-        if (text.isNotEmpty) return WxReadableText(text);
+        if (text.isNotEmpty) {
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(child: WxReadableText(text)),
+              const SizedBox(width: 6),
+              _JumpToEndButton(typewriter: typewriter),
+            ],
+          );
+        }
         return ValueListenableBuilder<String>(
           valueListenable: phase,
           builder: (_, livePhase, __) {
-            return Semantics(
-              liveRegion: true,
-              child: Text(
-                askLivePhaseLabel(livePhase, book: true),
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: Wx.muted,
-                  height: 1.45,
-                ),
-              ),
+            return ValueListenableBuilder<int>(
+              valueListenable: elapsed,
+              builder: (_, elapsedSec, __) {
+                return Semantics(
+                  liveRegion: true,
+                  child: Text(
+                    askLivePhaseLabel(
+                      livePhase,
+                      book: true,
+                      chapter: chapter,
+                      secondsElapsed: elapsedSec,
+                    ),
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: Wx.muted,
+                      height: 1.45,
+                    ),
+                  ),
+                );
+              },
             );
           },
         );
       },
+    );
+  }
+}
+
+class _JumpToEndButton extends StatelessWidget {
+  const _JumpToEndButton({required this.typewriter});
+
+  final WxTypewriterStream typewriter;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return InkWell(
+      onTap: () => typewriter.animateToEnd(
+        budget: const Duration(milliseconds: 400),
+      ),
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        child: Text(
+          '⏩ 跳到末尾',
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: Wx.faint,
+            letterSpacing: 0.2,
+          ),
+        ),
+      ),
     );
   }
 }
@@ -1459,6 +1520,8 @@ class _AllQaHistoryList extends StatelessWidget {
               child: _BookAskLiveText(
                 typewriter: typewriter,
                 phase: phase,
+                elapsed: _phaseElapsed,
+                chapter: _livePhaseChapter,
               ),
             ),
           );

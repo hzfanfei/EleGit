@@ -1,12 +1,25 @@
-String askLivePhaseLabel(String phase, {bool book = false}) {
+String askLivePhaseLabel(
+  String phase, {
+  bool book = false,
+  String? chapter,
+  int secondsElapsed = 0,
+}) {
+  final trimmed = chapter?.trim() ?? '';
+  final showChapter = trimmed.isNotEmpty;
+  final waitTail = secondsElapsed > 0 ? '（已等 ${secondsElapsed}s）' : '';
+
   if (book) {
     switch (phase) {
       case 'book':
-        return '对照当前章节…';
+        return showChapter ? '对照《$trimmed》…' : '对照当前章节…';
+      case 'reading':
+        return '正在翻阅上下文…';
+      case 'warm':
+        return '正在预热会话…';
       case 'generate':
         return '正在组织回答…';
       case 'wait':
-        return '还在翻看，请再等一会儿…';
+        return '还在翻看，请再等一会儿…$waitTail';
       case 'connect':
       default:
         return '正在连接问书…';
@@ -30,12 +43,7 @@ String? nextAskLiveFallbackPhase({
   bool book = false,
 }) {
   if (book) {
-    if (elapsed >= const Duration(seconds: 8) && current != 'wait') return 'wait';
-    if (elapsed >= const Duration(seconds: 3) &&
-        current != 'generate' &&
-        current != 'wait') {
-      return 'generate';
-    }
+    if (elapsed >= const Duration(seconds: 5) && current != 'wait') return 'wait';
     if (elapsed >= const Duration(milliseconds: 1200) && current == 'connect') {
       return 'book';
     }
