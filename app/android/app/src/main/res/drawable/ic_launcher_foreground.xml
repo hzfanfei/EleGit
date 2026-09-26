@@ -4,14 +4,12 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Circle-safe: a 66dp mask clips square corners. Visual seal is ~42dp. -->
-    <path
-        android:fillColor="#00000000"
-        android:strokeColor="#A67C52"
-        android:strokeWidth="3"
-        android:strokeLineJoin="round"
-        android:pathData="M38.5,34.5 H69.5 A4,4 0 0 1 73.5,38.5 V69.5 A4,4 0 0 1 69.5,73.5 H38.5 A4,4 0 0 1 34.5,69.5 V38.5 A4,4 0 0 1 38.5,34.5 Z" />
+    <!-- Outer 34–74 and the stroke share center 54. Circle-safe side is 40. -->
     <path
         android:fillColor="#A67C52"
-        android:pathData="M52.4,44.5 H55.6 V64.5 H52.4 Z" />
+        android:fillType="evenOdd"
+        android:pathData="M38,34 H70 A4,4 0 0 1 74,38 V70 A4,4 0 0 1 70,74 H38 A4,4 0 0 1 34,70 V38 A4,4 0 0 1 38,34 Z M39,37 H69 A2,2 0 0 1 71,39 V69 A2,2 0 0 1 69,71 H39 A2,2 0 0 1 37,69 V39 A2,2 0 0 1 39,37 Z" />
+    <path
+        android:fillColor="#A67C52"
+        android:pathData="M52.5,44.4 H55.5 V63.6 H52.5 Z" />
 </vector>
