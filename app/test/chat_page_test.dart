@@ -415,4 +415,57 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
     }
   });
+
+  testWidgets('queued turn can be removed before it runs', (tester) async {
+    final api = FakeWenxiangApi(
+      streamPace: const Duration(milliseconds: 120),
+      streamEvents: [
+        ChatStreamEvent(type: 'start', engine: 'local-progress'),
+        ChatStreamEvent(type: 'delta', text: '只答第一条。'),
+        ChatStreamEvent(type: 'done', engine: 'local-progress', sessionId: 's1'),
+      ],
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: ChatPage(
+          api: api,
+          repo: sampleRepo(),
+          onBack: () {},
+        ),
+      ),
+    );
+    await tester.pump();
+    for (var i = 0; i < 30; i++) {
+      await tester.pump(const Duration(milliseconds: 20));
+      if (find.text('正在准备对话…').evaluate().isEmpty) break;
+    }
+    await tester.tap(find.text('这个仓库最近在做什么？'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 40));
+
+    await tester.enterText(find.byType(TextField), '不要这条');
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('wx-chat-send')));
+    await tester.pump();
+    expect(find.text('不要这条'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('wx-queue-remove')));
+    await tester.pump();
+    expect(find.text('不要这条'), findsNothing);
+    expect(find.textContaining('还有'), findsNothing);
+
+    for (var i = 0; i < 50; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+      if (api.chatMessages.length >= 1 &&
+          find.textContaining('只答第一条').evaluate().isNotEmpty) {
+        break;
+      }
+    }
+    expect(api.chatMessages, ['这个仓库最近在做什么？']);
+    expect(find.textContaining('只答第一条'), findsOneWidget);
+    for (var i = 0; i < 30; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+  });
 }

@@ -716,6 +716,34 @@ class _ChatPageState extends State<ChatPage> {
     return _busy && active != null && index > active;
   }
 
+  Future<void> _removeQueuedTurn(int index) async {
+    if (index < 0 || index >= _messages.length) return;
+    final message = _messages[index];
+    if (!_isQueuedUserMessage(index, message)) return;
+    if (_processingUserIndex == index) return;
+    HapticFeedback.selectionClick();
+    setState(() {
+      _messages.removeAt(index);
+      _queuedUserIndices.remove(index);
+      for (var i = 0; i < _queuedUserIndices.length; i++) {
+        if (_queuedUserIndices[i] > index) {
+          _queuedUserIndices[i]--;
+        }
+      }
+      if (_processingUserIndex != null && _processingUserIndex! > index) {
+        _processingUserIndex = _processingUserIndex! - 1;
+      }
+      if (_editingIndex != null) {
+        if (_editingIndex == index) {
+          _editingIndex = null;
+        } else if (_editingIndex! > index) {
+          _editingIndex = _editingIndex! - 1;
+        }
+      }
+    });
+    await _persist();
+  }
+
   Future<void> _send([String? preset]) async {
     final text = (preset ?? _input.text).trim();
     if (text.isEmpty) return;
@@ -1114,6 +1142,9 @@ class _ChatPageState extends State<ChatPage> {
                               : null,
                           onCancelEdit: _cancelEdit,
                           onSubmitEdit: (text) => _commitEdit(chronological, text),
+                          onRemoveQueue: _isQueuedUserMessage(chronological, message)
+                              ? () => _removeQueuedTurn(chronological)
+                              : null,
                           onRetry: message.role == 'error' && _lastUser != null && !_busy
                               ? () => _send(_lastUser)
                               : null,
@@ -1321,6 +1352,7 @@ class _EditableUserTurn extends StatefulWidget {
     this.onEdit,
     this.onCancel,
     this.onSubmit,
+    this.onRemoveQueue,
   });
 
   final ChatMessage message;
@@ -1329,6 +1361,7 @@ class _EditableUserTurn extends StatefulWidget {
   final VoidCallback? onEdit;
   final VoidCallback? onCancel;
   final Future<void> Function(String text)? onSubmit;
+  final VoidCallback? onRemoveQueue;
 
   @override
   State<_EditableUserTurn> createState() => _EditableUserTurnState();
@@ -1366,9 +1399,19 @@ class _EditableUserTurnState extends State<_EditableUserTurn> {
               style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.muted),
             )
           : null,
-      trailing: widget.editing || widget.onEdit == null
+      trailing: widget.editing
           ? null
-          : IconButton(
+          : widget.queued && widget.onRemoveQueue != null
+              ? IconButton(
+                  key: const Key('wx-queue-remove'),
+                  tooltip: '移出队列',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: widget.onRemoveQueue,
+                  icon: const Icon(Icons.close, size: 18, color: Wx.muted),
+                )
+              : widget.onEdit == null
+                  ? null
+                  : IconButton(
               tooltip: '编辑',
               visualDensity: VisualDensity.compact,
               onPressed: widget.onEdit,
@@ -1423,6 +1466,7 @@ class _FinishedTurn extends StatelessWidget {
     this.onEdit,
     this.onCancelEdit,
     this.onSubmitEdit,
+    this.onRemoveQueue,
     this.onRetry,
   });
   final ChatMessage message;
@@ -1431,6 +1475,7 @@ class _FinishedTurn extends StatelessWidget {
   final VoidCallback? onEdit;
   final VoidCallback? onCancelEdit;
   final Future<void> Function(String text)? onSubmitEdit;
+  final VoidCallback? onRemoveQueue;
   final VoidCallback? onRetry;
 
   @override
@@ -1443,6 +1488,7 @@ class _FinishedTurn extends StatelessWidget {
         onEdit: onEdit,
         onCancel: onCancelEdit,
         onSubmit: onSubmitEdit,
+        onRemoveQueue: onRemoveQueue,
       );
     }
     if (message.role == 'error') {
