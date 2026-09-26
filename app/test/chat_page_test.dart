@@ -277,7 +277,7 @@ void main() {
     expect(find.text('展开'), findsNothing);
     expect(find.byKey(const Key('wx-work-log')), findsOneWidget);
     final box = tester.getSize(find.byKey(const Key('wx-work-log')));
-    expect(box.height, 80);
+    expect(box.height, 66);
 
     for (var i = 0; i < 20; i++) {
       await tester.pump(const Duration(milliseconds: 100));

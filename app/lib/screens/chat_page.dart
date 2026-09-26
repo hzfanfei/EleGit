@@ -1745,9 +1745,40 @@ class _VoiceTurn extends StatelessWidget {
   }
 }
 
-const _workPanelHeight = 80.0;
+const _workRowHeight = 22.0;
+const _workRows = 3;
+const _workPanelHeight = _workRowHeight * _workRows;
 
-class _WorkingNote extends StatefulWidget {
+/// One visible step. Thought keeps only the latest line so the row stays put.
+({String text, bool thought}) _workStep(String block) {
+  final lines = block.split('\n').map((line) => line.trim()).where((line) => line.isNotEmpty).toList();
+  if (lines.isEmpty) return (text: '', thought: false);
+  final head = lines.first;
+  final thought = head == '思考' || head.startsWith('思考·') || head.startsWith('思考 ');
+  if (!thought) return (text: head, thought: false);
+  final inline = head.replaceFirst(RegExp(r'^思考[·\s]*'), '').trim();
+  final body = lines.skip(1).join('\n').trim();
+  final source = body.isNotEmpty ? body : inline;
+  if (source.isEmpty) return (text: '…', thought: true);
+  final latest = source.split('\n').map((line) => line.trim()).where((line) => line.isNotEmpty).last;
+  const max = 42;
+  final text = latest.length <= max ? latest : '…${latest.substring(latest.length - max)}';
+  return (text: text, thought: true);
+}
+
+List<({String text, bool thought})> _workSteps(String activity, String fallback) {
+  final raw = activity.trim();
+  if (raw.isEmpty) return [(text: fallback, thought: false)];
+  final steps = raw
+      .split(RegExp(r'\n{2,}'))
+      .map(_workStep)
+      .where((step) => step.text.isNotEmpty)
+      .toList();
+  if (steps.isEmpty) return [(text: fallback, thought: false)];
+  return steps;
+}
+
+class _WorkingNote extends StatelessWidget {
   const _WorkingNote({
     required this.phase,
     required this.activity,
@@ -1759,85 +1790,35 @@ class _WorkingNote extends StatefulWidget {
   final bool hideWhenIdle;
 
   @override
-  State<_WorkingNote> createState() => _WorkingNoteState();
-}
-
-class _WorkingNoteState extends State<_WorkingNote> {
-  final ScrollController _scroll = ScrollController();
-  String _shown = '';
-
-  @override
-  void dispose() {
-    _scroll.dispose();
-    super.dispose();
-  }
-
-  void _followEnd() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_scroll.hasClients) return;
-      final max = _scroll.position.maxScrollExtent;
-      if (_scroll.offset == max) return;
-      _scroll.jumpTo(max);
-    });
-  }
-
-  @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<String>(
-      valueListenable: widget.phase,
+      valueListenable: phase,
       builder: (context, livePhase, _) {
         return ValueListenableBuilder<String>(
-          valueListenable: widget.activity,
+          valueListenable: activity,
           builder: (context, liveActivity, _) {
-            if (widget.hideWhenIdle && liveActivity.trim().isEmpty) {
+            if (hideWhenIdle && liveActivity.trim().isEmpty) {
               return const SizedBox.shrink();
             }
-            final text = liveActivity.trim().isEmpty ? _livePhaseLabel(livePhase) : liveActivity.trim();
-            if (text != _shown) {
-              _shown = text;
-              _followEnd();
-            }
+            final steps = _workSteps(liveActivity, _livePhaseLabel(livePhase));
+            final visible = steps.length <= _workRows ? steps : steps.sublist(steps.length - _workRows);
+            final pad = _workRows - visible.length;
             return Semantics(
               liveRegion: true,
-              child: DecoratedBox(
+              child: SizedBox(
                 key: const Key('wx-work-log'),
-                decoration: BoxDecoration(
-                  color: Wx.surface,
-                  borderRadius: BorderRadius.circular(Wx.radius),
-                  border: Border.all(color: Wx.hairline),
-                ),
-                child: SizedBox(
-                  height: _workPanelHeight,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Padding(
-                          padding: EdgeInsets.only(top: 4),
-                          child: _WorkingDots(),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: ScrollConfiguration(
-                            behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
-                            child: SingleChildScrollView(
-                              controller: _scroll,
-                              physics: const NeverScrollableScrollPhysics(),
-                              child: Text(
-                                text,
-                                style: const TextStyle(
-                                  color: Wx.muted,
-                                  fontSize: 12,
-                                  height: 1.4,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                height: _workPanelHeight,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (var i = 0; i < pad; i++) const SizedBox(height: _workRowHeight),
+                    for (var i = 0; i < visible.length; i++)
+                      _WorkRow(
+                        text: visible[i].text,
+                        thought: visible[i].thought,
+                        active: i == visible.length - 1,
+                      ),
+                  ],
                 ),
               ),
             );
@@ -1848,8 +1829,69 @@ class _WorkingNoteState extends State<_WorkingNote> {
   }
 }
 
+class _WorkRow extends StatelessWidget {
+  const _WorkRow({
+    required this.text,
+    required this.thought,
+    required this.active,
+  });
+
+  final String text;
+  final bool thought;
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: _workRowHeight,
+      child: Row(
+        children: [
+          SizedBox(
+            width: 18,
+            child: Center(child: active ? const _WorkingDots(dot: 3.5) : const _StepDot()),
+          ),
+          if (thought) ...[
+            const Text(
+              '思考',
+              style: TextStyle(color: Wx.faint, fontSize: 11, height: 1),
+            ),
+            const SizedBox(width: 6),
+          ],
+          Expanded(
+            child: Text(
+              text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: active ? Wx.text : Wx.muted,
+                fontSize: 12,
+                height: 1.2,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StepDot extends StatelessWidget {
+  const _StepDot();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 4,
+      height: 4,
+      decoration: const BoxDecoration(color: Wx.faint, shape: BoxShape.circle),
+    );
+  }
+}
+
 class _WorkingDots extends StatefulWidget {
-  const _WorkingDots();
+  const _WorkingDots({this.dot = 5});
+
+  final double dot;
 
   @override
   State<_WorkingDots> createState() => _WorkingDotsState();
@@ -1884,12 +1926,12 @@ class _WorkingDotsState extends State<_WorkingDots> with SingleTickerProviderSta
           children: [
             for (var i = 0; i < 3; i++)
               Padding(
-                padding: EdgeInsets.only(right: i == 2 ? 0 : 4),
+                padding: EdgeInsets.only(right: i == 2 ? 0 : (widget.dot <= 4 ? 2 : 4)),
                 child: Opacity(
                   opacity: _opacity(i),
                   child: Container(
-                    width: 5,
-                    height: 5,
+                    width: widget.dot,
+                    height: widget.dot,
                     decoration: const BoxDecoration(
                       color: Wx.accent,
                       shape: BoxShape.circle,
