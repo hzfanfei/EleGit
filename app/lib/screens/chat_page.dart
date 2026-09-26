@@ -29,6 +29,13 @@ import '../widgets/wx_hold_to_speak.dart';
 import '../widgets/wx_rich_text.dart';
 import '../widgets/wx_typewriter_stream.dart';
 
+/// Mic sits this far above the system inset, clear of the 64px composer
+/// (8 + 48 + 8). The list keeps the same gap so the last line is not under the button.
+const _kChatFabLift = 92.0;
+const _kChatComposerBody = 64.0;
+const _kChatListBottomInset =
+    _kChatFabLift + kQuickVoiceFabBottomPad + kQuickVoiceMicSize - _kChatComposerBody + 8;
+
 class ChatPage extends StatefulWidget {
   const ChatPage({
     super.key,
@@ -1198,7 +1205,7 @@ class _ChatPageState extends State<ChatPage> {
                           key: const Key('wx-chat-list'),
                           controller: _scroll,
                           reverse: true,
-                          padding: const EdgeInsets.fromLTRB(4, 12, 4, 8),
+                          padding: const EdgeInsets.fromLTRB(4, 12, 4, _kChatListBottomInset),
                           itemCount: itemCount,
                           itemBuilder: (context, index) {
                       final chronological = itemCount - 1 - index;
@@ -1286,7 +1293,7 @@ class _ChatPageState extends State<ChatPage> {
             Positioned(
               left: 8,
               right: 0,
-              bottom: MediaQuery.of(context).padding.bottom + 92,
+              bottom: MediaQuery.of(context).padding.bottom + _kChatFabLift,
               child: Align(
                 alignment: Alignment.bottomRight,
                 child: BookQuickVoiceFab(

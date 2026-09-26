@@ -768,7 +768,7 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
                               _settings.horizontalPadding,
                               topContentPad,
                               _settings.horizontalPadding,
-                              24,
+                              kQuickVoiceFabClearance,
                             ),
                           )
                         : ListView.builder(
@@ -778,7 +778,7 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
                               _settings.horizontalPadding,
                               topContentPad,
                               _settings.horizontalPadding,
-                              24,
+                              kQuickVoiceFabClearance,
                             ),
                             itemCount: (_rangeLast - _rangeFirst + 1) + (_loadingTail ? 1 : 0),
                             itemBuilder: (context, itemIndex) {

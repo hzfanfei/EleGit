@@ -10,6 +10,12 @@ import '../voice/book_quick_voice_session.dart';
 import 'voice_caption_panel.dart';
 import 'wx_hold_to_speak.dart';
 
+/// Outer padding under the mic, the mic itself, and a gap so the last line
+/// of text ends above the button.
+const kQuickVoiceFabBottomPad = 12.0;
+const kQuickVoiceMicSize = 48.0;
+const kQuickVoiceFabClearance = kQuickVoiceFabBottomPad + kQuickVoiceMicSize + 8;
+
 /// Floating mic for book quick voice Q&A — hold to talk, no transcript UI.
 class BookQuickVoiceFab extends StatefulWidget {
   const BookQuickVoiceFab({
@@ -200,7 +206,7 @@ class _BookQuickVoiceFabState extends State<BookQuickVoiceFab>
     final maxCaptionW = MediaQuery.sizeOf(context).width * 0.72;
 
     return Padding(
-      padding: EdgeInsets.only(right: 14, bottom: 12 + widget.bottomInset),
+      padding: EdgeInsets.only(right: 14, bottom: kQuickVoiceFabBottomPad + widget.bottomInset),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.end,
@@ -333,8 +339,8 @@ class _BookQuickVoiceFabState extends State<BookQuickVoiceFab>
                   ),
                   child: SizedBox(
                     key: const Key('wx-quick-voice-mic'),
-                    width: 48,
-                    height: 48,
+                    width: kQuickVoiceMicSize,
+                    height: kQuickVoiceMicSize,
                     child: Icon(
                       _micIcon(phase),
                       size: 24,

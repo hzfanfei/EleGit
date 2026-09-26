@@ -59,6 +59,9 @@ void main() {
 
     expect(find.text('第一章'), findsWidgets);
     expect(find.text('正文。'), findsOneWidget);
+    final titleTop = tester.getTopLeft(find.text('第一章').first).dy;
+    final chromeBottom = tester.getRect(find.byType(BookReaderChrome)).bottom;
+    expect(titleTop - chromeBottom, inInclusiveRange(-0.5, 6));
     expect(find.byType(BookAskPanel), findsOneWidget);
 
     final hiddenPanel = tester.getRect(find.byType(BookAskPanel));
@@ -369,7 +372,7 @@ void main() {
       viewPadding: EdgeInsets.only(top: 47, bottom: 34),
       viewInsets: EdgeInsets.only(bottom: 320),
     );
-    expect(bookReaderTopContentPad(media: ime), closeTo(59, 0.1));
+    expect(bookReaderTopContentPad(media: ime), closeTo(47 + kReaderChromeBodyHeight, 0.1));
   });
 
   testWidgets('immersive sepia + 3/4 + keyboard collapse keeps paper under the status bar', (tester) async {

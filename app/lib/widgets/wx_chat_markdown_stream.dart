@@ -248,7 +248,10 @@ class _WxChatMarkdownStreamState extends State<WxChatMarkdownStream> {
           if (widget.showCaret && _pendingText.isNotEmpty)
             const Padding(
               padding: EdgeInsets.only(top: 2),
-              child: _BlinkingCaret(),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: _BlinkingCaret(),
+              ),
             ),
         ],
       ),
@@ -363,6 +366,7 @@ class _BlinkingCaretState extends State<_BlinkingCaret>
     return FadeTransition(
       opacity: _anim,
       child: Container(
+        key: const Key('wx-stream-caret'),
         width: 2,
         height: 15,
         decoration: BoxDecoration(

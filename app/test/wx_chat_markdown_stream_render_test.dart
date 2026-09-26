@@ -130,6 +130,7 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(find.byType(MarkdownBody), findsOneWidget);
       expect(find.textContaining('第二段还在写'), findsOneWidget);
+      expect(tester.getSize(find.byKey(const Key('wx-stream-caret'))).width, 2);
     });
 
     testWidgets('宽表格可横向滚动，不出现裸分隔符', (tester) async {
