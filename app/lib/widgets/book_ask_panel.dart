@@ -817,6 +817,8 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
                               live: _live,
                               typewriter: _typewriter,
                               phase: _livePhase,
+                              elapsed: _phaseElapsed,
+                              chapter: _livePhaseChapter,
                               onDeleteTurn: _confirmDeleteTurn,
                             )
                           : ListView.builder(
@@ -1479,6 +1481,8 @@ class _AllQaHistoryList extends StatelessWidget {
     required this.live,
     required this.typewriter,
     required this.phase,
+    required this.elapsed,
+    required this.chapter,
     required this.onDeleteTurn,
   });
 
@@ -1487,6 +1491,8 @@ class _AllQaHistoryList extends StatelessWidget {
   final bool live;
   final WxTypewriterStream typewriter;
   final ValueNotifier<String> phase;
+  final ValueNotifier<int> elapsed;
+  final String chapter;
   final Future<void> Function(BookQaTurn turn) onDeleteTurn;
 
   @override
@@ -1520,8 +1526,8 @@ class _AllQaHistoryList extends StatelessWidget {
               child: _BookAskLiveText(
                 typewriter: typewriter,
                 phase: phase,
-                elapsed: _phaseElapsed,
-                chapter: _livePhaseChapter,
+                elapsed: elapsed,
+                chapter: chapter,
               ),
             ),
           );
