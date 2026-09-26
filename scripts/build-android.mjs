@@ -11,7 +11,7 @@
 // Output naming: 问象-v<versionName>-<buildNumber>.apk
 //   e.g. 问象-v0.1.0-1.apk
 
-import { readFileSync, copyFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, copyFileSync, existsSync, mkdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -101,3 +101,29 @@ if (!existsSync(apkSrc)) {
 mkdirSync(staticDir, { recursive: true });
 copyFileSync(apkSrc, dest);
 console.log(`[build-android] OK → ${dest}`);
+
+// Best-effort: push a "build done" notification to the local server so the
+// user's phone buzzes when the APK is ready. Failures are non-fatal.
+try {
+  const sizeMb = (statSync(dest).size / (1024 * 1024)).toFixed(1);
+  const notifUrl = `${envValue("WENXIANG_PUBLIC_URL").replace(/\/$/, "")}/v1/inbox`;
+  const res = await fetch(notifUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Wenxiang-Key": envValue("WENXIANG_API_KEY"),
+    },
+    body: JSON.stringify({
+      kind: "build",
+      title: "Android 安装包已就绪",
+      body: `${finalName}（${sizeMb} MB）`,
+    }),
+  });
+  if (!res.ok) {
+    console.warn(`[build-android] 通知推送失败 HTTP ${res.status}`);
+  } else {
+    console.log(`[build-android] 通知已推送`);
+  }
+} catch (err) {
+  console.warn(`[build-android] 通知推送失败: ${err?.message || err}`);
+}

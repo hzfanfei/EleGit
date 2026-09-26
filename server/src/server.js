@@ -1143,6 +1143,32 @@ app.post("/v1/inbox/clear", async (_req, res) => {
   }
 });
 
+app.post("/v1/inbox", async (req, res) => {
+  const body = req.body || {};
+  const title = String(body.title || "").trim();
+  const text = String(body.body || "").trim();
+  if (!title || !text) {
+    res.status(400).json({ error: "title and body are required" });
+    return;
+  }
+  const kind = String(body.kind || "external-notification").slice(0, 64);
+  const sessionId = body.sessionId ? String(body.sessionId).slice(0, 128) : undefined;
+  const question = body.question ? String(body.question).slice(0, 200) : undefined;
+  try {
+    const item = await appendInboxItem(store.config.workspaceRoot, {
+      kind,
+      title: title.slice(0, 128),
+      body: text.slice(0, 280),
+      sessionId,
+      question,
+    });
+    broadcastInboxItem(item);
+    res.json({ ok: true, item });
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
 const httpServer = createServer(app);
 
 attachVoiceGateway(httpServer, {
