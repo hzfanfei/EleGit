@@ -19,6 +19,13 @@ void main() {
     expect(loaded.theme, ReaderThemeMode.sepia);
     expect(loaded.fontSize, 22);
     expect(loaded.navMode, ReaderNavMode.scroll);
+    expect(loaded.horizontalPadding, 28);
+  });
+
+  test('old default side margin opens out to the thin edge', () {
+    final loaded = ReaderSettings.fromJson(const {'horizontalPadding': 22});
+    expect(loaded.horizontalPadding, 8);
+    expect(const ReaderSettings().horizontalPadding, 8);
   });
 
   test('reader chrome fade matches paper in every theme', () {

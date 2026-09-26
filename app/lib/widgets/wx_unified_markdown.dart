@@ -212,7 +212,8 @@ class WxUnifiedMarkdownBody extends StatelessWidget {
       return _withRules(data);
     }
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment:
+          fitContent ? CrossAxisAlignment.start : CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
         for (var i = 0; i < segments.length; i++) ...[

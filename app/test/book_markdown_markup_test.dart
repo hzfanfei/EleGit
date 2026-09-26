@@ -230,4 +230,39 @@ void main() {
     );
     expect(tester.getSize(scroll).width, lessThanOrEqualTo(180));
   });
+
+  testWidgets('问书正文铺到屏幕宽度', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final sheet = bookReaderMarkdownStyle(
+      theme: wenxiangTheme(),
+      palette: ReaderPalette.forMode(ReaderThemeMode.dark),
+      settings: const ReaderSettings(),
+    );
+    const prose = '这是一段很长的问书正文，应该铺满屏幕宽度，不要在右边留出一大块空白。';
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: Scaffold(
+          body: ListView(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            children: [
+              BookMarkdownBody(
+                api: FakeWenxiangApi(),
+                bookId: 'book',
+                chapterFile: '001.md',
+                data: prose * 3,
+                styleSheet: sheet,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final rect = tester.getRect(find.textContaining('铺满屏幕宽度'));
+    expect(rect.left, lessThan(20));
+    expect(rect.right, greaterThan(360));
+  });
 }

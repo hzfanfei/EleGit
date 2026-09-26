@@ -52,7 +52,7 @@ class ReaderSettings {
     this.theme = ReaderThemeMode.dark,
     this.fontSize = 19,
     this.lineHeight = 1.72,
-    this.horizontalPadding = 22,
+    this.horizontalPadding = 8,
     this.navMode = ReaderNavMode.scroll,
   });
 
@@ -98,7 +98,7 @@ class ReaderSettings {
       theme: theme,
       fontSize: (json['fontSize'] as num?)?.toDouble().clamp(15, 28) ?? 19,
       lineHeight: (json['lineHeight'] as num?)?.toDouble().clamp(1.35, 2.1) ?? 1.72,
-      horizontalPadding: (json['horizontalPadding'] as num?)?.toDouble().clamp(8, 40) ?? 22,
+      horizontalPadding: _horizontalPadding(json['horizontalPadding']),
       navMode: navRaw == 'scroll' ? ReaderNavMode.scroll : ReaderNavMode.tapTurn,
     );
   }
@@ -110,6 +110,13 @@ class ReaderSettings {
         'horizontalPadding': horizontalPadding,
         'navMode': navMode == ReaderNavMode.scroll ? 'scroll' : 'tapTurn',
       };
+}
+
+double _horizontalPadding(Object? raw) {
+  final value = raw is num ? raw.toDouble() : null;
+  // 22 was the previous default; open that out to the thin edge.
+  if (value == null || value == 22) return 8;
+  return value.clamp(8, 40);
 }
 
 class BookReaderPrefs {

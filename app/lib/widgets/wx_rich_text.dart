@@ -258,7 +258,7 @@ Widget _prose(String text, Color color, bool selectable) {
     index += 1;
   }
   return Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
+    crossAxisAlignment: CrossAxisAlignment.stretch,
     children: children,
   );
 }

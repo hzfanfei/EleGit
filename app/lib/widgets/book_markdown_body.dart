@@ -87,6 +87,7 @@ class BookMarkdownBody extends StatelessWidget {
     return WxUnifiedMarkdownBody(
       data: _prepared(),
       styleSheet: styleSheet,
+      fitContent: false,
       tableTheme: tableTheme ?? WxMarkdownTableTheme.chat,
       onSelectionChanged: (_, selection, __) {
         if (!selection.isCollapsed) onConsumeTap?.call();

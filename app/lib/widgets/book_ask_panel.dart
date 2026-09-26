@@ -866,7 +866,7 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
                             )
                           : ListView.builder(
                               controller: widget.scrollController,
-                              padding: const EdgeInsets.fromLTRB(Wx.inset, 0, Wx.inset, 8),
+                              padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
                               itemCount: _messages.length + (_live ? 1 : 0),
                               itemBuilder: (context, index) {
                                 if (_live && index == _messages.length) {
@@ -1449,31 +1449,32 @@ class _AskBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     final isUser = role == 'user';
     final isError = role == 'error';
-    return Align(
-      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        constraints: const BoxConstraints(maxWidth: 480),
-        decoration: BoxDecoration(
-          color: isError
-              ? Wx.danger.withValues(alpha: 0.12)
-              : (isUser
-                  ? Wx.accent.withValues(alpha: 0.16)
-                  : Wx.hairline.withValues(alpha: 0.45)),
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(Wx.radius),
-            topRight: const Radius.circular(Wx.radius),
-            bottomLeft: Radius.circular(isUser ? Wx.radius : 3),
-            bottomRight: Radius.circular(isUser ? 3 : Wx.radius),
-          ),
-          border: streaming
-              ? Border.all(color: Wx.accent.withValues(alpha: 0.35))
-              : null,
-        ),
-        child: child,
+    final decorated = isUser || isError;
+    final box = Container(
+      width: isUser ? null : double.infinity,
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: EdgeInsets.symmetric(
+        horizontal: decorated ? 12 : 0,
+        vertical: decorated ? 8 : 2,
       ),
+      decoration: BoxDecoration(
+        color: isError
+            ? Wx.danger.withValues(alpha: 0.12)
+            : (isUser ? Wx.accent.withValues(alpha: 0.16) : null),
+        borderRadius: BorderRadius.only(
+          topLeft: const Radius.circular(Wx.radius),
+          topRight: const Radius.circular(Wx.radius),
+          bottomLeft: Radius.circular(isUser ? Wx.radius : 3),
+          bottomRight: Radius.circular(isUser ? 3 : Wx.radius),
+        ),
+        border: streaming
+            ? Border.all(color: Wx.accent.withValues(alpha: 0.35))
+            : null,
+      ),
+      child: child,
     );
+    if (!isUser) return box;
+    return Align(alignment: Alignment.centerRight, child: box);
   }
 }
 
@@ -1621,7 +1622,7 @@ class _AllQaHistoryList extends StatelessWidget {
     final extra = live ? 1 : 0;
     return ListView.builder(
       controller: scrollController,
-      padding: const EdgeInsets.fromLTRB(Wx.inset, 0, Wx.inset, 8),
+      padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
       itemCount: turns.length + extra,
       itemBuilder: (context, index) {
         if (live && index == turns.length) {
@@ -1709,7 +1710,7 @@ class _QaTurnCardState extends State<_QaTurnCard> {
                     bottomLeft: Radius.circular(Wx.radius),
                   ),
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 10, 4, 10),
+                    padding: const EdgeInsets.fromLTRB(4, 10, 4, 10),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
