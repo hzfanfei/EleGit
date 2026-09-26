@@ -207,6 +207,35 @@ void main() {
     expect(api.lastSessionId, isNot('s1'));
   });
 
+  testWidgets('progress hint is shown once before the answer starts', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: ChatPage(
+          api: FakeWenxiangApi(
+            streamPace: const Duration(milliseconds: 200),
+            streamEvents: [
+              ChatStreamEvent(type: 'status', phase: 'activity', detail: '读·README.md'),
+              ChatStreamEvent(type: 'done', engine: 'local-progress', sessionId: 's1'),
+            ],
+          ),
+          repo: sampleRepo(),
+          onBack: () {},
+        ),
+      ),
+    );
+    await _pumpUntilChatReady(tester);
+    await tester.tap(find.text('这个仓库最近在做什么？'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
+
+    expect(find.text('读·README.md'), findsOneWidget);
+
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+  });
+
   testWidgets('composer stays typable while a reply is streaming', (tester) async {
     await tester.pumpWidget(
       MaterialApp(

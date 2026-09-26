@@ -1686,22 +1686,23 @@ class _LiveTurn extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               body,
-              ValueListenableBuilder<String>(
-                valueListenable: activity,
-                builder: (context, liveActivity, _) {
-                  if (liveActivity.isEmpty) return const SizedBox.shrink();
-                  return Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Text(
-                      liveActivity,
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                            color: Wx.muted,
-                            height: 1.4,
-                          ),
-                    ),
-                  );
-                },
-              ),
+              if (value.isNotEmpty)
+                ValueListenableBuilder<String>(
+                  valueListenable: activity,
+                  builder: (context, liveActivity, _) {
+                    if (liveActivity.isEmpty) return const SizedBox.shrink();
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        liveActivity,
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                              color: Wx.muted,
+                              height: 1.4,
+                            ),
+                      ),
+                    );
+                  },
+                ),
             ],
           );
         },
