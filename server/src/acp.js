@@ -634,6 +634,43 @@ export function acpActivityLabelFromFsRead(rawPath) {
 }
 
 const TOOL_ACTIVITY_CAP = 4;
+const THOUGHT_ACTIVITY_CAP = 1000;
+
+function capToolLog(log) {
+  while (log.items.length > TOOL_ACTIVITY_CAP) {
+    const drop = log.items.findIndex((entry) => entry.id !== "thought");
+    if (drop < 0) {
+      log.items.splice(0, log.items.length - TOOL_ACTIVITY_CAP);
+      break;
+    }
+    log.items.splice(drop, 1);
+  }
+}
+
+function mergeThoughtText(prev, next) {
+  const prior = String(prev || "");
+  const piece = String(next || "");
+  if (!piece) return prior;
+  if (!prior) return piece;
+  if (piece.startsWith(prior) || prior.startsWith(piece)) {
+    return piece.length >= prior.length ? piece : prior;
+  }
+  if (piece.includes(prior) && piece.length > prior.length) return piece;
+  if (prior.endsWith(piece)) return prior;
+  return `${prior}${piece}`;
+}
+
+function clipThoughtText(text) {
+  const raw = String(text || "").replace(/\r/g, "").trim();
+  if (raw.length <= THOUGHT_ACTIVITY_CAP) return raw;
+  return `…${raw.slice(raw.length - (THOUGHT_ACTIVITY_CAP - 1))}`;
+}
+
+function thoughtPieceFromUpdate(update) {
+  const fromContent = textFromAcpContentBlock(update?.content);
+  const text = fromContent.trim() ? fromContent : String(update?.text || update?.delta || "");
+  return sanitizeAcpUserVisibleText(text).trim();
+}
 
 function clipToolOutput(text) {
   const lines = String(text || "")
@@ -731,6 +768,14 @@ function toolOutputFromUpdate(update) {
 }
 
 function renderToolItem(item) {
+  if (item.id === "thought") {
+    const body = String(item.output || "").trim();
+    if (!body) return item.title || "思考";
+    const preview = clipActivityLabel(body.split("\n")[0], 48);
+    const head = preview ? `思考·${preview}` : "思考";
+    if (body === preview) return head;
+    return `${head}\n${body}`;
+  }
   const lines = [];
   if (item.title) lines.push(item.title);
   if (item.command && !item.title.includes(item.command)) lines.push(item.command);
@@ -743,13 +788,35 @@ function renderToolLog(log) {
 }
 
 /**
- * Fold one ACP tool/plan update into a short bubble log.
- * Returns the text to show, or "" when this update is not a visible tool step.
- * Thoughts stay out. The log is display-only and is never sent back to the agent.
+ * Fold one ACP tool, plan, or thought update into a short bubble log.
+ * Returns the text to show, or "" when this update is not a visible step.
+ * Thoughts stay out of the answer and appear here as one「思考」block.
+ * The log is display-only and is never sent back to the agent.
  */
 export function pushAcpToolActivity(log, update) {
   if (!log || !Array.isArray(log.items) || !update || typeof update !== "object") return "";
   const kind = String(update.sessionUpdate || "");
+  if (kind === "agent_thought_chunk" || kind === "agent_thought") {
+    const piece = thoughtPieceFromUpdate(update);
+    if (!piece) return renderToolLog(log);
+    let item = log.items.find((entry) => entry.id === "thought");
+    if (!item) {
+      item = { id: "thought", title: "思考", command: "", output: "", raw: "" };
+      log.items.push(item);
+    }
+    item.raw = mergeThoughtText(item.raw || item.output, piece);
+    if (item.raw.length > THOUGHT_ACTIVITY_CAP * 8) {
+      item.raw = item.raw.slice(item.raw.length - THOUGHT_ACTIVITY_CAP * 8);
+    }
+    item.output = clipThoughtText(item.raw);
+    const index = log.items.indexOf(item);
+    if (index >= 0 && index !== log.items.length - 1) {
+      log.items.splice(index, 1);
+      log.items.push(item);
+    }
+    capToolLog(log);
+    return renderToolLog(log);
+  }
   if (kind === "plan") {
     const title = acpPlanActivityLabel(update);
     let item = log.items.find((entry) => entry.id === "plan");
@@ -759,9 +826,7 @@ export function pushAcpToolActivity(log, update) {
     } else {
       item.title = title;
     }
-    if (log.items.length > TOOL_ACTIVITY_CAP) {
-      log.items.splice(0, log.items.length - TOOL_ACTIVITY_CAP);
-    }
+    capToolLog(log);
     return renderToolLog(log);
   }
   if (kind !== "tool_call" && kind !== "tool_call_update") return "";
@@ -789,9 +854,7 @@ export function pushAcpToolActivity(log, update) {
     if (command) item.command = command;
     if (output) item.output = output;
   }
-  if (log.items.length > TOOL_ACTIVITY_CAP) {
-    log.items.splice(0, log.items.length - TOOL_ACTIVITY_CAP);
-  }
+  capToolLog(log);
   return renderToolLog(log);
 }
 

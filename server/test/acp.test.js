@@ -228,7 +228,7 @@ describe("acpActivityLabelFromUpdate", () => {
 });
 
 describe("pushAcpToolActivity", () => {
-  it("shows the tool name, command, and a short output without reasoning", () => {
+  it("shows the tool name, command, a short output, and the thought text", () => {
     const log = { items: [] };
     const started = pushAcpToolActivity(log, {
       sessionUpdate: "tool_call",
@@ -268,14 +268,52 @@ describe("pushAcpToolActivity", () => {
     });
     assert.match(counted, /4 处/);
 
-    assert.equal(
-      pushAcpToolActivity(log, {
-        sessionUpdate: "agent_thought_chunk",
-        content: { type: "text", text: "secret plan" },
-      }),
-      "",
-    );
     assert.doesNotMatch(counted, /secret plan/);
+
+    const thought = pushAcpToolActivity(log, {
+      sessionUpdate: "agent_thought_chunk",
+      content: { type: "text", text: "先看登录" },
+    });
+    assert.match(thought, /思考/);
+    assert.match(thought, /先看登录/);
+    assert.match(thought, /npm test/);
+    const continued = pushAcpToolActivity(log, {
+      sessionUpdate: "agent_thought_chunk",
+      content: { type: "text", text: "页" },
+    });
+    assert.match(continued, /先看登录页/);
+    assert.equal(log.items.filter((entry) => entry.id === "thought").length, 1);
+
+    const replaced = pushAcpToolActivity(log, {
+      sessionUpdate: "agent_thought",
+      content: { type: "text", text: "先看登录页，再对会话" },
+    });
+    assert.match(replaced, /先看登录页，再对会话/);
+    assert.doesNotMatch(replaced, /先看登录页先看登录页/);
+  });
+
+  it("keeps the thought block when older tools fall off the log", () => {
+    const log = { items: [] };
+    pushAcpToolActivity(log, {
+      sessionUpdate: "agent_thought_chunk",
+      content: { type: "text", text: "还在想范围" },
+    });
+    for (let i = 0; i < 6; i += 1) {
+      pushAcpToolActivity(log, {
+        sessionUpdate: "tool_call",
+        toolCallId: `t${i}`,
+        title: "Read",
+        kind: "read",
+        rawInput: { path: `file-${i}.txt` },
+      });
+    }
+    assert.equal(log.items.length, 4);
+    assert.equal(log.items.some((entry) => entry.id === "thought"), true);
+    const shown = pushAcpToolActivity(log, {
+      sessionUpdate: "agent_thought_chunk",
+      content: { type: "text", text: "，看文件" },
+    });
+    assert.match(shown, /还在想范围，看文件/);
   });
 });
 
