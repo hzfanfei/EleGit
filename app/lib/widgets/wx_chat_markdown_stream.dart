@@ -4,6 +4,7 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 
 import '../theme.dart';
 import '../utils/text_fit.dart';
+import 'wx_rich_text.dart';
 
 final _taskMarkerRe = RegExp(r'^===TASK_COMPLETED===\s*', multiLine: true);
 
@@ -74,11 +75,16 @@ class ChatMarkdownBlockParser {
           inFence = true;
         }
       } else if (line.trim().isEmpty) {
-        if (buf.isNotEmpty) {
+        if (buf.isNotEmpty && !_bufferIsTableOnly(buf.toString())) {
           completed.add(buf.toString());
           buf.clear();
         }
       } else {
+        final tableLine = isMarkdownTableLine(line);
+        if (buf.isNotEmpty && !tableLine && _bufferIsTableOnly(buf.toString())) {
+          completed.add(buf.toString());
+          buf.clear();
+        }
         buf.write(line);
         buf.write('\n');
       }
@@ -102,6 +108,16 @@ class ChatMarkdownBlockParser {
   static bool _isFenceClose(String line) {
     final stripped = line.trimLeft();
     return stripped.startsWith('```') && stripped.replaceAll('`', '').trim().isEmpty;
+  }
+
+  static bool _bufferIsTableOnly(String text) {
+    var any = false;
+    for (final line in text.split('\n')) {
+      if (line.trim().isEmpty) continue;
+      any = true;
+      if (!isMarkdownTableLine(line)) return false;
+    }
+    return any;
   }
 }
 
@@ -221,7 +237,7 @@ class _WxChatMarkdownStreamState extends State<WxChatMarkdownStream> {
               isNew: i >= _renderedHashes.length - (_renderedHashes.length - _completedCountAtLastRender()),
             ),
           if (_pendingText.isNotEmpty)
-            widget.showCaret
+            widget.showCaret && !looksLikeStructuredMarkdown(_pendingText)
                 ? _PendingView(text: _pendingText)
                 : _BlockView(
                     key: ValueKey(_pendingHash),
@@ -269,10 +285,9 @@ class _BlockView extends StatefulWidget {
 }
 
 class _BlockViewState extends State<_BlockView> {
-  @override
-  Widget build(BuildContext context) {
-    final body = MarkdownBody(
-      data: breakLongRuns(widget.source),
+  Widget _markdownBody(String data) {
+    return MarkdownBody(
+      data: data,
       selectable: true,
       styleSheet: widget.styleSheet,
       onTapLink: (text, href, title) {
@@ -281,6 +296,31 @@ class _BlockViewState extends State<_BlockView> {
         widget.onTapLink?.call(target, text);
       },
     );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final segments = splitChatMarkdownSegments(widget.source);
+    final Widget body;
+    if (segments.length == 1 && segments.first.kind == ChatMdSegmentKind.markdown) {
+      body = _markdownBody(segments.first.text);
+    } else if (segments.isEmpty) {
+      body = _markdownBody(widget.source);
+    } else {
+      body = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (var i = 0; i < segments.length; i++) ...[
+            if (i > 0) const SizedBox(height: 10),
+            if (segments[i].kind == ChatMdSegmentKind.table)
+              WxMarkdownTable(segments[i].text, selectable: true)
+            else
+              _markdownBody(segments[i].text),
+          ],
+        ],
+      );
+    }
     if (!widget.isNew) return body;
     return TweenAnimationBuilder<double>(
       tween: Tween<double>(begin: 0, end: 1),

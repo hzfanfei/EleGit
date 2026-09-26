@@ -75,5 +75,19 @@ void main() {
       expect(p.completed, ['block\n']);
       expect(p.pending, '');
     });
+
+    test('keeps table rows together across blank lines from the model', () {
+      final p = ChatMarkdownBlockParser();
+      p.update('| a | b |\n\n| --- | --- |\n\n| c | d |\n\nafter');
+      expect(p.completed, ['| a | b |\n| --- | --- |\n| c | d |\n']);
+      expect(p.pending, 'after\n');
+    });
+
+    test('flushes table before following prose', () {
+      final p = ChatMarkdownBlockParser();
+      p.update('| a | b |\n| --- | --- |\n| c | d |\n\nparagraph');
+      expect(p.completed, ['| a | b |\n| --- | --- |\n| c | d |\n']);
+      expect(p.pending, 'paragraph\n');
+    });
   });
 }

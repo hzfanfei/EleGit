@@ -49,7 +49,7 @@ void main() {
       );
       expect(tester.takeException(), isNull);
       expect(find.text('进度'), findsOneWidget);
-      expect(find.byType(Table), findsOneWidget);
+      expect(find.byKey(const Key('wx-md-table')), findsOneWidget);
       expect(find.textContaining('名称'), findsWidgets);
       expect(find.textContaining('登录'), findsWidgets);
       expect(find.textContaining('进行中'), findsWidgets);
@@ -96,6 +96,48 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(find.byType(MarkdownBody), findsOneWidget);
       expect(find.textContaining('第二段还在写'), findsOneWidget);
+    });
+
+    testWidgets('宽表格可横向滚动，不出现裸分隔符', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: wenxiangTheme(),
+          home: Scaffold(
+            backgroundColor: Wx.bg,
+            body: SingleChildScrollView(
+              child: SizedBox(
+                width: 160,
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: WxChatMarkdownStream(
+                    source: ValueNotifier<String>(
+                      '| 列甲 | 列乙 | 列丙 |\n| --- | --- | --- |\n| 值甲 | 值乙 | 值丙 |\n',
+                    ),
+                    styleSheet: chatMarkdownStyle(wenxiangTheme()),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 250));
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const Key('wx-table-scroll')), findsOneWidget);
+      expect(find.textContaining('| ---'), findsNothing);
+    });
+
+    testWidgets('流式表格尾部仍走表格渲染', (tester) async {
+      await _pumpWithSource(
+        tester,
+        '说明\n\n| 名称 | 状态 |\n| --- | --- |\n| 登录 | 进行',
+        showCaret: true,
+      );
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const Key('wx-md-table')), findsOneWidget);
+      expect(find.textContaining('名称'), findsWidgets);
+      expect(find.textContaining('| 登录'), findsNothing);
     });
   });
 }

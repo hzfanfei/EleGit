@@ -149,7 +149,8 @@ class WxReadableText extends StatelessWidget {
   }
 }
 
-bool _hasStructure(String text) {
+/// Headings, lists, or pipe tables — use structured renderers instead of plain text.
+bool looksLikeStructuredMarkdown(String text) {
   return text.split('\n').any((line) {
     final trimmed = line.trim();
     return _heading.hasMatch(trimmed) ||
@@ -159,8 +160,56 @@ bool _hasStructure(String text) {
   });
 }
 
+enum ChatMdSegmentKind { markdown, table }
+
+class ChatMdSegment {
+  const ChatMdSegment(this.kind, this.text);
+  final ChatMdSegmentKind kind;
+  final String text;
+}
+
+/// Splits one chat markdown block into prose [MarkdownBody] segments and tables.
+List<ChatMdSegment> splitChatMarkdownSegments(String text) {
+  if (text.trim().isEmpty) return const [];
+  final lines = text.split('\n');
+  final out = <ChatMdSegment>[];
+  final buf = StringBuffer();
+  ChatMdSegmentKind? mode;
+
+  void flush() {
+    if (buf.isEmpty || mode == null) return;
+    final chunk = buf.toString().trimRight();
+    if (chunk.isNotEmpty) out.add(ChatMdSegment(mode!, chunk));
+    buf.clear();
+    mode = null;
+  }
+
+  var index = 0;
+  while (index < lines.length) {
+    final line = lines[index];
+    if (line.trim().isEmpty) {
+      if (mode == ChatMdSegmentKind.markdown) buf.write('\n');
+      index += 1;
+      continue;
+    }
+    final tableLine = isMarkdownTableLine(line);
+    final kind = tableLine ? ChatMdSegmentKind.table : ChatMdSegmentKind.markdown;
+    if (mode == null) {
+      mode = kind;
+    } else if (mode != kind) {
+      flush();
+      mode = kind;
+    }
+    buf.write(line);
+    buf.write('\n');
+    index += 1;
+  }
+  flush();
+  return out;
+}
+
 Widget _prose(String text, Color color, bool selectable) {
-  if (!_hasStructure(text)) {
+  if (!looksLikeStructuredMarkdown(text)) {
     return _inline(text, color, selectable);
   }
   final lines = text.split('\n');
@@ -184,7 +233,7 @@ Widget _prose(String text, Color color, bool selectable) {
       if (children.isNotEmpty) {
         children.add(SizedBox(height: gap ? 12 : 8));
       }
-      children.add(_MarkdownTable(rows.join('\n'), selectable: selectable));
+      children.add(WxMarkdownTable(rows.join('\n'), selectable: selectable));
       gap = false;
       continue;
     }
@@ -374,8 +423,8 @@ class _CodeBlock extends StatelessWidget {
   }
 }
 
-class _MarkdownTable extends StatelessWidget {
-  const _MarkdownTable(this.src, {required this.selectable});
+class WxMarkdownTable extends StatelessWidget {
+  const WxMarkdownTable(this.src, {required this.selectable, super.key});
   final String src;
   final bool selectable;
 
