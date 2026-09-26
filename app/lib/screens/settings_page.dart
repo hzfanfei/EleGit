@@ -465,46 +465,39 @@ class _SettingsPageState extends State<SettingsPage> {
                         ),
                       );
                     }
-                    return ValueListenableBuilder<Connectivity>(
-                      valueListenable: NotificationCenter.instance.connectivity,
-                      builder: (context, conn, _) {
-                        final status = isEnabled
-                            ? (conn == Connectivity.connected
-                                ? '已连接：后台任务完成时弹出通知'
-                                : '已开启，等待连接…')
-                            : '关闭';
-                        return Material(
-                          color: Wx.surface,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            side: const BorderSide(color: Wx.hairline),
-                          ),
-                          clipBehavior: Clip.antiAlias,
-                          child: SwitchListTile(
-                            value: isEnabled,
-                            onChanged: (val) {
-                              NotificationCenter.instance
-                                  .setEnabled(widget.api!, want: val)
-                                  .catchError((Object err) {
-                                if (!mounted) return null;
-                                setState(() => _saveError = err.toString());
-                                return null;
-                              });
-                            },
-                            title: const Text('开启本地通知'),
-                            subtitle: Text(
-                              status,
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.muted),
-                            ),
-                            secondary: Icon(
-                              isEnabled
-                                  ? Icons.notifications_active_rounded
-                                  : Icons.notifications_off_rounded,
-                              color: isEnabled ? Wx.accent : Wx.faint,
-                            ),
-                          ),
-                        );
-                      },
+                    final status = isEnabled
+                        ? '已开启：后台任务完成时弹出通知'
+                        : '关闭';
+                    return Material(
+                      color: Wx.surface,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        side: const BorderSide(color: Wx.hairline),
+                      ),
+                      clipBehavior: Clip.antiAlias,
+                      child: SwitchListTile(
+                        value: isEnabled,
+                        onChanged: (val) {
+                          NotificationCenter.instance
+                              .setEnabled(widget.api!, want: val)
+                              .catchError((Object err) {
+                            if (!mounted) return null;
+                            setState(() => _saveError = err.toString());
+                            return null;
+                          });
+                        },
+                        title: const Text('开启本地通知'),
+                        subtitle: Text(
+                          status,
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.muted),
+                        ),
+                        secondary: Icon(
+                          isEnabled
+                              ? Icons.notifications_active_rounded
+                              : Icons.notifications_off_rounded,
+                          color: isEnabled ? Wx.accent : Wx.faint,
+                        ),
+                      ),
                     );
                   },
                 ),
