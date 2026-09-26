@@ -55,6 +55,7 @@ describe("claudeCodeSessionOptions", () => {
     const options = claudeCodeSessionOptions("MiniMax-M3");
     assert.deepEqual(options.settingSources, ["user"]);
     assert.equal(options.settings.enabledPlugins["superpowers@claude-plugins-official"], false);
+    assert.equal(options.permissionMode, "ask");
   });
 });
 
@@ -121,11 +122,12 @@ describe("whichSync", () => {
 
 describe("preferredAcpModeIds", () => {
   it("picks each engine's write mode first and never a write mode for read", () => {
-    assert.equal(preferredAcpModeIds(true, true)[0], "bypassPermissions");
+    assert.deepEqual(preferredAcpModeIds(true, true), ["bypassPermissions", "acceptEdits"]);
     assert.equal(preferredAcpModeIds(true, false)[0], "agent");
     for (const claude of [true, false]) {
       const read = preferredAcpModeIds(false, claude);
-      assert.deepEqual(read, ["ask", "plan"]);
+      assert.deepEqual(read, ["ask"]);
+      assert.equal(read.includes("plan"), false);
       assert.equal(read.some((id) => /dontAsk|bypass|agent|accept/i.test(id)), false);
     }
   });

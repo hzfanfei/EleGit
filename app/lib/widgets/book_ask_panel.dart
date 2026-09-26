@@ -671,7 +671,6 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
 
   @override
   void dispose() {
-    if (_busy) widget.api.cancelChat();
     _stopLivePhaseFallback();
     widget.readingPlace?.removeListener(_onReadingPlaceChanged);
     unawaited(_persistStore());
@@ -877,7 +876,7 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
                         input: _input,
                         onToggleVoice: _toggleVoice,
                         onSend: () => _send(),
-                        onStop: () => widget.api.cancelChat(),
+                        onStop: () => widget.api.cancelChat(sessionId: _sessionId),
                       ),
                     ),
                   ],

@@ -229,7 +229,6 @@ class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
   }
 
   void _backFromBookRead() {
-    _api.cancelChat();
     setState(() {
       _step = AppStep.books;
       _book = null;
@@ -238,7 +237,6 @@ class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
   }
 
   void _backFromChat() {
-    _api.cancelChat();
     setState(() {
       _step = AppStep.repos;
       _lastRepo = _memory?.lastRepo();

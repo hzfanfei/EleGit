@@ -13,7 +13,7 @@ import {
 import { handleBookVoiceTurn } from "./book-voice-turn.js";
 import { handleRepoVoiceTurn } from "./repo-voice-turn.js";
 import { streamAnswer, synthesizeBookAnswer } from "./ask.js";
-import { openSse, writeSse } from "./sse.js";
+import { openSse, writeSse, writeSseSafe } from "./sse.js";
 import {
   emptyRepoProgress,
   formatProgressContext,
@@ -114,6 +114,19 @@ setPreferredVoiceStack(store.config.voiceStack);
 
 const sessions = createSessionStore();
 const bookSessions = createSessionStore();
+const chatCancels = new Map();
+
+function beginChatTurn(sessionId) {
+  const prev = chatCancels.get(sessionId);
+  prev?.abort();
+  const ac = new AbortController();
+  chatCancels.set(sessionId, ac);
+  return ac;
+}
+
+function endChatTurn(sessionId, ac) {
+  if (chatCancels.get(sessionId) === ac) chatCancels.delete(sessionId);
+}
 const oauth = createOAuthSessions();
 const tunnel = createTunnelManager({
   port: PORT,
@@ -865,6 +878,8 @@ app.post("/v1/chat/voice-turn", async (req, res) => {
 });
 
 app.post("/v1/books/chat", async (req, res) => {
+  let turn;
+  let turnSessionId = "";
   try {
     const bookId = String(req.body?.bookId || "").trim();
     const message = String(req.body?.message || "").trim();
@@ -879,10 +894,9 @@ app.post("/v1/books/chat", async (req, res) => {
     const materialized = await ensureBookMaterialized(store.config.workspaceRoot, book);
     const owner = bookSessionOwner();
     const session = bookSessions.resolveForChat(owner, bookId, sessionId);
-    const signal = requestSignal(req, res);
-    req.on("close", () => {
-      bookSessions.cancel?.(session).catch(() => {});
-    });
+    turn = beginChatTurn(session.id);
+    turnSessionId = session.id;
+    const signal = turn.signal;
     const acp = detectCursorEngine();
     if (!acp) {
       res.status(503).json({
@@ -892,6 +906,7 @@ app.post("/v1/books/chat", async (req, res) => {
       return;
     }
     openSse(res);
+    res.on("error", () => {});
     writeSse(res, { type: "meta", sessionId: session.id, bookId: book.id, engine: "acp" });
     writeSse(res, { type: "status", phase: "connect" });
     writeSse(res, { type: "status", phase: "book" });
@@ -932,12 +947,12 @@ app.post("/v1/books/chat", async (req, res) => {
         synthesizeBookAnswer({ ...opts, question: message, book, bookContext, local }),
       signal,
       workspaceRoot: store.config.workspaceRoot,
+      bookId: book.id,
     })) {
-      if (signal.aborted) break;
       if (event.type === "done") {
         finalEngine = event.engine;
         finalAnswer = event.answer || "";
-        writeSse(res, {
+        writeSseSafe(res, {
           type: "done",
           engine: finalEngine,
           model: acp.model || null,
@@ -947,15 +962,15 @@ app.post("/v1/books/chat", async (req, res) => {
           sessionId: session.id,
         });
       } else {
-        writeSse(res, event);
+        writeSseSafe(res, event);
       }
     }
     if (signal.aborted) {
-      res.end();
+      try { res.end(); } catch { /* already gone */ }
       return;
     }
     if (!finalAnswer) {
-      writeSse(res, {
+      writeSseSafe(res, {
         type: "done",
         engine: finalEngine,
         answer: "",
@@ -964,18 +979,34 @@ app.post("/v1/books/chat", async (req, res) => {
         sessionId: session.id,
       });
     }
-    res.end();
+    try { res.end(); } catch { /* already gone */ }
   } catch (err) {
     if (res.headersSent) {
-      writeSse(res, { type: "error", error: err.message });
-      res.end();
+      writeSseSafe(res, { type: "error", error: err.message });
+      try { res.end(); } catch { /* already gone */ }
       return;
     }
     sendError(res, err);
+  } finally {
+    if (turn) endChatTurn(turnSessionId, turn);
   }
 });
 
+app.post("/v1/chat/cancel", async (req, res) => {
+  const sessionId = String(req.body?.sessionId || "").trim();
+  if (!sessionId) {
+    res.status(400).json({ error: "sessionId is required" });
+    return;
+  }
+  chatCancels.get(sessionId)?.abort();
+  await sessions.cancelById(sessionId).catch(() => {});
+  await bookSessions.cancelById(sessionId).catch(() => {});
+  res.json({ ok: true });
+});
+
 app.post("/v1/chat", async (req, res) => {
+  let turn;
+  let turnSessionId = "";
   try {
     const owner = String(req.body?.owner || "").trim();
     const repo = String(req.body?.repo || "").trim();
@@ -988,11 +1019,11 @@ app.post("/v1/chat", async (req, res) => {
       return;
     }
     const session = sessions.resolveForChat(owner, repo, sessionId);
-    const signal = requestSignal(req, res);
-    req.on("close", () => {
-      sessions.cancel?.(session).catch(() => {});
-    });
+    turn = beginChatTurn(session.id);
+    turnSessionId = session.id;
+    const signal = turn.signal;
     openSse(res);
+    res.on("error", () => {});
     writeSse(res, { type: "meta", sessionId: session.id });
     if (detectCursorEngine()) {
       writeSse(res, { type: "start", engine: "acp" });
@@ -1059,11 +1090,10 @@ app.post("/v1/chat", async (req, res) => {
       staticFiles: staticFilesPrompt(store.config),
       workspaceRoot: store.config.workspaceRoot,
     })) {
-      if (signal.aborted) break;
       if (event.type === "done") {
         finalEngine = event.engine;
         finalAnswer = event.answer;
-        writeSse(res, {
+        writeSseSafe(res, {
           type: "done",
           engine: event.engine,
           answer: event.answer,
@@ -1072,15 +1102,15 @@ app.post("/v1/chat", async (req, res) => {
           sessionId: session.id,
         });
       } else {
-        writeSse(res, event);
+        writeSseSafe(res, event);
       }
     }
     if (signal.aborted) {
-      res.end();
+      try { res.end(); } catch { /* already gone */ }
       return;
     }
     if (!finalAnswer) {
-      writeSse(res, {
+      writeSseSafe(res, {
         type: "done",
         engine: finalEngine,
         answer: "",
@@ -1089,14 +1119,16 @@ app.post("/v1/chat", async (req, res) => {
         sessionId: session.id,
       });
     }
-    res.end();
+    try { res.end(); } catch { /* already gone */ }
   } catch (err) {
     if (res.headersSent) {
-      writeSse(res, { type: "error", error: err.message });
-      res.end();
+      writeSseSafe(res, { type: "error", error: err.message });
+      try { res.end(); } catch { /* already gone */ }
       return;
     }
     sendError(res, err);
+  } finally {
+    if (turn) endChatTurn(turnSessionId, turn);
   }
 });
 
@@ -1120,6 +1152,9 @@ app.get("/v1/inbox", async (_req, res) => {
   try {
     const items = await listInbox(store.config.workspaceRoot, { unreadOnly: false });
     res.json({ items });
+    for (const it of items) {
+      if (it && it.id && !it.read) await markInboxRead(store.config.workspaceRoot, it.id);
+    }
   } catch (err) {
     sendError(res, err);
   }
@@ -1154,13 +1189,21 @@ app.post("/v1/inbox", async (req, res) => {
   const kind = String(body.kind || "external-notification").slice(0, 64);
   const sessionId = body.sessionId ? String(body.sessionId).slice(0, 128) : undefined;
   const question = body.question ? String(body.question).slice(0, 200) : undefined;
+  const answer = body.answer ? String(body.answer).slice(0, 20000) : undefined;
+  const owner = body.owner ? String(body.owner).slice(0, 128) : undefined;
+  const repo = body.repo ? String(body.repo).slice(0, 128) : undefined;
+  const bookId = body.bookId ? String(body.bookId).slice(0, 128) : undefined;
   try {
     const item = await appendInboxItem(store.config.workspaceRoot, {
       kind,
       title: title.slice(0, 128),
       body: text.slice(0, 280),
+      answer,
       sessionId,
       question,
+      owner,
+      repo,
+      bookId,
     });
     broadcastInboxItem(item);
     res.json({ ok: true, item });

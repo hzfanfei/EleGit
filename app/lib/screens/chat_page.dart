@@ -9,6 +9,7 @@ import '../copy/errors.dart';
 import '../copy/time.dart';
 import '../models.dart';
 import '../persist/app_memory.dart';
+import '../persist/chat_backfill.dart';
 import '../persist/book_reader_prefs.dart';
 import '../theme.dart';
 import '../voice/device_media.dart';
@@ -158,6 +159,7 @@ class _ChatPageState extends State<ChatPage> {
       },
     );
     _restoreLocal();
+    chatBackfillTick.addListener(_onChatBackfill);
     _agentMode = widget.memory?.agentModeFor(widget.repo.fullName) ?? false;
     widget.api
         .warmChatSession(widget.repo.owner, widget.repo.name)
@@ -746,13 +748,18 @@ class _ChatPageState extends State<ChatPage> {
       if (!mounted) return;
       await _typewriter.animateToEnd();
       if (!mounted) return;
-      final answer = _typewriter.fullText;
+      final answer = stripTaskMarker(_typewriter.fullText);
+      final already = _messages.any(
+        (message) => message.role == 'assistant' && sameChatText(message.content, answer),
+      );
       setState(() {
-        _messages.add(ChatMessage(
-          role: 'assistant',
-          content: answer,
-          engine: _liveEngine.value,
-        ));
+        if (answer.isNotEmpty && !already) {
+          _messages.add(ChatMessage(
+            role: 'assistant',
+            content: answer,
+            engine: _liveEngine.value,
+          ));
+        }
         _live = false;
       });
       _typewriter.reset();
@@ -802,6 +809,7 @@ class _ChatPageState extends State<ChatPage> {
           _busy = false;
           _live = false;
         });
+        _mergeBackfill();
       }
       _jumpToLatest();
     }
@@ -809,7 +817,36 @@ class _ChatPageState extends State<ChatPage> {
 
   void _stop() {
     if (!_busy) return;
-    widget.api.cancelChat();
+    widget.api.cancelChat(sessionId: _sessionId);
+  }
+
+  void _onChatBackfill() {
+    if (!mounted || _busy) return;
+    _mergeBackfill();
+  }
+
+  void _mergeBackfill() {
+    final stored = widget.memory?.loadChats(widget.repo.fullName);
+    if (stored == null) return;
+    var changed = false;
+    for (final entry in stored.transcripts.entries) {
+      final incoming = entry.value.where((message) => message.role == 'assistant');
+      if (incoming.isEmpty) continue;
+      final last = incoming.last;
+      final local = _transcripts[entry.key];
+      final have = local?.any(
+            (message) => message.role == 'assistant' && sameChatText(message.content, last.content),
+          ) ??
+          false;
+      if (have) continue;
+      _transcripts[entry.key] = List<ChatMessage>.from(entry.value);
+      changed = true;
+    }
+    if (!changed || !mounted) return;
+    setState(() {
+      _live = false;
+    });
+    _jumpToLatest(force: true);
   }
 
   bool get _nearBottom {
@@ -896,7 +933,7 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   void dispose() {
-    if (_busy) widget.api.cancelChat();
+    chatBackfillTick.removeListener(_onChatBackfill);
     _quickVoice.dispose();
     _disposeStt();
     _micSub?.cancel();

@@ -12,6 +12,34 @@ export { buildAcpPrompt, buildBookAcpPrompt } from "./acp.js";
  */
 export const TASK_COMPLETED_MARKER = "===TASK_COMPLETED===";
 const TASK_COMPLETED_RE = /^===TASK_COMPLETED===\s*$/m;
+const CHAT_ANSWER_CAP = 20000;
+
+/**
+ * When a finished reply contains the task marker, split the toast preview
+ * from the full text that should be written back into the chat.
+ */
+export function taskCompletionNotice(full, { session, question, bookId } = {}) {
+  const text = String(full || "");
+  const match = text.match(TASK_COMPLETED_RE);
+  if (!match) return null;
+  const answer = text.slice((match.index ?? 0) + match[0].length).trim();
+  if (!answer) return null;
+  const notice = {
+    kind: "agent-notification",
+    title: "回答已就绪",
+    body: answer.slice(0, 280),
+    answer: answer.slice(0, CHAT_ANSWER_CAP),
+    sessionId: session?.id,
+    question: String(question || "").slice(0, 200),
+  };
+  if (bookId) {
+    notice.bookId = String(bookId);
+  } else if (session?.owner && session?.repo) {
+    notice.owner = session.owner;
+    notice.repo = session.repo;
+  }
+  return notice;
+}
 
 export function streamOptsFromEnv() {
   const rawSize = String(process.env.WENXIANG_STREAM_CHUNK_SIZE ?? "0").trim();
@@ -176,6 +204,7 @@ export async function* streamAnswer({
   agentMode = false,
   staticFiles,
   workspaceRoot,
+  bookId,
 }) {
   const opts = { ...streamOpts, signal };
   const engine = detectEngine();
@@ -228,24 +257,16 @@ export async function* streamAnswer({
     }
     if (!fail && full) {
       if (workspaceRoot) {
-        const match = full.match(TASK_COMPLETED_RE);
-        if (match) {
-          const idx = match.index ?? 0;
-          const summary = full.slice(idx + match[0].length).trim();
-          if (summary) {
-            try {
-              const item = await appendInboxItem(workspaceRoot, {
-                kind: "agent-notification",
-                title: "回答已就绪",
-                body: summary.slice(0, 280),
-                sessionId: session.id,
-                question: String(question || "").slice(0, 200),
-              });
+        const notice = taskCompletionNotice(full, { session, question, bookId });
+        if (notice) {
+          try {
+            const item = await appendInboxItem(workspaceRoot, notice);
+            if (item) {
               broadcastInboxItem(item);
               yield { type: "notification", item };
-            } catch {
-              /* inbox is best-effort; never break the answer stream */
             }
+          } catch {
+            /* inbox is best-effort; never break the answer stream */
           }
         }
       }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildCursorPrompt, detectCursorEngine, streamAnswer, streamText, synthesizeLocalAnswer } from "../src/ask.js";
+import { buildCursorPrompt, detectCursorEngine, streamAnswer, streamText, synthesizeLocalAnswer, taskCompletionNotice } from "../src/ask.js";
 
 const sampleProgress = {
   repo: {
@@ -110,12 +110,40 @@ describe("streamAnswer", () => {
   });
 });
 
+describe("taskCompletionNotice", () => {
+  it("keeps the full answer for chat and a short body for the toast", () => {
+    const answer = `${"已修好。".repeat(80)}`;
+    const notice = taskCompletionNotice(`===TASK_COMPLETED===\n${answer}`, {
+      session: { id: "s1", owner: "acme", repo: "widget" },
+      question: "修一下",
+    });
+    assert.equal(notice.title, "回答已就绪");
+    assert.equal(notice.sessionId, "s1");
+    assert.equal(notice.owner, "acme");
+    assert.equal(notice.repo, "widget");
+    assert.equal(notice.answer, answer.trim());
+    assert.ok(notice.body.length <= 280);
+    assert.equal(notice.body, answer.trim().slice(0, 280));
+  });
+
+  it("tags book chats and ignores replies without the marker", () => {
+    assert.equal(taskCompletionNotice("普通回答", { session: { id: "s1" } }), null);
+    const notice = taskCompletionNotice("===TASK_COMPLETED===\n这一章主角离家。", {
+      session: { id: "b1", owner: "book", repo: "white-night" },
+      bookId: "white-night",
+    });
+    assert.equal(notice.bookId, "white-night");
+    assert.equal(notice.owner, undefined);
+    assert.equal(notice.answer, "这一章主角离家。");
+  });
+});
+
 describe("detectCursorEngine", () => {
   it("reports an ACP engine when a CLI exists, otherwise null", () => {
     const engine = detectCursorEngine();
     if (engine) {
       assert.ok(["claude-acp", "cursor-acp", "acp"].includes(engine.id));
-      assert.ok(["ask", "plan"].includes(engine.mode));
+      assert.equal(engine.mode, "ask");
       assert.equal(engine.transport, "stdio");
     } else {
       assert.equal(engine, null);

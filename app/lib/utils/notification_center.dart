@@ -9,6 +9,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/status.dart' as ws_status;
 
 import '../api/wenxiang_api.dart';
+import '../persist/chat_backfill.dart';
 import 'background_sync.dart';
 
 /// A single inbox notification item delivered by the companion.
@@ -22,6 +23,10 @@ class InboxItem {
     required this.read,
     this.sessionId,
     this.question,
+    this.answer,
+    this.owner,
+    this.repo,
+    this.bookId,
   });
 
   final String id;
@@ -32,6 +37,10 @@ class InboxItem {
   final bool read;
   final String? sessionId;
   final String? question;
+  final String? answer;
+  final String? owner;
+  final String? repo;
+  final String? bookId;
 
   factory InboxItem.fromJson(Map<String, dynamic> json) {
     DateTime parseCreated() {
@@ -49,6 +58,10 @@ class InboxItem {
       read: json['read'] == true,
       sessionId: json['sessionId']?.toString(),
       question: json['question']?.toString(),
+      answer: json['answer']?.toString(),
+      owner: json['owner']?.toString(),
+      repo: json['repo']?.toString(),
+      bookId: json['bookId']?.toString(),
     );
   }
 }
@@ -257,6 +270,18 @@ class NotificationCenter {
   }
 
   Future<void> _showItem(InboxItem item) async {
+    try {
+      await backfillChatFromNotice(
+        sessionId: item.sessionId ?? '',
+        answer: item.answer ?? '',
+        question: item.question ?? '',
+        owner: item.owner ?? '',
+        repo: item.repo ?? '',
+        bookId: item.bookId ?? '',
+      );
+    } catch (err) {
+      debugPrint('Chat backfill failed: $err');
+    }
     if (item.read) return;
     if (!Platform.isAndroid) return;
     final plugin = FlutterLocalNotificationsPlugin();
@@ -277,6 +302,10 @@ class NotificationCenter {
         NotificationDetails(android: details),
         payload: item.id,
       );
+      final id = item.id.trim();
+      if (id.isNotEmpty) {
+        await _api?.markInboxRead(id);
+      }
     } catch (err) {
       debugPrint('Show notification failed: $err');
     }

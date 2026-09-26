@@ -21,3 +21,13 @@ export function writeSse(res, event) {
   res.write(`data: ${JSON.stringify(event)}\n\n`);
   flushSse(res);
 }
+
+/** Keep draining a finished turn after the phone has already left. */
+export function writeSseSafe(res, event) {
+  if (!res || res.writableEnded || res.destroyed || res.socket?.destroyed) return;
+  try {
+    writeSse(res, event);
+  } catch {
+    /* client disconnected */
+  }
+}

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -158,10 +159,25 @@ class WenxiangApi {
     _checkoutClient = null;
   }
 
-  void cancelChat() {
+  void cancelChat({String? sessionId}) {
     _chatCancelled = true;
     _chatClient?.close();
     _chatClient = null;
+    final id = sessionId?.trim() ?? '';
+    if (id.isEmpty) return;
+    unawaited(_postChatCancel(id));
+  }
+
+  Future<void> _postChatCancel(String sessionId) async {
+    try {
+      await http
+          .post(
+            _uri('/v1/chat/cancel'),
+            headers: _headers,
+            body: jsonEncode({'sessionId': sessionId}),
+          )
+          .timeout(const Duration(seconds: 8));
+    } catch (_) {}
   }
 
   void cancelBookVoiceTurn() {

@@ -45,7 +45,7 @@ export function acpEnginePreference() {
 export function claudeCodeSessionOptions(model) {
   return {
     model,
-    permissionMode: "plan",
+    permissionMode: "ask",
     allowDangerouslySkipPermissions: true,
     settingSources: ["user"],
     settings: {
@@ -102,7 +102,7 @@ export function resolveClaudeAgentCommand() {
     bin: "claude-agent-acp",
     path: resolveNodeExecutable(),
     args: [script],
-    mode: "plan",
+    mode: "ask",
     model: acpModelId(),
     transport: "stdio",
     provider: "claude",
@@ -213,11 +213,10 @@ export function detectCursorEngine() {
 
 export function preferredAcpModeIds(agentMode, isClaude) {
   if (agentMode) {
-    const claude = ["bypassPermissions", "acceptEdits", "dontAsk", "agent", "default"];
-    const cursor = ["agent", "code", "default", "bypassPermissions", "acceptEdits", "dontAsk"];
-    return isClaude ? claude : cursor;
+    if (isClaude) return ["bypassPermissions", "acceptEdits"];
+    return ["agent", "code", "default", "bypassPermissions", "acceptEdits", "dontAsk"];
   }
-  return ["ask", "plan"];
+  return ["ask"];
 }
 
 export function selectPermissionOption(params, { agentMode = false } = {}) {
@@ -1096,6 +1095,13 @@ export function createSessionStore({
     }
   }
 
+  async function cancelById(id) {
+    const session = sessions.get(String(id || ""));
+    if (!session) return false;
+    await cancel(session);
+    return true;
+  }
+
   async function warm(session, cwd) {
     return warmRepo(session.owner, session.repo, cwd);
   }
@@ -1121,6 +1127,7 @@ export function createSessionStore({
     resolveForChat,
     prompt,
     cancel,
+    cancelById,
     warm,
     warmRepo,
     resetAllChannels,

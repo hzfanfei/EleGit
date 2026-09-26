@@ -160,7 +160,6 @@ class _BookChatPageState extends State<BookChatPage> {
 
   @override
   void dispose() {
-    if (_busy) widget.api.cancelChat();
     _input.dispose();
     _scroll.dispose();
     _typewriter.dispose();
@@ -246,7 +245,7 @@ class _BookChatPageState extends State<BookChatPage> {
                   ),
                   const SizedBox(width: 8),
                   IconButton.filled(
-                    onPressed: _busy ? () => widget.api.cancelChat() : () => _send(),
+                    onPressed: _busy ? () => widget.api.cancelChat(sessionId: _sessionId) : () => _send(),
                     icon: Icon(_busy ? Icons.stop : Icons.arrow_upward),
                   ),
                 ],
