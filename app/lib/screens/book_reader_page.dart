@@ -830,6 +830,10 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
                                         chapterTitle: heading,
                                         data: body,
                                         styleSheet: styleSheet,
+                                        tableTheme: bookReaderMarkdownTableTheme(
+                                          palette: palette,
+                                          fontSize: _settings.fontSize,
+                                        ),
                                         onTapLink: _onBookLink,
                                         onConsumeTap: () => _linkTappedThisGesture = true,
                                       ),

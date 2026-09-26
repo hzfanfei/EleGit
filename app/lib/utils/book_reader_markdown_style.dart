@@ -3,6 +3,7 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 
 import '../persist/book_reader_prefs.dart';
 import '../theme.dart';
+import '../widgets/wx_rich_text.dart';
 
 MarkdownStyleSheet bookReaderMarkdownStyle({
   required ThemeData theme,
@@ -79,6 +80,25 @@ MarkdownStyleSheet bookReaderMarkdownStyle({
     horizontalRuleDecoration: BoxDecoration(
       border: Border(top: BorderSide(color: palette.ink.withValues(alpha: 0.14), width: 0.6)),
     ),
+  );
+}
+
+WxMarkdownTableTheme bookReaderMarkdownTableTheme({
+  required ReaderPalette palette,
+  required double fontSize,
+}) {
+  final frameFill = Color.lerp(palette.paper, palette.ink, 0.06) ?? palette.paper;
+  final headerFill = Color.lerp(palette.paper, palette.ink, 0.11) ?? palette.paper;
+  final border = palette.ink.withValues(alpha: 0.14);
+  return WxMarkdownTableTheme(
+    frameFill: frameFill,
+    headerFill: headerFill,
+    borderColor: border,
+    headerInk: palette.ink,
+    bodyInk: palette.ink,
+    zebraFill: palette.ink.withValues(alpha: 0.045),
+    headerUnderline: Wx.accent.withValues(alpha: 0.55),
+    cellFontSize: fontSize * 0.9,
   );
 }
 

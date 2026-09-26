@@ -45,6 +45,7 @@ class WxUnifiedMarkdownBody extends StatelessWidget {
     this.selectable = true,
     this.splitTables = true,
     this.softWrapProse = true,
+    this.tableTheme = WxMarkdownTableTheme.chat,
   });
 
   final String data;
@@ -55,6 +56,7 @@ class WxUnifiedMarkdownBody extends StatelessWidget {
   final bool selectable;
   final bool splitTables;
   final bool softWrapProse;
+  final WxMarkdownTableTheme tableTheme;
 
   Widget _markdownChunk(String chunk) {
     final sheet = styleSheet;
@@ -92,7 +94,11 @@ class WxUnifiedMarkdownBody extends StatelessWidget {
         for (var i = 0; i < segments.length; i++) ...[
           if (i > 0) const SizedBox(height: 10),
           if (segments[i].kind == ChatMdSegmentKind.table)
-            WxMarkdownTable(segments[i].text, selectable: selectable)
+            WxMarkdownTable(
+              segments[i].text,
+              selectable: selectable,
+              theme: tableTheme,
+            )
           else
             _markdownChunk(segments[i].text),
         ],

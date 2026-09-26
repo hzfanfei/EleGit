@@ -423,16 +423,60 @@ class _CodeBlock extends StatelessWidget {
   }
 }
 
+@immutable
+class WxMarkdownTableTheme {
+  const WxMarkdownTableTheme({
+    required this.frameFill,
+    required this.headerFill,
+    required this.borderColor,
+    required this.headerInk,
+    required this.bodyInk,
+    required this.zebraFill,
+    required this.headerUnderline,
+    this.cellFontSize = 13.5,
+    this.borderRadius = 10,
+  });
+
+  final Color frameFill;
+  final Color headerFill;
+  final Color borderColor;
+  final Color headerInk;
+  final Color bodyInk;
+  final Color zebraFill;
+  final Color headerUnderline;
+  final double cellFontSize;
+  final double borderRadius;
+
+  /// Default for chat, repo cards, and [WxReadableText].
+  static const chat = WxMarkdownTableTheme(
+    frameFill: Wx.surface,
+    headerFill: Wx.raised,
+    borderColor: Wx.hairline,
+    headerInk: Wx.text,
+    bodyInk: Color(0xFFD8D4CC),
+    zebraFill: Color(0x121C1F24),
+    headerUnderline: Wx.accent,
+  );
+}
+
 class WxMarkdownTable extends StatelessWidget {
-  const WxMarkdownTable(this.src, {required this.selectable, super.key});
+  const WxMarkdownTable(
+    this.src, {
+    required this.selectable,
+    this.theme = WxMarkdownTableTheme.chat,
+    super.key,
+  });
+
   final String src;
   final bool selectable;
+  final WxMarkdownTableTheme theme;
 
   @override
   Widget build(BuildContext context) {
     final table = parseMarkdownTable(src);
+    final t = theme;
     if (table == null) {
-      return _inline(src, Wx.text, selectable);
+      return _inline(src, t.headerInk, selectable);
     }
 
     Widget cell(String text, {required bool header}) {
@@ -440,9 +484,9 @@ class WxMarkdownTable extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
         child: _inline(
           text,
-          header ? Wx.text : const Color(0xFFD8D4CC),
+          header ? t.headerInk : t.bodyInk,
           selectable,
-          size: 13.5,
+          size: t.cellFontSize,
           weight: header ? FontWeight.w600 : FontWeight.w400,
         ),
       );
@@ -460,9 +504,9 @@ class WxMarkdownTable extends StatelessWidget {
         final extra = scroll || count == 0 ? 0.0 : (width - natural) / count;
         final framed = DecoratedBox(
             decoration: BoxDecoration(
-              color: Wx.surface,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: Wx.hairline),
+              color: t.frameFill,
+              borderRadius: BorderRadius.circular(t.borderRadius),
+              border: Border.all(color: t.borderColor),
             ),
             child: Table(
               key: const Key('wx-md-table'),
@@ -470,16 +514,16 @@ class WxMarkdownTable extends StatelessWidget {
                 for (var i = 0; i < count; i++) i: FixedColumnWidth(columns[i] + extra),
               },
               defaultVerticalAlignment: TableCellVerticalAlignment.top,
-              border: const TableBorder(
-                horizontalInside: BorderSide(color: Wx.hairline),
-                verticalInside: BorderSide(color: Wx.hairline),
+              border: TableBorder(
+                horizontalInside: BorderSide(color: t.borderColor),
+                verticalInside: BorderSide(color: t.borderColor),
               ),
               children: [
                 TableRow(
-                  decoration: const BoxDecoration(
-                    color: Wx.raised,
+                  decoration: BoxDecoration(
+                    color: t.headerFill,
                     border: Border(
-                      bottom: BorderSide(color: Wx.accent, width: 1.2),
+                      bottom: BorderSide(color: t.headerUnderline, width: 1.2),
                     ),
                   ),
                   children: [
@@ -489,7 +533,7 @@ class WxMarkdownTable extends StatelessWidget {
                 for (var row = 0; row < table.rows.length; row++)
                   TableRow(
                     decoration: BoxDecoration(
-                      color: row.isOdd ? const Color(0x121C1F24) : Colors.transparent,
+                      color: row.isOdd ? t.zebraFill : Colors.transparent,
                     ),
                     children: [
                       for (final value in table.rows[row]) cell(value, header: false),

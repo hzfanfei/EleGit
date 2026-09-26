@@ -7,6 +7,7 @@ import '../api/wenxiang_api.dart';
 import '../theme.dart';
 import '../utils/book_markdown_assets.dart';
 import '../utils/book_markdown_markup.dart';
+import 'wx_rich_text.dart';
 import 'wx_unified_markdown.dart';
 
 final Map<String, Uint8List> _bookImageBytes = {};
@@ -24,6 +25,7 @@ class BookMarkdownBody extends StatelessWidget {
     this.onTapLink,
     this.onConsumeTap,
     this.launchExternalLinks = true,
+    this.tableTheme,
   });
 
   final WenxiangApi api;
@@ -43,6 +45,9 @@ class BookMarkdownBody extends StatelessWidget {
   /// still invoked for every link so callers can do their own bookkeeping
   /// (e.g. suppress the chrome-toggle gesture in the book reader).
   final bool launchExternalLinks;
+
+  /// When set, pipe tables follow the reader paper palette instead of chat chrome.
+  final WxMarkdownTableTheme? tableTheme;
 
   String _prepared() {
     final normalized = normalizeBookMarkdown(data);
@@ -82,6 +87,7 @@ class BookMarkdownBody extends StatelessWidget {
     return WxUnifiedMarkdownBody(
       data: _prepared(),
       styleSheet: styleSheet,
+      tableTheme: tableTheme ?? WxMarkdownTableTheme.chat,
       onSelectionChanged: (_, selection, __) {
         if (!selection.isCollapsed) onConsumeTap?.call();
       },

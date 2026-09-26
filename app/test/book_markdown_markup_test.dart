@@ -6,6 +6,7 @@ import 'package:wenxiang/theme.dart';
 import 'package:wenxiang/utils/book_markdown_markup.dart';
 import 'package:wenxiang/utils/book_reader_markdown_style.dart';
 import 'package:wenxiang/widgets/book_markdown_body.dart';
+import 'package:wenxiang/widgets/wx_rich_text.dart';
 
 import 'support/fake_api.dart';
 
@@ -120,6 +121,14 @@ void main() {
     expect(normalizeBookMarkdown('正文开始了。'), startsWith('　　正文开始了。'));
   });
 
+  test('reader table theme follows paper palette not chat chrome', () {
+    final light = ReaderPalette.forMode(ReaderThemeMode.light);
+    final reader = bookReaderMarkdownTableTheme(palette: light, fontSize: 19);
+    expect(reader.frameFill, isNot(WxMarkdownTableTheme.chat.frameFill));
+    expect(reader.bodyInk, light.ink);
+    expect(reader.cellFontSize, closeTo(17.1, 0.01));
+  });
+
   test('reader type scale separates headings and quiets links', () {
     final sheet = bookReaderMarkdownStyle(
       theme: wenxiangTheme(),
@@ -197,6 +206,10 @@ void main() {
               chapterFile: '001.md',
               data: '| 列甲 | 列乙 | 列丙 | 列丁 |\n| --- | --- | --- | --- |\n| 甲 | 乙 | 丙 | 丁 |',
               styleSheet: sheet,
+              tableTheme: bookReaderMarkdownTableTheme(
+                palette: ReaderPalette.forMode(ReaderThemeMode.dark),
+                fontSize: 19,
+              ),
             ),
           ),
         ),
