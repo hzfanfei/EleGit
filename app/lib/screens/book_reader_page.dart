@@ -675,10 +675,7 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
 
     final manifest = _manifest;
     final media = MediaQuery.of(context);
-    final topContentPad = bookReaderTopContentPad(
-      chromeVisible: _chromeVisible,
-      media: media,
-    );
+    final topContentPad = bookReaderTopContentPad(media: media);
     final styleSheet = bookReaderMarkdownStyle(
       theme: Theme.of(context),
       palette: palette,

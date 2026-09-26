@@ -352,6 +352,16 @@ void main() {
     }
   });
 
+  testWidgets('toggling the reader chrome does not move the chapter', (tester) async {
+    await _pumpBookReader(tester, expandAsk: false);
+    final before = tester.getTopLeft(find.text('第一章').first).dy;
+    final body = tester.getRect(find.byKey(const Key('book-reader-body')));
+    await tester.tapAt(Offset(body.center.dx, body.top + 80));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(tester.getTopLeft(find.text('第一章').first).dy, closeTo(before, 0.5));
+  });
+
   test('chrome top inset keeps viewPadding while IME zeros padding.top', () {
     const ime = MediaQueryData(
       size: Size(390, 844),
@@ -359,8 +369,7 @@ void main() {
       viewPadding: EdgeInsets.only(top: 47, bottom: 34),
       viewInsets: EdgeInsets.only(bottom: 320),
     );
-    expect(bookReaderTopContentPad(chromeVisible: true, media: ime), closeTo(59, 0.1));
-    expect(bookReaderTopContentPad(chromeVisible: false, media: ime), closeTo(12, 0.1));
+    expect(bookReaderTopContentPad(media: ime), closeTo(59, 0.1));
   });
 
   testWidgets('immersive sepia + 3/4 + keyboard collapse keeps paper under the status bar', (tester) async {

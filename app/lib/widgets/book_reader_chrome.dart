@@ -7,15 +7,12 @@ import '../theme.dart';
 /// Fixed inset below the status bar; chrome overlays without shifting body text.
 const kReaderContentTopInset = 12.0;
 
-/// List padding under the reader chrome. Uses [MediaQueryData.viewPadding]
-/// so an open IME cannot zero [MediaQueryData.padding.top] and drop text
-/// into the status-bar region.
-double bookReaderTopContentPad({
-  required bool chromeVisible,
-  required MediaQueryData media,
-}) {
-  final statusInset = chromeVisible ? media.viewPadding.top : 0.0;
-  return statusInset + kReaderContentTopInset;
+/// List padding under the reader chrome. The inset does not depend on whether
+/// the chrome is showing, so a tap does not move the book. Uses
+/// [MediaQueryData.viewPadding] so an open IME cannot zero
+/// [MediaQueryData.padding.top] and drop text into the status-bar region.
+double bookReaderTopContentPad({required MediaQueryData media}) {
+  return media.viewPadding.top + kReaderContentTopInset;
 }
 
 /// Status / nav bar style for the reader. Paper-colored status bar + no
