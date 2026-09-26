@@ -11,12 +11,14 @@ Future<void> openRepoWithSync({
   required WenxiangApi api,
   required RepoItem repo,
   required void Function(WxCloneMode mode)? onScrim,
+  required void Function(String path)? onPath,
   required Future<void> Function() onReady,
 }) async {
   onScrim?.call(WxCloneMode.open);
   CheckoutSyncStatus status;
   try {
     status = await api.checkoutStatus(repo.owner, repo.name);
+    if (status.path.isNotEmpty) onPath?.call(status.path);
   } catch (_) {
     onScrim?.call(WxCloneMode.clone);
     await api.checkout(repo.owner, repo.name);

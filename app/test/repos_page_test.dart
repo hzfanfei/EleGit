@@ -48,7 +48,7 @@ void main() {
 
     await tester.tap(find.text('demo'));
     await tester.pump();
-    expect(find.textContaining('~/问象/octo/demo'), findsWidgets);
+    expect(find.textContaining('/home/fei/问象/octo/demo'), findsWidgets);
     expect(
       tester.any(find.textContaining('正在')) || tester.any(find.textContaining('准备')),
       isTrue,
@@ -163,7 +163,7 @@ void main() {
 
     await tester.tap(find.text('demo'));
     await tester.pump();
-    expect(find.textContaining('~/问象/octo/demo'), findsWidgets);
+    expect(find.textContaining('/home/fei/问象/octo/demo'), findsWidgets);
     await tester.pump(const Duration(milliseconds: 30));
     await tester.pump();
     expect(find.text('没有落到本机'), findsNothing);

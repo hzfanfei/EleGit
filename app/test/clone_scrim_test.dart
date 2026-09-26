@@ -14,12 +14,14 @@ void main() {
         home: Scaffold(
           body: WxCloneScrim(
             repo: sampleRepo(),
+            path: '/home/fei/问象/octo/demo',
             mode: WxCloneMode.sync,
           ),
         ),
       ),
     );
 
+    await tester.pump(const Duration(milliseconds: 900));
     expect(find.textContaining('正在更新'), findsWidgets);
     expect(find.textContaining('正在克隆'), findsNothing);
   });
@@ -31,6 +33,7 @@ void main() {
         home: Scaffold(
           body: WxCloneScrim(
             repo: sampleRepo(),
+            path: '/home/fei/问象/octo/demo',
             error: ApiException(
               "fatal: destination path '/home/fei/问象/octo/demo' already exists and is not an empty directory",
             ),
@@ -46,6 +49,6 @@ void main() {
     expect(find.textContaining('already exists'), findsNothing);
     expect(find.textContaining('克隆'), findsWidgets);
     expect(find.textContaining('octo/demo'), findsWidgets);
-    expect(find.textContaining('~/问象/octo/demo'), findsWidgets);
+    expect(find.textContaining('/home/fei/问象/octo/demo'), findsWidgets);
   });
 }

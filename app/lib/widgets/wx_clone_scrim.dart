@@ -13,6 +13,7 @@ class WxCloneScrim extends StatefulWidget {
   const WxCloneScrim({
     super.key,
     required this.repo,
+    required this.path,
     this.mode = WxCloneMode.clone,
     this.error,
     this.onRetry,
@@ -21,6 +22,7 @@ class WxCloneScrim extends StatefulWidget {
   });
 
   final RepoItem repo;
+  final String path;
   final WxCloneMode mode;
   final Object? error;
   final VoidCallback? onRetry;
@@ -36,7 +38,7 @@ class _WxCloneScrimState extends State<WxCloneScrim> {
   int _stage = 0;
   Timer? _timer;
 
-  String get _path => '~/问象/${widget.repo.owner}/${widget.repo.name}';
+  String get _path => widget.path;
 
   @override
   void initState() {

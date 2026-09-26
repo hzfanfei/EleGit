@@ -48,6 +48,8 @@ class ReposPageState extends State<ReposPage> {
   List<RepoItem> _repos = [];
   bool _localOnly = false;
   RepoItem? _cloning;
+  String _workspaceRoot = '';
+  String _checkoutPath = '';
   WxCloneMode _cloneMode = WxCloneMode.clone;
   Object? _cloneError;
   int _cloneAttempt = 0;
@@ -61,7 +63,9 @@ class ReposPageState extends State<ReposPage> {
     _query.addListener(_onQueryChanged);
     widget.api.linkEpoch.addListener(_onLinkChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _loadRepos();
+      if (!mounted) return;
+      _loadWorkspace();
+      _loadRepos();
     });
   }
 
@@ -125,12 +129,29 @@ class ReposPageState extends State<ReposPage> {
     }
   }
 
+  Future<void> _loadWorkspace() async {
+    try {
+      final status = await widget.api.status();
+      if (!mounted) return;
+      setState(() => _workspaceRoot = status.workspaceRoot);
+    } catch (_) {}
+  }
+
+  String _pathFor(RepoItem repo) {
+    final root = _workspaceRoot.trim();
+    if (root.isEmpty) return '${repo.owner}/${repo.name}';
+    final sep = root.contains('\\') ? '\\' : '/';
+    final base = root.replaceAll(RegExp(r'[/\\]+$'), '');
+    return '$base$sep${repo.owner}$sep${repo.name}';
+  }
+
   Future<void> _open(RepoItem repo) async {
     if (_cloning != null && _cloneError == null) return;
     HapticFeedback.lightImpact();
     setState(() {
       _cloneError = null;
       _cloning = repo;
+      _checkoutPath = _pathFor(repo);
       _cloneMode = WxCloneMode.open;
       _cloneAttempt += 1;
     });
@@ -145,6 +166,10 @@ class ReposPageState extends State<ReposPage> {
             _cloneMode = mode;
             _cloneAttempt += 1;
           });
+        },
+        onPath: (path) {
+          if (!mounted || path.isEmpty) return;
+          setState(() => _checkoutPath = path);
         },
         onReady: () async {
           if (!mounted) return;
@@ -220,7 +245,9 @@ class ReposPageState extends State<ReposPage> {
     final blocked = _cloning != null && _cloneError == null;
     final home = widget.githubConnected
         ? (widget.githubLogin.isEmpty ? '选一个仓库问进度' : widget.githubLogin)
-        : (_localOnly ? '本机 ~/问象 仓库' : '选一个仓库问进度');
+        : (_localOnly
+            ? (_workspaceRoot.isEmpty ? '本机仓库' : _workspaceRoot)
+            : '选一个仓库问进度');
     final subtitle = home;
     return Scaffold(
       body: Column(
@@ -301,6 +328,7 @@ class ReposPageState extends State<ReposPage> {
                   WxCloneScrim(
                     key: ValueKey(_cloneAttempt),
                     repo: _cloning!,
+                    path: _checkoutPath,
                     mode: _cloneMode,
                     error: _cloneError,
                     onRetry: _cloneError == null ? null : () => _open(_cloning!),
@@ -325,8 +353,8 @@ class ReposPageState extends State<ReposPage> {
         title: query.isEmpty ? '本机还没有仓库' : '没有找到仓库',
         detail: query.isEmpty
             ? (widget.githubConnected
-                ? '把仓库克隆到 ~/问象/<owner>/<repo>，或连接 GitHub 搜索远程。'
-                : '把已有 git 仓库放到 ~/问象/<owner>/<repo>，或点「连接 GitHub」。')
+                ? '把仓库克隆到 ${_workspaceRoot.isEmpty ? '本机工作区' : _workspaceRoot}/<owner>/<repo>，或连接 GitHub 搜索远程。'
+                : '把已有 git 仓库放到 ${_workspaceRoot.isEmpty ? '本机工作区' : _workspaceRoot}/<owner>/<repo>，或点「连接 GitHub」。')
             : '换个关键词，或清空搜索看看全部。',
         action: TextButton(onPressed: _loadRepos, child: const Text('重新加载')),
       );
