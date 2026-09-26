@@ -137,53 +137,55 @@ class _BrandTitle extends StatelessWidget {
   final VoidCallback? onTap;
   final String tooltip;
 
+  Widget _tap(Widget child) {
+    if (onTap == null) return child;
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(onTap: onTap, child: child),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final brand = Row(
-      mainAxisSize: MainAxisSize.min,
+    final theme = Theme.of(context);
+    // The icon sits on the title line. A long subtitle stays underneath and
+    // ellipsizes, so it cannot shove the icon into the trailing actions.
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (showMark)
-          Padding(
-            padding: EdgeInsets.only(left: padMark ? Wx.inset : 0, right: 10),
-            child: const WxMark(size: 22),
-          ),
-        Flexible(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.titleMedium,
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (showMark)
+              Padding(
+                padding: EdgeInsets.only(left: padMark ? Wx.inset : 0, right: 10),
+                child: const WxMark(size: 22),
               ),
-              if (subtitle != null && subtitle!.isNotEmpty)
+            Flexible(
+              child: _tap(
                 Text(
-                  subtitle!,
+                  title,
                   overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelSmall,
+                  style: theme.textTheme.titleMedium,
                 ),
-            ],
-          ),
-        ),
-      ],
-    );
-    final tappable = onTap == null
-        ? brand
-        : Tooltip(
-            message: tooltip,
-            child: InkWell(
-              onTap: onTap,
-              child: brand,
+              ),
             ),
-          );
-    return Row(
-      children: [
-        Flexible(child: tappable),
-        if (status != null) ...[
-          const SizedBox(width: 6),
-          status!,
-        ],
+            if (status != null) ...[
+              const SizedBox(width: 6),
+              status!,
+              const SizedBox(width: 8),
+            ],
+          ],
+        ),
+        if (subtitle != null && subtitle!.isNotEmpty)
+          _tap(
+            Text(
+              subtitle!,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.labelSmall,
+            ),
+          ),
       ],
     );
   }

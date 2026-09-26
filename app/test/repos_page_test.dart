@@ -4,6 +4,7 @@ import 'package:wenxiang/api/wenxiang_api.dart';
 import 'package:wenxiang/models.dart';
 import 'package:wenxiang/screens/repos_page.dart';
 import 'package:wenxiang/theme.dart';
+import 'package:wenxiang/widgets/wx_chrome.dart';
 
 import 'support/fake_api.dart';
 
@@ -202,5 +203,27 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
     await tester.pump();
     expect(opened, isNull);
+  });
+
+  testWidgets('a long subtitle does not push the status icon into trailing actions', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: _theme(),
+        home: const Scaffold(
+          body: WxPageHeader(
+            title: '问象',
+            subtitle: '这是一段很长的副标题，不该把状态图标顶到右侧按钮旁边',
+            status: Icon(Icons.wifi, key: Key('wx-status')),
+            trailing: [Icon(Icons.smart_toy_outlined, key: Key('wx-trail'))],
+          ),
+        ),
+      ),
+    );
+
+    final title = tester.getRect(find.text('问象'));
+    final status = tester.getRect(find.byKey(const Key('wx-status')));
+    final trail = tester.getRect(find.byKey(const Key('wx-trail')));
+    expect(status.left, lessThan(title.right + 20));
+    expect(trail.left - status.right, greaterThan(24));
   });
 }
