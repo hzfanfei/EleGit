@@ -67,6 +67,7 @@ class FakeWenxiangApi extends WenxiangApi {
   String? lastSessionId;
   String? lastChatMessage;
   final List<String> chatMessages = <String>[];
+  final List<List<ChatMessage>> chatHistories = <List<ChatMessage>>[];
   String? lastBookTtsVoice;
   String? lastRepoTtsVoice;
   String? lastSetTtsVoice;
@@ -450,6 +451,7 @@ class FakeWenxiangApi extends WenxiangApi {
     lastSessionId = sessionId;
     lastChatMessage = message;
     chatMessages.add(message);
+    chatHistories.add(List<ChatMessage>.from(history));
     if (streamThrows != null) throw streamThrows!;
     if (streamDelay > Duration.zero) {
       await Future<void>.delayed(streamDelay);

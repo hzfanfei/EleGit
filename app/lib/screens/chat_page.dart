@@ -716,6 +716,19 @@ class _ChatPageState extends State<ChatPage> {
     return _busy && active != null && index > active;
   }
 
+  void _insertMessageAfterUser(int userIndex, ChatMessage message) {
+    final insertAt = userIndex + 1;
+    _messages.insert(insertAt, message);
+    for (var i = 0; i < _queuedUserIndices.length; i++) {
+      if (_queuedUserIndices[i] >= insertAt) {
+        _queuedUserIndices[i]++;
+      }
+    }
+    if (_editingIndex != null && _editingIndex! >= insertAt) {
+      _editingIndex = _editingIndex! + 1;
+    }
+  }
+
   Future<void> _removeQueuedTurn(int index) async {
     if (index < 0 || index >= _messages.length) return;
     final message = _messages[index];
@@ -841,11 +854,14 @@ class _ChatPageState extends State<ChatPage> {
       );
       setState(() {
         if (answer.isNotEmpty && !already) {
-          _messages.add(ChatMessage(
-            role: 'assistant',
-            content: answer,
-            engine: _liveEngine.value,
-          ));
+          _insertMessageAfterUser(
+            userIndex,
+            ChatMessage(
+              role: 'assistant',
+              content: answer,
+              engine: _liveEngine.value,
+            ),
+          );
         }
         _live = false;
       });
@@ -858,11 +874,14 @@ class _ChatPageState extends State<ChatPage> {
       final partial = _typewriter.fullText;
       setState(() {
         if (partial.isNotEmpty) {
-          _messages.add(ChatMessage(
-            role: 'assistant',
-            content: partial,
-            engine: _liveEngine.value,
-          ));
+          _insertMessageAfterUser(
+            userIndex,
+            ChatMessage(
+              role: 'assistant',
+              content: partial,
+              engine: _liveEngine.value,
+            ),
+          );
         }
         _live = false;
       });
@@ -877,11 +896,14 @@ class _ChatPageState extends State<ChatPage> {
         if (partial.isEmpty) {
           _messages.add(ChatMessage(role: 'error', content: shown));
         } else {
-          _messages.add(ChatMessage(
-            role: 'assistant',
-            content: partial,
-            engine: _liveEngine.value,
-          ));
+          _insertMessageAfterUser(
+            userIndex,
+            ChatMessage(
+              role: 'assistant',
+              content: partial,
+              engine: _liveEngine.value,
+            ),
+          );
           _messages.add(ChatMessage(role: 'error', content: shown));
         }
         _live = false;

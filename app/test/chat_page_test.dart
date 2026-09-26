@@ -19,6 +19,14 @@ ScrollableState _chatScrollState(WidgetTester tester) {
   );
 }
 
+Future<void> _pumpUntilChatReady(WidgetTester tester) async {
+  await tester.pump();
+  for (var i = 0; i < 40; i++) {
+    await tester.pump(const Duration(milliseconds: 20));
+    if (find.text('正在准备对话…').evaluate().isEmpty) break;
+  }
+}
+
 void main() {
   testWidgets('empty chat is a short prompt, not a chip wall', (tester) async {
     await tester.pumpWidget(
@@ -64,7 +72,7 @@ void main() {
         ),
       ),
     );
-    await tester.pump();
+    await _pumpUntilChatReady(tester);
     await tester.tap(find.text('这个仓库最近在做什么？'));
     await tester.pump();
 
@@ -109,7 +117,7 @@ void main() {
         ),
       ),
     );
-    await tester.pump();
+    await _pumpUntilChatReady(tester);
     await tester.tap(find.text('这个仓库最近在做什么？'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
@@ -132,7 +140,7 @@ void main() {
         ),
       ),
     );
-    await tester.pump();
+    await _pumpUntilChatReady(tester);
 
     expect(find.byType(AppBar), findsNothing);
     expect(find.byTooltip('新建会话'), findsOneWidget);
@@ -145,7 +153,8 @@ void main() {
     expect(find.textContaining('从进度问起'), findsOneWidget);
 
     await tester.tap(find.byTooltip('历史会话'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('历史会话'), findsOneWidget);
     expect(find.text('新会话'), findsWidgets);
 
@@ -166,21 +175,28 @@ void main() {
         ),
       ),
     );
-    await tester.pump();
+    await _pumpUntilChatReady(tester);
     await tester.tap(find.text('这个仓库最近在做什么？'));
-    await tester.pumpAndSettle();
+    for (var i = 0; i < 40; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+      if (find.textContaining('最近在修登录').evaluate().isNotEmpty) break;
+    }
 
     expect(find.textContaining('最近在修登录'), findsOneWidget);
     expect(find.byTooltip('编辑'), findsOneWidget);
 
     await tester.tap(find.byTooltip('编辑'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
     expect(find.byKey(const Key('wx-edit-field')), findsOneWidget);
     expect(find.text('取消'), findsOneWidget);
 
     await tester.enterText(find.byKey(const Key('wx-edit-field')), 'README 里怎么写的？');
     await tester.tap(find.text('发送'));
-    await tester.pumpAndSettle();
+    for (var i = 0; i < 40; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+      if (find.textContaining('README 说先跑').evaluate().isNotEmpty) break;
+    }
 
     expect(find.text('README 里怎么写的？'), findsWidgets);
     expect(find.text('这个仓库最近在做什么？'), findsNothing);
@@ -202,15 +218,16 @@ void main() {
         ),
       ),
     );
-    await tester.pump();
+    await _pumpUntilChatReady(tester);
     await tester.tap(find.text('这个仓库最近在做什么？'));
     await tester.pump();
 
     expect(find.textContaining('生成中'), findsOneWidget);
     await tester.enterText(find.byType(TextField), '先记下下一问');
     expect(find.text('先记下下一问'), findsOneWidget);
-    await tester.pump(const Duration(milliseconds: 100));
-    await tester.pumpAndSettle();
+    for (var i = 0; i < 15; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
   });
 
   testWidgets('stop ends the waiting UI without a stack dump', (tester) async {
@@ -224,7 +241,7 @@ void main() {
         ),
       ),
     );
-    await tester.pump();
+    await _pumpUntilChatReady(tester);
     await tester.tap(find.text('这个仓库最近在做什么？'));
     await tester.pump();
 
@@ -353,11 +370,12 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await _pumpUntilChatReady(tester);
 
     expect(find.byKey(const Key('wx-call')), findsNothing);
     await tester.tap(find.byKey(const Key('wx-voice-toggle')));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
     expect(find.text('按住 说话'), findsOneWidget);
     expect(find.byKey(const Key('wx-hold-speak')), findsOneWidget);
     expect(find.text('松手自动发送，上滑取消'), findsOneWidget);
@@ -382,11 +400,7 @@ void main() {
         ),
       ),
     );
-    await tester.pump();
-    for (var i = 0; i < 30; i++) {
-      await tester.pump(const Duration(milliseconds: 20));
-      if (find.text('正在准备对话…').evaluate().isEmpty) break;
-    }
+    await _pumpUntilChatReady(tester);
     await tester.tap(find.text('这个仓库最近在做什么？'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 40));
@@ -409,6 +423,8 @@ void main() {
       '这个仓库最近在做什么？',
       '第二条任务',
     ]);
+    expect(api.chatHistories.length, 2);
+    expect(api.chatHistories.last.any((m) => m.role == 'assistant'), isTrue);
     expect(find.textContaining('第一条答完'), findsOneWidget);
     expect(find.text('排队中'), findsNothing);
     for (var i = 0; i < 30; i++) {
@@ -435,11 +451,7 @@ void main() {
         ),
       ),
     );
-    await tester.pump();
-    for (var i = 0; i < 30; i++) {
-      await tester.pump(const Duration(milliseconds: 20));
-      if (find.text('正在准备对话…').evaluate().isEmpty) break;
-    }
+    await _pumpUntilChatReady(tester);
     await tester.tap(find.text('这个仓库最近在做什么？'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 40));
