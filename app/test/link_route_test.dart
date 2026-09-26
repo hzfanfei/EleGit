@@ -17,6 +17,19 @@ void main() {
     expect(isLanBaseUrl('http://11.0.0.1:8787'), isFalse);
   });
 
+  test('downloads follow the current base instead of the baked tunnel', () {
+    const tunnel =
+        'https://wenxiang.ngrok.app/files/%E9%97%AE%E8%B1%A1-v0.1.0-1.apk?token=abc';
+    expect(
+      downloadUrlOnBase(tunnel, 'http://192.168.110.169:8787'),
+      'http://192.168.110.169:8787/files/%E9%97%AE%E8%B1%A1-v0.1.0-1.apk?token=abc',
+    );
+    expect(
+      downloadUrlOnBase(tunnel, 'https://wenxiang.ngrok.app'),
+      'https://wenxiang.ngrok.app/files/%E9%97%AE%E8%B1%A1-v0.1.0-1.apk?token=abc',
+    );
+  });
+
   test('pickLanBase keeps the first reachable private url', () {
     final picked = pickLanBase(
       const [

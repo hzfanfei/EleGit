@@ -21,6 +21,23 @@ String linkRouteLabel(String raw) => isLanBaseUrl(raw) ? '局域网' : '穿透';
 
 String normalizeBaseUrl(String raw) => raw.trim().replaceAll(RegExp(r'/$'), '');
 
+/// Keep [downloadUrl]'s path and token, but send it to [baseUrl].
+String downloadUrlOnBase(String downloadUrl, String baseUrl) {
+  final raw = downloadUrl.trim();
+  final base = normalizeBaseUrl(baseUrl);
+  if (raw.isEmpty || base.isEmpty) return raw;
+  final file = Uri.tryParse(raw);
+  final root = Uri.tryParse(base);
+  if (file == null || root == null || root.host.isEmpty || !file.hasScheme) return raw;
+  return Uri(
+    scheme: root.scheme,
+    host: root.host,
+    port: root.hasPort ? root.port : null,
+    pathSegments: file.pathSegments,
+    queryParameters: file.queryParameters.isEmpty ? null : file.queryParameters,
+  ).toString();
+}
+
 /// First private URL in [urls] for which [reachable] returns true.
 String? pickLanBase(List<String> urls, {required bool Function(String url) reachable}) {
   for (final raw in urls) {

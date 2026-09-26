@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../api/link_route.dart';
 import '../api/wenxiang_api.dart';
 import '../models.dart';
 import '../theme.dart';
@@ -52,7 +53,7 @@ class _StaticFilesPageState extends State<StaticFilesPage> {
   }
 
   Future<void> _open(StaticFileItem file) async {
-    final raw = file.downloadUrl.trim();
+    final raw = downloadUrlOnBase(file.downloadUrl, widget.api.baseUrl);
     if (raw.isEmpty) return;
     final uri = Uri.tryParse(raw);
     if (uri == null) return;
