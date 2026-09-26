@@ -7,7 +7,7 @@ import '../api/wenxiang_api.dart';
 import '../theme.dart';
 import '../utils/book_markdown_assets.dart';
 import '../utils/book_markdown_markup.dart';
-import '../utils/text_fit.dart';
+import 'wx_unified_markdown.dart';
 
 final Map<String, Uint8List> _bookImageBytes = {};
 
@@ -79,12 +79,9 @@ class BookMarkdownBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final messenger = ScaffoldMessenger.maybeOf(context);
-    final codeStyle = (styleSheet.code ?? const TextStyle()).copyWith(backgroundColor: null);
-    return MarkdownBody(
+    return WxUnifiedMarkdownBody(
       data: _prepared(),
-      selectable: true,
       styleSheet: styleSheet,
-      builders: {'pre': _WrappingCodeBlock(codeStyle)},
       onSelectionChanged: (_, selection, __) {
         if (!selection.isCollapsed) onConsumeTap?.call();
       },
@@ -100,8 +97,6 @@ class BookMarkdownBody extends StatelessWidget {
         if (launchExternalLinks) {
           final external = bookMarkdownExternalUri(target);
           if (external != null) {
-            // Fire-and-forget: this callback is sync; surface launch failures
-            // via SnackBar if we have a messenger.
             () async {
               final opened = await launchUrl(
                 external,
@@ -118,8 +113,6 @@ class BookMarkdownBody extends StatelessWidget {
             }();
           }
         }
-        // Always let the caller observe the tap — they may want to mark
-        // the gesture (e.g. prevent the reader's chrome from toggling).
         onTapLink?.call(target, text);
       },
       sizedImageBuilder: (config) => _BookMarkdownImage(
@@ -132,36 +125,6 @@ class BookMarkdownBody extends StatelessWidget {
         width: config.width,
         height: config.height,
         onOpen: onConsumeTap,
-      ),
-    );
-  }
-}
-
-class _WrappingCodeBlock extends MarkdownElementBuilder {
-  _WrappingCodeBlock(this.style);
-
-  final TextStyle style;
-
-  @override
-  Widget? visitText(dynamic text, TextStyle? preferredStyle) {
-    // flutter_markdown only clears the inline stack when visitText returns
-    // a widget. The real block is built in visitElementAfterWithContext.
-    return const SizedBox.shrink();
-  }
-
-  @override
-  Widget? visitElementAfterWithContext(
-    BuildContext context,
-    dynamic element,
-    TextStyle? preferredStyle,
-    TextStyle? parentStyle,
-  ) {
-    final code = (element.textContent as String).replaceAll(RegExp(r'\s+$'), '');
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-      child: SelectableText(
-        breakLongRuns(code),
-        style: style,
       ),
     );
   }

@@ -5,6 +5,7 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import '../theme.dart';
 import '../utils/text_fit.dart';
 import 'wx_rich_text.dart';
+import 'wx_unified_markdown.dart';
 
 final _taskMarkerRe = RegExp(r'^===TASK_COMPLETED===\s*', multiLine: true);
 
@@ -284,80 +285,18 @@ class _BlockView extends StatefulWidget {
   State<_BlockView> createState() => _BlockViewState();
 }
 
-class _ChatWrappingCodeBlock extends MarkdownElementBuilder {
-  _ChatWrappingCodeBlock(this.style);
-
-  final TextStyle style;
-
-  @override
-  Widget? visitText(dynamic text, TextStyle? preferredStyle) {
-    return const SizedBox.shrink();
-  }
-
-  @override
-  Widget? visitElementAfterWithContext(
-    BuildContext context,
-    dynamic element,
-    TextStyle? preferredStyle,
-    TextStyle? parentStyle,
-  ) {
-    final code = (element.textContent as String).replaceAll(RegExp(r'\s+$'), '');
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-      child: SelectableText(
-        breakLongRuns(code),
-        style: style,
-      ),
-    );
-  }
-}
-
 class _BlockViewState extends State<_BlockView> {
-  Widget _markdownBody(String data) {
-    final sheet = widget.styleSheet;
-    final codeStyle = (sheet.code ?? const TextStyle()).copyWith(backgroundColor: null);
-    final prepared = prepareChatMarkdownForDisplay(
-      data,
-      isTableLine: isMarkdownTableLine,
-    );
-    return MarkdownBody(
-      data: prepared,
-      selectable: true,
-      styleSheet: sheet,
-      builders: {
-        'pre': _ChatWrappingCodeBlock(codeStyle),
-      },
+  @override
+  Widget build(BuildContext context) {
+    final body = WxUnifiedMarkdownBody(
+      data: widget.source,
+      styleSheet: widget.styleSheet,
       onTapLink: (text, href, title) {
         final target = (href ?? '').trim();
         if (target.isEmpty) return;
         widget.onTapLink?.call(target, text);
       },
     );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final segments = splitChatMarkdownSegments(widget.source);
-    final Widget body;
-    if (segments.length == 1 && segments.first.kind == ChatMdSegmentKind.markdown) {
-      body = _markdownBody(segments.first.text);
-    } else if (segments.isEmpty) {
-      body = _markdownBody(widget.source);
-    } else {
-      body = Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          for (var i = 0; i < segments.length; i++) ...[
-            if (i > 0) const SizedBox(height: 10),
-            if (segments[i].kind == ChatMdSegmentKind.table)
-              WxMarkdownTable(segments[i].text, selectable: true)
-            else
-              _markdownBody(segments[i].text),
-          ],
-        ],
-      );
-    }
     if (!widget.isNew) return body;
     return TweenAnimationBuilder<double>(
       tween: Tween<double>(begin: 0, end: 1),
