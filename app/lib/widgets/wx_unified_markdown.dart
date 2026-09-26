@@ -147,6 +147,7 @@ class WxUnifiedMarkdownBody extends StatelessWidget {
     this.selectable = true,
     this.splitTables = true,
     this.softWrapProse = true,
+    this.fitContent = true,
     this.tableTheme = WxMarkdownTableTheme.chat,
   });
 
@@ -158,6 +159,9 @@ class WxUnifiedMarkdownBody extends StatelessWidget {
   final bool selectable;
   final bool splitTables;
   final bool softWrapProse;
+
+  /// When false, quotes, code, and rules stretch to the available width.
+  final bool fitContent;
   final WxMarkdownTableTheme tableTheme;
 
   Widget _markdownChunk(String chunk) {
@@ -169,6 +173,7 @@ class WxUnifiedMarkdownBody extends StatelessWidget {
     return MarkdownBody(
       data: prepared,
       selectable: selectable,
+      fitContent: fitContent,
       styleSheet: sheet,
       builders: {'pre': WrappingMarkdownCodeBlock(codeStyle)},
       bulletBuilder: _wxBullet,

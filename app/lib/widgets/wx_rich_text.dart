@@ -846,37 +846,40 @@ class WxReplyFrame extends StatelessWidget {
     final ask = label == '你问';
     return Padding(
       padding: EdgeInsets.only(bottom: bottom),
-      child: CustomPaint(
-        painter: _ReplyRailPainter(color: railColor, width: railWidth),
-        child: Padding(
-          padding: EdgeInsets.only(left: railWidth + lead),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      label,
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                            color: labelColor,
-                            fontSize: ask ? 12 : 13,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: ask ? 0.4 : 0.8,
-                          ),
+      child: SizedBox(
+        width: double.infinity,
+        child: CustomPaint(
+          painter: _ReplyRailPainter(color: railColor, width: railWidth),
+          child: Padding(
+            padding: EdgeInsets.only(left: railWidth + lead),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        label,
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                              color: labelColor,
+                              fontSize: ask ? 12 : 13,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: ask ? 0.4 : 0.8,
+                            ),
+                      ),
                     ),
-                  ),
-                  if (trailing != null) trailing!,
-                ],
-              ),
-              const SizedBox(height: 8),
-              child,
-              if (footer != null) ...[
+                    if (trailing != null) trailing!,
+                  ],
+                ),
                 const SizedBox(height: 8),
-                footer!,
+                child,
+                if (footer != null) ...[
+                  const SizedBox(height: 8),
+                  footer!,
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ),

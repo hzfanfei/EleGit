@@ -225,7 +225,7 @@ class _WxChatMarkdownStreamState extends State<WxChatMarkdownStream> {
       curve: Wx.motionCurve,
       alignment: Alignment.topCenter,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
           for (var i = 0; i < _parser.completed.length; i++)
@@ -290,6 +290,7 @@ class _BlockViewState extends State<_BlockView> {
     final body = WxUnifiedMarkdownBody(
       data: widget.source,
       styleSheet: widget.styleSheet,
+      fitContent: false,
       onTapLink: (text, href, title) {
         final target = (href ?? '').trim();
         if (target.isEmpty) return;

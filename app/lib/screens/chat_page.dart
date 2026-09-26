@@ -1135,6 +1135,7 @@ class _ChatPageState extends State<ChatPage> {
       body: Stack(
         children: [
           Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
           WxPageHeader(
             onBack: () {
@@ -1197,7 +1198,7 @@ class _ChatPageState extends State<ChatPage> {
                           key: const Key('wx-chat-list'),
                           controller: _scroll,
                           reverse: true,
-                          padding: const EdgeInsets.fromLTRB(Wx.inset, 20, Wx.inset, 16),
+                          padding: const EdgeInsets.fromLTRB(4, 12, 4, 8),
                           itemCount: itemCount,
                           itemBuilder: (context, index) {
                       final chronological = itemCount - 1 - index;

@@ -206,5 +206,36 @@ void main() {
       expect(find.textContaining('名称'), findsWidgets);
       expect(find.textContaining('| 登录'), findsNothing);
     });
+
+    testWidgets('长正文铺到屏幕宽度', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final source = ValueNotifier<String>('这是一段很长的聊天正文，应该铺满屏幕宽度，不要在右边留出一大块空白。' * 3);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: wenxiangTheme(),
+          home: Scaffold(
+            body: ListView(
+              padding: const EdgeInsets.fromLTRB(4, 12, 4, 8),
+              children: [
+                WxReplyFrame(
+                  label: '问象',
+                  lead: 6,
+                  child: WxChatMarkdownStream(
+                    source: source,
+                    styleSheet: chatMarkdownStyle(wenxiangTheme()),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 250));
+      final prose = tester.getRect(find.textContaining('铺满屏幕宽度'));
+      expect(prose.left, lessThan(20));
+      expect(prose.right, greaterThan(370));
+    });
   });
 }
