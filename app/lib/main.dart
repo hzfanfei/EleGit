@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'diagnostics/client_error_log.dart';
 import 'screens/shell_page.dart';
 import 'theme.dart';
+import 'utils/notification_center.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -29,6 +30,11 @@ void main() {
     );
     return false;
   };
+  NotificationCenter.instance.initPlatform().then((_) {
+    return NotificationCenter.instance.hydrateFromPrefs();
+  }).catchError((Object err) {
+    debugPrint('NotificationCenter boot failed: $err');
+  });
   runApp(const WenxiangApp());
 }
 

@@ -997,6 +997,22 @@ class WenxiangApi {
         .timeout(const Duration(seconds: 15));
     return _json(res, fallback: '停止隧道失败');
   }
+
+  Future<Map<String, dynamic>> fetchInbox() async {
+    final res = await http
+        .get(_uri('/v1/inbox'), headers: _headers)
+        .timeout(const Duration(seconds: 15));
+    return _json(res, fallback: '读取通知中心失败');
+  }
+
+  Future<void> markInboxRead(String id) async {
+    final res = await http
+        .post(_uri('/v1/inbox/${Uri.encodeComponent(id)}/read'), headers: _headers)
+        .timeout(const Duration(seconds: 12));
+    if (res.statusCode >= 400) {
+      await _json(res, fallback: '标记通知已读失败');
+    }
+  }
 }
 
 class TtsVoicePreview {

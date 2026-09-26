@@ -93,6 +93,8 @@ import {
   staticFilesPrompt,
   contentTypeForStatic,
 } from "./static-files.js";
+import { appendInboxItem, clearInbox, listInbox, markInboxRead } from "./inbox.js";
+import { attachNotifications, broadcastInboxItem } from "./notifications.js";
 import { stat } from "node:fs/promises";
 
 loadLocalEnv();
@@ -929,6 +931,7 @@ app.post("/v1/books/chat", async (req, res) => {
       synthesize: (opts) =>
         synthesizeBookAnswer({ ...opts, question: message, book, bookContext, local }),
       signal,
+      workspaceRoot: store.config.workspaceRoot,
     })) {
       if (signal.aborted) break;
       if (event.type === "done") {
@@ -1054,6 +1057,7 @@ app.post("/v1/chat", async (req, res) => {
       signal,
       agentMode,
       staticFiles: staticFilesPrompt(store.config),
+      workspaceRoot: store.config.workspaceRoot,
     })) {
       if (signal.aborted) break;
       if (event.type === "done") {
@@ -1112,6 +1116,33 @@ app.post("/v1/tunnel/stop", (_req, res) => {
   res.json(tunnel.stop());
 });
 
+app.get("/v1/inbox", async (_req, res) => {
+  try {
+    const items = await listInbox(store.config.workspaceRoot, { unreadOnly: false });
+    res.json({ items });
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.post("/v1/inbox/:id/read", async (req, res) => {
+  try {
+    const changed = await markInboxRead(store.config.workspaceRoot, req.params.id);
+    res.json({ ok: true, changed });
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.post("/v1/inbox/clear", async (_req, res) => {
+  try {
+    await clearInbox(store.config.workspaceRoot);
+    res.json({ ok: true });
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
 const httpServer = createServer(app);
 
 attachVoiceGateway(httpServer, {
@@ -1121,6 +1152,9 @@ attachVoiceGateway(httpServer, {
 });
 attachSttGateway(httpServer, {
   getApiKey: () => store.config.apiKey,
+});
+attachNotifications(httpServer, {
+  getStore: () => store,
 });
 
 function logCompanionStartup() {

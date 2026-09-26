@@ -8,6 +8,8 @@ import '../copy/ask_engine.dart';
 import '../models/diagnostics.dart';
 import '../persist/app_memory.dart';
 import '../theme.dart';
+import '../utils/app_version.dart';
+import '../utils/notification_center.dart';
 import '../voice/cosyvoice_tts_voices.dart';
 import '../voice/device_media.dart';
 import '../voice/tts_voice_catalog.dart';
@@ -45,6 +47,8 @@ class _SettingsPageState extends State<SettingsPage> {
   String? _previewVoiceId;
   bool _previewLoading = false;
   String? _previewError;
+  AppVersion? _appVersion;
+  bool _appVersionLoading = false;
 
   @override
   void initState() {
@@ -63,6 +67,25 @@ class _SettingsPageState extends State<SettingsPage> {
           unawaited(_loadVoiceProfile());
         }
       });
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_loadAppVersion());
+    });
+  }
+
+  Future<void> _loadAppVersion() async {
+    if (_appVersionLoading) return;
+    setState(() => _appVersionLoading = true);
+    try {
+      final v = await AppVersion.load();
+      if (!mounted) return;
+      setState(() {
+        _appVersion = v;
+      });
+    } catch (_) {
+      if (!mounted) return;
+    } finally {
+      if (mounted) setState(() => _appVersionLoading = false);
     }
   }
 
@@ -418,6 +441,121 @@ class _SettingsPageState extends State<SettingsPage> {
                   const SizedBox(height: 14),
                   _ProbeResultCard(result: _probeResult!),
                 ],
+                const SizedBox(height: 28),
+                Text('通知中心', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 6),
+                Text(
+                  '问书后台任务完成时，通过本地系统通知提醒。无需服务器推送通道。',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.muted),
+                ),
+                const SizedBox(height: 12),
+                ValueListenableBuilder<bool>(
+                  valueListenable: NotificationCenter.instance.enabled,
+                  builder: (context, isEnabled, _) {
+                    if (widget.api == null) {
+                      return Material(
+                        color: Wx.surface,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          side: const BorderSide(color: Wx.hairline),
+                        ),
+                        child: const Padding(
+                          padding: EdgeInsets.fromLTRB(14, 12, 14, 12),
+                          child: Text('需要连接本机问象服务后才能开启通知。'),
+                        ),
+                      );
+                    }
+                    return ValueListenableBuilder<Connectivity>(
+                      valueListenable: NotificationCenter.instance.connectivity,
+                      builder: (context, conn, _) {
+                        final status = isEnabled
+                            ? (conn == Connectivity.connected
+                                ? '已连接：后台任务完成时弹出通知'
+                                : '已开启，等待连接…')
+                            : '关闭';
+                        return Material(
+                          color: Wx.surface,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            side: const BorderSide(color: Wx.hairline),
+                          ),
+                          clipBehavior: Clip.antiAlias,
+                          child: SwitchListTile(
+                            value: isEnabled,
+                            onChanged: (val) {
+                              NotificationCenter.instance
+                                  .setEnabled(widget.api!, want: val)
+                                  .catchError((Object err) {
+                                if (!mounted) return null;
+                                setState(() => _saveError = err.toString());
+                                return null;
+                              });
+                            },
+                            title: const Text('开启本地通知'),
+                            subtitle: Text(
+                              status,
+                              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.muted),
+                            ),
+                            secondary: Icon(
+                              isEnabled
+                                  ? Icons.notifications_active_rounded
+                                  : Icons.notifications_off_rounded,
+                              color: isEnabled ? Wx.accent : Wx.faint,
+                            ),
+                          ),
+                        );
+                      },
+                    );
+                  },
+                ),
+                const SizedBox(height: 28),
+                Text('关于', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 6),
+                Text(
+                  '问象的本机客户端。版本号会随每次打包写入 APK 文件名。',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.muted),
+                ),
+                const SizedBox(height: 12),
+                Material(
+                  color: Wx.surface,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: const BorderSide(color: Wx.hairline),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '问象',
+                                style: Theme.of(context).textTheme.titleSmall,
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                '打包自 hzfanfei/EleGit',
+                                style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.faint),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Text(
+                          _appVersionLoading
+                              ? '加载中…'
+                              : _appVersion?.label ?? '版本不可用',
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: Wx.muted,
+                                fontFeatures: const [FontFeature.tabularFigures()],
+                              ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
@@ -698,7 +836,7 @@ class _VoiceTile extends StatelessWidget {
                       height: 18,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : Icon(Icons.volume_up_rounded, size: 22, color: Wx.muted),
+                  : const Icon(Icons.volume_up_rounded, size: 22, color: Wx.muted),
             ),
           if (selected) const Icon(Icons.check_rounded, color: Wx.accent, size: 20),
         ],

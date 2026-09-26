@@ -1,8 +1,17 @@
 import { detectCursorEngine } from "./acp.js";
+import { appendInboxItem } from "./inbox.js";
+import { broadcastInboxItem } from "./notifications.js";
 
 export { detectCursorEngine } from "./acp.js";
 export { whichSync } from "./which.js";
 export { buildAcpPrompt, buildBookAcpPrompt } from "./acp.js";
+
+/**
+ * Marker the agent emits when a previously-deferred / background answer is now
+ * ready. Anything after this marker (on its own line) becomes the inbox body.
+ */
+export const TASK_COMPLETED_MARKER = "===TASK_COMPLETED===";
+const TASK_COMPLETED_RE = /^===TASK_COMPLETED===\s*$/m;
 
 export function streamOptsFromEnv() {
   const rawSize = String(process.env.WENXIANG_STREAM_CHUNK_SIZE ?? "0").trim();
@@ -37,6 +46,7 @@ export function buildCursorPrompt({ question, history, context }) {
     "You are 问象, a local repo progress assistant running on the user's computer.",
     "Answer in Simplified Chinese unless the user writes in another language.",
     "Be concise and efficient: lead with the direct answer; use short paragraphs or bullets; skip preamble, filler, and long recaps unless the user asks for detail.",
+    "【通知钩子】如你刚刚派发了后台任务并已得到最终结果，开始本轮答复前独占一行写 ===TASK_COMPLETED=== 再紧接答案正文；没有后台任务不要写这行。问象会把它推到用户的本地通知中心。",
     "Use ONLY the GitHub facts and local checkout facts below. If something is missing, say so.",
     "Do not invent commits, PRs, files, or dates. Prefer the local checkout when it disagrees with stale memory.",
     "",
@@ -165,6 +175,7 @@ export async function* streamAnswer({
   signal,
   agentMode = false,
   staticFiles,
+  workspaceRoot,
 }) {
   const opts = { ...streamOpts, signal };
   const engine = detectEngine();
@@ -216,6 +227,28 @@ export async function* streamAnswer({
       if (piece) yield { type: "delta", text: piece };
     }
     if (!fail && full) {
+      if (workspaceRoot) {
+        const match = full.match(TASK_COMPLETED_RE);
+        if (match) {
+          const idx = match.index ?? 0;
+          const summary = full.slice(idx + match[0].length).trim();
+          if (summary) {
+            try {
+              const item = await appendInboxItem(workspaceRoot, {
+                kind: "agent-notification",
+                title: "回答已就绪",
+                body: summary.slice(0, 280),
+                sessionId: session.id,
+                question: String(question || "").slice(0, 200),
+              });
+              broadcastInboxItem(item);
+              yield { type: "notification", item };
+            } catch {
+              /* inbox is best-effort; never break the answer stream */
+            }
+          }
+        }
+      }
       yield { type: "done", engine: "acp", answer: full, sessionId: session.id };
       return;
     }

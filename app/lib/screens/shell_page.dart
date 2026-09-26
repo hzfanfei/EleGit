@@ -1,3 +1,4 @@
+import 'dart:async' show unawaited;
 import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
@@ -10,6 +11,7 @@ import '../diagnostics/client_error_log.dart';
 import '../models.dart';
 import '../persist/app_memory.dart';
 import '../theme.dart';
+import '../utils/notification_center.dart';
 import '../widgets/wx_chrome.dart';
 import '../widgets/wx_edge_back.dart';
 import 'book_reader_page.dart';
@@ -74,8 +76,12 @@ class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed ||
-        state == AppLifecycleState.paused ||
+    if (state == AppLifecycleState.resumed) {
+      _uploadClientErrors();
+      if (NotificationCenter.instance.enabled.value) {
+        unawaited(NotificationCenter.instance.fetchAndShowUnread());
+      }
+    } else if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden) {
       _uploadClientErrors();
     }
@@ -138,6 +144,10 @@ class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
       });
       if (status.githubLogin.isNotEmpty) {
         await memory?.saveGithubLogin(status.githubLogin);
+      }
+      if (NotificationCenter.instance.enabled.value) {
+        // user opted in previously — restart the inbox socket now that api/key are known.
+        unawaited(NotificationCenter.instance.setEnabled(_api, want: true));
       }
     } catch (err) {
       if (!mounted) return;

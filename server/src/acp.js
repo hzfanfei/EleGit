@@ -261,6 +261,7 @@ export function buildAcpPrompt({
     "Answer in Simplified Chinese unless the user writes in another language.",
     "Be concise and efficient: lead with the direct answer; use short paragraphs or bullets; skip preamble, filler, and long recaps unless the user asks for detail.",
     "Do not invent commits, PRs, files, or dates. Prefer the local checkout when it disagrees with stale memory.",
+    "【通知钩子】如你刚刚派发了后台任务并已得到最终结果，开始本轮答复前独占一行写 ===TASK_COMPLETED=== 再紧接答案正文；没有后台任务不要写这行。问象会把它推到用户的本地通知中心。",
   ];
   if (staticFiles?.dir) {
     lines.push(
@@ -311,6 +312,7 @@ export const BOOK_DIRECT_ANSWER_RULES = [
   "You are 问象·问书. Ask mode only. Do not edit files.",
   "Use Simplified Chinese unless the user uses another language.",
   "【核心】只输出答案正文；检索、对照、推理过程全部在内部完成，禁止写进回复。",
+  "【通知钩子】如果你刚刚派发了后台任务并已得到最终结果，开始本轮答复前独占一行写 ===TASK_COMPLETED=== 再紧接答案正文；没有后台任务不要写这行。问象会把它推到用户的本地通知中心。",
   "【开头】第一个字就要进入实质内容（情节/观点/事实/建议），禁止铺垫、承让、流程旁白、复述问题。",
   "禁止以这些开头或起句：让我/我来/我先/正在/稍等/查完/看完/读完/分析/梳理/总结/归纳/我认为/我的理解/根据书中/从本章来看/关于你的问题/需要注意的是/这本书主要/本书讲的是（空洞总起）/好的/嗯/那么/首先/简单来说/总的来说/可以说/其实/这里。",
   "Quote or paraphrase the book when helpful. Do not invent passages, characters, or events.",
@@ -475,7 +477,7 @@ function claudeClaudeCodeExecutable() {
 }
 
 export class AcpChannel {
-  constructor({ command, cwd, spawnImpl = spawn, idleMs = 15 * 60 * 1000 } = {}) {
+  constructor({ command, cwd, spawnImpl = spawn, idleMs = 30 * 60 * 1000 } = {}) {
     this.command = command;
     this.cwd = cwd;
     this.spawnImpl = spawnImpl;
@@ -865,7 +867,7 @@ export class AcpChannel {
 
 export function createSessionStore({
   spawnImpl = spawn,
-  idleMs = 15 * 60 * 1000,
+  idleMs = 30 * 60 * 1000,
   now = () => new Date().toISOString(),
   resolveCommand = resolveAgentCommand,
 } = {}) {
