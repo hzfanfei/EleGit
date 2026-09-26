@@ -19,7 +19,7 @@ class WxLinkRouteMark extends StatelessWidget {
         lan ? Icons.wifi : Icons.cloud_outlined,
         key: Key(lan ? 'wx-link-lan' : 'wx-link-tunnel'),
         size: 16,
-        color: lan ? Wx.ok : Wx.accent,
+        color: Wx.accent,
         semanticLabel: label,
       ),
     );
