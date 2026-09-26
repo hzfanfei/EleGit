@@ -18,8 +18,12 @@ String breakLongRuns(String text, {int every = 8}) {
   return buf.toString();
 }
 
-/// Soft-wrap long ASCII in chat markdown prose without touching tables or
-/// fenced code (those use dedicated renderers).
+final _protectedMarkdown = RegExp(
+  r'<img\b[^>]*>|!\[[^\]]*\]\([^)\n]*\)|\[[^\]\n]*\]\([^)\n]*\)|`[^`\n]+`',
+);
+
+/// Soft-wrap long ASCII in chat markdown prose without touching tables,
+/// fenced code, or link and image targets (those must stay byte-for-byte).
 String prepareChatMarkdownForDisplay(
   String data, {
   bool Function(String line)? isTableLine,
@@ -42,7 +46,19 @@ String prepareChatMarkdownForDisplay(
       out.add(line);
       continue;
     }
-    out.add(breakLongRuns(line));
+    out.add(_breakOutsideProtected(line));
   }
   return out.join('\n');
+}
+
+String _breakOutsideProtected(String line) {
+  final out = StringBuffer();
+  var last = 0;
+  for (final match in _protectedMarkdown.allMatches(line)) {
+    out.write(breakLongRuns(line.substring(last, match.start)));
+    out.write(match.group(0));
+    last = match.end;
+  }
+  out.write(breakLongRuns(line.substring(last)));
+  return out.toString();
 }

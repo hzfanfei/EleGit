@@ -186,11 +186,14 @@ class _BookMarkdownImageState extends State<_BookMarkdownImage> {
   }
 
   String get _raw {
+    final String text;
     try {
-      return Uri.decodeFull(widget.uri.toString());
+      text = Uri.decodeFull(widget.uri.toString());
     } catch (_) {
-      return widget.uri.toString();
+      text = widget.uri.toString();
     }
+    // Wrap opportunities must not stay inside the file path.
+    return text.replaceAll('\u200b', '');
   }
 
   Future<Uint8List?> _load() async {
