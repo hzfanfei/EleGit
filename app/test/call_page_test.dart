@@ -321,7 +321,9 @@ void main() {
     client.emit(VoiceEvent(type: 'state', state: 'listening'));
     await tester.pump();
     media.speak(9000);
-    await tester.pump(const Duration(milliseconds: 1300));
+    await tester.pump(const Duration(milliseconds: 500));
+    media.speak(9000);
+    await tester.pump(const Duration(milliseconds: 800));
     expect(media.stopMicCalls, 0);
     expect(media.startCalls, 1);
 
@@ -330,8 +332,11 @@ void main() {
     await tester.pump();
     client.emit(VoiceEvent(type: 'state', state: 'barge'));
     await tester.pump();
+    // The voice that triggered the barge got through; the mic went mute right after.
+    media.speak(9000);
+    await tester.pump(const Duration(milliseconds: 500));
     media.speak(0);
-    await tester.pump(const Duration(milliseconds: 1300));
+    await tester.pump(const Duration(milliseconds: 800));
     expect(media.stopMicCalls, 1);
     expect(media.startCalls, 2);
   });

@@ -53,6 +53,7 @@ export function createVoiceSession({
   let micTimer = null;
   let micFrames = 0;
   let micMax = 0;
+  let micMaxPlaying = -1;
   let heardPcmSinceTurn = false;
   let speechBytesSinceTurn = 0;
   let bargeChunks = [];
@@ -91,16 +92,20 @@ export function createVoiceSession({
     micTimer = null;
     micFrames = 0;
     micMax = 0;
+    micMaxPlaying = -1;
   }
 
   function startMicLog() {
     stopMicLog();
     micTimer = setInterval(() => {
       if (micFrames > 0) {
-        console.log(`[voice] mic frames=${micFrames} maxRms=${Math.round(micMax)}`);
+        const time = new Date().toTimeString().slice(0, 8);
+        const playing = micMaxPlaying >= 0 ? ` playingRms=${Math.round(micMaxPlaying)}` : "";
+        console.log(`[voice] ${time} mic frames=${micFrames} maxRms=${Math.round(micMax)}${playing} state=${machine.state}`);
       }
       micFrames = 0;
       micMax = 0;
+      micMaxPlaying = -1;
     }, 2000);
     micTimer.unref?.();
   }
@@ -483,6 +488,7 @@ export function createVoiceSession({
       micFrames += 1;
       const rms = pcmRms(bytes);
       if (rms > micMax) micMax = rms;
+      if (playbackOpen && rms > micMaxPlaying) micMaxPlaying = rms;
       // 在听 must take the next sentence. A stuck playback flag used to drop it.
       if (machine.state === "listening" && playbackOpen) {
         clearPlaybackTimer();

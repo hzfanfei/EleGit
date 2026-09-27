@@ -304,21 +304,27 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
   }
 
   /// A barge means the mic just heard the user over the speaker, mid-sentence.
-  /// Restarting it here dropped the rest of that sentence. Reopen only if it went silent.
+  /// Restarting it here dropped the rest of that sentence, so keep it open.
+  /// On vivo the mic can still go mute once the speaker stops. The voice that broke
+  /// through at the barge itself proves nothing, so only frames after [_bargeMicGrace] count.
   void _checkMicAfterBarge() {
     _bargeMicCheck?.cancel();
     _bargeMicPeak = 0;
-    _watchBargeMic = true;
+    _watchBargeMic = false;
     final epoch = _micEpoch;
-    _bargeMicCheck = Timer(_bargeMicWindow, () {
-      _bargeMicCheck = null;
-      _watchBargeMic = false;
-      if (!_live || _disposing || epoch != _micEpoch) return;
-      if (_bargeMicPeak < _deadMicPeak) unawaited(_reopenMicAfterSpeaker());
+    _bargeMicCheck = Timer(_bargeMicGrace, () {
+      _watchBargeMic = true;
+      _bargeMicCheck = Timer(_bargeMicWindow - _bargeMicGrace, () {
+        _bargeMicCheck = null;
+        _watchBargeMic = false;
+        if (!_live || _disposing || epoch != _micEpoch) return;
+        if (_bargeMicPeak < _deadMicPeak) unawaited(_reopenMicAfterSpeaker());
+      });
     });
   }
 
-  static const _bargeMicWindow = Duration(milliseconds: 1200);
+  static const _bargeMicGrace = Duration(milliseconds: 300);
+  static const _bargeMicWindow = Duration(milliseconds: 900);
 
   /// Room noise on a live phone mic peaks well above this; a suppressed one sends near-zero.
   static const _deadMicPeak = 200;
