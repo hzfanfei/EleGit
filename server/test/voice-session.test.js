@@ -565,6 +565,70 @@ describe("createVoiceSession", () => {
     assert.deepEqual(asked, ["最近在做什么？", "换个话题吧"]);
   });
 
+  it("a voice squeezed by echo cancel still interrupts once the speaker is known to be quiet", async () => {
+    const asked = [];
+    const session = createVoiceSession({
+      config: { ready: true, provider: "volc" },
+      send: () => {},
+      sendAudio: () => {},
+      asr: { async start() {}, push() {} },
+      checkout: async () => ({ dest: "/tmp/octo/demo" }),
+      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      ask: async function* (opts) {
+        asked.push(opts.question);
+        yield { type: "delta", text: "仓库最近在修登录。" };
+        yield { type: "done", engine: "acp", answer: "仓库最近在修登录。" };
+      },
+      tts: async () => Buffer.from("pcm-audio-bytes"),
+    });
+
+    await session.start({ owner: "octo", repo: "demo", sessionId: "s1" });
+    session.onTranscript("最近在做什么？", { final: true });
+    await new Promise((r) => setTimeout(r, 40));
+
+    const frame = (level) => {
+      const buf = Buffer.alloc(2560);
+      for (let i = 0; i < buf.length; i += 2) buf.writeInt16LE(i % 4 ? -level : level, i);
+      return buf;
+    };
+    for (let i = 0; i < 15; i += 1) session.onPcm(frame(i % 3 ? 0 : 40));
+    assert.equal(session.state, "speaking");
+    for (let i = 0; i < 4; i += 1) session.onPcm(frame(250));
+    assert.equal(session.state, "listening");
+    session.onTranscript("换个话题吧", { final: true });
+    await new Promise((r) => setTimeout(r, 40));
+    assert.deepEqual(asked, ["最近在做什么？", "换个话题吧"]);
+  });
+
+  it("a leaky speaker keeps the loud bar during playback", async () => {
+    const session = createVoiceSession({
+      config: { ready: true, provider: "volc" },
+      send: () => {},
+      sendAudio: () => {},
+      asr: { async start() {}, push() {} },
+      checkout: async () => ({ dest: "/tmp/octo/demo" }),
+      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      ask: async function* () {
+        yield { type: "delta", text: "仓库最近在修登录。" };
+        yield { type: "done", engine: "acp", answer: "仓库最近在修登录。" };
+      },
+      tts: async () => Buffer.from("pcm-audio-bytes"),
+    });
+
+    await session.start({ owner: "octo", repo: "demo", sessionId: "s1" });
+    session.onTranscript("最近在做什么？", { final: true });
+    await new Promise((r) => setTimeout(r, 40));
+
+    const frame = (level) => {
+      const buf = Buffer.alloc(2560);
+      for (let i = 0; i < buf.length; i += 2) buf.writeInt16LE(i % 4 ? -level : level, i);
+      return buf;
+    };
+    for (let i = 0; i < 15; i += 1) session.onPcm(frame(i % 2 ? 150 : 400));
+    for (let i = 0; i < 10; i += 1) session.onPcm(frame(600));
+    assert.equal(session.state, "speaking");
+  });
+
   it("a hole in the user's voice during playback still interrupts", async () => {
     const asked = [];
     const session = createVoiceSession({

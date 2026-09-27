@@ -8,6 +8,15 @@ const INTERRUPT_SPEECH_BYTES = 16000 * 2 * 0.4;
  * normal interruption never reached recognition and the call stayed on 在说.
  */
 const PLAYBACK_BARGE_RMS = 800;
+/**
+ * vivo's call echo cancel leaves the speaker at 0-40 RMS but also squeezes the
+ * user's voice to 80-400 while it plays, so 800 never fires there. Once the echo
+ * level of this playback is known, the bar drops to a multiple of it.
+ */
+const PLAYBACK_BARGE_MIN_RMS = 100;
+const PLAYBACK_ECHO_MARGIN = 2.5;
+const PLAYBACK_ECHO_LEARN_BYTES = 16000 * 2 * 1;
+const PLAYBACK_ECHO_HALF_LIFE_BYTES = 16000 * 2 * 3;
 const PLAYBACK_BARGE_BYTES = 16000 * 2 * 0.25;
 // A breath or an echo-cancel hole must not wipe the sentence being spoken over the answer.
 const PLAYBACK_BARGE_GAP_MS = 1100;
@@ -59,6 +68,8 @@ export function createVoiceSession({
   let bargeChunks = [];
   let bargeSpeechBytes = 0;
   let bargeHardBytes = 0;
+  let echoBytes = 0;
+  let echoPeak = 0;
   let bargeGapTimer = null;
   let checkoutPromise = null;
   const callAbort = new AbortController();
@@ -100,7 +111,7 @@ export function createVoiceSession({
     micTimer = setInterval(() => {
       if (micFrames > 0) {
         const time = new Date().toTimeString().slice(0, 8);
-        const playing = micMaxPlaying >= 0 ? ` playingRms=${Math.round(micMaxPlaying)}` : "";
+        const playing = micMaxPlaying >= 0 ? ` playingRms=${Math.round(micMaxPlaying)} bar=${Math.round(playbackBargeRms())}` : "";
         console.log(`[voice] ${time} mic frames=${micFrames} maxRms=${Math.round(micMax)}${playing} state=${machine.state}`);
       }
       micFrames = 0;
@@ -189,12 +200,22 @@ export function createVoiceSession({
     bargeChunks = [];
     bargeSpeechBytes = 0;
     bargeHardBytes = 0;
+    echoBytes = 0;
+    echoPeak = 0;
     if (bargeGapTimer) clearTimeout(bargeGapTimer);
     bargeGapTimer = null;
   }
 
+  function playbackBargeRms() {
+    if (echoBytes < PLAYBACK_ECHO_LEARN_BYTES) return PLAYBACK_BARGE_RMS;
+    return Math.min(PLAYBACK_BARGE_RMS, Math.max(PLAYBACK_BARGE_MIN_RMS, echoPeak * PLAYBACK_ECHO_MARGIN));
+  }
+
   function notePlaybackPcm(bytes, rms) {
-    if (rms >= PLAYBACK_BARGE_RMS) {
+    const bar = playbackBargeRms();
+    echoBytes += bytes.length;
+    if (rms < bar) echoPeak = Math.max(echoPeak * 0.5 ** (bytes.length / PLAYBACK_ECHO_HALF_LIFE_BYTES), rms);
+    if (rms >= bar) {
       if (bargeGapTimer) {
         clearTimeout(bargeGapTimer);
         bargeGapTimer = null;
