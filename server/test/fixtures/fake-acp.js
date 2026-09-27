@@ -121,6 +121,7 @@ function answerPrompt(msg) {
   }
   const recall = /restore after reconnect/i.test(text) ? "seeded" : seen.length > 1 ? "followup" : "first";
   const persona = /You are 问象/.test(text) ? "persona:" : "";
+  const spoken = /【语音通话】/.test(text) ? "spoken:" : "";
   const planBit = planOutcome ? `plan:${planOutcome}:` : "";
   planOutcome = "";
   write({
@@ -141,7 +142,7 @@ function answerPrompt(msg) {
       sessionId,
       update: {
         sessionUpdate: "agent_message_chunk",
-        content: { type: "text", text: `${persona}${planBit}${recall}:${seen.length}` },
+        content: { type: "text", text: `${persona}${spoken}${planBit}${recall}:${seen.length}` },
       },
     },
   });

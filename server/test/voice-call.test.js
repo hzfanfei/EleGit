@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { createCallMachine, createUtteranceGate, pcmHasSpeech, takeSpeakable } from "../src/voice-call.js";
+import { createCallMachine, createUtteranceGate, pcmHasSpeech, runVoiceTurn, takeSpeakable } from "../src/voice-call.js";
+import { speechTextFromMarkdown } from "../src/spoken-tts.js";
 
 describe("call machine", () => {
   it("walks idle → connecting → listening → speaking → barge → listening", () => {
@@ -141,5 +142,99 @@ describe("barge energy", () => {
     const quiet = Buffer.alloc(320);
     assert.equal(pcmHasSpeech(loud), true);
     assert.equal(pcmHasSpeech(quiet), false);
+  });
+});
+
+describe("speech text", () => {
+  it("drops Markdown marks, links, tables and code before TTS", () => {
+    const md = [
+      "===TASK_COMPLETED===",
+      "## 登录流程",
+      "- **入口**在 `auth.js`，见 [文档](https://example.com/a)。",
+      "1. 先校验 token",
+      "| 文件 | 作用 |",
+      "| --- | --- |",
+      "| auth.js | 登录 |",
+      "```js",
+      "const token = read();",
+      "```",
+      "---",
+      "> 注意 C# 版本和 snake_case 名字",
+    ].join("\n");
+    assert.equal(
+      speechTextFromMarkdown(md),
+      ["登录流程", "入口在 auth.js，见 文档。", "先校验 token", "文件，作用", "auth.js，登录", "注意 C# 版本和 snake_case 名字"].join("\n"),
+    );
+  });
+
+  it("skips a code block that streams in over several sentences", async () => {
+    const spoken = [];
+    const pieces = ["改的是 **登录**。\n", "```js\nconst a = 1;\n", "if (a) run();\n```\n", "改完就好了。"];
+    await runVoiceTurn({
+      question: "改了啥",
+      ask: async function* () {
+        for (const text of pieces) yield { type: "delta", text };
+      },
+      tts: async (text) => {
+        spoken.push(text);
+        return Buffer.from([1, 2]);
+      },
+    });
+    assert.deepEqual(spoken, ["改的是 登录。", "改完就好了。"]);
+  });
+
+  it("does not read the task marker even when it is glued to the answer", () => {
+    assert.equal(speechTextFromMarkdown("===TASK_COMPLETED===默认用小米识别。"), "默认用小米识别。");
+  });
+});
+
+describe("first words", () => {
+  it("says the first clause without waiting for the full stop", () => {
+    assert.deepEqual(takeSpeakable("默认用小米的识别，", 320, { firstClause: true }), { speak: "默认用小米的识别，", rest: "" });
+    assert.deepEqual(takeSpeakable("嗯，", 320, { firstClause: true }), { speak: "", rest: "嗯，" });
+    assert.deepEqual(takeSpeakable("默认用小米的识别，", 320), { speak: "", rest: "默认用小米的识别，" });
+  });
+
+  it("plays streamed audio while the sentence is still being synthesized", async () => {
+    const events = [];
+    const piece = Buffer.alloc(8000, 1);
+    await runVoiceTurn({
+      question: "q",
+      ask: async function* () {
+        yield { type: "delta", text: "我看一下。" };
+      },
+      tts: async () => {
+        throw new Error("whole-sentence TTS should not run");
+      },
+      ttsStream: async (text, signal, onPcm) => {
+        for (let i = 0; i < 4; i += 1) {
+          events.push(`synth:${i}`);
+          await onPcm(piece);
+        }
+        events.push("synth:end");
+      },
+      onAudio: async (buf) => {
+        events.push(`play:${buf.length}`);
+      },
+    });
+    assert.deepEqual(events, ["synth:0", "synth:1", "play:16000", "synth:2", "synth:3", "play:16000", "synth:end"]);
+  });
+
+  it("falls back to whole-sentence TTS when streaming fails before any audio", async () => {
+    const played = [];
+    await runVoiceTurn({
+      question: "q",
+      ask: async function* () {
+        yield { type: "delta", text: "好的。" };
+      },
+      tts: async () => Buffer.from([7, 7]),
+      ttsStream: async () => {
+        throw new Error("stream down");
+      },
+      onAudio: async (buf) => {
+        played.push([...buf]);
+      },
+    });
+    assert.deepEqual(played, [[7, 7]]);
   });
 });

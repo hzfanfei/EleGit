@@ -6,6 +6,7 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   AcpChannel,
+  CALL_TURN_NOTE,
   DEFAULT_ACP_MODEL,
   acpModelId,
   setCursorModelPreference,
@@ -633,6 +634,39 @@ describe("session store", () => {
     });
     assert.match(restored.join(""), /seeded/);
     assert.match(restored.join(""), /persona:/);
+    await store.resetAllChannels();
+  });
+
+  it("sends the call note on every call turn, even after the text chat primed the thread", async () => {
+    const store = createSessionStore({
+      resolveCommand: () => ({
+        id: "acp",
+        path: process.execPath,
+        args: [fakeAcp],
+        mode: "ask",
+        transport: "stdio",
+      }),
+      spawnImpl: spawn,
+    });
+    const cwd = process.cwd();
+    const session = store.resolveForChat("hzfanfei", "fwechat", "");
+    const turn = async (question, call) => {
+      const out = [];
+      await store.prompt(session, { question, cwd, turnNote: call ? CALL_TURN_NOTE : "", onDelta: (t) => out.push(t) });
+      return out.join("");
+    };
+    assert.doesNotMatch(await turn("文字问", false), /spoken:/);
+    const call = await turn("电话里问", true);
+    assert.match(call, /spoken:/);
+    assert.doesNotMatch(call, /persona:/);
+    assert.match(await turn("电话里再问", true), /spoken:/);
+    assert.doesNotMatch(await turn("回到文字", false), /spoken:/);
+    await store.resetAllChannels();
+
+    const fresh = store.resolveForChat("hzfanfei", "fwechat", "");
+    const out = [];
+    await store.prompt(fresh, { question: "一上来就打电话", cwd, turnNote: CALL_TURN_NOTE, onDelta: (t) => out.push(t) });
+    assert.match(out.join(""), /persona:spoken:/);
     await store.resetAllChannels();
   });
 

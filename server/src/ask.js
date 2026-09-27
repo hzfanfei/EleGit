@@ -231,6 +231,7 @@ export async function* streamAnswer({
   streamOpts = streamOptsFromEnv(),
   signal,
   agentMode = false,
+  turnNote = "",
   staticFiles,
   workspaceRoot,
   bookId,
@@ -281,6 +282,7 @@ export async function* streamAnswer({
         cwd: local?.present ? local.path : undefined,
         buildPrompt,
         agentMode,
+        turnNote,
         staticFiles,
         onDelta: (chunk) => {
           full += chunk;

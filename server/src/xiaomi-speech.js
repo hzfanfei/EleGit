@@ -139,6 +139,79 @@ export async function xiaomiTts(xiaomi, text, signal, fetchImpl = fetch) {
   return pcm16FromWav(Buffer.from(b64, "base64")).pcm;
 }
 
+/**
+ * Streams raw 24 kHz PCM16 as Xiaomi produces it. The first audio lands in about
+ * half a second, versus about two seconds for the whole sentence.
+ */
+export async function xiaomiTtsStream(xiaomi, text, { signal, onPcm, fetchImpl = fetch } = {}) {
+  const spoken = String(text || "").trim();
+  if (!isSpeakableTtsText(spoken)) return 0;
+  const voiceId = isXiaomiTtsVoice(xiaomi?.ttsVoice) ? xiaomi.ttsVoice : DEFAULT_XIAOMI_TTS_VOICE;
+  const res = await fetchImpl(xiaomi.baseUrl || XIAOMI_SPEECH_URL, {
+    method: "POST",
+    headers: speechHeaders(xiaomi.apiKey),
+    body: JSON.stringify({
+      model: xiaomi?.ttsModel || XIAOMI_TTS_MODEL,
+      stream: true,
+      messages: [
+        { role: "user", content: TTS_STYLE },
+        { role: "assistant", content: spoken },
+      ],
+      audio: { format: "pcm16", voice: xiaomiApiVoice(voiceId) },
+    }),
+    signal,
+  });
+  if (!res.ok || !res.body) {
+    const err = new Error(`xiaomi tts stream failed (${res.status})`);
+    err.status = res.status;
+    throw err;
+  }
+  const decoder = new TextDecoder();
+  let pending = "";
+  let total = 0;
+  let odd = null;
+  const takeLine = async (line) => {
+    const data = line.startsWith("data:") ? line.slice(5).trim() : "";
+    if (!data || data === "[DONE]") return;
+    let json;
+    try {
+      json = JSON.parse(data);
+    } catch {
+      return;
+    }
+    const b64 = json?.choices?.[0]?.delta?.audio?.data;
+    if (!b64) return;
+    let pcm = Buffer.from(b64, "base64");
+    if (odd) {
+      pcm = Buffer.concat([odd, pcm]);
+      odd = null;
+    }
+    if (pcm.length % 2) {
+      odd = pcm.subarray(pcm.length - 1);
+      pcm = pcm.subarray(0, pcm.length - 1);
+    }
+    if (!pcm.length) return;
+    total += pcm.length;
+    await onPcm?.(pcm);
+  };
+  for await (const chunk of res.body) {
+    if (signal?.aborted) break;
+    pending += decoder.decode(chunk, { stream: true });
+    let idx;
+    while ((idx = pending.indexOf("\n")) >= 0) {
+      await takeLine(pending.slice(0, idx).trim());
+      pending = pending.slice(idx + 1);
+    }
+  }
+  if (pending.trim()) await takeLine(pending.trim());
+  if (!total && !signal?.aborted) {
+    const err = new Error("xiaomi tts empty");
+    err.status = 502;
+    throw err;
+  }
+  return total;
+}
+
 export async function xiaomiAsrTranscribe(xiaomi, pcm, { sampleRate = 16000, signal, fetchImpl = fetch } = {}) {
   const audio = Buffer.isBuffer(pcm) ? pcm : Buffer.from(pcm || []);
   if (!audio.length) return "";

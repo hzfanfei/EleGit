@@ -1,12 +1,13 @@
 import { WebSocketServer } from "ws";
 import { formatProgressContext } from "./github.js";
 import { streamAnswer } from "./ask.js";
+import { CALL_TURN_NOTE } from "./acp.js";
 import { publicVoiceStatus, resolveVoiceConfig } from "./voice-config.js";
 import { createVoiceSession } from "./voice-session.js";
 import { createOpenAiAsr, openAiTts } from "./voice-openai.js";
 import { cosyvoiceTts } from "./cosyvoice-tts.js";
 import { createFunasrAsr } from "./funasr-asr.js";
-import { createXiaomiAsr, xiaomiTts } from "./xiaomi-speech.js";
+import { createXiaomiAsr, xiaomiTts, xiaomiTtsStream } from "./xiaomi-speech.js";
 import { createVolcAsr, volcTts } from "./voice-volc.js";
 import { formatLocalContext } from "./workspace.js";
 
@@ -50,6 +51,7 @@ export function createDefaultAsk() {
       local,
       session: opts.session,
       sessions: opts.sessions,
+      turnNote: CALL_TURN_NOTE,
       signal,
     });
   };
@@ -96,12 +98,10 @@ function resolveAsr(config, hooks) {
 
 function resolveTtsFn(config) {
   if (config?.ttsProvider === "xiaomi" && config.xiaomi?.enabled) {
-    return (text, signal) =>
-      xiaomiTts(
-        { ...config.xiaomi, ttsVoice: config.ttsVoice || config.xiaomi?.ttsVoice },
-        text,
-        signal,
-      );
+    const xiaomi = { ...config.xiaomi, ttsVoice: config.ttsVoice || config.xiaomi?.ttsVoice };
+    const tts = (text, signal) => xiaomiTts(xiaomi, text, signal);
+    tts.stream = (text, signal, onPcm) => xiaomiTtsStream(xiaomi, text, { signal, onPcm });
+    return tts;
   }
   if (config?.ttsProvider === "cosyvoice" && config.cosyvoice?.enabled) {
     return (text, signal) =>

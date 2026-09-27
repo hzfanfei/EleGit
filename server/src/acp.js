@@ -329,6 +329,7 @@ export function buildAcpPrompt({
       "【核心】只输出答案正文；读盘与推理在内部完成，禁止过程旁白与复述问题。",
       "第一个字就要进入实质内容；禁止让我/正在/查完/分析/梳理/好的/首先/简单来说 等开头。",
       ...BOOK_SPOKEN_ANSWER_RULES,
+      SPOKEN_TURN_NOTE,
     );
   }
   if (githubContext) {
@@ -414,6 +415,12 @@ export const BOOK_SPOKEN_ANSWER_RULES = [
   "Output ONLY what should be spoken aloud.",
   "Natural colloquial Chinese; no lecture tone or padding.",
 ];
+
+export const SPOKEN_TURN_NOTE =
+  "【语音通话】这一轮会被直接念给用户听：只说答案本身，口语短句；不要 Markdown、列表、表格、代码块、链接或文件路径，需要提到代码时用一句话讲清它做什么。";
+
+export const CALL_TURN_NOTE =
+  "【语音通话】这一轮会边写边念给用户听，像打电话一样说话：口语短句，先说结论，一般两三句说完，用户想听细节会接着问。如果得先查代码才能答，先用一句很短的话接住（比如「我看一下。」）再去查，查完直接说结果，不要复述过程。不要 Markdown、列表、表格、代码块、链接、文件路径，也不要写 ===TASK_COMPLETED===；提到代码时用一句话讲清它做什么。";
 
 export const BOOK_ANSWER_FEW_SHOT = [
   "=== 正反例（风格必须像「正确」）===",
@@ -1595,6 +1602,7 @@ export function createSessionStore({
     onInteraction,
     buildPrompt,
     agentMode = false,
+    turnNote = "",
     staticFiles,
   }) {
     const command = resolveCommand();
@@ -1635,13 +1643,16 @@ export function createSessionStore({
         agentMode: write,
         staticFiles: bookContext ? undefined : staticFiles,
       });
-    } else if (entry.announcedAgentMode !== write) {
-      const note = write
-        ? "You are now in agent mode for this checkout. Edit files in this checkout when that is what the user asked for."
-        : "You are now in ask mode. Do not edit files or change the working tree.";
-      text = `${note}\n\n${question}`;
+      if (turnNote) text = `${text}\n\n${turnNote}`;
     } else {
-      text = String(question || "");
+      const notes = [];
+      if (entry.announcedAgentMode !== write) {
+        notes.push(write
+          ? "You are now in agent mode for this checkout. Edit files in this checkout when that is what the user asked for."
+          : "You are now in ask mode. Do not edit files or change the working tree.");
+      }
+      if (turnNote) notes.push(turnNote);
+      text = notes.length ? `${notes.join("\n")}\n\n${question}` : String(question || "");
     }
     await withRepoLock(entry, async () => {
       channel.agentMode = write;

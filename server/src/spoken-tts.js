@@ -7,6 +7,56 @@ export function isSpeakableTtsText(text) {
   return SPEAKABLE_RE.test(String(text || ""));
 }
 
+const FENCE_RE = /^\s*(```|~~~)/;
+const TABLE_RULE_RE = /^\s*\|?[\s:|-]+\|?\s*$/;
+
+function speechLine(line) {
+  let s = line.replace(/===TASK_COMPLETED===/g, "");
+  if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(s)) return "";
+  if (s.includes("|")) {
+    if (TABLE_RULE_RE.test(s) && s.includes("-")) return "";
+    if (/^\s*\|.*\|\s*$/.test(s)) {
+      s = s.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim()).filter(Boolean).join("，");
+    }
+  }
+  s = s
+    .replace(/^\s*#{1,6}\s+/, "")
+    .replace(/^\s*>\s?/, "")
+    .replace(/^\s*(?:[-*+]|\d+[.)、])\s+/, "")
+    .replace(/^\s*\[[ xX]\]\s+/, "")
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/<?https?:\/\/[^\s<>)）]+>?/g, "")
+    .replace(/`([^`]*)`/g, "$1")
+    .replace(/(\*\*|__)(.+?)\1/g, "$2")
+    .replace(/(^|[^\w*])\*(?!\s)([^*\n]+?)\*(?!\w)/g, "$1$2")
+    .replace(/~~(.+?)~~/g, "$1")
+    .replace(/[*`]+/g, "");
+  return s.replace(/\s+/g, " ").trim();
+}
+
+/** Turns streamed Markdown into text worth saying; fenced code is skipped across chunks. */
+export function createSpeechCleaner() {
+  let inFence = false;
+  return (text) => {
+    const out = [];
+    for (const line of String(text || "").split("\n")) {
+      if (FENCE_RE.test(line)) {
+        inFence = !inFence;
+        continue;
+      }
+      if (inFence) continue;
+      const spoken = speechLine(line);
+      if (spoken) out.push(spoken);
+    }
+    return out.join("\n");
+  };
+}
+
+export function speechTextFromMarkdown(text) {
+  return createSpeechCleaner()(text);
+}
+
 export function isUnreadableTtsError(err) {
   const msg = String(err?.message || err || "");
   return /no readable text|no valid text/i.test(msg);
@@ -38,7 +88,7 @@ export function splitTextForTts(text, maxChars = 320) {
 }
 
 export async function speakTextInParts({ text, tts, onCaption, onAudio, signal }) {
-  const parts = splitTextForTts(text);
+  const parts = splitTextForTts(speechTextFromMarkdown(text));
   for (const part of parts) {
     if (signal?.aborted) break;
     if (!isSpeakableTtsText(part)) continue;

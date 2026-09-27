@@ -59,6 +59,32 @@ export function createVoiceSession({
   let bargeSpeechBytes = 0;
   let bargeHardBytes = 0;
   let bargeGapTimer = null;
+  let checkoutPromise = null;
+  const callAbort = new AbortController();
+
+  /** One local checkout per call. It used to run again after every question. */
+  function repoCheckout() {
+    if (!checkoutPromise) {
+      checkoutPromise = Promise.resolve(checkout?.(owner, repo, callAbort.signal)).catch((err) => {
+        checkoutPromise = null;
+        throw err;
+      });
+    }
+    return checkoutPromise;
+  }
+
+  /** The first question should not wait for the Agent process to start. */
+  function warmRepoCall() {
+    repoCheckout()
+      .then((ctx) => {
+        if (closed) return;
+        const chat = sessions?.resolveForChat?.(owner, repo, sessionId);
+        if (chat?.id) sessionId = chat.id;
+        const cwd = ctx?.local?.present ? ctx.local.path : "";
+        if (cwd) return sessions?.warmRepo?.(owner, repo, cwd);
+      })
+      .catch(() => {});
+  }
 
   function stopMicLog() {
     if (micTimer) clearInterval(micTimer);
@@ -296,7 +322,7 @@ export function createVoiceSession({
         sessionId = currentSession?.id || sessionId;
         turnSessions = ctx.sessions || sessions;
       } else {
-        ctx = await checkout?.(owner, repo, signal);
+        ctx = await repoCheckout(signal);
         if (signal.aborted) return;
         turnSessions = sessions;
         currentSession = sessions?.resolveForChat?.(owner, repo, sessionId) || { id: sessionId };
@@ -306,6 +332,9 @@ export function createVoiceSession({
         question,
         signal,
         tts: (text, ttsSignal) => tts?.(text, ttsSignal || ttsAbort.signal),
+        ttsStream: tts?.stream
+          ? (text, ttsSignal, onPcm) => tts.stream(text, ttsSignal || ttsAbort.signal, onPcm)
+          : undefined,
         ask: (q, askSignal) =>
           ask?.(
             {
@@ -411,6 +440,7 @@ export function createVoiceSession({
         });
         emit({ type: "state", state: "listening" });
         startMicLog();
+        if (!bookMode) warmRepoCall();
       } catch (err) {
         started = false;
         machine.fail();
@@ -502,6 +532,7 @@ export function createVoiceSession({
     hangup() {
       closed = true;
       started = false;
+      callAbort.abort();
       clearPlaybackTimer();
       resetPlaybackBarge();
       stopMicLog();

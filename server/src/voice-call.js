@@ -1,10 +1,14 @@
-import { isSpeakableTtsText, isUnreadableTtsError, speakTextInParts } from "./spoken-tts.js";
+import { createSpeechCleaner, isSpeakableTtsText, isUnreadableTtsError, speakTextInParts } from "./spoken-tts.js";
 
 /** Sentence ends only. Semicolons and commas stay inside one spoken segment. */
 const SENTENCE_END = /[。！？!?\n]/;
 /** Fallback pause when a clause has no sentence end and exceeds SPEAK_HARD_LEN. */
 const CLAUSE_PAUSE = /[，,、；;]/;
 const SPEAK_HARD_LEN = 320;
+/** Nothing has been said yet: a clause this long is worth saying instead of waiting for the full stop. */
+const FIRST_CLAUSE_MIN = 6;
+/** About 0.3s of 24 kHz PCM16. Smaller sends only add player gaps on the phone. */
+const STREAM_SEND_BYTES = 14400;
 
 export function createCallMachine() {
   let state = "idle";
@@ -48,7 +52,7 @@ export function createCallMachine() {
   };
 }
 
-export function takeSpeakable(buffer, hardLen = SPEAK_HARD_LEN) {
+export function takeSpeakable(buffer, hardLen = SPEAK_HARD_LEN, { firstClause = false } = {}) {
   const text = String(buffer || "");
   if (!text) return { speak: "", rest: "" };
   let lastSentence = -1;
@@ -61,8 +65,20 @@ export function takeSpeakable(buffer, hardLen = SPEAK_HARD_LEN) {
       rest: text.slice(lastSentence + 1),
     };
   }
-  if (text.length < hardLen) return { speak: "", rest: text };
   let lastClause = -1;
+  if (firstClause) {
+    for (let i = 0; i < text.length; i += 1) {
+      if (CLAUSE_PAUSE.test(text[i])) lastClause = i;
+    }
+    if (lastClause >= FIRST_CLAUSE_MIN - 1) {
+      return {
+        speak: text.slice(0, lastClause + 1).trim(),
+        rest: text.slice(lastClause + 1),
+      };
+    }
+  }
+  if (text.length < hardLen) return { speak: "", rest: text };
+  lastClause = -1;
   for (let i = 0; i < text.length; i += 1) {
     if (CLAUSE_PAUSE.test(text[i])) lastClause = i;
   }
@@ -206,6 +222,8 @@ export async function runVoiceTurn({
   question,
   ask,
   tts,
+  /** `(text, signal, onPcm)` — audio pieces as they are synthesized. Falls back to `tts` if it fails before any audio. */
+  ttsStream,
   signal,
   onDelta,
   onCaption,
@@ -224,6 +242,7 @@ export async function runVoiceTurn({
   let spokenChars = 0;
   let capped = false;
   let emittedAudio = false;
+  const cleanForSpeech = createSpeechCleaner();
 
   const playAudio = async (buf) => {
     if (!buf?.length) return;
@@ -231,10 +250,47 @@ export async function runVoiceTurn({
     await onAudio?.(buf);
   };
 
+  const speakStreamed = async (speak) => {
+    let parts = [];
+    let size = 0;
+    let sent = 0;
+    const send = async () => {
+      if (!size || signal?.aborted) return;
+      const out = Buffer.concat(parts);
+      parts = [];
+      size = 0;
+      sent += out.length;
+      await playAudio(out);
+    };
+    try {
+      await ttsStream(speak, signal, async (pcm) => {
+        if (signal?.aborted || !pcm?.length) return;
+        parts.push(pcm);
+        size += pcm.length;
+        if (size >= STREAM_SEND_BYTES) await send();
+      });
+      await send();
+      return true;
+    } catch (err) {
+      if (signal?.aborted) return true;
+      if (!sent) return false;
+      throw err;
+    }
+  };
+
   const speakOne = async (speak) => {
     if (signal?.aborted || speakFail) return;
     if (!isSpeakableTtsText(speak)) return;
     onCaption?.(speak);
+    if (ttsStream) {
+      try {
+        if (await speakStreamed(speak)) return;
+      } catch (err) {
+        if (signal?.aborted || isUnreadableTtsError(err)) return;
+        speakFail = err;
+        return;
+      }
+    }
     try {
       let audio = await tts(speak, signal);
       if (!audio?.length && !signal?.aborted) {
@@ -266,13 +322,13 @@ export async function runVoiceTurn({
     if (capped && !force) return;
     const chunk = force
       ? { speak: pending.trim(), rest: "" }
-      : takeSpeakable(pending);
+      : takeSpeakable(pending, SPEAK_HARD_LEN, { firstClause: spokenChars === 0 });
     if (!chunk.speak) {
       pending = chunk.rest || pending;
       return;
     }
     pending = chunk.rest;
-    const speak = capChunk(chunk.speak);
+    const speak = capChunk(cleanForSpeech(chunk.speak));
     if (!speak) return;
     spokenChars += [...speak].length;
     speakQueue.push(speak);
