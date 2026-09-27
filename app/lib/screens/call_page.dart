@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -113,8 +114,11 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
   int _micEpoch = 0;
   int _micReopens = 0;
   int _linkResets = 0;
+  static const _maxLinkResets = 6;
   bool _closing = false;
   bool _relinking = false;
+  bool _watchPostPlaybackMic = false;
+  int _postPlaybackPeak = 0;
   double _voiceLevel = 0;
   Timer? _voiceFade;
   /// Server can mark the turn done before the first downlink PCM arrives (common on a cold first reply).
@@ -255,7 +259,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
   /// Open another one and keep the call, instead of ending it on the first stall.
   void _onSocketGone(Object? cause) {
     if (!_live || _closing || _relinking || _disposing) return;
-    if (widget.client != null || _linkResets >= 2) {
+    if (widget.client != null || _linkResets >= _maxLinkResets) {
       _drop(cause: cause);
       return;
     }
@@ -319,7 +323,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
       });
       return;
     }
-    if (event.type == 'pcm' && event.pcm != null && (_phase == 'speaking' || _phase == 'thinking')) {
+    if (event.type == 'pcm' && event.pcm != null && _shouldPlayDownlink(event.pcm!)) {
       _pcmSeq++;
       _speakerIdleTimer?.cancel();
       if (!_playing) {
@@ -334,6 +338,17 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
         _schedulePlaybackEnd();
       }
     }
+  }
+
+  /// State JSON can lag binary PCM after a relink; still play answer audio for this turn.
+  bool _shouldPlayDownlink(Uint8List pcm) {
+    if (pcm.isEmpty || !_live) return false;
+    if (_phase == 'speaking' || _phase == 'thinking') return true;
+    if (_phase == 'listening' &&
+        (_answerAudioDone || _playbackEndPending || _assistantLive.isNotEmpty || _playing)) {
+      return true;
+    }
+    return false;
   }
 
   /// Only barge / hangup / relink should bump [_listenHold] and drop a pending drain.
@@ -418,6 +433,8 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
   Future<void> _listenWhenPlaybackEnds(int hold) async {
     try {
       await _media.waitForPlaybackQueue();
+      if (!mounted || _disposing || hold != _listenHold) return;
+      await Future<void>.delayed(const Duration(milliseconds: 90));
     } catch (_) {}
     _playbackEndPending = false;
     if (!mounted || _disposing || hold != _listenHold) return;
@@ -429,7 +446,33 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
       _playing = false;
       _assistantLive = '';
     });
-    unawaited(_reopenMicAfterSpeaker());
+    unawaited(_maybeReopenMicAfterPlayback(hold));
+  }
+
+  /// Full stop/start after every answer drops short follow-ups on some OEM mics.
+  Future<void> _maybeReopenMicAfterPlayback(int hold) async {
+    if (!_live || _disposing || hold != _listenHold) return;
+    _postPlaybackPeak = 0;
+    _watchPostPlaybackMic = true;
+    await Future<void>.delayed(const Duration(milliseconds: 420));
+    _watchPostPlaybackMic = false;
+    if (!_live || _disposing || hold != _listenHold) return;
+    if (_postPlaybackPeak >= _deadMicPeak) return;
+    await _reopenMicAfterSpeaker();
+  }
+
+  void _userTapBarge() {
+    if (!_live || _disposing) return;
+    if (!_playing && _phase != 'speaking' && _phase != 'thinking') return;
+    _cancelPlaybackEnd();
+    setState(() {
+      _phase = 'listening';
+      _playing = false;
+      _assistantLive = '';
+    });
+    unawaited(_media.stopPlayback());
+    _client?.barge();
+    _checkMicAfterBarge();
   }
 
   /// A barge means the mic just heard the user over the speaker, mid-sentence.
@@ -497,6 +540,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
       _micReopens = 0;
       final peak = pcm16Peak(pcm);
       if (_watchBargeMic && peak > _bargeMicPeak) _bargeMicPeak = peak;
+      if (_watchPostPlaybackMic && peak > _postPlaybackPeak) _postPlaybackPeak = peak;
       _noteHeard(peak);
       _client?.sendPcm(pcm);
     }, onError: (_) {
@@ -576,6 +620,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
     _voiceFade = null;
     _voiceLevel = 0;
     _watchBargeMic = false;
+    _watchPostPlaybackMic = false;
     _sub?.cancel();
     _sub = null;
     _micSub?.cancel();
@@ -658,7 +703,9 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
               child: Column(
                 children: [
                   const Spacer(),
-                  Stack(
+                  GestureDetector(
+                    onDoubleTap: _userTapBarge,
+                    child: Stack(
                     alignment: Alignment.center,
                     clipBehavior: Clip.none,
                     children: [
@@ -711,6 +758,15 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
                       ),
                     ],
                   ),
+                  ),
+                  if (_live && (_playing || _phase == 'speaking' || _phase == 'thinking'))
+                    Padding(
+                      padding: const EdgeInsets.only(top: 10),
+                      child: Text(
+                        '双击球打断',
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.muted),
+                      ),
+                    ),
                   const SizedBox(height: 28),
                   _status(context),
                   if (!_live) _faultDetail(context),

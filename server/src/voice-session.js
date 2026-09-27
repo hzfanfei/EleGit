@@ -19,6 +19,8 @@ const PLAYBACK_BARGE_RMS = 800;
  */
 const PLAYBACK_BARGE_MIN_RMS = 100;
 const PLAYBACK_ECHO_MARGIN = 2.5;
+/** Xiaomi echo cancel squeezes the user's voice; keep the bar closer to room noise. */
+const PLAYBACK_ECHO_MARGIN_XIAOMI = 2.1;
 const PLAYBACK_ECHO_LEARN_BYTES = 16000 * 2 * 1;
 /**
  * TTS runs 3-5x faster than playback. Sending every sentence at once stacked
@@ -31,7 +33,7 @@ const PCM_BYTES_PER_MS = 48;
  * Unsent bytes on the socket. State messages queue behind audio, so a stalled
  * link kept the phone on 在说 after a barge. Hold further audio past this.
  */
-const DOWNLINK_BACKLOG_BYTES = 32 * 1024;
+const DOWNLINK_BACKLOG_BYTES = 48 * 1024;
 
 function looksLikeMp3(buf) {
   if (!buf || buf.length < 3) return false;
@@ -301,6 +303,11 @@ export function createVoiceSession({
     return callBargeRms ?? PLAYBACK_BARGE_RMS;
   }
 
+  function playbackEchoMargin() {
+    const xiaomi = config?.asrProvider === "xiaomi" || config?.provider === "xiaomi";
+    return xiaomi ? PLAYBACK_ECHO_MARGIN_XIAOMI : PLAYBACK_ECHO_MARGIN;
+  }
+
   function learnEcho(bytes, rms) {
     if (callBargeRms != null) return;
     echoLevels.push(rms);
@@ -308,7 +315,7 @@ export function createVoiceSession({
     if (echoBytes < PLAYBACK_ECHO_LEARN_BYTES) return;
     const sorted = [...echoLevels].sort((a, b) => a - b);
     const echo = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.9))];
-    callBargeRms = Math.min(PLAYBACK_BARGE_RMS, Math.max(PLAYBACK_BARGE_MIN_RMS, echo * PLAYBACK_ECHO_MARGIN));
+    callBargeRms = Math.min(PLAYBACK_BARGE_RMS, Math.max(PLAYBACK_BARGE_MIN_RMS, echo * playbackEchoMargin()));
   }
 
   function notePlaybackPcm(bytes, rms) {

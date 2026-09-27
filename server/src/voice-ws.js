@@ -36,9 +36,9 @@ export function isVoiceCallEnabled(env = process.env) {
 }
 
 /** Bytes already sitting on a socket the phone has stopped acknowledging. */
-export const DOWNLINK_STALL_BYTES = 32 * 1024;
+export const DOWNLINK_STALL_BYTES = 48 * 1024;
 /** How long that queue may sit still before the socket is thrown away. */
-export const DOWNLINK_STALL_MS = 2000;
+export const DOWNLINK_STALL_MS = 4000;
 
 /**
  * A queue under the limit is healthy. Above it, remember when it first stuck.

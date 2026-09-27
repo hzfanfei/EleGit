@@ -33,9 +33,9 @@ describe("noteDownlinkQueue", () => {
     const first = noteDownlinkQueue(70 * 1024, 0, 1000);
     assert.equal(first.reset, false);
     assert.equal(first.stuckSince, 1000);
-    const held = noteDownlinkQueue(70 * 1024, first.stuckSince, 1000 + 1999);
+    const held = noteDownlinkQueue(70 * 1024, first.stuckSince, 1000 + 3999);
     assert.equal(held.reset, false);
-    const stuck = noteDownlinkQueue(70 * 1024, held.stuckSince, 1000 + 2000);
+    const stuck = noteDownlinkQueue(70 * 1024, held.stuckSince, 1000 + 4000);
     assert.equal(stuck.reset, true);
     const drained = noteDownlinkQueue(0, stuck.stuckSince, 9000);
     assert.deepEqual(drained, { stuckSince: 0, reset: false });
