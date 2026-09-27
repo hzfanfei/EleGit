@@ -26,6 +26,10 @@ class _StaticFilesPageState extends State<StaticFilesPage> {
   Object? _error;
   bool _loading = true;
   String? _deletingPath;
+  bool _batchDeleting = false;
+  final _selected = <String>{};
+
+  bool get _busy => _deletingPath != null || _batchDeleting;
 
   @override
   void initState() {
@@ -43,7 +47,11 @@ class _StaticFilesPageState extends State<StaticFilesPage> {
     try {
       final library = await widget.api.listStaticFiles();
       if (!mounted) return;
-      setState(() => _library = library);
+      final paths = library.files.map((file) => file.path).toSet();
+      setState(() {
+        _library = library;
+        _selected.removeWhere((path) => !paths.contains(path));
+      });
     } catch (err) {
       if (!mounted) return;
       setState(() => _error = err);
@@ -66,7 +74,7 @@ class _StaticFilesPageState extends State<StaticFilesPage> {
   }
 
   Future<void> _confirmDelete(StaticFileItem file) async {
-    if (_deletingPath != null) return;
+    if (_busy) return;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -95,6 +103,63 @@ class _StaticFilesPageState extends State<StaticFilesPage> {
     } finally {
       if (mounted) setState(() => _deletingPath = null);
     }
+  }
+
+  void _toggleAll(List<StaticFileItem> files, bool? checked) {
+    setState(() {
+      if (checked == true) {
+        _selected
+          ..clear()
+          ..addAll(files.map((file) => file.path));
+      } else {
+        _selected.clear();
+      }
+    });
+  }
+
+  Future<void> _confirmDeleteSelected(List<StaticFileItem> files) async {
+    if (_busy || _selected.isEmpty) return;
+    final chosen = files.where((file) => _selected.contains(file.path)).toList();
+    if (chosen.isEmpty) return;
+    final all = chosen.length == files.length;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(all ? '删除全部 ${chosen.length} 个资源？' : '删除选中的 ${chosen.length} 个资源？'),
+        content: const Text('删除后无法恢复。'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('删除')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() => _batchDeleting = true);
+    var failed = 0;
+    Object? lastError;
+    for (final file in chosen) {
+      if (!mounted) return;
+      try {
+        await widget.api.deleteStaticFile(file.path);
+        _selected.remove(file.path);
+      } catch (err) {
+        failed += 1;
+        lastError = err;
+      }
+    }
+    if (!mounted) return;
+    final removed = chosen.length - failed;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          failed == 0
+              ? '已删除 $removed 个资源'
+              : '已删除 $removed 个，${failed} 个没删掉${lastError == null ? '' : '：$lastError'}',
+        ),
+      ),
+    );
+    setState(() => _batchDeleting = false);
+    await _load();
   }
 
   @override
@@ -144,6 +209,46 @@ class _StaticFilesPageState extends State<StaticFilesPage> {
         action: TextButton(onPressed: _load, child: const Text('重新加载')),
       );
     }
+    final allSelected = files.every((file) => _selected.contains(file.path));
+    final someSelected = _selected.isNotEmpty && !allSelected;
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(right: 4),
+          child: Row(
+            children: [
+              Checkbox(
+                visualDensity: VisualDensity.compact,
+                tristate: true,
+                value: allSelected ? true : (someSelected ? null : false),
+                onChanged: _busy ? null : (_) => _toggleAll(files, !allSelected),
+              ),
+              GestureDetector(
+                onTap: _busy ? null : () => _toggleAll(files, !allSelected),
+                child: const Text('全选'),
+              ),
+              const Spacer(),
+              if (_batchDeleting)
+                const Padding(
+                  padding: EdgeInsets.only(right: 12),
+                  child: WxLoading(size: 20),
+                )
+              else
+                TextButton(
+                  onPressed: _selected.isEmpty || _busy ? null : () => _confirmDeleteSelected(files),
+                  style: TextButton.styleFrom(foregroundColor: Wx.danger),
+                  child: Text(_selected.isEmpty ? '删除' : '删除 ${_selected.length}'),
+                ),
+            ],
+          ),
+        ),
+        const WxHairline(),
+        Expanded(child: _fileList(files)),
+      ],
+    );
+  }
+
+  Widget _fileList(List<StaticFileItem> files) {
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView.separated(
@@ -153,8 +258,24 @@ class _StaticFilesPageState extends State<StaticFilesPage> {
         itemBuilder: (context, index) {
           final file = files[index];
           final deleting = _deletingPath == file.path;
+          final picked = _selected.contains(file.path);
           return ListTile(
             contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+            leading: Checkbox(
+              visualDensity: VisualDensity.compact,
+              value: picked,
+              onChanged: _busy
+                  ? null
+                  : (checked) {
+                      setState(() {
+                        if (checked == true) {
+                          _selected.add(file.path);
+                        } else {
+                          _selected.remove(file.path);
+                        }
+                      });
+                    },
+            ),
             title: Text(file.name, maxLines: 1, overflow: TextOverflow.ellipsis),
             subtitle: Text(
               [
@@ -174,7 +295,7 @@ class _StaticFilesPageState extends State<StaticFilesPage> {
                   IconButton(
                     tooltip: '删除',
                     icon: Icon(Icons.delete_outline, size: 22, color: Wx.danger),
-                    onPressed: _deletingPath != null ? null : () => _confirmDelete(file),
+                    onPressed: _busy ? null : () => _confirmDelete(file),
                   ),
                 const Icon(Icons.download_outlined, size: 20),
               ],
