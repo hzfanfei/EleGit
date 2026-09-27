@@ -1,4 +1,7 @@
-import { createCallMachine, pcmRms, runVoiceTurn } from "./voice-call.js";
+import { CALL_MIN_RMS, createCallMachine, pcmRms, runVoiceTurn } from "./voice-call.js";
+
+/** Speech long enough to be a real interrupt, not the tail of the question just asked. */
+const INTERRUPT_SPEECH_BYTES = 16000 * 2 * 0.4;
 
 export function createVoiceSession({
   config,
@@ -41,6 +44,8 @@ export function createVoiceSession({
   let micTimer = null;
   let micFrames = 0;
   let micMax = 0;
+  let heardPcmSinceTurn = false;
+  let speechBytesSinceTurn = 0;
 
   function stopMicLog() {
     if (micTimer) clearInterval(micTimer);
@@ -84,6 +89,20 @@ export function createVoiceSession({
       if (spoken.includes(heard.slice(i, i + 2))) hit += 1;
     }
     return hit / pairs >= 0.72;
+  }
+
+  /** A second decode of the question already accepted, not a new one. */
+  function revisionOfAsk(text) {
+    const heard = compact(text);
+    const asked = compact(lastFinalText);
+    if (!heard || !asked) return false;
+    if (heard === asked || asked.includes(heard)) return true;
+    return heard.includes(asked) && heard.length - asked.length < 4;
+  }
+
+  function interruptHasSpeech() {
+    if (!heardPcmSinceTurn) return true;
+    return speechBytesSinceTurn >= INTERRUPT_SPEECH_BYTES;
   }
 
   function pushCaption(role, text, extra = {}) {
@@ -186,7 +205,10 @@ export function createVoiceSession({
     clearPlaybackTimer();
     playbackOpen = false;
     playbackBytes = 0;
+    heardPcmSinceTurn = false;
+    speechBytesSinceTurn = 0;
     abortTurn();
+    asr?.discard?.();
     const gen = ++turnGen;
     turnAbort = new AbortController();
     ttsAbort = new AbortController();
@@ -338,12 +360,17 @@ export function createVoiceSession({
       const busy = machine.state === "speaking" || machine.state === "thinking";
       if (echoOfAssistant(spoken, { loose: busy || Date.now() < echoLooseUntil })) return;
       if (busy && compact(spoken).length < 4) return;
+      if (busy && revisionOfAsk(spoken)) return;
       if (final && spoken === lastFinalText) {
         const now = Date.now();
         // Recognition often repeats the line it just accepted. Cutting the
         // answer on that repeat makes the call stutter a few seconds in.
         if (busy || now - lastFinalAt < 1200) return;
       }
+      // Partials keep arriving while the answer is still being written.
+      // Cancelling on one of them drops the question and nothing is said.
+      if (busy && !final) return;
+      if (busy && !interruptHasSpeech()) return;
       if (machine.state === "speaking" || machine.state === "thinking") bargeIn("asr");
       pushCaption("user", spoken, { final });
       if (!final) return;
@@ -360,6 +387,8 @@ export function createVoiceSession({
       if (rms > micMax) micMax = rms;
       // The speaker is still in the room. Loud or quiet, this audio is not the next question.
       if (playbackOpen) return;
+      heardPcmSinceTurn = true;
+      if (rms >= CALL_MIN_RMS) speechBytesSinceTurn += bytes.length;
       asr?.push?.(bytes);
     },
     onAsrFailure(message) {

@@ -8,6 +8,12 @@ function loudPcm() {
   return buf;
 }
 
+function speechBurst() {
+  const buf = Buffer.alloc(16000 * 2 * 0.4);
+  for (let i = 0; i < buf.length; i += 2) buf.writeInt16LE(14000, i);
+  return buf;
+}
+
 describe("createVoiceSession", () => {
   it("refuses to start a fake demo when keys are missing", async () => {
     const sent = [];
@@ -66,10 +72,12 @@ describe("createVoiceSession", () => {
     assert.equal(sent.some((m) => m.type === "state" && m.state === "speaking"), true);
 
     session.onPcm(loudPcm());
-    await new Promise((r) => setTimeout(r, 40));
+    session.onTranscript("先停一下", { final: false });
+    await new Promise((r) => setTimeout(r, 20));
     assert.equal(sent.some((m) => m.type === "state" && m.state === "barge"), false);
 
-    session.onTranscript("先停一下", { final: false });
+    session.onPcm(speechBurst());
+    session.onTranscript("先停一下", { final: true });
     await new Promise((r) => setTimeout(r, 120));
 
     assert.equal(sent.some((m) => m.type === "state" && m.state === "barge"), true);
@@ -374,7 +382,7 @@ describe("createVoiceSession", () => {
     session.onTranscript("最近在做什么？", { final: true });
     await new Promise((r) => setTimeout(r, 40));
     assert.equal(session.state, "speaking");
-    assert.equal(discarded, 1);
+    assert.equal(discarded, 2);
 
     session.barge("speech");
     session.onTranscript("仓库最近", { final: false });
@@ -478,6 +486,49 @@ describe("createVoiceSession", () => {
     session.playbackDone();
     session.onPcm(loudPcm());
     assert.equal(pushed.length, 1);
+  });
+
+  it("keeps the question when a later decode arrives before any speech", async () => {
+    const asked = [];
+    let aborted = false;
+    const session = createVoiceSession({
+      config: { ready: true, provider: "volc" },
+      send: () => {},
+      sendAudio: () => {},
+      checkout: async () => ({ dest: "/tmp/octo/demo" }),
+      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      ask: async function* (opts, signal) {
+        asked.push(opts.question);
+        await new Promise((resolve) => {
+          const timer = setTimeout(resolve, 400);
+          signal?.addEventListener("abort", () => {
+            clearTimeout(timer);
+            aborted = true;
+            resolve();
+          }, { once: true });
+        });
+        if (signal?.aborted) return;
+        yield { type: "delta", text: "先说到这里。" };
+        yield { type: "done", engine: "acp", answer: "先说到这里。" };
+      },
+      tts: async () => Buffer.from("pcm"),
+    });
+
+    await session.start({ owner: "octo", repo: "demo", sessionId: "s1" });
+    session.onTranscript("最近在做什么？", { final: true });
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(session.state, "thinking");
+
+    const quiet = Buffer.alloc(16000 * 2);
+    session.onPcm(quiet);
+    session.onTranscript("最近在做什么呢", { final: false });
+    session.onTranscript("屋里有点杂音", { final: true });
+    await new Promise((r) => setTimeout(r, 30));
+
+    assert.equal(aborted, false);
+    assert.deepEqual(asked, ["最近在做什么？"]);
+    assert.equal(session.state, "thinking");
+    session.hangup();
   });
 
   it("does not restart the answer when recognition repeats the same line", async () => {
