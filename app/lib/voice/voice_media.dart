@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 abstract class VoiceMedia {
@@ -20,7 +21,23 @@ abstract class VoiceMedia {
   void dispose();
 }
 
-/// Boost quiet 16-bit LE PCM before playback. Clamps to int16.
+/// Above this share of full scale, boosted samples are bent down instead of cut off.
+const double _limiterKnee = 0.8;
+
+/// Xiaomi TTS peaks at 70–86% of full scale, so [minGain] pushed loud syllables past int16.
+/// A hard clamp there crackles; this curve reaches full scale smoothly instead.
+int _softLimit(double sample) {
+  const knee = 32767 * _limiterKnee;
+  const room = 32767 - knee;
+  final level = sample.abs();
+  if (level <= knee) return sample.round();
+  final e = math.exp(2 * (level - knee) / room);
+  final bent = knee + room * (e - 1) / (e + 1);
+  final out = sample.isNegative ? -bent : bent;
+  return out.round().clamp(-32768, 32767);
+}
+
+/// Boost quiet 16-bit LE PCM before playback.
 ///
 /// By default peak-normalizes toward [targetPeak] of full scale (good for quiet TTS).
 /// Pass [gain] to force a fixed multiplier (tests / overrides).
@@ -47,11 +64,8 @@ Uint8List amplifyPcm16(
   if (effectiveGain == 1.0) return out;
 
   for (var i = 0; i + 1 < out.length; i += 2) {
-    var sample = view.getInt16(i, Endian.little);
-    sample = (sample * effectiveGain).round();
-    if (sample > 32767) sample = 32767;
-    if (sample < -32768) sample = -32768;
-    view.setInt16(i, sample, Endian.little);
+    final sample = view.getInt16(i, Endian.little) * effectiveGain;
+    view.setInt16(i, _softLimit(sample), Endian.little);
   }
   return out;
 }

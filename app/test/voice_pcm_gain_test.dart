@@ -15,6 +15,22 @@ void main() {
     expect(outView.getInt16(2, Endian.little), -2000);
   });
 
+  test('amplifyPcm16 bends loud samples below full scale instead of cutting them flat', () {
+    final pcm = Uint8List(6);
+    final view = ByteData.view(pcm.buffer);
+    view.setInt16(0, 10000, Endian.little);
+    view.setInt16(2, 20000, Endian.little);
+    view.setInt16(4, -24000, Endian.little);
+    final out = ByteData.view(amplifyPcm16(pcm, gain: 1.75).buffer);
+    expect(out.getInt16(0, Endian.little), 17500);
+    final loud = out.getInt16(2, Endian.little);
+    final louder = out.getInt16(4, Endian.little).abs();
+    expect(loud, lessThan(32767));
+    expect(louder, lessThan(32767));
+    expect(louder, greaterThan(loud));
+    expect(loud, greaterThan(26214));
+  });
+
   test('amplifyPcm16 peak-normalizes quiet TTS', () {
     final pcm = Uint8List(4);
     final view = ByteData.view(pcm.buffer);

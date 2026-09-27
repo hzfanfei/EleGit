@@ -7,8 +7,6 @@ const CLAUSE_PAUSE = /[，,、；;]/;
 const SPEAK_HARD_LEN = 320;
 /** Nothing has been said yet: a clause this long is worth saying instead of waiting for the full stop. */
 const FIRST_CLAUSE_MIN = 6;
-/** About 0.3s of 24 kHz PCM16. Smaller sends only add player gaps on the phone. */
-const STREAM_SEND_BYTES = 14400;
 
 export function createCallMachine() {
   let state = "idle";
@@ -250,32 +248,22 @@ export async function runVoiceTurn({
     await onAudio?.(buf);
   };
 
+  /**
+   * Streaming synthesis finishes a sentence sooner than the whole-sentence API,
+   * but the phone plays every send as its own clip with a gap and its own gain.
+   * Split mid-sentence, that stuttered and jumped in volume. Send whole sentences.
+   */
   const speakStreamed = async (speak) => {
-    let parts = [];
-    let size = 0;
-    let sent = 0;
-    const send = async () => {
-      if (!size || signal?.aborted) return;
-      const out = Buffer.concat(parts);
-      parts = [];
-      size = 0;
-      sent += out.length;
-      await playAudio(out);
-    };
+    const parts = [];
     try {
       await ttsStream(speak, signal, async (pcm) => {
-        if (signal?.aborted || !pcm?.length) return;
-        parts.push(pcm);
-        size += pcm.length;
-        if (size >= STREAM_SEND_BYTES) await send();
+        if (!signal?.aborted && pcm?.length) parts.push(pcm);
       });
-      await send();
-      return true;
-    } catch (err) {
-      if (signal?.aborted) return true;
-      if (!sent) return false;
-      throw err;
+    } catch {
+      return Boolean(signal?.aborted);
     }
+    if (!signal?.aborted && parts.length) await playAudio(Buffer.concat(parts));
+    return true;
   };
 
   const speakOne = async (speak) => {

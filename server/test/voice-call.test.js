@@ -195,7 +195,7 @@ describe("first words", () => {
     assert.deepEqual(takeSpeakable("默认用小米的识别，", 320), { speak: "", rest: "默认用小米的识别，" });
   });
 
-  it("plays streamed audio while the sentence is still being synthesized", async () => {
+  it("sends a streamed sentence to the phone as one clip", async () => {
     const events = [];
     const piece = Buffer.alloc(8000, 1);
     await runVoiceTurn({
@@ -217,7 +217,7 @@ describe("first words", () => {
         events.push(`play:${buf.length}`);
       },
     });
-    assert.deepEqual(events, ["synth:0", "synth:1", "play:16000", "synth:2", "synth:3", "play:16000", "synth:end"]);
+    assert.deepEqual(events, ["synth:0", "synth:1", "synth:2", "synth:3", "synth:end", "play:32000"]);
   });
 
   it("falls back to whole-sentence TTS when streaming fails before any audio", async () => {
