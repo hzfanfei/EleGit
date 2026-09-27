@@ -39,4 +39,28 @@ describe("createFunasrAsr", () => {
     await asr.finalize();
     assert.deepEqual(calls, [{ type: "final", text: "你好" }]);
   });
+
+  it("drops an in-flight transcript after discard", async () => {
+    let release;
+    const gate = new Promise((resolve) => {
+      release = resolve;
+    });
+    const calls = [];
+    const asr = createFunasrAsr({
+      funasr: { baseUrl: "http://127.0.0.1:9" },
+      pushToTalk: true,
+      onFinal: (text) => calls.push(text),
+      fetchImpl: async () => {
+        await gate;
+        return { ok: true, json: async () => ({ text: "喇叭", final: true }) };
+      },
+    });
+    await asr.start();
+    asr.push(Buffer.alloc(1000, 1));
+    const pending = asr.finalize();
+    asr.discard();
+    release();
+    await pending;
+    assert.deepEqual(calls, []);
+  });
 });
