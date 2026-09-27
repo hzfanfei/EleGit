@@ -98,7 +98,7 @@ void main() {
     await tester.pump();
     expect(find.text('在说'), findsOneWidget);
     expect(find.text('思考中'), findsNothing);
-    expect(find.text('点击打断'), findsOneWidget);
+    expect(find.text('点击打断'), findsNothing);
     expect(find.text('静音'), findsOneWidget);
 
     client.emit(VoiceEvent(type: 'state', state: 'barge'));
@@ -107,11 +107,10 @@ void main() {
     expect(find.text('在听'), findsOneWidget);
     expect(find.text('你打断了'), findsNothing);
     expect(find.text('在说'), findsNothing);
-    expect(find.text('点击打断'), findsNothing);
     expect(media.stopPlayCalls, greaterThan(0));
   });
 
-  testWidgets('tapping the stage barges and drops leftover TTS', (tester) async {
+  testWidgets('tapping the stage does not barge', (tester) async {
     final media = FakeVoiceMedia();
     final client = FakeVoiceClient();
     await tester.pumpWidget(
@@ -134,16 +133,17 @@ void main() {
     client.emit(VoiceEvent(type: 'pcm', pcm: Uint8List.fromList([1, 0, 2, 0])));
     await tester.pump();
     expect(media.played, hasLength(1));
+    expect(find.text('点击打断'), findsNothing);
 
-    await tester.tap(find.byKey(const Key('wx-call-stage')));
+    await tester.tap(find.text('在说'));
     await tester.pump();
-    expect(client.bargeCalls, 1);
-    expect(find.text('在听'), findsOneWidget);
-    expect(find.text('你打断了'), findsNothing);
+    expect(client.bargeCalls, 0);
+    expect(find.text('在说'), findsOneWidget);
+    expect(media.stopPlayCalls, 0);
 
     client.emit(VoiceEvent(type: 'pcm', pcm: Uint8List.fromList([3, 0, 4, 0])));
     await tester.pump();
-    expect(media.played, hasLength(1));
+    expect(media.played, hasLength(2));
   });
 
   testWidgets('stays 在说 until queued audio finishes', (tester) async {

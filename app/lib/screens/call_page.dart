@@ -153,8 +153,6 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
     return '开始通话';
   }
 
-  bool get canBarge => _live && (_phase == 'speaking' || _phase == 'thinking');
-
   void _holdBackground() {
     if (_backgroundHeld) return;
     _backgroundHeld = true;
@@ -414,14 +412,6 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
     if (pop && mounted) widget.onBack();
   }
 
-  void barge() {
-    if (!canBarge) return;
-    HapticFeedback.selectionClick();
-    _client?.barge();
-    unawaited(_media.stopPlayback());
-    _applyState('barge');
-  }
-
   Future<void> retry() async {
     setState(() {
       _error = null;
@@ -501,47 +491,35 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
                 ),
               ),
               Expanded(
-                child: GestureDetector(
-                  key: const Key('wx-call-stage'),
-                  behavior: HitTestBehavior.opaque,
-                  onTap: canBarge ? barge : null,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 28),
-                    child: Column(
-                      children: [
-                        const Spacer(),
-                        _callOrb(speaking: speaking, listening: listening, thinking: thinking),
-                        const SizedBox(height: 28),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 28),
+                  child: Column(
+                    children: [
+                      const Spacer(),
+                      _callOrb(speaking: speaking, listening: listening, thinking: thinking),
+                      const SizedBox(height: 28),
+                      Text(
+                        statusLabel,
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Wx.muted),
+                      ),
+                      if (_live && _subtitle.isNotEmpty) ...[
+                        const SizedBox(height: 16),
                         Text(
-                          statusLabel,
+                          _subtitle,
                           textAlign: TextAlign.center,
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Wx.muted),
+                          maxLines: 4,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                color: Wx.text,
+                                fontSize: 20,
+                                height: 1.45,
+                              ),
                         ),
-                        if (_live && _subtitle.isNotEmpty) ...[
-                          const SizedBox(height: 16),
-                          Text(
-                            _subtitle,
-                            textAlign: TextAlign.center,
-                            maxLines: 4,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                  color: Wx.text,
-                                  fontSize: 20,
-                                  height: 1.45,
-                                ),
-                          ),
-                        ],
-                        if (canBarge) ...[
-                          const SizedBox(height: 14),
-                          Text(
-                            '点击打断',
-                            style: Theme.of(context).textTheme.bodyMedium,
-                          ),
-                        ],
-                        if (!_live) _faultDetail(context),
-                        const Spacer(),
                       ],
-                    ),
+                      if (!_live) _faultDetail(context),
+                      const Spacer(),
+                    ],
                   ),
                 ),
               ),
