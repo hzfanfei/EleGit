@@ -8,6 +8,7 @@ import 'package:wenxiang/screens/call_page.dart';
 import 'package:wenxiang/theme.dart';
 import 'package:wenxiang/voice/voice_client.dart';
 import 'package:wenxiang/voice/voice_media.dart';
+import 'package:wenxiang/widgets/wx_chrome.dart';
 
 import 'support/fake_api.dart';
 
@@ -87,17 +88,19 @@ void main() {
     client.emit(VoiceEvent(type: 'state', state: 'thinking'));
     await tester.pump();
     expect(find.textContaining('最近在做什么'), findsOneWidget);
-    expect(find.text('思考中'), findsOneWidget);
+    expect(find.byType(WxLoading), findsOneWidget);
+    expect(find.text('思考中'), findsNothing);
+    expect(find.text('在听'), findsNothing);
 
     client.emit(VoiceEvent(type: 'state', state: 'speaking'));
     await tester.pump();
-    expect(find.text('思考中'), findsOneWidget);
+    expect(find.byType(WxLoading), findsOneWidget);
     expect(find.text('在说'), findsNothing);
 
     client.emit(VoiceEvent(type: 'pcm', pcm: Uint8List.fromList([1, 0, 2, 0])));
     await tester.pump();
     expect(find.text('在说'), findsOneWidget);
-    expect(find.text('思考中'), findsNothing);
+    expect(find.byType(WxLoading), findsNothing);
     expect(find.text('点击打断'), findsNothing);
     expect(find.text('静音'), findsNothing);
 
