@@ -89,6 +89,9 @@ export function createOpenAiAsr({
       if (!buf.length) return;
       send({ type: "input_audio_buffer.append", audio: buf.toString("base64") });
     },
+    discard() {
+      pending.length = 0;
+    },
     stop() {
       opened = false;
       socket?.close();

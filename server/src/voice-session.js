@@ -10,6 +10,7 @@ export function createVoiceSession({
   ask,
   tts,
   asr,
+  playbackFallbackMs = null,
 } = {}) {
   const machine = createCallMachine();
   const captions = [];
@@ -35,6 +36,8 @@ export function createVoiceSession({
   let playbackOpen = false;
   let playbackBytes = 0;
   let playbackTimer = null;
+  let asrRecoverAt = 0;
+  let echoLooseUntil = 0;
   let micTimer = null;
   let micFrames = 0;
   let micMax = 0;
@@ -63,11 +66,24 @@ export function createVoiceSession({
     send?.(msg);
   }
 
-  function echoOfAssistant(text) {
-    const heard = String(text || "").replace(/[\s，。！？、,.!?\n]/g, "");
-    const spoken = assistantUtterance.replace(/[\s，。！？、,.!?\n]/g, "");
-    if (heard.length < 8 || spoken.length < 8) return false;
-    return spoken.includes(heard);
+  function compact(text) {
+    return String(text || "").replace(/[\s，。！？、,.!?;；:：\n"'「」]/g, "");
+  }
+
+  /** Speaker bleed is often a fragment or a near-copy, not the full line. */
+  function echoOfAssistant(text, { loose = false } = {}) {
+    const heard = compact(text);
+    const spoken = compact(assistantUtterance);
+    if (!heard || !spoken) return false;
+    if (loose && heard.length >= 2 && spoken.includes(heard)) return true;
+    if (heard.length >= 8 && spoken.length >= 8 && (spoken.includes(heard) || heard.includes(spoken))) return true;
+    if (!loose || heard.length < 6 || spoken.length < 6) return false;
+    let hit = 0;
+    const pairs = heard.length - 1;
+    for (let i = 0; i < pairs; i += 1) {
+      if (spoken.includes(heard.slice(i, i + 2))) hit += 1;
+    }
+    return hit / pairs >= 0.72;
   }
 
   function pushCaption(role, text, extra = {}) {
@@ -102,6 +118,8 @@ export function createVoiceSession({
     clearPlaybackTimer();
     playbackOpen = false;
     playbackBytes = 0;
+    asr?.discard?.();
+    echoLooseUntil = Date.now() + 1500;
     if (machine.state === "speaking" || machine.state === "thinking") {
       machine.listen();
       emit({ type: "state", state: "listening" });
@@ -110,12 +128,34 @@ export function createVoiceSession({
 
   function armPlaybackWatch() {
     clearPlaybackTimer();
-    const ms = Math.min(120000, Math.ceil((playbackBytes / 48000) * 1000) + 1200);
+    const audioMs = Math.ceil((playbackBytes / 48000) * 1000);
+    // Phone playback runs longer than the byte estimate (player gaps). Opening
+    // the mic on a short timer lets the speaker get transcribed as the next turn.
+    const ms = Math.min(120000, playbackFallbackMs == null ? audioMs + 8000 : playbackFallbackMs);
     playbackTimer = setTimeout(() => {
       playbackTimer = null;
       if (playbackOpen) finishListen();
     }, ms);
     playbackTimer.unref?.();
+  }
+
+  async function sayRetry(hint, signal) {
+    pushCaption("assistant", hint, { final: true });
+    if (!tts || signal?.aborted) return;
+    try {
+      const audio = await tts(hint, signal);
+      if (signal?.aborted || !audio?.length) return;
+      beginSpeaking();
+      if (sendAudio) {
+        const opening = !playbackOpen;
+        playbackOpen = true;
+        playbackBytes += audio.length;
+        if (opening) asr?.discard?.();
+      }
+      sendAudio?.(audio);
+    } catch {
+      /* stay on the call even when this line cannot be spoken */
+    }
   }
 
   function bargeIn(reason = "speech") {
@@ -159,12 +199,12 @@ export function createVoiceSession({
         try {
           ctx = await prepareContext?.({ bookId, chapter, sessionId, signal });
         } catch {
-          emit({ type: "error", code: "book", hint: "没找到这本书" });
+          await sayRetry("没找到这本书", signal);
           return;
         }
         if (signal.aborted) return;
         if (!ctx?.book || !ctx?.materialized) {
-          emit({ type: "error", code: "book", hint: "没找到这本书" });
+          await sayRetry("没找到这本书", signal);
           return;
         }
         currentSession = ctx.session || { id: sessionId };
@@ -207,8 +247,10 @@ export function createVoiceSession({
           if (signal.aborted) return;
           beginSpeaking();
           if (sendAudio) {
+            const opening = !playbackOpen;
             playbackOpen = true;
             playbackBytes += buf?.length || 0;
+            if (opening) asr?.discard?.();
           }
           sendAudio?.(buf);
         },
@@ -223,7 +265,12 @@ export function createVoiceSession({
     } catch (err) {
       if (signal.aborted || err?.code === "cancelled") return;
       console.error(`[voice] turn ${err?.code || ""} ${err?.message || err}`);
-      emit({ type: "caption", role: "assistant", text: "这句没说成，再说一次", final: true });
+      const ttsFailed = err?.code === "tts" || /tts/i.test(String(err?.message || ""));
+      if (ttsFailed) {
+        emit({ type: "caption", role: "assistant", text: "这句没说成，再说一次", final: true });
+      } else {
+        await sayRetry("这句没说成，再说一次", signal);
+      }
     } finally {
       if (gen !== turnGen || signal.aborted) return;
       if (playbackOpen) {
@@ -285,7 +332,11 @@ export function createVoiceSession({
     onTranscript(text, { final = false } = {}) {
       const spoken = String(text || "").trim();
       if (!spoken || !started) return;
-      if (echoOfAssistant(spoken)) return;
+      const busy = playbackOpen || machine.state === "speaking" || machine.state === "thinking";
+      if (echoOfAssistant(spoken, { loose: busy || Date.now() < echoLooseUntil })) return;
+      // Partials of the speaker arrive before the full line and used to cut playback.
+      if (playbackOpen && !final) return;
+      if (busy && compact(spoken).length < 4) return;
       if (machine.state === "speaking" || machine.state === "thinking") bargeIn("asr");
       pushCaption("user", spoken, { final });
       if (!final) return;
@@ -306,8 +357,21 @@ export function createVoiceSession({
       if (!started || closed) return;
       console.error(`[voice] asr ${String(message || "failed")}`);
       emit({ type: "caption", role: "assistant", text: "没听清，再说一次", final: true });
+      const now = Date.now();
+      if (now < asrRecoverAt) return;
+      asrRecoverAt = now + 3000;
+      Promise.resolve()
+        .then(async () => {
+          if (closed || !started) return;
+          asr?.stop?.();
+          await asr?.start?.();
+        })
+        .catch((err) => {
+          console.error(`[voice] asr restart ${err?.message || err}`);
+        });
     },
     barge(reason = "tap") {
+      if (reason !== "tap" && playbackOpen) return;
       if (machine.state === "speaking" || machine.state === "thinking") {
         bargeIn(reason === "tap" ? "tap" : "speech");
       }

@@ -168,6 +168,9 @@ export function createVolcAsr({
       pending.push(encodeVolcAudio(pcm));
       flush();
     },
+    discard() {
+      pending.length = 0;
+    },
     stop() {
       if (socket && opened) {
         try {

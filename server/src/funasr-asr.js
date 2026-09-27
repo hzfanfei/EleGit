@@ -247,6 +247,11 @@ export function createFunasrAsr({
       chunks.push(Buffer.isBuffer(pcm) ? pcm : Buffer.from(pcm));
       if (!pushToTalk) scheduleEndpoint();
     },
+    discard() {
+      clearEndpointTimer();
+      chunks.length = 0;
+      lastPartial = "";
+    },
     stop() {
       started = false;
       clearPartialTimer();

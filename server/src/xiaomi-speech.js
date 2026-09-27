@@ -236,6 +236,10 @@ export function createXiaomiAsr({
       }
       gate.push(buf);
     },
+    discard() {
+      chunks.length = 0;
+      gate.reset();
+    },
     stop() {
       started = false;
       chunks.length = 0;

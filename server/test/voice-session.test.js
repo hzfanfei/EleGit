@@ -307,6 +307,29 @@ describe("createVoiceSession", () => {
       config: { ready: true, provider: "volc" },
       send: () => {},
       sendAudio: () => {},
+      playbackFallbackMs: 200,
+      checkout: async () => ({ dest: "/tmp/octo/demo" }),
+      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      ask: async function* () {
+        yield { type: "delta", text: "先说到这里。" };
+        yield { type: "done", engine: "acp", answer: "先说到这里。" };
+      },
+      tts: async () => Buffer.from("pcm"),
+    });
+
+    await session.start({ owner: "octo", repo: "demo", sessionId: "s1" });
+    session.onTranscript("最近在做什么？", { final: true });
+    await new Promise((r) => setTimeout(r, 40));
+    assert.equal(session.state, "speaking");
+    await new Promise((r) => setTimeout(r, 400));
+    assert.equal(session.state, "listening");
+  });
+
+  it("does not open the mic on the short playback estimate", async () => {
+    const session = createVoiceSession({
+      config: { ready: true, provider: "volc" },
+      send: () => {},
+      sendAudio: () => {},
       checkout: async () => ({ dest: "/tmp/octo/demo" }),
       sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
       ask: async function* () {
@@ -321,6 +344,99 @@ describe("createVoiceSession", () => {
     await new Promise((r) => setTimeout(r, 40));
     assert.equal(session.state, "speaking");
     await new Promise((r) => setTimeout(r, 1400));
+    assert.equal(session.state, "speaking");
+  });
+
+  it("ignores speaker bleed while audio is still going out", async () => {
+    const asked = [];
+    let discarded = 0;
+    const session = createVoiceSession({
+      config: { ready: true, provider: "volc" },
+      send: () => {},
+      sendAudio: () => {},
+      asr: {
+        async start() {},
+        discard() {
+          discarded += 1;
+        },
+      },
+      checkout: async () => ({ dest: "/tmp/octo/demo" }),
+      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      ask: async function* (opts) {
+        asked.push(opts.question);
+        yield { type: "delta", text: "仓库最近在修登录。" };
+        yield { type: "done", engine: "acp", answer: "仓库最近在修登录。" };
+      },
+      tts: async () => Buffer.from("pcm-audio-bytes"),
+    });
+
+    await session.start({ owner: "octo", repo: "demo", sessionId: "s1" });
+    session.onTranscript("最近在做什么？", { final: true });
+    await new Promise((r) => setTimeout(r, 40));
+    assert.equal(session.state, "speaking");
+    assert.equal(discarded, 1);
+
+    session.barge("speech");
+    session.onTranscript("仓库最近", { final: false });
+    session.onTranscript("仓库最近在修登入", { final: true });
+    await new Promise((r) => setTimeout(r, 40));
+
+    assert.deepEqual(asked, ["最近在做什么？"]);
+    assert.equal(session.state, "speaking");
+
+    session.onTranscript("换个话题吧", { final: true });
+    await new Promise((r) => setTimeout(r, 40));
+    assert.deepEqual(asked, ["最近在做什么？", "换个话题吧"]);
+  });
+
+  it("stays on the call when the open book cannot be loaded", async () => {
+    const sent = [];
+    const session = createVoiceSession({
+      config: { ready: true, provider: "volc" },
+      send: (msg) => sent.push(msg),
+      prepareContext: async () => {
+        throw new Error("missing book");
+      },
+      tts: async () => Buffer.alloc(0),
+    });
+
+    await session.start({ bookId: "b1", chapter: "第一章", sessionId: "book-s1" });
+    session.onTranscript("墙纸象征什么", { final: true });
+    await new Promise((r) => setTimeout(r, 40));
+
+    assert.equal(sent.some((msg) => msg.type === "error"), false);
+    assert.ok(sent.some((msg) => msg.type === "caption" && msg.text === "没找到这本书"));
+    assert.equal(session.started, true);
+    assert.equal(session.state, "listening");
+  });
+
+  it("restarts recognition after one asr failure and stays on the call", async () => {
+    const sent = [];
+    let starts = 0;
+    let stops = 0;
+    const session = createVoiceSession({
+      config: { ready: true, provider: "volc" },
+      send: (msg) => sent.push(msg),
+      asr: {
+        async start() {
+          starts += 1;
+        },
+        stop() {
+          stops += 1;
+        },
+      },
+    });
+
+    await session.start({ owner: "octo", repo: "demo", sessionId: "s1" });
+    assert.equal(starts, 1);
+    session.onAsrFailure("socket dropped");
+    await new Promise((r) => setTimeout(r, 30));
+
+    assert.equal(stops, 1);
+    assert.equal(starts, 2);
+    assert.equal(sent.some((msg) => msg.type === "error"), false);
+    assert.ok(sent.some((msg) => msg.type === "caption" && msg.text === "没听清，再说一次"));
+    assert.equal(session.started, true);
     assert.equal(session.state, "listening");
   });
 
