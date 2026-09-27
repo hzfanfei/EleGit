@@ -47,6 +47,9 @@ class DeviceVoiceMedia implements VoiceMedia {
 
   bool _playing = false;
 
+  /// Bumped by [stopPlayback]. In-flight [playPcm] must not enqueue after this.
+  int _playbackEpoch = 0;
+
   int _pendingPlayCalls = 0;
 
   Completer<void>? _currentPlay;
@@ -393,11 +396,15 @@ class DeviceVoiceMedia implements VoiceMedia {
 
     if (pcm.isEmpty) return;
 
+    final epoch = _playbackEpoch;
+
     _pendingPlayCalls += 1;
 
     try {
 
     await _preparePlaybackAudio();
+
+    if (epoch != _playbackEpoch) return;
 
     _outRate = sampleRate;
 
@@ -420,6 +427,8 @@ class DeviceVoiceMedia implements VoiceMedia {
     if (outFormat == 'pcm') {
       bytes = amplifyPcm16(bytes);
     }
+
+    if (epoch != _playbackEpoch) return;
 
     _queue.add(
       _PlayJob(
@@ -473,28 +482,37 @@ class DeviceVoiceMedia implements VoiceMedia {
     );
   }
 
-  Future<void> _playJob(_PlayJob job, {required bool leadingStop}) async {
+  Future<void> _playJob(
+    _PlayJob job, {
+    required bool leadingStop,
+    required int epoch,
+  }) async {
+    if (epoch != _playbackEpoch) return;
     job.onPlaybackStart?.call();
 
     final cancel = Completer<void>();
     _currentPlay = cancel;
 
     try {
+      if (epoch != _playbackEpoch) return;
       if (job.format == 'mp3') {
         if (job.bytes.isEmpty) return;
         await _playSourceWithRetry(
           BytesSource(job.bytes, mimeType: 'audio/mpeg'),
           leadingStop: leadingStop,
+          epoch: epoch,
         );
       } else {
         final pcm = normalizePcm16Length(job.bytes);
         if (pcm.isEmpty) return;
         final wav = pcm16ToWav(pcm, sampleRate: _outRate);
         if (wav.isEmpty) return;
+        if (epoch != _playbackEpoch) return;
         await _playSourceWithRetry(
           BytesSource(wav, mimeType: 'audio/wav'),
           fileFallbackBytes: Platform.isAndroid ? wav : null,
           leadingStop: leadingStop,
+          epoch: epoch,
         );
       }
       await Future.any([
@@ -517,9 +535,11 @@ class DeviceVoiceMedia implements VoiceMedia {
     Source source, {
     Uint8List? fileFallbackBytes,
     required bool leadingStop,
+    required int epoch,
   }) async {
     Object? lastError;
     for (var attempt = 0; attempt < 3; attempt++) {
+      if (epoch != _playbackEpoch) return;
       try {
         if (leadingStop || attempt > 0) {
           await _player.stop();
@@ -538,6 +558,7 @@ class DeviceVoiceMedia implements VoiceMedia {
           await file.writeAsBytes(fileFallbackBytes, flush: true);
           active = DeviceFileSource(file.path);
         }
+        if (epoch != _playbackEpoch) return;
         await _player.play(active);
         return;
       } on PlatformException catch (err) {
@@ -556,6 +577,8 @@ class DeviceVoiceMedia implements VoiceMedia {
 
     if (_playing) return;
 
+    final epoch = _playbackEpoch;
+
     _playing = true;
 
     await BackgroundWork.acquire();
@@ -564,9 +587,11 @@ class DeviceVoiceMedia implements VoiceMedia {
 
       await _preparePlaybackAudio();
 
+      if (epoch != _playbackEpoch) return;
+
       var leadingStop = true;
-      while (_queue.isNotEmpty) {
-        await _playJob(_takeNextJob(), leadingStop: leadingStop);
+      while (_queue.isNotEmpty && epoch == _playbackEpoch) {
+        await _playJob(_takeNextJob(), leadingStop: leadingStop, epoch: epoch);
         leadingStop = false;
       }
 
@@ -601,6 +626,8 @@ class DeviceVoiceMedia implements VoiceMedia {
   @override
 
   Future<void> stopPlayback() async {
+
+    _playbackEpoch += 1;
 
     _queue.clear();
 
