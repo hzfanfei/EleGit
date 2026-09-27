@@ -653,6 +653,67 @@ describe("createVoiceSession", () => {
     }
   });
 
+  it("the user's own quiet voice does not raise the bar out of reach", async () => {
+    const session = createVoiceSession({
+      config: { ready: true, provider: "volc" },
+      send: () => {},
+      sendAudio: () => {},
+      asr: { async start() {}, push() {} },
+      checkout: async () => ({ dest: "/tmp/octo/demo" }),
+      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      ask: async function* () {
+        yield { type: "delta", text: "仓库最近在修登录。" };
+        yield { type: "done", engine: "acp", answer: "仓库最近在修登录。" };
+      },
+      tts: async () => Buffer.from("pcm-audio-bytes"),
+    });
+
+    await session.start({ owner: "octo", repo: "demo", sessionId: "s1" });
+    session.onTranscript("最近在做什么？", { final: true });
+    await new Promise((r) => setTimeout(r, 40));
+
+    const frame = (level) => {
+      const buf = Buffer.alloc(2560);
+      for (let i = 0; i < buf.length; i += 2) buf.writeInt16LE(i % 4 ? -level : level, i);
+      return buf;
+    };
+    for (let i = 0; i < 15; i += 1) session.onPcm(frame(i % 3 ? 0 : 30));
+    for (let i = 0; i < 6; i += 1) session.onPcm(frame(90));
+    assert.equal(session.state, "speaking");
+    for (let i = 0; i < 4; i += 1) session.onPcm(frame(160));
+    assert.equal(session.state, "listening");
+  });
+
+  it("stays a few seconds ahead of the speaker and drops what a barge cut off", async () => {
+    const sends = [];
+    const t0 = Date.now();
+    const session = createVoiceSession({
+      config: { ready: true, provider: "volc" },
+      send: () => {},
+      sendAudio: (buf) => sends.push({ at: Date.now() - t0, bytes: buf.length }),
+      asr: { async start() {}, push() {} },
+      checkout: async () => ({ dest: "/tmp/octo/demo" }),
+      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      ask: async function* () {
+        yield { type: "delta", text: "第一句话说完了。" };
+        await new Promise((r) => setTimeout(r, 5));
+        yield { type: "delta", text: "第二句话也说完了。" };
+        await new Promise((r) => setTimeout(r, 5));
+        yield { type: "delta", text: "第三句话不该发出去。" };
+        yield { type: "done", engine: "acp", answer: "第一句话说完了。第二句话也说完了。第三句话不该发出去。" };
+      },
+      tts: async () => Buffer.alloc(48000 * 3),
+    });
+
+    await session.start({ owner: "octo", repo: "demo", sessionId: "s1" });
+    session.onTranscript("最近在做什么？", { final: true });
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(sends.length, 2);
+    session.barge();
+    await new Promise((r) => setTimeout(r, 2200));
+    assert.equal(sends.length, 2);
+  });
+
   it("a leaky speaker keeps the loud bar during playback", async () => {
     const session = createVoiceSession({
       config: { ready: true, provider: "volc" },

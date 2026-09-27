@@ -201,6 +201,7 @@ export function attachVoiceGateway(httpServer, {
       ask,
       tts: providers.tts,
       asr: providers.asr,
+      socketBacklog: () => ws.bufferedAmount,
     });
     holder.session = session;
 

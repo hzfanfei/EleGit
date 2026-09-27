@@ -10,13 +10,40 @@ const INTERRUPT_SPEECH_BYTES = 16000 * 2 * 0.4;
 const PLAYBACK_BARGE_RMS = 800;
 /**
  * vivo's call echo cancel leaves the speaker at 0-40 RMS but also squeezes the
- * user's voice to 80-400 while it plays, so 800 never fires there. Once the echo
- * level of this playback is known, the bar drops to a multiple of it.
+ * user's voice to 80-400 while it plays, so 800 never fires there. The first second
+ * of the call's first playback measures the echo; the bar then stays put for the call.
+ * Tracking a running echo peak let the user's own squeezed voice push the bar up
+ * past itself, and the answer talked on.
  */
 const PLAYBACK_BARGE_MIN_RMS = 100;
 const PLAYBACK_ECHO_MARGIN = 2.5;
 const PLAYBACK_ECHO_LEARN_BYTES = 16000 * 2 * 1;
-const PLAYBACK_ECHO_HALF_LIFE_BYTES = 16000 * 2 * 3;
+/**
+ * TTS runs 3-5x faster than playback. Sending every sentence at once stacked
+ * seconds of audio on the tunnel, which starved the mic upload and still had to
+ * drain after a barge. Stay at most this far ahead of the phone's speaker.
+ */
+const PLAYBACK_AHEAD_MS = 4000;
+const PCM_BYTES_PER_MS = 48;
+
+function looksLikeMp3(buf) {
+  if (!buf || buf.length < 3) return false;
+  if (buf[0] === 0x49 && buf[1] === 0x44 && buf[2] === 0x33) return true;
+  return buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0;
+}
+
+function sleep(ms, signal) {
+  return new Promise((resolve) => {
+    if (signal?.aborted) return resolve();
+    const timer = setTimeout(done, ms);
+    function done() {
+      clearTimeout(timer);
+      signal?.removeEventListener?.("abort", done);
+      resolve();
+    }
+    signal?.addEventListener?.("abort", done, { once: true });
+  });
+}
 const PLAYBACK_BARGE_BYTES = 16000 * 2 * 0.25;
 /**
  * The squeezed interruption sits under Xiaomi's speech floor, so its gate threw the
@@ -52,6 +79,7 @@ export function createVoiceSession({
   tts,
   asr,
   playbackFallbackMs = null,
+  socketBacklog,
 } = {}) {
   const machine = createCallMachine();
   const captions = [];
@@ -89,8 +117,10 @@ export function createVoiceSession({
   let bargeSpeechBytes = 0;
   let bargeHardBytes = 0;
   let echoBytes = 0;
-  let echoPeak = 0;
+  let echoLevels = [];
+  let callBargeRms = null;
   let bargeLiftUntil = 0;
+  let speakerBusyUntil = 0;
   let bargeGapTimer = null;
   let checkoutPromise = null;
   const callAbort = new AbortController();
@@ -133,7 +163,9 @@ export function createVoiceSession({
       if (micFrames > 0) {
         const time = new Date().toTimeString().slice(0, 8);
         const playing = micMaxPlaying >= 0 ? ` playingRms=${Math.round(micMaxPlaying)} bar=${Math.round(playbackBargeRms())}` : "";
-        console.log(`[voice] ${time} mic frames=${micFrames} maxRms=${Math.round(micMax)}${playing} state=${machine.state}`);
+        const backlog = socketBacklog?.() || 0;
+        const sendq = backlog ? ` sendq=${Math.round(backlog / 1024)}KB` : "";
+        console.log(`[voice] ${time} mic frames=${micFrames} maxRms=${Math.round(micMax)}${playing}${sendq} state=${machine.state}`);
       }
       micFrames = 0;
       micMax = 0;
@@ -222,20 +254,28 @@ export function createVoiceSession({
     bargeSpeechBytes = 0;
     bargeHardBytes = 0;
     echoBytes = 0;
-    echoPeak = 0;
+    echoLevels = [];
     if (bargeGapTimer) clearTimeout(bargeGapTimer);
     bargeGapTimer = null;
   }
 
   function playbackBargeRms() {
-    if (echoBytes < PLAYBACK_ECHO_LEARN_BYTES) return PLAYBACK_BARGE_RMS;
-    return Math.min(PLAYBACK_BARGE_RMS, Math.max(PLAYBACK_BARGE_MIN_RMS, echoPeak * PLAYBACK_ECHO_MARGIN));
+    return callBargeRms ?? PLAYBACK_BARGE_RMS;
+  }
+
+  function learnEcho(bytes, rms) {
+    if (callBargeRms != null) return;
+    echoLevels.push(rms);
+    echoBytes += bytes.length;
+    if (echoBytes < PLAYBACK_ECHO_LEARN_BYTES) return;
+    const sorted = [...echoLevels].sort((a, b) => a - b);
+    const echo = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.9))];
+    callBargeRms = Math.min(PLAYBACK_BARGE_RMS, Math.max(PLAYBACK_BARGE_MIN_RMS, echo * PLAYBACK_ECHO_MARGIN));
   }
 
   function notePlaybackPcm(bytes, rms) {
     const bar = playbackBargeRms();
-    echoBytes += bytes.length;
-    if (rms < bar) echoPeak = Math.max(echoPeak * 0.5 ** (bytes.length / PLAYBACK_ECHO_HALF_LIFE_BYTES), rms);
+    learnEcho(bytes, rms);
     if (rms >= bar) {
       if (bargeGapTimer) {
         clearTimeout(bargeGapTimer);
@@ -322,6 +362,7 @@ export function createVoiceSession({
     resetPlaybackBarge();
     playbackOpen = false;
     playbackBytes = 0;
+    speakerBusyUntil = 0;
     abortTurn();
     emit({ type: "state", state: "barge", reason });
     machine.afterBarge();
@@ -347,6 +388,7 @@ export function createVoiceSession({
     heardPcmSinceTurn = false;
     speechBytesSinceTurn = 0;
     bargeLiftUntil = 0;
+    speakerBusyUntil = 0;
     abortTurn();
     asr?.discard?.();
     const gen = ++turnGen;
@@ -410,6 +452,12 @@ export function createVoiceSession({
         },
         onAudio: async (buf) => {
           if (signal.aborted) return;
+          if (!looksLikeMp3(buf)) {
+            const ahead = speakerBusyUntil - Date.now();
+            if (ahead > PLAYBACK_AHEAD_MS) await sleep(ahead - PLAYBACK_AHEAD_MS, signal);
+            if (signal.aborted) return;
+            speakerBusyUntil = Math.max(Date.now(), speakerBusyUntil) + (buf?.length || 0) / PCM_BYTES_PER_MS;
+          }
           beginSpeaking();
           if (sendAudio) {
             const opening = !playbackOpen;
