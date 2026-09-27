@@ -25,6 +25,25 @@ void main() {
     expect(outView.getInt16(0, Endian.little).abs(), greaterThan(800));
   });
 
+  test('playbackCompleteBudget follows pcm length and stays bounded', () {
+    expect(
+      playbackCompleteBudget(byteLength: 24000 * 2, sampleRate: 24000),
+      const Duration(milliseconds: 4000),
+    );
+    expect(
+      playbackCompleteBudget(byteLength: 24000 * 2 * 20, sampleRate: 24000),
+      const Duration(milliseconds: 22500),
+    );
+    expect(
+      playbackCompleteBudget(byteLength: 24000 * 2 * 200, sampleRate: 24000),
+      const Duration(milliseconds: 120000),
+    );
+    expect(
+      playbackCompleteBudget(byteLength: 100, sampleRate: 24000, format: 'mp3'),
+      const Duration(seconds: 20),
+    );
+  });
+
   test('normalizePcm16Length drops trailing byte', () {
     expect(normalizePcm16Length(Uint8List.fromList([1, 2, 3])).length, 2);
     expect(normalizePcm16Length(Uint8List(1)).length, 0);

@@ -108,6 +108,22 @@ class FakeVoiceMedia implements VoiceMedia {
   void dispose() {}
 }
 
+/// Wait this long for one clip to finish. A missed completion used to leave the call on 在说.
+Duration playbackCompleteBudget({
+  required int byteLength,
+  required int sampleRate,
+  String format = 'pcm',
+}) {
+  if (format == 'pcm' && sampleRate > 0 && byteLength >= 2) {
+    final samples = byteLength ~/ 2;
+    final ms = (samples * 1000 / sampleRate).ceil() + 2500;
+    if (ms < 4000) return const Duration(milliseconds: 4000);
+    if (ms > 120000) return const Duration(milliseconds: 120000);
+    return Duration(milliseconds: ms);
+  }
+  return const Duration(seconds: 20);
+}
+
 /// Truncate trailing byte so 16-bit PCM sample pairs are complete.
 Uint8List normalizePcm16Length(Uint8List pcm) {
   if (pcm.length < 2) return Uint8List(0);

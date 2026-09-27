@@ -503,6 +503,10 @@ class DeviceVoiceMedia implements VoiceMedia {
 
     final cancel = Completer<void>();
     _currentPlay = cancel;
+    final done = Completer<void>();
+    final completeSub = _player.onPlayerComplete.listen((_) {
+      if (!done.isCompleted) done.complete();
+    });
 
     try {
       if (epoch != _playbackEpoch) return;
@@ -527,16 +531,25 @@ class DeviceVoiceMedia implements VoiceMedia {
         );
       }
       await Future.any([
-        _player.onPlayerComplete.first,
+        done.future,
         cancel.future,
-      ]).timeout(const Duration(minutes: 3));
+      ]).timeout(playbackCompleteBudget(
+        byteLength: job.bytes.length,
+        sampleRate: _outRate,
+        format: job.format,
+      ));
     } on TimeoutException {
       if (cancel.isCompleted) return;
-      rethrow;
+      try {
+        await _player.stop();
+      } on PlatformException {
+        // already stopped
+      }
     } catch (_) {
       if (cancel.isCompleted) return;
       rethrow;
     } finally {
+      await completeSub.cancel();
       if (identical(_currentPlay, cancel)) _currentPlay = null;
     }
   }

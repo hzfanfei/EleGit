@@ -523,6 +523,48 @@ describe("createVoiceSession", () => {
     assert.equal(pushed.length, 1);
   });
 
+  it("conversation-level speech during playback interrupts and is answered", async () => {
+    const asked = [];
+    const pushed = [];
+    const session = createVoiceSession({
+      config: { ready: true, provider: "volc" },
+      send: () => {},
+      sendAudio: () => {},
+      asr: {
+        async start() {},
+        push(buf) {
+          pushed.push(buf);
+        },
+      },
+      checkout: async () => ({ dest: "/tmp/octo/demo" }),
+      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      ask: async function* (opts) {
+        asked.push(opts.question);
+        yield { type: "delta", text: "仓库最近在修登录。" };
+        yield { type: "done", engine: "acp", answer: "仓库最近在修登录。" };
+      },
+      tts: async () => Buffer.from("pcm-audio-bytes"),
+    });
+
+    await session.start({ owner: "octo", repo: "demo", sessionId: "s1" });
+    session.onTranscript("最近在做什么？", { final: true });
+    await new Promise((r) => setTimeout(r, 40));
+
+    const speaker = Buffer.alloc(16000 * 2 * 0.4);
+    for (let i = 0; i < speaker.length; i += 2) speaker.writeInt16LE(500, i);
+    session.onPcm(speaker);
+    assert.equal(pushed.length, 0);
+    assert.equal(session.state, "speaking");
+
+    const voice = Buffer.alloc(16000 * 2 * 0.3);
+    for (let i = 0; i < voice.length; i += 2) voice.writeInt16LE(2500, i);
+    session.onPcm(voice);
+    assert.equal(pushed.length, 1);
+    session.onTranscript("换个话题吧", { final: true });
+    await new Promise((r) => setTimeout(r, 40));
+    assert.deepEqual(asked, ["最近在做什么？", "换个话题吧"]);
+  });
+
   it("keeps the question when a later decode arrives before any speech", async () => {
     const asked = [];
     let aborted = false;

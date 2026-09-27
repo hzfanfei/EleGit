@@ -1,9 +1,14 @@
-import { BARGE_RMS, CALL_MIN_RMS, createCallMachine, pcmRms, runVoiceTurn } from "./voice-call.js";
+import { CALL_MIN_RMS, createCallMachine, pcmRms, runVoiceTurn } from "./voice-call.js";
 
 /** Speech long enough to be a real interrupt, not the tail of the question just asked. */
 const INTERRUPT_SPEECH_BYTES = 16000 * 2 * 0.4;
-/** About 0.2s of 16 kHz PCM16 loud enough to talk over the speaker. */
-const PLAYBACK_BARGE_BYTES = 6400;
+/**
+ * About 0.25s of 16 kHz PCM16 above conversation level.
+ * 1400 was louder than a phone mic usually gets while the speaker is on, so a
+ * normal interruption never reached recognition and the call stayed on 在说.
+ */
+const PLAYBACK_BARGE_RMS = 800;
+const PLAYBACK_BARGE_BYTES = 16000 * 2 * 0.25;
 const PLAYBACK_BARGE_GAP_MS = 280;
 
 export function createVoiceSession({
@@ -149,15 +154,15 @@ export function createVoiceSession({
   }
 
   function notePlaybackPcm(bytes, rms) {
-    if (rms >= CALL_MIN_RMS) {
+    if (rms >= PLAYBACK_BARGE_RMS) {
       if (bargeGapTimer) {
         clearTimeout(bargeGapTimer);
         bargeGapTimer = null;
       }
       bargeSpeechBytes += bytes.length;
-      if (rms >= BARGE_RMS) bargeHardBytes += bytes.length;
+      bargeHardBytes += bytes.length;
       bargeChunks.push(bytes);
-      if (bargeSpeechBytes < PLAYBACK_BARGE_BYTES || bargeHardBytes < PLAYBACK_BARGE_BYTES) return;
+      if (bargeHardBytes < PLAYBACK_BARGE_BYTES) return;
       const buffered = Buffer.concat(bargeChunks);
       if (!bargeIn("speech")) return;
       heardPcmSinceTurn = true;
