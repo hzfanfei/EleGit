@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../api/wenxiang_api.dart';
+import '../copy/errors.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../voice/background_work.dart';
@@ -85,6 +86,8 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
 
   String _phase = 'idle';
   String? _error;
+  Object? _fault;
+  bool _detailOpen = false;
   bool _live = false;
   bool _checking = true;
   bool _voiceReady = false;
@@ -122,11 +125,13 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
       if (widget.autoStart && status.voiceReady) {
         await startCall();
       }
-    } catch (_) {
+    } catch (err) {
       if (!mounted || _disposing) return;
       setState(() {
         _checking = false;
         _error = '通话断了';
+        _fault = err;
+        _detailOpen = false;
       });
     }
   }
@@ -178,6 +183,8 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
     }
     setState(() {
       _error = null;
+      _fault = null;
+      _detailOpen = false;
       _phase = 'connecting';
       _live = true;
     });
@@ -195,7 +202,7 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
     final client = widget.client ?? SocketVoiceClient(widget.api.voiceUri());
     _client = client;
     try {
-      _sub = client.connect().listen(_onEvent, onError: (_) => _drop(), onDone: () {
+      _sub = client.connect().listen(_onEvent, onError: (Object err) => _drop(cause: err), onDone: () {
         if (_live) _drop();
       });
       if (widget.book != null) {
@@ -212,8 +219,8 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
         );
       }
       _armMic();
-    } catch (_) {
-      _drop(hint: '通话断了');
+    } catch (err) {
+      _drop(cause: err);
     }
   }
 
@@ -223,7 +230,8 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
       final hint = event.hint?.isNotEmpty == true
           ? event.hint!
           : (event.code == 'unconfigured' ? '还没配语音密钥' : '通话断了');
-      _fail(hint);
+      final raw = event.detail?.trim() ?? '';
+      _fail(hint, cause: raw.isEmpty ? null : raw);
       return;
     }
     if (event.type == 'state' && event.state != null) {
@@ -328,10 +336,14 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
     });
   }
 
-  void _fail(String hint) {
+  void _fail(String hint, {Object? cause}) {
     hangup(pop: false);
     if (!mounted || _disposing) return;
-    setState(() => _error = hint);
+    setState(() {
+      _error = hint;
+      _fault = cause;
+      _detailOpen = false;
+    });
   }
 
   String _mapState(String raw) {
@@ -353,10 +365,14 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
     }
   }
 
-  void _drop({String hint = '通话断了'}) {
+  void _drop({String hint = '通话断了', Object? cause}) {
     hangup(pop: false);
     if (!mounted) return;
-    setState(() => _error = hint);
+    setState(() {
+      _error = hint;
+      _fault = cause;
+      _detailOpen = false;
+    });
   }
 
   void hangup({bool pop = false}) {
@@ -397,6 +413,8 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
   Future<void> retry() async {
     setState(() {
       _error = null;
+      _fault = null;
+      _detailOpen = false;
       _checking = true;
     });
     await _loadStatus();
@@ -466,6 +484,7 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.headlineMedium,
                     ),
+                    if (!_live) _faultDetail(context),
                     const Spacer(),
                     SizedBox(
                       height: 92,
@@ -506,6 +525,53 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
           ),
         ],
       ),
+    );
+  }
+
+  Widget _faultDetail(BuildContext context) {
+    final fault = _fault;
+    if (fault == null) return const SizedBox.shrink();
+    final detail = errorDetail(fault);
+    if (detail == null) return const SizedBox.shrink();
+    return Column(
+      children: [
+        if (_detailOpen) ...[
+          const SizedBox(height: 8),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 120),
+            child: SingleChildScrollView(
+              child: SelectableText(
+                detail,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: Wx.muted,
+                      height: 1.45,
+                    ),
+              ),
+            ),
+          ),
+        ],
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            TextButton(
+              onPressed: () => setState(() => _detailOpen = !_detailOpen),
+              child: Text(_detailOpen ? '收起详情' : '详情'),
+            ),
+            if (_detailOpen)
+              TextButton(
+                onPressed: () async {
+                  await Clipboard.setData(ClipboardData(text: detail));
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('已复制')),
+                  );
+                },
+                child: const Text('复制'),
+              ),
+          ],
+        ),
+      ],
     );
   }
 

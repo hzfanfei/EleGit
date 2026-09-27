@@ -16,12 +16,14 @@ class VoiceEvent {
     this.engine,
     this.pcm,
     this.outputRate = 24000,
+    this.detail,
   });
 
   final String type;
   final String? state;
   final String? hint;
   final String? code;
+  final String? detail;
   final String? role;
   final String text;
   final bool finalCaption;
@@ -40,6 +42,7 @@ class VoiceEvent {
       finalCaption: json['final'] == true,
       engine: json['engine']?.toString(),
       outputRate: (json['outputRate'] as num?)?.toInt() ?? 24000,
+      detail: json['detail']?.toString(),
     );
   }
 }
@@ -90,7 +93,18 @@ class SocketVoiceClient implements VoiceCallClient {
       }, onError: (Object err, StackTrace stack) {
         if (!events.isClosed) events.addError(err, stack);
       }, onDone: () {
-        if (!events.isClosed) events.close();
+        if (events.isClosed) return;
+        final code = channel.closeCode;
+        final reason = (channel.closeReason ?? '').trim();
+        if (code != null || reason.isNotEmpty) {
+          final parts = [
+            'WebSocket closed',
+            if (code != null) 'code=$code',
+            if (reason.isNotEmpty) 'reason=$reason',
+          ];
+          events.addError(WebSocketChannelException(parts.join(' ')));
+        }
+        events.close();
       });
     }).catchError((Object err, StackTrace stack) {
       if (!events.isClosed) {

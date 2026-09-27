@@ -41,4 +41,30 @@ void main() {
     await sub.cancel();
     client.hangup();
   });
+
+  test('a remote close keeps the close code', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    server.listen((request) async {
+      if (!WebSocketTransformer.isUpgradeRequest(request)) {
+        request.response.statusCode = 404;
+        await request.response.close();
+        return;
+      }
+      final socket = await WebSocketTransformer.upgrade(request);
+      socket.close(1011, 'upstream dropped');
+    });
+    addTearDown(server.close);
+
+    final client = SocketVoiceClient(Uri.parse('ws://127.0.0.1:${server.port}/v1/voice'));
+    final done = Completer<Object>();
+    final sub = client.connect().listen((_) {}, onError: (Object err) {
+      if (!done.isCompleted) done.complete(err);
+    });
+    addTearDown(sub.cancel);
+
+    final err = await done.future.timeout(const Duration(seconds: 3));
+    expect(err.toString(), contains('code=1011'));
+    expect(err.toString(), contains('upstream dropped'));
+    client.hangup();
+  });
 }

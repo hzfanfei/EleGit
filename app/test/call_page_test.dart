@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wenxiang/screens/call_page.dart';
 import 'package:wenxiang/theme.dart';
@@ -197,10 +198,63 @@ void main() {
     await tester.pump();
     expect(key.currentState!.isLive, isFalse);
     expect(find.text('通话断了'), findsOneWidget);
+    expect(find.text('详情'), findsNothing);
     expect(find.text('重试'), findsOneWidget);
     expect(find.text('挂断'), findsNothing);
     expect(find.text('在听'), findsNothing);
     expect(client.hangupCalls, greaterThan(0));
+  });
+
+  testWidgets('a dropped call can open and copy the close reason', (tester) async {
+    String? copied;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.setData') {
+        copied = (call.arguments as Map)['text'] as String?;
+      }
+      return null;
+    });
+    addTearDown(() {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null);
+    });
+    final client = FakeVoiceClient();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: CallPage(
+          api: FakeWenxiangApi(voiceReady: true),
+          repo: sampleRepo(),
+          onBack: () {},
+          media: FakeVoiceMedia(),
+          client: client,
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    await tester.tap(find.text('开始通话'));
+    await tester.pump();
+    client.emit(VoiceEvent(type: 'state', state: 'listening'));
+    await tester.pump();
+    client.emit(VoiceEvent(
+      type: 'error',
+      code: 'channel',
+      hint: '通话断了',
+      detail: 'WebSocket closed code=1006',
+    ));
+    await tester.pump();
+    expect(find.text('通话断了'), findsOneWidget);
+    expect(find.text('详情'), findsOneWidget);
+    expect(find.textContaining('code=1006'), findsNothing);
+
+    await tester.tap(find.text('详情'));
+    await tester.pump();
+    expect(find.textContaining('code=1006'), findsOneWidget);
+    expect(find.text('复制'), findsOneWidget);
+
+    await tester.tap(find.text('复制'));
+    await tester.pump();
+    expect(copied, 'WebSocket closed code=1006');
+    expect(find.text('已复制'), findsOneWidget);
   });
 
   testWidgets('a mic that drops mid-call reopens instead of hanging up', (tester) async {

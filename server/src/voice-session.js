@@ -348,7 +348,9 @@ export function createVoiceSession({
       } catch (err) {
         started = false;
         machine.fail();
-        emit({ type: "error", code: "channel", hint: "通话断了" });
+        const detail = String(err?.message || err || "").slice(0, 400);
+        console.error(`[voice] start ${detail}`);
+        emit({ type: "error", code: "channel", hint: "通话断了", detail });
       }
     },
     onTranscript(text, { final = false } = {}) {
