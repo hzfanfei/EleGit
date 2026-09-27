@@ -259,6 +259,7 @@ class _StaticFilesPageState extends State<StaticFilesPage> {
           final file = files[index];
           final deleting = _deletingPath == file.path;
           final picked = _selected.contains(file.path);
+          final when = _formatMtime(file.mtime);
           return ListTile(
             contentPadding: const EdgeInsets.symmetric(horizontal: 4),
             leading: Checkbox(
@@ -278,12 +279,8 @@ class _StaticFilesPageState extends State<StaticFilesPage> {
             ),
             title: Text(file.name, maxLines: 1, overflow: TextOverflow.ellipsis),
             subtitle: Text(
-              [
-                file.path,
-                _formatBytes(file.size),
-                if (_formatMtime(file.mtime) case final t?) t,
-              ].join(' · '),
-              maxLines: 2,
+              when ?? _formatBytes(file.size),
+              maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
             trailing: Row(

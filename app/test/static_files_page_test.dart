@@ -92,4 +92,25 @@ void main() {
     expect(find.text('b.png'), findsOneWidget);
     expect(find.text('a.apk'), findsNothing);
   });
+
+  testWidgets('the second line of a resource is its time', (tester) async {
+    final api = _FilesApi([
+      StaticFileItem(
+        path: 'builds/问象.apk',
+        name: '问象.apk',
+        size: 2048,
+        downloadUrl: 'https://example.test/a',
+        mtime: '2026-09-27T14:59:00.000Z',
+      ),
+    ]);
+    await _open(tester, api);
+
+    final local = DateTime.parse('2026-09-27T14:59:00.000Z').toLocal();
+    String two(int n) => n.toString().padLeft(2, '0');
+    final when = '${local.year}-${two(local.month)}-${two(local.day)} ${two(local.hour)}:${two(local.minute)}';
+    expect(find.text('问象.apk'), findsOneWidget);
+    expect(find.text(when), findsOneWidget);
+    expect(find.textContaining('builds/'), findsNothing);
+    expect(find.textContaining('KB'), findsNothing);
+  });
 }
