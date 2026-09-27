@@ -1,3 +1,4 @@
+import { pcmHasSpeech } from "./voice-call.js";
 import { isSpeakableTtsText } from "./spoken-tts.js";
 import {
   DEFAULT_XIAOMI_TTS_VOICE,
@@ -11,8 +12,11 @@ export const XIAOMI_ASR_MODEL = "mimo-v2.5-asr";
 
 const TTS_STYLE = "用自然、清晰的中文说。";
 const MAX_WAV_BYTES = 8 * 1024 * 1024;
-const ENDPOINT_SILENCE_MS = 900;
-const MIN_ENDPOINT_BYTES = 16000 * 2;
+const ENDPOINT_SILENCE_MS = 700;
+/** About 0.4s of 16 kHz PCM16. Shorter than this is not a turn. */
+const MIN_ENDPOINT_BYTES = 12800;
+/** About 0.2s of speech before the call may barge in. */
+const SPEECH_START_BYTES = 6400;
 
 function trim(value) {
   return String(value || "").trim();
@@ -176,12 +180,17 @@ export function createXiaomiAsr({
   pushToTalk = false,
   onFinal,
   onError,
+  onSpeechStart,
+  endpointSilenceMs = ENDPOINT_SILENCE_MS,
+  minEndpointBytes = MIN_ENDPOINT_BYTES,
   fetchImpl = fetch,
 } = {}) {
   const chunks = [];
   let started = false;
   let endpointTimer = null;
   let chain = Promise.resolve();
+  let speechRun = 0;
+  let announced = false;
 
   function pcmBuffer() {
     return chunks.length ? Buffer.concat(chunks) : Buffer.alloc(0);
@@ -213,29 +222,55 @@ export function createXiaomiAsr({
     return chain;
   }
 
-  function scheduleEndpoint() {
-    if (pushToTalk) return;
+  function resetUtterance() {
+    chunks.length = 0;
+    speechRun = 0;
+    announced = false;
     clearEndpoint();
+  }
+
+  function finishUtterance() {
+    endpointTimer = null;
     if (!started) return;
-    endpointTimer = setTimeout(() => {
-      if (!started || pcmBuffer().length < MIN_ENDPOINT_BYTES) return;
-      const buf = pcmBuffer();
-      chunks.length = 0;
-      transcribe(buf);
-    }, ENDPOINT_SILENCE_MS);
+    const buf = pcmBuffer();
+    const ready = announced && buf.length >= minEndpointBytes;
+    resetUtterance();
+    if (!ready) return;
+    transcribe(buf);
   }
 
   return {
     async start() {
-      chunks.length = 0;
       started = true;
       chain = Promise.resolve();
-      clearEndpoint();
+      resetUtterance();
     },
     push(pcm) {
       if (!started || !pcm) return;
-      chunks.push(Buffer.isBuffer(pcm) ? pcm : Buffer.from(pcm));
-      scheduleEndpoint();
+      const buf = Buffer.isBuffer(pcm) ? pcm : Buffer.from(pcm);
+      if (!buf.length) return;
+      if (pushToTalk) {
+        chunks.push(buf);
+        return;
+      }
+      // The mic streams continuously, including silence. Endpoint on quiet
+      // audio, not on a gap between packets.
+      if (pcmHasSpeech(buf)) {
+        speechRun += buf.length;
+        chunks.push(buf);
+        clearEndpoint();
+        if (!announced && speechRun >= SPEECH_START_BYTES) {
+          announced = true;
+          onSpeechStart?.();
+        }
+        return;
+      }
+      if (!announced) {
+        resetUtterance();
+        return;
+      }
+      chunks.push(buf);
+      if (!endpointTimer) endpointTimer = setTimeout(finishUtterance, endpointSilenceMs);
     },
     stop() {
       started = false;

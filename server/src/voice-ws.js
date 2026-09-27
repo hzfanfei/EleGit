@@ -61,6 +61,7 @@ function resolveAsr(config, hooks) {
       xiaomi: config.xiaomi,
       pushToTalk: hooks.pushToTalk === true,
       onFinal: hooks.onFinal,
+      onSpeechStart: hooks.onSpeechStart,
       onError: (detail) => hooks.onAsrError?.({ message: detail?.message, err: detail }),
     });
   }

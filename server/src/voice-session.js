@@ -75,6 +75,12 @@ export function createVoiceSession({
     return true;
   }
 
+  function beginSpeaking() {
+    if (machine.state === "speaking") return;
+    machine.speak();
+    if (machine.state === "speaking") emit({ type: "state", state: "speaking" });
+  }
+
   async function runAsk(question) {
     const fromInterrupt = acceptInterruptFinal;
     if (!fromInterrupt && Date.now() < bargeHoldUntil) return;
@@ -84,8 +90,8 @@ export function createVoiceSession({
     turnAbort = new AbortController();
     ttsAbort = new AbortController();
     const signal = turnAbort.signal;
-    machine.speak();
-    emit({ type: "state", state: "speaking" });
+    machine.think();
+    emit({ type: "state", state: "thinking" });
     try {
       const ctx = await checkout?.(owner, repo, signal);
       if (signal.aborted) return;
@@ -109,9 +115,13 @@ export function createVoiceSession({
             },
             askSignal,
           ),
-        onDelta: ({ text, engine, final }) => pushCaption("assistant", text, { engine, final }),
+        onDelta: ({ text, engine, final }) => {
+          beginSpeaking();
+          pushCaption("assistant", text, { engine, final });
+        },
         onAudio: async (buf) => {
           if (signal.aborted) return;
+          beginSpeaking();
           sendAudio?.(buf);
         },
         onDone: ({ text, engine }) => {
@@ -126,8 +136,8 @@ export function createVoiceSession({
       if (signal.aborted || err?.code === "cancelled") return;
       emit({ type: "error", code: "turn", hint: "通话断了" });
     } finally {
-      if (gen === turnGen && machine.state === "speaking") {
-        machine.connected();
+      if (gen === turnGen && (machine.state === "speaking" || machine.state === "thinking")) {
+        machine.listen();
         emit({ type: "state", state: "listening" });
       }
     }
@@ -179,7 +189,7 @@ export function createVoiceSession({
       const spoken = String(text || "").trim();
       if (!spoken || !started) return;
       if (echoOfAssistant(spoken)) return;
-      if (machine.state === "speaking") bargeIn("asr");
+      if (machine.state === "speaking" || machine.state === "thinking") bargeIn("asr");
       pushCaption("user", spoken, { final });
       if (!final) return;
       const now = Date.now();
@@ -193,7 +203,9 @@ export function createVoiceSession({
       asr?.push?.(buf);
     },
     barge(reason = "tap") {
-      if (machine.state === "speaking") bargeIn(reason === "tap" ? "tap" : "speech");
+      if (machine.state === "speaking" || machine.state === "thinking") {
+        bargeIn(reason === "tap" ? "tap" : "speech");
+      }
     },
     hangup() {
       closed = true;

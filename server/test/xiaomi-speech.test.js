@@ -8,6 +8,13 @@ import {
   xiaomiTts,
 } from "../src/xiaomi-speech.js";
 
+function tone(ms) {
+  const samples = Math.floor((16000 * ms) / 1000);
+  const buf = Buffer.alloc(samples * 2);
+  for (let i = 0; i < samples; i += 1) buf.writeInt16LE(9000, i * 2);
+  return buf;
+}
+
 function jsonResponse(body, status = 200) {
   return {
     ok: status >= 200 && status < 300,
@@ -71,6 +78,45 @@ describe("xiaomi speech", () => {
     asr.push(Buffer.alloc(3200, 2));
     await asr.finalize();
     assert.equal(model, "你好。");
+  });
+
+  it("ends a call utterance on quiet audio while the mic keeps streaming", async () => {
+    let text = "";
+    let starts = 0;
+    const asr = createXiaomiAsr({
+      xiaomi: { apiKey: "tp-test" },
+      endpointSilenceMs: 40,
+      onSpeechStart: () => {
+        starts += 1;
+      },
+      onFinal: (value) => {
+        text = value;
+      },
+      fetchImpl: async () => jsonResponse({ choices: [{ message: { content: "你好" } }] }),
+    });
+    await asr.start();
+    asr.push(tone(500));
+    asr.push(tone(200));
+    assert.equal(starts, 1);
+    asr.push(Buffer.alloc(3200));
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.equal(text, "你好");
+  });
+
+  it("does not send a stream of silence to the recognizer", async () => {
+    let called = false;
+    const asr = createXiaomiAsr({
+      xiaomi: { apiKey: "tp-test" },
+      endpointSilenceMs: 30,
+      fetchImpl: async () => {
+        called = true;
+        return jsonResponse({ choices: [{ message: { content: "不该出现" } }] });
+      },
+    });
+    await asr.start();
+    for (let i = 0; i < 6; i += 1) asr.push(Buffer.alloc(6400));
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.equal(called, false);
   });
 
   it("transcribe of empty audio does not call the network", async () => {

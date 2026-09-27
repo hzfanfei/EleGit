@@ -102,6 +102,8 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
         return '连接中';
       case 'listening':
         return '在听';
+      case 'thinking':
+        return '思考中';
       case 'speaking':
         return '在说';
       case 'barge':
@@ -117,7 +119,7 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
     return '开始通话';
   }
 
-  bool get canBarge => _live && _phase == 'speaking';
+  bool get canBarge => _live && (_phase == 'speaking' || _phase == 'thinking');
 
   void _holdBackground() {
     if (_backgroundHeld) return;
@@ -239,6 +241,8 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
         return 'connecting';
       case 'listening':
         return 'listening';
+      case 'thinking':
+        return 'thinking';
       case 'speaking':
         return 'speaking';
       case 'barge':

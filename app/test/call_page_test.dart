@@ -79,6 +79,12 @@ void main() {
     expect(find.text('在听'), findsOneWidget);
     expect(find.text('挂断'), findsOneWidget);
 
+    client.emit(VoiceEvent(type: 'caption', role: 'user', text: '最近在做什么', finalCaption: true));
+    client.emit(VoiceEvent(type: 'state', state: 'thinking'));
+    await tester.pump();
+    expect(find.textContaining('最近在做什么'), findsOneWidget);
+    expect(find.text('思考中'), findsOneWidget);
+
     client.emit(VoiceEvent(type: 'state', state: 'speaking'));
     await tester.pump();
     expect(find.text('在说'), findsOneWidget);

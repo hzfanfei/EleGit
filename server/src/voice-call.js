@@ -18,11 +18,19 @@ export function createCallMachine() {
     connected() {
       if (state === "connecting" || state === "idle") state = "listening";
     },
+    think() {
+      if (state === "listening" || state === "barge") state = "thinking";
+    },
     speak() {
-      if (state === "listening" || state === "barge") state = "speaking";
+      if (state === "listening" || state === "barge" || state === "thinking") state = "speaking";
+    },
+    listen() {
+      if (state === "speaking" || state === "thinking" || state === "barge" || state === "connecting" || state === "idle") {
+        state = "listening";
+      }
     },
     barge() {
-      if (state !== "speaking") {
+      if (state !== "speaking" && state !== "thinking") {
         return { stopTts: false, cancelTurn: false };
       }
       state = "barge";

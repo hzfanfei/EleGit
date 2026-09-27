@@ -22,6 +22,21 @@ describe("call machine", () => {
     assert.equal(m.state, "idle");
   });
 
+  it("cancels a turn that is still thinking", () => {
+    const m = createCallMachine();
+    m.start();
+    m.connected();
+    m.think();
+    assert.equal(m.state, "thinking");
+    const action = m.barge();
+    assert.equal(action.cancelTurn, true);
+    m.afterBarge();
+    assert.equal(m.state, "listening");
+    m.think();
+    m.speak();
+    assert.equal(m.state, "speaking");
+  });
+
   it("does not cancel a turn when barging from listening", () => {
     const m = createCallMachine();
     m.start();
