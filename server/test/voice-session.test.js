@@ -403,6 +403,41 @@ describe("createVoiceSession", () => {
     assert.deepEqual(asked, ["最近在做什么？", "换个话题吧"]);
   });
 
+  it("loud speech during playback interrupts and is answered", async () => {
+    const asked = [];
+    const pushed = [];
+    const session = createVoiceSession({
+      config: { ready: true, provider: "volc" },
+      send: () => {},
+      sendAudio: () => {},
+      asr: {
+        async start() {},
+        push(buf) {
+          pushed.push(buf);
+        },
+      },
+      checkout: async () => ({ dest: "/tmp/octo/demo" }),
+      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      ask: async function* (opts) {
+        asked.push(opts.question);
+        yield { type: "delta", text: "仓库最近在修登录。" };
+        yield { type: "done", engine: "acp", answer: "仓库最近在修登录。" };
+      },
+      tts: async () => Buffer.from("pcm-audio-bytes"),
+    });
+
+    await session.start({ owner: "octo", repo: "demo", sessionId: "s1" });
+    session.onTranscript("最近在做什么？", { final: true });
+    await new Promise((r) => setTimeout(r, 40));
+    assert.equal(session.state, "speaking");
+
+    session.onPcm(speechBurst());
+    assert.equal(pushed.length, 1);
+    session.onTranscript("换个话题吧", { final: true });
+    await new Promise((r) => setTimeout(r, 40));
+    assert.deepEqual(asked, ["最近在做什么？", "换个话题吧"]);
+  });
+
   it("stays on the call when the open book cannot be loaded", async () => {
     const sent = [];
     const session = createVoiceSession({

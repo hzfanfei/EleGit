@@ -1,7 +1,10 @@
-import { CALL_MIN_RMS, createCallMachine, pcmRms, runVoiceTurn } from "./voice-call.js";
+import { BARGE_RMS, CALL_MIN_RMS, createCallMachine, pcmRms, runVoiceTurn } from "./voice-call.js";
 
 /** Speech long enough to be a real interrupt, not the tail of the question just asked. */
 const INTERRUPT_SPEECH_BYTES = 16000 * 2 * 0.4;
+/** About 0.2s of 16 kHz PCM16 loud enough to talk over the speaker. */
+const PLAYBACK_BARGE_BYTES = 6400;
+const PLAYBACK_BARGE_GAP_MS = 280;
 
 export function createVoiceSession({
   config,
@@ -46,6 +49,10 @@ export function createVoiceSession({
   let micMax = 0;
   let heardPcmSinceTurn = false;
   let speechBytesSinceTurn = 0;
+  let bargeChunks = [];
+  let bargeSpeechBytes = 0;
+  let bargeHardBytes = 0;
+  let bargeGapTimer = null;
 
   function stopMicLog() {
     if (micTimer) clearInterval(micTimer);
@@ -133,8 +140,46 @@ export function createVoiceSession({
     playbackTimer = null;
   }
 
+  function resetPlaybackBarge() {
+    bargeChunks = [];
+    bargeSpeechBytes = 0;
+    bargeHardBytes = 0;
+    if (bargeGapTimer) clearTimeout(bargeGapTimer);
+    bargeGapTimer = null;
+  }
+
+  function notePlaybackPcm(bytes, rms) {
+    if (rms >= CALL_MIN_RMS) {
+      if (bargeGapTimer) {
+        clearTimeout(bargeGapTimer);
+        bargeGapTimer = null;
+      }
+      bargeSpeechBytes += bytes.length;
+      if (rms >= BARGE_RMS) bargeHardBytes += bytes.length;
+      bargeChunks.push(bytes);
+      if (bargeSpeechBytes < PLAYBACK_BARGE_BYTES || bargeHardBytes < PLAYBACK_BARGE_BYTES) return;
+      const buffered = Buffer.concat(bargeChunks);
+      if (!bargeIn("speech")) return;
+      heardPcmSinceTurn = true;
+      speechBytesSinceTurn += buffered.length;
+      asr?.push?.(buffered);
+      return;
+    }
+    if (!bargeSpeechBytes) return;
+    bargeChunks.push(bytes);
+    if (bargeGapTimer) return;
+    bargeGapTimer = setTimeout(() => {
+      bargeGapTimer = null;
+      bargeChunks = [];
+      bargeSpeechBytes = 0;
+      bargeHardBytes = 0;
+    }, PLAYBACK_BARGE_GAP_MS);
+    bargeGapTimer.unref?.();
+  }
+
   function finishListen() {
     clearPlaybackTimer();
+    resetPlaybackBarge();
     playbackOpen = false;
     playbackBytes = 0;
     asr?.discard?.();
@@ -169,7 +214,10 @@ export function createVoiceSession({
         const opening = !playbackOpen;
         playbackOpen = true;
         playbackBytes += audio.length;
-        if (opening) asr?.discard?.();
+        if (opening) {
+          resetPlaybackBarge();
+          asr?.discard?.();
+        }
       }
       sendAudio?.(audio);
     } catch {
@@ -181,6 +229,7 @@ export function createVoiceSession({
     const action = machine.barge();
     if (!action.stopTts && !action.cancelTurn) return false;
     clearPlaybackTimer();
+    resetPlaybackBarge();
     playbackOpen = false;
     playbackBytes = 0;
     abortTurn();
@@ -272,7 +321,10 @@ export function createVoiceSession({
             const opening = !playbackOpen;
             playbackOpen = true;
             playbackBytes += buf?.length || 0;
-            if (opening) asr?.discard?.();
+            if (opening) {
+              resetPlaybackBarge();
+              asr?.discard?.();
+            }
           }
           sendAudio?.(buf);
         },
@@ -387,8 +439,11 @@ export function createVoiceSession({
       micFrames += 1;
       const rms = pcmRms(bytes);
       if (rms > micMax) micMax = rms;
-      // The speaker is still in the room. Loud or quiet, this audio is not the next question.
-      if (playbackOpen) return;
+      // Speaker bleed stays out of recognition. A loud stretch talks over it.
+      if (playbackOpen) {
+        notePlaybackPcm(bytes, rms);
+        return;
+      }
       heardPcmSinceTurn = true;
       if (rms >= CALL_MIN_RMS) speechBytesSinceTurn += bytes.length;
       asr?.push?.(bytes);
@@ -427,6 +482,7 @@ export function createVoiceSession({
       closed = true;
       started = false;
       clearPlaybackTimer();
+      resetPlaybackBarge();
       stopMicLog();
       abortTurn();
       asr?.stop?.();
