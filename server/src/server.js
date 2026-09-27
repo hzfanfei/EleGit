@@ -15,7 +15,7 @@ import { askBookOnCall, handleBookVoiceTurn, prepareBookTurnContext } from "./bo
 import { handleRepoVoiceTurn } from "./repo-voice-turn.js";
 import { streamAnswer, synthesizeBookAnswer, answerReadyNotice } from "./ask.js";
 import { setPhoneForeground, phoneInForeground } from "./phone-presence.js";
-import { openSse, writeSse, writeSseSafe } from "./sse.js";
+import { openSse, sseClientGone, writeSse, writeSseSafe } from "./sse.js";
 import {
   emptyRepoProgress,
   formatProgressContext,
@@ -149,7 +149,9 @@ function trackUnwatched(res) {
   res.on("close", () => {
     if (!res.writableEnded) gone = true;
   });
-  return () => gone || !phoneInForeground();
+  // A dropped body must still publish the finished answer. Foreground alone
+  // used to skip the inbox, so the phone only saw "connection closed".
+  return () => gone || !phoneInForeground() || sseClientGone(res);
 }
 
 async function notifyFinishedAnswer({ notified, aborted, unwatched, answer, session, question, bookId }) {
@@ -1335,7 +1337,10 @@ app.post("/v1/inbox", async (req, res) => {
 });
 
 const httpServer = createServer(app);
+// Both must be 0. Node still sweeps sockets when only requestTimeout is cleared,
+// and that sweep closes a live /v1/chat body (phone: Connection closed while receiving data).
 httpServer.requestTimeout = 0;
+httpServer.headersTimeout = 0;
 httpServer.timeout = 0;
 
 attachVoiceGateway(httpServer, {

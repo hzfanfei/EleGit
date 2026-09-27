@@ -36,6 +36,19 @@ void main() {
     );
   });
 
+  test('does not resend after the server has already accepted the turn', () {
+    expect(
+      shouldRetryChatStreamBeforeText(
+        sawText: false,
+        sawEvent: true,
+        failures: 1,
+        cancelled: false,
+        error: Exception('connection closed'),
+      ),
+      isFalse,
+    );
+  });
+
   test('keeps a partial answer instead of sending the question again', () {
     expect(
       shouldRetryChatStreamBeforeText(

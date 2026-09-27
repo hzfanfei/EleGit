@@ -14,6 +14,23 @@ String stripTaskMarker(String text) {
 
 bool sameChatText(String a, String b) => stripTaskMarker(a) == stripTaskMarker(b);
 
+/// A dropped turn should take the inbox item for this session. The server
+/// stores only the first 200 characters of the question.
+bool heldTurnMatchesNotice({
+  required String sessionId,
+  required String currentSessionId,
+  required String question,
+  required String asked,
+}) {
+  final current = currentSessionId.trim();
+  final incoming = sessionId.trim();
+  if (current.isNotEmpty && incoming.isNotEmpty && incoming != current) return false;
+  final q = question.trim();
+  final text = asked.trim();
+  if (q.isNotEmpty) return text == q || text.startsWith(q);
+  return current.isNotEmpty && incoming == current;
+}
+
 /// Append a finished answer into the saved repo or book chat.
 /// Returns true when a transcript changed.
 Future<bool> backfillChatFromNotice({

@@ -34,10 +34,12 @@ bool shouldRetryChatStreamBeforeText({
   required int failures,
   required bool cancelled,
   required Object error,
+  bool sawEvent = false,
 }) {
   if (cancelled || error is OperationCancelled) return false;
   if (error is ApiException) return false;
-  if (sawText) return false;
+  // A second POST aborts the turn already running on the server.
+  if (sawText || sawEvent) return false;
   return failures < 4;
 }
 
@@ -995,8 +997,10 @@ class WenxiangApi {
       var failures = 0;
       while (true) {
         var sawText = false;
+        var sawEvent = false;
         try {
           await for (final event in open()) {
+            sawEvent = true;
             if (chatEventHasVisibleText(event)) sawText = true;
             yield event;
           }
@@ -1005,6 +1009,7 @@ class WenxiangApi {
           failures += 1;
           if (!shouldRetryChatStreamBeforeText(
             sawText: sawText,
+            sawEvent: sawEvent,
             failures: failures,
             cancelled: cancelled(),
             error: err,

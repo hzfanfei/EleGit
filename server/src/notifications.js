@@ -1,6 +1,7 @@
 // WebSocket gateway for pushing inbox events to clients.
 //
-// Path: /v1/notifications, authenticates via X-Wenxiang-Key header.
+// Path: /v1/notifications. The phone cannot set headers on the upgrade,
+// so the key is accepted from the header or the `key` query (same as voice).
 // On connect, sends a snapshot of recent unread items, then any new items
 // are pushed as `{type:"inbox", item}` messages. Heartbeats every 25s
 // to keep intermediate proxies (ngrok etc.) from idling the socket.
@@ -15,6 +16,17 @@ let wss = null;
 let subscribers = null;
 let recentBuffer = [];
 
+export function notificationKeyFromRequest(req) {
+  const header = String(req?.headers?.["x-wenxiang-key"] || "").trim();
+  if (header) return header;
+  try {
+    const url = new URL(req?.url || "", "http://127.0.0.1");
+    return String(url.searchParams.get("key") || "").trim();
+  } catch {
+    return "";
+  }
+}
+
 export function attachNotifications(httpServer, { getStore }) {
   if (wss) return;
   wss = new WebSocketServer({ noServer: true });
@@ -22,7 +34,7 @@ export function attachNotifications(httpServer, { getStore }) {
 
   httpServer.on("upgrade", (req, socket, head) => {
     if (!req.url || !req.url.startsWith("/v1/notifications")) return;
-    const apiKey = String(req.headers["x-wenxiang-key"] || "");
+    const apiKey = notificationKeyFromRequest(req);
     const expected = (() => {
       try {
         return getStore().config.apiKey;

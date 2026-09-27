@@ -109,6 +109,10 @@ bool _isClone(String lower) {
       lower.contains('authentication failed');
 }
 
+bool isChatTransportDrop(Object error) {
+  return _isSseDrop(error.toString().toLowerCase());
+}
+
 bool _isSseDrop(String lower) {
   return lower.contains('connection closed') ||
       lower.contains('connection abort') ||

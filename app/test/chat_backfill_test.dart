@@ -41,4 +41,43 @@ void main() {
       isNull,
     );
   });
+
+  test('matches a dropped turn to the inbox item for that session', () {
+    expect(
+      heldTurnMatchesNotice(
+        sessionId: 's1',
+        currentSessionId: 's1',
+        question: '修一下',
+        asked: '修一下',
+      ),
+      isTrue,
+    );
+    expect(
+      heldTurnMatchesNotice(
+        sessionId: 's1',
+        currentSessionId: 's1',
+        question: '问' * 200,
+        asked: '${'问' * 200}后面还有',
+      ),
+      isTrue,
+    );
+    expect(
+      heldTurnMatchesNotice(
+        sessionId: 'other',
+        currentSessionId: 's1',
+        question: '修一下',
+        asked: '修一下',
+      ),
+      isFalse,
+    );
+    expect(
+      heldTurnMatchesNotice(
+        sessionId: 's1',
+        currentSessionId: 's1',
+        question: '上一问',
+        asked: '修一下',
+      ),
+      isFalse,
+    );
+  });
 }

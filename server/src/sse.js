@@ -20,7 +20,7 @@ export function openSse(res) {
 }
 
 /** Comment frames so a quiet thinking stretch does not look like a dead socket. */
-export function startSseHeartbeat(res, intervalMs = 15000) {
+export function startSseHeartbeat(res, intervalMs = 5000) {
   if (!res || typeof res.write !== "function") return () => {};
   const timer = setInterval(() => {
     if (res.writableEnded || res.destroyed || res.socket?.destroyed) {
@@ -46,6 +46,14 @@ export function startSseHeartbeat(res, intervalMs = 15000) {
 export function writeSse(res, event) {
   res.write(`data: ${JSON.stringify(event)}\n\n`);
   flushSse(res);
+}
+
+/** The phone socket is already gone, even if the close listener has not run. */
+export function sseClientGone(res) {
+  if (!res || res.destroyed) return Boolean(res?.destroyed);
+  const socket = res.socket;
+  if (socket && (socket.destroyed || socket.writable === false)) return true;
+  return false;
 }
 
 /** Keep draining a finished turn after the phone has already left. */

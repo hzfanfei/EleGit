@@ -92,6 +92,8 @@ class _ChatPageState extends State<ChatPage> {
   String? _sessionId;
   bool _live = false;
   bool _busy = false;
+  bool _holdForAnswer = false;
+  bool _stopped = false;
   int? _processingUserIndex;
   final List<int> _queuedUserIndices = <int>[];
   bool _agentMode = false;
@@ -890,6 +892,8 @@ class _ChatPageState extends State<ChatPage> {
         .where((m) => m.role != 'error')
         .toList();
     var firstDelta = true;
+    var accepted = false;
+    _stopped = false;
 
     try {
       await for (final event in widget.api.chatStream(
@@ -901,6 +905,7 @@ class _ChatPageState extends State<ChatPage> {
         agentMode: _agentMode,
       )) {
         if (!mounted) return;
+        accepted = true;
         if (event.sessionId != null && event.sessionId!.isNotEmpty) {
           _rememberSessionId(event.sessionId);
         }
@@ -979,29 +984,38 @@ class _ChatPageState extends State<ChatPage> {
       await _persist();
     } catch (err) {
       if (!mounted) return;
-      _typewriter.flushNow();
-      final partial = _typewriter.fullText;
-      final raw = err.toString().trim();
-      final reason = raw.isEmpty ? '出了点问题。请稍后重试。' : raw;
-      setState(() {
-        if (partial.isEmpty) {
-          _messages.add(ChatMessage(role: 'error', content: reason));
+      if (accepted && !_stopped && isChatTransportDrop(err)) {
+        final landed = await _holdForServerAnswer(userIndex);
+        if (!mounted) return;
+        if (landed) {
+          _typewriter.reset();
+          await _persist();
+        } else if (_stopped) {
+          _typewriter.flushNow();
+          final partial = _typewriter.fullText;
+          setState(() {
+            if (partial.isNotEmpty) {
+              _insertMessageAfterUser(
+                userIndex,
+                ChatMessage(
+                  role: 'assistant',
+                  content: partial,
+                  engine: _liveEngine.value,
+                ),
+              );
+            }
+            _live = false;
+          });
+          _typewriter.reset();
+          await _persist();
         } else {
-          _insertMessageAfterUser(
-            userIndex,
-            ChatMessage(
-              role: 'assistant',
-              content: partial,
-              engine: _liveEngine.value,
-            ),
-          );
-          _messages.add(ChatMessage(role: 'error', content: reason));
+          _showSendError(userIndex, err);
         }
-        _live = false;
-      });
-      _typewriter.reset();
-      await _persist();
+      } else {
+        _showSendError(userIndex, err);
+      }
     } finally {
+      _holdForAnswer = false;
       _processingUserIndex = null;
       _stopLivePhaseFallback();
       _cancelStreamScrollFollow();
@@ -1028,11 +1042,120 @@ class _ChatPageState extends State<ChatPage> {
 
   void _stop() {
     if (!_busy) return;
+    _stopped = true;
+    _holdForAnswer = false;
     widget.api.cancelChat(sessionId: _sessionId);
   }
 
+  void _showSendError(int userIndex, Object err) {
+    _typewriter.flushNow();
+    final partial = _typewriter.fullText;
+    final raw = err.toString().trim();
+    final reason = raw.isEmpty ? '出了点问题。请稍后重试。' : raw;
+    setState(() {
+      if (partial.isEmpty) {
+        _messages.add(ChatMessage(role: 'error', content: reason));
+      } else {
+        _insertMessageAfterUser(
+          userIndex,
+          ChatMessage(
+            role: 'assistant',
+            content: partial,
+            engine: _liveEngine.value,
+          ),
+        );
+        _messages.add(ChatMessage(role: 'error', content: reason));
+      }
+      _live = false;
+    });
+    _typewriter.reset();
+    unawaited(_persist());
+  }
+
+  bool _answerAfter(int userIndex) {
+    if (userIndex < 0 || userIndex >= _messages.length) return false;
+    for (var i = userIndex + 1; i < _messages.length; i++) {
+      final message = _messages[i];
+      if (message.role == 'user') return false;
+      if (message.role == 'assistant' && message.content.trim().isNotEmpty) return true;
+    }
+    return false;
+  }
+
+  /// The socket dropped after the server accepted the turn. Keep waiting:
+  /// a new POST would abort the answer that is still being written.
+  /// A failed inbox poll is the same outage, so it does not end the wait.
+  Future<bool> _holdForServerAnswer(int userIndex) async {
+    _holdForAnswer = true;
+    _setLivePhase('hold');
+    final deadline = DateTime.now().add(const Duration(minutes: 12));
+    while (mounted && _holdForAnswer && DateTime.now().isBefore(deadline)) {
+      if (_answerAfter(userIndex)) return true;
+      try {
+        await _pullInboxIntoChat(userIndex);
+      } catch (_) {}
+      if (_answerAfter(userIndex)) return true;
+      await Future<void>.delayed(const Duration(seconds: 2));
+    }
+    return _answerAfter(userIndex);
+  }
+
+  Future<void> _pullInboxIntoChat(int userIndex) async {
+    final res = await widget.api.fetchInbox();
+    final list = (res['items'] as List?) ?? const [];
+    for (final entry in list) {
+      if (entry is! Map) continue;
+      final item = Map<String, dynamic>.from(entry);
+      final answer = (item['answer'] ?? '').toString().trim();
+      if (answer.isEmpty) continue;
+      final sessionId = (item['sessionId'] ?? '').toString();
+      final question = (item['question'] ?? '').toString();
+      await backfillChatFromNotice(
+        sessionId: sessionId,
+        answer: answer,
+        question: question,
+        owner: (item['owner'] ?? '').toString(),
+        repo: (item['repo'] ?? '').toString(),
+        bookId: (item['bookId'] ?? '').toString(),
+      );
+      if (_messagesMatchNotice(userIndex, sessionId: sessionId, question: question)) {
+        _placeHeldAnswer(userIndex, answer);
+      }
+    }
+    _mergeBackfill();
+  }
+
+  bool _messagesMatchNotice(int userIndex, {required String sessionId, required String question}) {
+    if (userIndex < 0 || userIndex >= _messages.length) return false;
+    return heldTurnMatchesNotice(
+      sessionId: sessionId,
+      currentSessionId: _sessionId ?? '',
+      question: question,
+      asked: _messages[userIndex].content,
+    );
+  }
+
+  void _placeHeldAnswer(int userIndex, String answer) {
+    if (!mounted) return;
+    final text = stripTaskMarker(answer);
+    if (text.isEmpty || _answerAfter(userIndex)) return;
+    if (userIndex < 0 || userIndex >= _messages.length) return;
+    setState(() {
+      _insertMessageAfterUser(
+        userIndex,
+        ChatMessage(
+          role: 'assistant',
+          content: text,
+          engine: _liveEngine.value ?? 'acp',
+        ),
+      );
+      _live = false;
+    });
+  }
+
   void _onChatBackfill() {
-    if (!mounted || _busy) return;
+    if (!mounted) return;
+    if (_busy && !_holdForAnswer) return;
     _mergeBackfill();
   }
 
@@ -1050,12 +1173,20 @@ class _ChatPageState extends State<ChatPage> {
           ) ??
           false;
       if (have) continue;
+      final holdingThis =
+          _holdForAnswer && entry.key == (_sessionId ?? '') && _processingUserIndex != null;
+      if (holdingThis) {
+        _placeHeldAnswer(_processingUserIndex!, last.content);
+        changed = true;
+        continue;
+      }
       _transcripts[entry.key] = List<ChatMessage>.from(entry.value);
       changed = true;
     }
     if (!changed || !mounted) return;
+    final answered = _processingUserIndex != null && _answerAfter(_processingUserIndex!);
     setState(() {
-      _live = false;
+      if (!_holdForAnswer || answered) _live = false;
     });
     _jumpToLatest(force: true);
   }
@@ -1690,6 +1821,8 @@ String _livePhaseLabel(String phase) {
       return '连接本机 Agent…';
     case 'generate':
       return '生成回答…';
+    case 'hold':
+      return '连接闪了一下，回答还在生成…';
     case 'connect':
     default:
       return '正在连接…';
