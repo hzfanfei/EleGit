@@ -1256,11 +1256,12 @@ export class AcpChannel {
       const text = acpVisibleTextFromUpdate(update);
       if (text) {
         this.onDelta?.(text);
-        if (!this._toolLog.items.length || toolLogSettled(this._toolLog)) this.onActivity?.("");
+        // A text-only reply has no work log. Once tools have started, keep the
+        // hint up for the whole turn; a finished tool is not the end.
+        if (!this._toolLog.items.length) this.onActivity?.("");
       }
       const traced = pushAcpToolActivity(this._toolLog, update);
-      if (toolLogSettled(this._toolLog)) this.onActivity?.("");
-      else if (traced) this.onActivity?.(traced);
+      if (traced) this.onActivity?.(traced);
       return;
     }
     if (msg.method === "fs/read_text_file") {
