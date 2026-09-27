@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { answerReadyNotice, buildCursorPrompt, detectCursorEngine, streamAnswer, streamText, synthesizeLocalAnswer, taskCompletionNotice } from "../src/ask.js";
+import { answerReadyNotice, buildCursorPrompt, detectCursorEngine, shouldPublishFinishedAnswer, streamAnswer, streamText, synthesizeLocalAnswer, taskCompletionNotice } from "../src/ask.js";
 
 const sampleProgress = {
   repo: {
@@ -124,6 +124,14 @@ describe("taskCompletionNotice", () => {
     assert.equal(notice.answer, answer.trim());
     assert.ok(notice.body.length <= 280);
     assert.equal(notice.body, answer.trim().slice(0, 280));
+  });
+
+  it("publishes when the phone left or the done event was not written", () => {
+    assert.equal(shouldPublishFinishedAnswer({ notified: false, aborted: false, unwatched: true, delivered: true }), true);
+    assert.equal(shouldPublishFinishedAnswer({ notified: false, aborted: false, unwatched: false, delivered: false }), true);
+    assert.equal(shouldPublishFinishedAnswer({ notified: false, aborted: false, unwatched: false, delivered: true }), false);
+    assert.equal(shouldPublishFinishedAnswer({ notified: true, aborted: false, unwatched: true, delivered: false }), false);
+    assert.equal(shouldPublishFinishedAnswer({ notified: false, aborted: true, unwatched: true, delivered: false }), false);
   });
 
   it("notifies a normal answer when there is no task marker", () => {

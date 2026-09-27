@@ -42,6 +42,29 @@ void main() {
     );
   });
 
+  test('a different inbox question does not finish the held turn', () {
+    expect(
+      transcriptAnswersAsk(
+        [
+          ChatMessage(role: 'user', content: '上一问'),
+          ChatMessage(role: 'assistant', content: '上一问的回答'),
+        ],
+        '修一下',
+      ),
+      isFalse,
+    );
+    expect(
+      transcriptAnswersAsk(
+        [
+          ChatMessage(role: 'user', content: '问' * 200),
+          ChatMessage(role: 'assistant', content: '答完了'),
+        ],
+        '${'问' * 200}后面还有',
+      ),
+      isTrue,
+    );
+  });
+
   test('matches a dropped turn to the inbox item for that session', () {
     expect(
       heldTurnMatchesNotice(

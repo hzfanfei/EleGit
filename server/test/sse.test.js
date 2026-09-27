@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { flushSse, openSse, sseClientGone, startSseHeartbeat, writeSse } from "../src/sse.js";
+import { flushSse, openSse, sseClientGone, startSseHeartbeat, writeSse, writeSseSafe } from "../src/sse.js";
 
 function mockRes() {
   const headers = {};
@@ -96,6 +96,13 @@ describe("SSE writer", () => {
     await new Promise((resolve) => setTimeout(resolve, 40));
     assert.equal(writes.length, count);
     stop();
+  });
+
+  it("reports when the done event was not written", () => {
+    assert.equal(writeSseSafe({ writableEnded: true, destroyed: false, write() {} }, { type: "done" }), false);
+    const res = mockRes();
+    assert.equal(writeSseSafe(res, { type: "done", answer: "好了" }), true);
+    assert.match(res.writes.join(""), /"type":"done"/);
   });
 
   it("treats a destroyed socket as a dropped chat body", () => {

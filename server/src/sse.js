@@ -58,10 +58,11 @@ export function sseClientGone(res) {
 
 /** Keep draining a finished turn after the phone has already left. */
 export function writeSseSafe(res, event) {
-  if (!res || res.writableEnded || res.destroyed || res.socket?.destroyed) return;
+  if (!res || res.writableEnded || res.destroyed || res.socket?.destroyed) return false;
   try {
     writeSse(res, event);
+    return true;
   } catch {
-    /* client disconnected */
+    return false;
   }
 }

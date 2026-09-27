@@ -36,6 +36,19 @@ void main() {
     );
   });
 
+  test('does not resend after the response headers were accepted', () {
+    expect(
+      shouldRetryChatStreamBeforeText(
+        sawText: false,
+        sawEvent: false,
+        failures: 1,
+        cancelled: false,
+        error: AcceptedChatDrop(Exception('connection closed while receiving data')),
+      ),
+      isFalse,
+    );
+  });
+
   test('does not resend after the server has already accepted the turn', () {
     expect(
       shouldRetryChatStreamBeforeText(

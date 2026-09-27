@@ -14,6 +14,21 @@ String stripTaskMarker(String text) {
 
 bool sameChatText(String a, String b) => stripTaskMarker(a) == stripTaskMarker(b);
 
+/// The saved transcript's latest question is this held turn.
+bool transcriptAnswersAsk(List<ChatMessage> messages, String asked) {
+  ChatMessage? lastUser;
+  for (final message in messages) {
+    if (message.role == 'user') lastUser = message;
+  }
+  if (lastUser == null) return false;
+  return heldTurnMatchesNotice(
+    sessionId: '',
+    currentSessionId: '',
+    question: lastUser.content,
+    asked: asked,
+  );
+}
+
 /// A dropped turn should take the inbox item for this session. The server
 /// stores only the first 200 characters of the question.
 bool heldTurnMatchesNotice({

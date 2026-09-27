@@ -13,7 +13,7 @@ import {
 } from "./acp.js";
 import { askBookOnCall, handleBookVoiceTurn, prepareBookTurnContext } from "./book-voice-turn.js";
 import { handleRepoVoiceTurn } from "./repo-voice-turn.js";
-import { streamAnswer, synthesizeBookAnswer, answerReadyNotice } from "./ask.js";
+import { streamAnswer, synthesizeBookAnswer, answerReadyNotice, shouldPublishFinishedAnswer } from "./ask.js";
 import { setPhoneForeground, phoneInForeground } from "./phone-presence.js";
 import { openSse, sseClientGone, writeSse, writeSseSafe } from "./sse.js";
 import {
@@ -154,8 +154,8 @@ function trackUnwatched(res) {
   return () => gone || !phoneInForeground() || sseClientGone(res);
 }
 
-async function notifyFinishedAnswer({ notified, aborted, unwatched, answer, session, question, bookId }) {
-  if (notified || aborted || !unwatched) return;
+async function notifyFinishedAnswer({ notified, aborted, unwatched, delivered, answer, session, question, bookId }) {
+  if (!shouldPublishFinishedAnswer({ notified, aborted, unwatched, delivered })) return;
   try {
     await publishInboxNotice(
       store.config.workspaceRoot,
@@ -1000,6 +1000,7 @@ app.post("/v1/books/chat", async (req, res) => {
     let finalEngine = "local-progress";
     let finalAnswer = "";
     let notified = false;
+    let deliveredDone;
     for await (const event of streamAnswer({
       question: message,
       history,
@@ -1022,7 +1023,7 @@ app.post("/v1/books/chat", async (req, res) => {
       if (event.type === "done") {
         finalEngine = event.engine;
         finalAnswer = event.answer || "";
-        writeSseSafe(res, {
+        deliveredDone = writeSseSafe(res, {
           type: "done",
           engine: finalEngine,
           model: acp.model || null,
@@ -1035,10 +1036,12 @@ app.post("/v1/books/chat", async (req, res) => {
         writeSseSafe(res, event);
       }
     }
+    await new Promise((resolve) => setImmediate(resolve));
     await notifyFinishedAnswer({
       notified,
       aborted: signal.aborted,
       unwatched: unwatched(),
+      delivered: deliveredDone,
       answer: finalAnswer,
       session,
       question: message,
@@ -1181,6 +1184,7 @@ app.post("/v1/chat", async (req, res) => {
     let finalEngine = "local-progress";
     let finalAnswer = "";
     let notified = false;
+    let deliveredDone;
     for await (const event of streamAnswer({
       question: message,
       history,
@@ -1200,7 +1204,7 @@ app.post("/v1/chat", async (req, res) => {
       if (event.type === "done") {
         finalEngine = event.engine;
         finalAnswer = event.answer;
-        writeSseSafe(res, {
+        deliveredDone = writeSseSafe(res, {
           type: "done",
           engine: event.engine,
           answer: event.answer,
@@ -1212,10 +1216,12 @@ app.post("/v1/chat", async (req, res) => {
         writeSseSafe(res, event);
       }
     }
+    await new Promise((resolve) => setImmediate(resolve));
     await notifyFinishedAnswer({
       notified,
       aborted: signal.aborted,
       unwatched: unwatched(),
+      delivered: deliveredDone,
       answer: finalAnswer,
       session,
       question: message,

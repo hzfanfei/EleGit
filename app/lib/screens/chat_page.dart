@@ -984,7 +984,8 @@ class _ChatPageState extends State<ChatPage> {
       await _persist();
     } catch (err) {
       if (!mounted) return;
-      if (accepted && !_stopped && isChatTransportDrop(err)) {
+      final cause = err is AcceptedChatDrop ? err.cause : err;
+      if ((accepted || err is AcceptedChatDrop) && !_stopped && isChatTransportDrop(cause)) {
         final landed = await _holdForServerAnswer(userIndex);
         if (!mounted) return;
         if (landed) {
@@ -1009,10 +1010,10 @@ class _ChatPageState extends State<ChatPage> {
           _typewriter.reset();
           await _persist();
         } else {
-          _showSendError(userIndex, err);
+          _showSendError(userIndex, cause);
         }
       } else {
-        _showSendError(userIndex, err);
+        _showSendError(userIndex, cause);
       }
     } finally {
       _holdForAnswer = false;
@@ -1176,8 +1177,11 @@ class _ChatPageState extends State<ChatPage> {
       final holdingThis =
           _holdForAnswer && entry.key == (_sessionId ?? '') && _processingUserIndex != null;
       if (holdingThis) {
-        _placeHeldAnswer(_processingUserIndex!, last.content);
-        changed = true;
+        final asked = _messages[_processingUserIndex!].content;
+        if (transcriptAnswersAsk(entry.value, asked)) {
+          _placeHeldAnswer(_processingUserIndex!, last.content);
+          changed = true;
+        }
         continue;
       }
       _transcripts[entry.key] = List<ChatMessage>.from(entry.value);

@@ -40,6 +40,13 @@ export function taskCompletionNotice(full, { session, question, bookId } = {}) {
   return notice;
 }
 
+/** Publish when the phone will not see the SSE `done` event. */
+export function shouldPublishFinishedAnswer({ notified, aborted, unwatched, delivered }) {
+  if (notified || aborted) return false;
+  if (unwatched) return true;
+  return delivered === false;
+}
+
 /** Inbox payload for a finished answer, with or without the task marker. */
 export function answerReadyNotice(full, ctx = {}) {
   const marked = taskCompletionNotice(full, ctx);

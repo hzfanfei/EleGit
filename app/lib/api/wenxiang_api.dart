@@ -29,6 +29,16 @@ Duration chatStreamRetryDelay(int failures) {
   }
 }
 
+/// The server already accepted the turn, then the body dropped.
+/// Retrying would abort the answer that is still being written.
+class AcceptedChatDrop implements Exception {
+  AcceptedChatDrop(this.cause);
+  final Object cause;
+
+  @override
+  String toString() => cause.toString();
+}
+
 bool shouldRetryChatStreamBeforeText({
   required bool sawText,
   required int failures,
@@ -36,7 +46,7 @@ bool shouldRetryChatStreamBeforeText({
   required Object error,
   bool sawEvent = false,
 }) {
-  if (cancelled || error is OperationCancelled) return false;
+  if (cancelled || error is OperationCancelled || error is AcceptedChatDrop) return false;
   if (error is ApiException) return false;
   // A second POST aborts the turn already running on the server.
   if (sawText || sawEvent) return false;
@@ -1070,6 +1080,7 @@ class WenxiangApi {
   }) async* {
     final client = http.Client();
     _chatClient = client;
+    var headersAccepted = false;
     try {
       final request = http.Request('POST', _uri('/v1/chat'))
         ..headers.addAll({
@@ -1095,6 +1106,7 @@ class WenxiangApi {
         } catch (_) {}
         throw ApiException(error);
       }
+      headersAccepted = true;
       var buffer = '';
       await for (final chunk in res.stream.transform(utf8.decoder)) {
         if (_chatCancelled) throw const OperationCancelled();
@@ -1114,6 +1126,7 @@ class WenxiangApi {
       if (_chatCancelled || err is OperationCancelled) {
         throw const OperationCancelled();
       }
+      if (headersAccepted) throw AcceptedChatDrop(err);
       rethrow;
     } finally {
       if (identical(_chatClient, client)) _chatClient = null;
