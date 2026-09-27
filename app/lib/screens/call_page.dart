@@ -225,14 +225,12 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
       client.hello(
         bookId: widget.book!.id,
         chapter: widget.chapter,
-        sessionId: widget.sessionId,
       );
       return;
     }
     client.hello(
       owner: widget.repo?.owner ?? '',
       repo: widget.repo?.name ?? '',
-      sessionId: widget.sessionId,
     );
   }
 

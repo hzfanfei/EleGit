@@ -1,4 +1,5 @@
 import { encodeAdpcm } from "./adpcm.js";
+import { bookSessionOwner } from "./books.js";
 import { CALL_MIN_RMS, createCallMachine, pcmRms, runVoiceTurn } from "./voice-call.js";
 
 /** Speech long enough to be a real interrupt, not the tail of the question just asked. */
@@ -81,6 +82,7 @@ export function createVoiceSession({
   checkout,
   prepareContext,
   sessions,
+  bookSessions,
   ask,
   tts,
   asr,
@@ -98,6 +100,9 @@ export function createVoiceSession({
   let bookMode = false;
   let sessionId = "";
   let turnSessions = sessions;
+  let callSessionStore = null;
+  let callSessionOwner = "";
+  let callSessionRepo = "";
   let history = [];
   let turnAbort = null;
   let ttsAbort = null;
@@ -147,17 +152,39 @@ export function createVoiceSession({
     return checkoutPromise;
   }
 
+  function openCallSession(store, sessionOwner, sessionRepo) {
+    const view = store?.createEphemeral?.(sessionOwner, sessionRepo);
+    if (!view?.id) return null;
+    sessionId = view.id;
+    turnSessions = store;
+    callSessionStore = store;
+    callSessionOwner = sessionOwner;
+    callSessionRepo = sessionRepo;
+    return view;
+  }
+
   /** The first question should not wait for the Agent process to start. */
   function warmRepoCall() {
     repoCheckout()
       .then((ctx) => {
-        if (closed) return;
-        const chat = sessions?.resolveForChat?.(owner, repo, sessionId);
-        if (chat?.id) sessionId = chat.id;
+        if (closed || !sessionId) return;
         const cwd = ctx?.local?.present ? ctx.local.path : "";
-        if (cwd) return sessions?.warmRepo?.(owner, repo, cwd);
+        if (!cwd || !turnSessions?.warm) return;
+        return turnSessions.warm({ id: sessionId, owner: callSessionOwner, repo: callSessionRepo }, cwd);
       })
       .catch(() => {});
+  }
+
+  function closeCallSession() {
+    const store = callSessionStore;
+    const id = sessionId;
+    const sessionOwner = callSessionOwner;
+    const sessionRepo = callSessionRepo;
+    callSessionStore = null;
+    callSessionOwner = "";
+    callSessionRepo = "";
+    if (!store?.close || !id || !sessionOwner || !sessionRepo) return;
+    store.close(sessionOwner, sessionRepo, id).catch(() => {});
   }
 
   function stopMicLog() {
@@ -428,8 +455,7 @@ export function createVoiceSession({
       } else {
         ctx = await repoCheckout(signal);
         if (signal.aborted) return;
-        turnSessions = sessions;
-        currentSession = sessions?.resolveForChat?.(owner, repo, sessionId) || { id: sessionId };
+        currentSession = turnSessions?.resolveForChat?.(owner, repo, sessionId) || { id: sessionId };
         sessionId = currentSession?.id || sessionId;
       }
       const result = await runVoiceTurn({
@@ -526,10 +552,18 @@ export function createVoiceSession({
       bookId = String(opts.bookId || "").trim();
       chapter = String(opts.chapter || "").trim();
       bookMode = Boolean(bookId);
-      sessionId = String(opts.sessionId || "").trim();
-      history = Array.isArray(opts.history) ? opts.history : [];
+      history = [];
       downlinkAdpcm = opts.audio === "adpcm";
+      callSessionStore = null;
+      callSessionOwner = "";
+      callSessionRepo = "";
+      sessionId = "";
       turnSessions = sessions;
+      if (bookMode && bookId) {
+        openCallSession(bookSessions || sessions, bookSessionOwner(), bookId);
+      } else if (owner && repo) {
+        openCallSession(sessions, owner, repo);
+      }
       if (!config?.ready) {
         emit({ type: "error", code: "unconfigured", hint: config?.hint || "还没配语音密钥" });
         return;
@@ -653,6 +687,7 @@ export function createVoiceSession({
       stopMicLog();
       abortTurn();
       asr?.stop?.();
+      closeCallSession();
       machine.hangup();
     },
   };

@@ -1388,6 +1388,7 @@ attachVoiceGateway(httpServer, {
     }),
   createBookAsk: () => askBookOnCall,
   sessions,
+  bookSessions,
 });
 attachSttGateway(httpServer, {
   getApiKey: () => store.config.apiKey,

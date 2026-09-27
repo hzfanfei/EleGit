@@ -14,6 +14,17 @@ function speechBurst() {
   return buf;
 }
 
+function voiceCallSessions(overrides = {}) {
+  return {
+    createEphemeral: () => ({ id: "call-1" }),
+    resolveForChat: (_owner, _repo, id) => ({ id: id || "call-1" }),
+    close: async () => ({ closed: true }),
+    cancel: async () => {},
+    warm: async () => {},
+    ...overrides,
+  };
+}
+
 describe("createVoiceSession", () => {
   it("refuses to start a fake demo when keys are missing", async () => {
     const sent = [];
@@ -38,12 +49,11 @@ describe("createVoiceSession", () => {
       send: (msg) => sent.push(msg),
       sendAudio: (buf) => audio.push(Buffer.from(buf)),
       checkout: async () => ({ dest: "/tmp/octo/demo", local: { present: true, path: "/tmp/octo/demo" }, progress: { repo: { fullName: "octo/demo" } } }),
-      sessions: {
-        resolveForChat: () => ({ id: "s1" }),
+      sessions: voiceCallSessions({
         cancel: async () => {
           cancelled += 1;
         },
-      },
+      }),
       ask: async function* (_q, signal) {
         yield { type: "start", engine: "acp" };
         yield { type: "delta", text: "仓库最近在修登录。" };
@@ -94,7 +104,7 @@ describe("createVoiceSession", () => {
       config: { ready: true, provider: "volc" },
       send: () => {},
       checkout: async () => ({ dest: "/tmp/octo/demo" }),
-      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      sessions: voiceCallSessions(),
       ask: async function* (opts) {
         asked.push(opts.question);
         yield { type: "delta", text: "先说到这里。" };
@@ -136,7 +146,7 @@ describe("createVoiceSession", () => {
       config: { ready: true, provider: "volc" },
       send: () => {},
       checkout: async () => ({ dest: "/tmp/octo/demo" }),
-      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      sessions: voiceCallSessions(),
       ask: async function* (opts) {
         asked.push(opts.question);
         yield { type: "delta", text: "先说到这里。" };
@@ -173,7 +183,7 @@ describe("createVoiceSession", () => {
       config: { ready: true, provider: "volc" },
       send: () => {},
       checkout: async () => ({ dest: "/tmp/octo/demo" }),
-      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      sessions: voiceCallSessions(),
       ask: async function* (opts) {
         asked.push(opts.question);
         yield { type: "delta", text: "先说到这里。" };
@@ -210,7 +220,7 @@ describe("createVoiceSession", () => {
       config: { ready: true, provider: "volc" },
       send: () => {},
       checkout: async () => ({ dest: "/tmp/octo/demo" }),
-      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      sessions: voiceCallSessions(),
       ask: async function* (opts) {
         asked.push(opts.question);
         yield { type: "delta", text: "仓库最近在修登录。" };
@@ -244,19 +254,21 @@ describe("createVoiceSession", () => {
   it("asks the open book without checking out a repo", async () => {
     const asked = [];
     let prepared = 0;
+    const bookSessions = voiceCallSessions();
     const session = createVoiceSession({
       config: { ready: true, provider: "volc" },
       send: () => {},
+      bookSessions,
       prepareContext: async ({ bookId, chapter, sessionId }) => {
         prepared += 1;
         assert.equal(bookId, "b1");
         assert.equal(chapter, "第一章");
-        assert.equal(sessionId, "book-s1");
+        assert.equal(sessionId, "call-1");
         return {
           book: { id: "b1", title: "演示书" },
           materialized: { cacheDir: "/tmp/book" },
-          session: { id: "book-s1" },
-          sessions: { cancel: async () => {} },
+          session: { id: sessionId },
+          sessions: bookSessions,
         };
       },
       checkout: async () => {
@@ -283,6 +295,37 @@ describe("createVoiceSession", () => {
     assert.equal(session.state, "listening");
   });
 
+  it("opens a fresh Agent session per call and closes it on hangup", async () => {
+    let ephemeral = 0;
+    let closed = 0;
+    const session = createVoiceSession({
+      config: { ready: true, provider: "volc" },
+      send: () => {},
+      checkout: async () => ({ dest: "/tmp/octo/demo" }),
+      sessions: voiceCallSessions({
+        createEphemeral: () => {
+          ephemeral += 1;
+          return { id: `call-${ephemeral}` };
+        },
+        close: async () => {
+          closed += 1;
+          return { closed: true };
+        },
+      }),
+      ask: async function* () {
+        yield { type: "done", engine: "acp", answer: "好。" };
+      },
+      tts: async () => Buffer.alloc(0),
+      asr: { start: async () => {}, stop: async () => {} },
+    });
+
+    await session.start({ owner: "octo", repo: "demo", sessionId: "chat-old" });
+    assert.equal(ephemeral, 1);
+    session.hangup();
+    await new Promise((r) => setTimeout(r, 5));
+    assert.equal(closed, 1);
+  });
+
   it("keeps speaking until the phone finishes playback", async () => {
     const sent = [];
     const session = createVoiceSession({
@@ -290,7 +333,7 @@ describe("createVoiceSession", () => {
       send: (msg) => sent.push(msg),
       sendAudio: () => {},
       checkout: async () => ({ dest: "/tmp/octo/demo" }),
-      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      sessions: voiceCallSessions(),
       ask: async function* () {
         yield { type: "delta", text: "先说到这里。" };
         yield { type: "done", engine: "acp", answer: "先说到这里。" };
@@ -317,7 +360,7 @@ describe("createVoiceSession", () => {
       sendAudio: () => {},
       playbackFallbackMs: 200,
       checkout: async () => ({ dest: "/tmp/octo/demo" }),
-      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      sessions: voiceCallSessions(),
       ask: async function* () {
         yield { type: "delta", text: "先说到这里。" };
         yield { type: "done", engine: "acp", answer: "先说到这里。" };
@@ -339,7 +382,7 @@ describe("createVoiceSession", () => {
       send: () => {},
       sendAudio: () => {},
       checkout: async () => ({ dest: "/tmp/octo/demo" }),
-      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      sessions: voiceCallSessions(),
       ask: async function* () {
         yield { type: "delta", text: "先说到这里。" };
         yield { type: "done", engine: "acp", answer: "先说到这里。" };
@@ -369,7 +412,7 @@ describe("createVoiceSession", () => {
         },
       },
       checkout: async () => ({ dest: "/tmp/octo/demo" }),
-      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      sessions: voiceCallSessions(),
       ask: async function* (opts) {
         asked.push(opts.question);
         yield { type: "delta", text: "仓库最近在修登录。" };
@@ -417,7 +460,7 @@ describe("createVoiceSession", () => {
         },
       },
       checkout: async () => ({ dest: "/tmp/octo/demo" }),
-      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      sessions: voiceCallSessions(),
       ask: async function* (opts) {
         asked.push(opts.question);
         yield { type: "delta", text: "仓库最近在修登录。" };
@@ -499,7 +542,7 @@ describe("createVoiceSession", () => {
         },
       },
       checkout: async () => ({ dest: "/tmp/octo/demo" }),
-      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      sessions: voiceCallSessions(),
       ask: async function* () {
         yield { type: "delta", text: "仓库最近在修登录。" };
         yield { type: "done", engine: "acp", answer: "仓库最近在修登录。" };
@@ -537,7 +580,7 @@ describe("createVoiceSession", () => {
         },
       },
       checkout: async () => ({ dest: "/tmp/octo/demo" }),
-      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      sessions: voiceCallSessions(),
       ask: async function* (opts) {
         asked.push(opts.question);
         yield { type: "delta", text: "仓库最近在修登录。" };
@@ -573,7 +616,7 @@ describe("createVoiceSession", () => {
       sendAudio: () => {},
       asr: { async start() {}, push() {} },
       checkout: async () => ({ dest: "/tmp/octo/demo" }),
-      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      sessions: voiceCallSessions(),
       ask: async function* (opts) {
         asked.push(opts.question);
         yield { type: "delta", text: "仓库最近在修登录。" };
@@ -616,7 +659,7 @@ describe("createVoiceSession", () => {
           },
         },
         checkout: async () => ({ dest: "/tmp/octo/demo" }),
-        sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+        sessions: voiceCallSessions(),
         ask: async function* () {
           yield { type: "delta", text: "仓库最近在修登录。" };
           yield { type: "done", engine: "acp", answer: "仓库最近在修登录。" };
@@ -660,7 +703,7 @@ describe("createVoiceSession", () => {
       sendAudio: () => {},
       asr: { async start() {}, push() {} },
       checkout: async () => ({ dest: "/tmp/octo/demo" }),
-      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      sessions: voiceCallSessions(),
       ask: async function* () {
         yield { type: "delta", text: "仓库最近在修登录。" };
         yield { type: "done", engine: "acp", answer: "仓库最近在修登录。" };
@@ -693,7 +736,7 @@ describe("createVoiceSession", () => {
       sendAudio: (buf) => sends.push({ at: Date.now() - t0, bytes: buf.length }),
       asr: { async start() {}, push() {} },
       checkout: async () => ({ dest: "/tmp/octo/demo" }),
-      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      sessions: voiceCallSessions(),
       ask: async function* () {
         yield { type: "delta", text: "第一句话说完了。" };
         await new Promise((r) => setTimeout(r, 5));
@@ -721,7 +764,7 @@ describe("createVoiceSession", () => {
       sendAudio: () => {},
       asr: { async start() {}, push() {} },
       checkout: async () => ({ dest: "/tmp/octo/demo" }),
-      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      sessions: voiceCallSessions(),
       ask: async function* () {
         yield { type: "delta", text: "仓库最近在修登录。" };
         yield { type: "done", engine: "acp", answer: "仓库最近在修登录。" };
@@ -751,7 +794,7 @@ describe("createVoiceSession", () => {
       sendAudio: () => {},
       asr: { async start() {}, push() {} },
       checkout: async () => ({ dest: "/tmp/octo/demo" }),
-      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      sessions: voiceCallSessions(),
       ask: async function* (opts) {
         asked.push(opts.question);
         yield { type: "delta", text: "我是问象，可以帮你看仓库进度，也可以聊天。" };
@@ -792,7 +835,7 @@ describe("createVoiceSession", () => {
         },
       },
       checkout: async () => ({ dest: "/tmp/octo/demo" }),
-      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      sessions: voiceCallSessions(),
       ask: async function* (opts) {
         asked.push(opts.question);
         yield { type: "delta", text: "我是问象，可以帮你看仓库进度，也可以聊天。" };
@@ -824,7 +867,7 @@ describe("createVoiceSession", () => {
       send: () => {},
       sendAudio: () => {},
       checkout: async () => ({ dest: "/tmp/octo/demo" }),
-      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      sessions: voiceCallSessions(),
       ask: async function* (opts, signal) {
         asked.push(opts.question);
         await new Promise((resolve) => {
@@ -866,7 +909,7 @@ describe("createVoiceSession", () => {
       send: () => {},
       sendAudio: () => {},
       checkout: async () => ({ dest: "/tmp/octo/demo" }),
-      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      sessions: voiceCallSessions(),
       ask: async function* (opts) {
         asked.push(opts.question);
         yield { type: "delta", text: "先说到这里。" };
@@ -931,7 +974,7 @@ describe("createVoiceSession", () => {
       config: { ready: true, provider: "volc" },
       send: (msg) => sent.push(msg),
       checkout: async () => ({ dest: "/tmp/octo/demo" }),
-      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      sessions: voiceCallSessions(),
       ask: async function* () {
         throw new Error("agent down");
       },

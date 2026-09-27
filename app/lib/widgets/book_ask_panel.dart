@@ -366,7 +366,6 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
       api: widget.api,
       book: widget.book,
       chapter: _place.chapter,
-      sessionId: _sessionId,
       media: widget.callMedia,
       client: widget.callClient,
       onTranscript: _foldCallTranscript,

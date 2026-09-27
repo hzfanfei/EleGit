@@ -331,7 +331,6 @@ class _ChatPageState extends State<ChatPage> {
       context,
       api: widget.api,
       repo: widget.repo,
-      sessionId: _sessionId,
       media: widget.callMedia,
       client: widget.callClient,
       onTranscript: _foldCallTranscript,

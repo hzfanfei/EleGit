@@ -473,6 +473,11 @@ describe("session store", () => {
     assert.equal(store.list("hzfanfei", "fwechat").activeSessionId, second.id);
     assert.notEqual(second.id, first.id);
 
+    const ephemeral = store.createEphemeral("hzfanfei", "fwechat");
+    assert.notEqual(ephemeral.id, second.id);
+    assert.equal(store.list("hzfanfei", "fwechat").activeSessionId, second.id);
+    await store.close("hzfanfei", "fwechat", ephemeral.id);
+
     const closed = await store.close("hzfanfei", "fwechat", first.id);
     assert.equal(closed.closed, true);
     const recovered = store.resolveForChat("hzfanfei", "fwechat", first.id);

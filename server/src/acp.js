@@ -1486,6 +1486,21 @@ export function createSessionStore({
     return publicView(session);
   }
 
+  /** Voice calls get their own Agent thread without switching the chat's active session. */
+  function createEphemeral(owner, repo) {
+    const session = {
+      id: randomUUID(),
+      owner,
+      repo,
+      title: "语音通话",
+      createdAt: now(),
+      updatedAt: now(),
+      turns: 0,
+    };
+    sessions.set(session.id, session);
+    return publicView(session);
+  }
+
   const channels = new Map();
   const pendingInteractions = new Map();
 
@@ -1767,6 +1782,7 @@ export function createSessionStore({
   return {
     list,
     create,
+    createEphemeral,
     close,
     resolveForChat,
     prompt,
