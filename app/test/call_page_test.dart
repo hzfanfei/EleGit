@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -135,6 +136,38 @@ void main() {
     expect(media.played, hasLength(1));
   });
 
+  testWidgets('stays 在说 until queued audio finishes', (tester) async {
+    final media = _HoldingVoiceMedia();
+    final client = FakeVoiceClient();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: CallPage(
+          api: FakeWenxiangApi(voiceReady: true),
+          repo: sampleRepo(),
+          onBack: () {},
+          media: media,
+          client: client,
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    await tester.tap(find.text('开始通话'));
+    await tester.pump();
+    client.emit(VoiceEvent(type: 'state', state: 'speaking'));
+    client.emit(VoiceEvent(type: 'pcm', pcm: Uint8List.fromList([1, 0, 2, 0])));
+    client.emit(VoiceEvent(type: 'state', state: 'listening'));
+    await tester.pump();
+    expect(find.text('在说'), findsOneWidget);
+    expect(find.text('在听'), findsNothing);
+
+    media.releasePlayback();
+    await tester.pump();
+    expect(find.text('在听'), findsOneWidget);
+    expect(find.text('在说'), findsNothing);
+  });
+
   testWidgets('a live channel error hangs up onto a single retry', (tester) async {
     final client = FakeVoiceClient();
     final key = GlobalKey<CallPageState>();
@@ -192,4 +225,20 @@ void main() {
     expect(find.text('开始通话'), findsNothing);
     expect(find.text('在听'), findsNothing);
   });
+}
+
+class _HoldingVoiceMedia extends FakeVoiceMedia {
+  Completer<void>? _gate = Completer<void>();
+
+  void releasePlayback() {
+    final gate = _gate;
+    if (gate != null && !gate.isCompleted) gate.complete();
+  }
+
+  @override
+  Future<void> waitForPlaybackQueue() {
+    final gate = _gate;
+    if (gate == null || gate.isCompleted) return Future<void>.value();
+    return gate.future;
+  }
 }

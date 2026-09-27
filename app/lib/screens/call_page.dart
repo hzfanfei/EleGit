@@ -95,6 +95,7 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
   bool _disposing = false;
   bool _backgroundHeld = false;
   Timer? _bargeFlash;
+  int _listenHold = 0;
 
   bool get isLive => _live;
 
@@ -263,6 +264,12 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
       });
       return;
     }
+    if (next == 'listening' && _phase == 'speaking') {
+      final hold = ++_listenHold;
+      unawaited(_listenWhenPlaybackEnds(hold));
+      return;
+    }
+    _listenHold++;
     _bargeFlash?.cancel();
     _bargeFlash = null;
     setState(() {
@@ -272,6 +279,18 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
     if (next == 'barge') {
       unawaited(_media.stopPlayback());
     }
+  }
+
+  /// Server marks the turn done as soon as audio is sent. Stay on 在说 until the phone finishes playing it.
+  Future<void> _listenWhenPlaybackEnds(int hold) async {
+    try {
+      await _media.waitForPlaybackQueue();
+    } catch (_) {}
+    if (!mounted || _disposing || hold != _listenHold || _phase != 'speaking') return;
+    setState(() {
+      _phase = 'listening';
+      _assistantLive = '';
+    });
   }
 
   void _fail(String hint) {
@@ -305,6 +324,7 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
 
   void hangup({bool pop = false}) {
     _freeBackground();
+    _listenHold++;
     _bargeFlash?.cancel();
     _bargeFlash = null;
     _sub?.cancel();
