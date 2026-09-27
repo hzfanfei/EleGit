@@ -117,6 +117,8 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
   bool _relinking = false;
   double _voiceLevel = 0;
   Timer? _voiceFade;
+  /// Server can mark the turn done before the first downlink PCM arrives (common on a cold first reply).
+  bool _answerAudioDone = false;
 
   bool get isLive => _live;
 
@@ -327,6 +329,10 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
       }
       unawaited(_media.playPcm(event.pcm!, sampleRate: event.outputRate));
       _watchSpeakerIdle();
+      if (_answerAudioDone) {
+        final hold = ++_listenHold;
+        unawaited(_listenWhenPlaybackEnds(hold));
+      }
     }
   }
 
@@ -358,6 +364,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
   void _applyState(String next) {
     if (next == 'barge') {
       _listenHold++;
+      _answerAudioDone = false;
       setState(() {
         _phase = 'listening';
         _playing = false;
@@ -367,6 +374,17 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
       _checkMicAfterBarge();
       return;
     }
+    if (next == 'audio_done') {
+      _answerAudioDone = true;
+      if (_phase == 'speaking') {
+        final hold = ++_listenHold;
+        unawaited(_listenWhenPlaybackEnds(hold));
+        return;
+      }
+      if (_phase == 'thinking') {
+        return;
+      }
+    }
     if ((next == 'listening' || next == 'audio_done') && _phase == 'speaking') {
       final hold = ++_listenHold;
       unawaited(_listenWhenPlaybackEnds(hold));
@@ -375,6 +393,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
     _listenHold++;
     setState(() {
       _phase = next == 'audio_done' ? 'listening' : next;
+      if (next == 'thinking') _answerAudioDone = false;
       if (next == 'listening' || next == 'thinking' || next == 'audio_done') {
         _playing = false;
         _assistantLive = '';
@@ -387,7 +406,9 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
     try {
       await _media.waitForPlaybackQueue();
     } catch (_) {}
-    if (!mounted || _disposing || hold != _listenHold || _phase != 'speaking') return;
+    if (!mounted || _disposing || hold != _listenHold) return;
+    if (_phase != 'speaking' && !_answerAudioDone) return;
+    _answerAudioDone = false;
     _client?.played();
     setState(() {
       _phase = 'listening';
