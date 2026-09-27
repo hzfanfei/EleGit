@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -473,23 +472,17 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
     return widget.repo?.fullName ?? '通话';
   }
 
-  static const _thinkingMarkSize = 36.0;
+  bool get _thinking => statusLabel == '思考中';
 
-  /// 思考中 is the breathing seal, not words. The slot keeps one height so 在听/在说 do not jump.
+  /// 思考中 is the breathing seal inside the orb, so the label goes blank. The slot keeps
+  /// one height during a call so 在听/在说 do not jump.
   Widget _status(BuildContext context) {
     final style = Theme.of(context).textTheme.headlineMedium;
     final lineHeight = (style?.fontSize ?? 28) * (style?.height ?? 1.2);
-    final thinking = statusLabel == '思考中';
     return SizedBox(
-      height: thinking || _live ? math.max(lineHeight, _thinkingMarkSize) : null,
+      height: _live ? lineHeight : null,
       child: Center(
-        child: thinking
-            ? Semantics(
-                label: statusLabel,
-                excludeSemantics: true,
-                child: const WxLoading(size: _thinkingMarkSize),
-              )
-            : Text(statusLabel, textAlign: TextAlign.center, style: style),
+        child: _thinking ? null : Text(statusLabel, textAlign: TextAlign.center, style: style),
       ),
     );
   }
@@ -534,6 +527,14 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
                           width: speaking ? 2 : 1,
                         ),
                       ),
+                      alignment: Alignment.center,
+                      child: _thinking
+                          ? Semantics(
+                              label: statusLabel,
+                              excludeSemantics: true,
+                              child: const WxLoading(size: 56),
+                            )
+                          : null,
                     ),
                   ),
                   const SizedBox(height: 28),
