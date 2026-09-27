@@ -119,6 +119,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
   Timer? _voiceFade;
   /// Server can mark the turn done before the first downlink PCM arrives (common on a cold first reply).
   bool _answerAudioDone = false;
+  bool _playbackEndPending = false;
 
   bool get isLive => _live;
 
@@ -268,7 +269,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
 
   void _relink() {
     _relinking = true;
-    _listenHold++;
+    _cancelPlaybackEnd();
     _speakerIdleTimer?.cancel();
     _speakerIdleTimer = null;
     final previous = _sub;
@@ -330,10 +331,23 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
       unawaited(_media.playPcm(event.pcm!, sampleRate: event.outputRate));
       _watchSpeakerIdle();
       if (_answerAudioDone) {
-        final hold = ++_listenHold;
-        unawaited(_listenWhenPlaybackEnds(hold));
+        _schedulePlaybackEnd();
       }
     }
+  }
+
+  /// Only barge / hangup / relink should bump [_listenHold] and drop a pending drain.
+  void _cancelPlaybackEnd() {
+    _listenHold += 1;
+    _playbackEndPending = false;
+    _answerAudioDone = false;
+  }
+
+  void _schedulePlaybackEnd() {
+    if (_playbackEndPending) return;
+    _playbackEndPending = true;
+    final hold = _listenHold;
+    unawaited(_listenWhenPlaybackEnds(hold));
   }
 
   /// After a lead-in like 我看一下 the agent can run tools for a while in silence.
@@ -363,8 +377,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
 
   void _applyState(String next) {
     if (next == 'barge') {
-      _listenHold++;
-      _answerAudioDone = false;
+      _cancelPlaybackEnd();
       setState(() {
         _phase = 'listening';
         _playing = false;
@@ -377,8 +390,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
     if (next == 'audio_done') {
       _answerAudioDone = true;
       if (_phase == 'speaking') {
-        final hold = ++_listenHold;
-        unawaited(_listenWhenPlaybackEnds(hold));
+        _schedulePlaybackEnd();
         return;
       }
       if (_phase == 'thinking') {
@@ -386,14 +398,15 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
       }
     }
     if ((next == 'listening' || next == 'audio_done') && _phase == 'speaking') {
-      final hold = ++_listenHold;
-      unawaited(_listenWhenPlaybackEnds(hold));
+      _schedulePlaybackEnd();
       return;
     }
-    _listenHold++;
     setState(() {
       _phase = next == 'audio_done' ? 'listening' : next;
-      if (next == 'thinking') _answerAudioDone = false;
+      if (next == 'thinking') {
+        _answerAudioDone = false;
+        _playbackEndPending = false;
+      }
       if (next == 'listening' || next == 'thinking' || next == 'audio_done') {
         _playing = false;
         _assistantLive = '';
@@ -406,6 +419,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
     try {
       await _media.waitForPlaybackQueue();
     } catch (_) {}
+    _playbackEndPending = false;
     if (!mounted || _disposing || hold != _listenHold) return;
     if (_phase != 'speaking' && !_answerAudioDone) return;
     _answerAudioDone = false;
@@ -550,7 +564,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
   void hangup({bool pop = false}) {
     _closing = true;
     _freeBackground();
-    _listenHold++;
+    _cancelPlaybackEnd();
     _micEpoch++;
     _micRetry?.cancel();
     _micRetry = null;

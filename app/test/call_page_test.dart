@@ -149,6 +149,39 @@ void main() {
     expect(media.played, hasLength(2));
   });
 
+  testWidgets('reopens mic when speaking state arrives before playback ends', (tester) async {
+    final media = FakeVoiceMedia();
+    final client = FakeVoiceClient();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: CallPage(
+          api: FakeWenxiangApi(voiceReady: true),
+          repo: sampleRepo(),
+          onBack: () {},
+          media: media,
+          client: client,
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    await tester.tap(find.text('开始通话'));
+    await tester.pump();
+
+    client.emit(VoiceEvent(type: 'state', state: 'thinking'));
+    client.emit(VoiceEvent(type: 'state', state: 'speaking'));
+    client.emit(VoiceEvent(type: 'state', state: 'audio_done'));
+    client.emit(VoiceEvent(type: 'pcm', pcm: Uint8List.fromList([1, 0, 2, 0])));
+    await tester.pump();
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+    await tester.pump();
+    expect(find.text('在听'), findsOneWidget);
+    expect(client.playedCalls, 1);
+    expect(media.stopMicCalls, 1);
+    expect(media.startCalls, 2);
+  });
+
   testWidgets('reopens mic when audio_done arrives before the first pcm', (tester) async {
     final media = FakeVoiceMedia();
     final client = FakeVoiceClient();
