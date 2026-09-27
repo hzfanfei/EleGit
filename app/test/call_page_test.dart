@@ -182,6 +182,48 @@ void main() {
     expect(client.playedCalls, 1);
   });
 
+  testWidgets('a quiet speaker mid-reply shows the thinking seal, not 在说', (tester) async {
+    final media = FakeVoiceMedia();
+    final client = FakeVoiceClient();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: CallPage(
+          api: FakeWenxiangApi(voiceReady: true),
+          repo: sampleRepo(),
+          onBack: () {},
+          media: media,
+          client: client,
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    await tester.tap(find.text('开始通话'));
+    await tester.pump();
+    client.emit(VoiceEvent(type: 'state', state: 'speaking'));
+    client.emit(VoiceEvent(type: 'pcm', pcm: Uint8List.fromList([1, 0, 2, 0])));
+    await tester.pump();
+    expect(find.text('在说'), findsOneWidget);
+
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('在说'), findsOneWidget);
+
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.text('在说'), findsNothing);
+    expect(find.byType(WxLoading), findsOneWidget);
+
+    client.emit(VoiceEvent(type: 'pcm', pcm: Uint8List.fromList([3, 0, 4, 0])));
+    await tester.pump();
+    expect(find.text('在说'), findsOneWidget);
+
+    client.emit(VoiceEvent(type: 'state', state: 'listening'));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('在听'), findsOneWidget);
+    expect(client.playedCalls, 1);
+  });
+
   testWidgets('a live channel error hangs up onto a single retry', (tester) async {
     final client = FakeVoiceClient();
     final key = GlobalKey<CallPageState>();
@@ -340,6 +382,8 @@ void main() {
     await tester.pump(const Duration(milliseconds: 500));
     media.speak(0);
     await tester.pump(const Duration(milliseconds: 800));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
+    await tester.pump();
     expect(media.stopMicCalls, 1);
     expect(media.startCalls, 2);
   });

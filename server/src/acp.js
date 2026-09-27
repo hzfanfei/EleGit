@@ -480,6 +480,9 @@ export function buildBookAcpPrompt({
 }
 
 /** ACP session/update kinds that must never be shown to the user (internal reasoning). */
+/** Longest wait for the agent to close a cancelled prompt before the next one goes out. */
+const ACP_CANCEL_SETTLE_MS = 3000;
+
 const ACP_HIDDEN_SESSION_UPDATES = new Set([
   "agent_thought_chunk",
   "agent_thought",
@@ -1104,6 +1107,7 @@ export class AcpChannel {
   }
 
   async _promptStream(text, { onDelta, onActivity, timeoutMs = acpPromptTimeoutMs() }) {
+    if (this._settling) await this._settling;
     this._toolLog = { items: [] };
     this.onDelta = (chunk) => {
       this._lastDeltaAt = Date.now();
@@ -1178,8 +1182,37 @@ export class AcpChannel {
     }
   }
 
+  /**
+   * The agent keeps streaming the cancelled turn until it answers that prompt.
+   * A new prompt sent right away got those chunks as its own answer and spoke
+   * the old reply, or queued behind the old work. Wait for that answer first.
+   */
+  _settleAfterCancel(id) {
+    let finish;
+    const settling = new Promise((resolve) => {
+      finish = resolve;
+    });
+    const done = () => {
+      clearTimeout(timer);
+      if (this._settling === settling) {
+        this._settling = null;
+        this._settleId = null;
+        this._settleDone = null;
+      }
+      finish();
+    };
+    const timer = setTimeout(done, ACP_CANCEL_SETTLE_MS);
+    timer.unref?.();
+    this._settleId = id;
+    this._settleDone = done;
+    this._settling = settling;
+  }
+
   async cancel() {
     if (!this.alive || !this.sessionId || !this.child?.stdin) return;
+    if (this._promptId != null) this._settleAfterCancel(this._promptId);
+    this.onDelta = null;
+    this.onActivity = null;
     try {
       this.child.stdin.write(
         `${JSON.stringify({
@@ -1269,6 +1302,10 @@ export class AcpChannel {
       return;
     }
     if (msg.id != null && (msg.result !== undefined || msg.error)) {
+      if (msg.id === this._settleId) {
+        this._settleDone?.();
+        return;
+      }
       const waiter = this.pending.get(msg.id);
       if (!waiter) return;
       this.pending.delete(msg.id);
@@ -1280,6 +1317,7 @@ export class AcpChannel {
       return;
     }
     if (msg.method === "session/update") {
+      if (this._settling) return;
       const update = msg.params?.update || {};
       if (update.sessionUpdate === "usage_update" && this._lastDeltaAt > 0) {
         this._usageAt = Date.now();

@@ -98,6 +98,9 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
   bool _playing = false;
   Timer? _micRetry;
   Timer? _bargeMicCheck;
+  Timer? _speakerIdleTimer;
+  bool _watchingSpeaker = false;
+  int _pcmSeq = 0;
   bool _watchBargeMic = false;
   int _bargeMicPeak = 0;
   int _listenHold = 0;
@@ -138,7 +141,7 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
   }
 
   /// Live call shows only three labels: 在听 while the mic takes a turn, 思考中 until
-  /// playback starts, 在说 only while that audio is actually playing.
+  /// playback starts or while the speaker sits idle mid-reply, 在说 only while audio plays.
   String get statusLabel {
     if (_checking && !_live) return '';
     if (_error != null && !_live) return _error!;
@@ -251,6 +254,8 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
       return;
     }
     if (event.type == 'pcm' && event.pcm != null && (_phase == 'speaking' || _phase == 'thinking')) {
+      _pcmSeq++;
+      _speakerIdleTimer?.cancel();
       if (!_playing) {
         setState(() {
           _phase = 'speaking';
@@ -258,8 +263,34 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
         });
       }
       unawaited(_media.playPcm(event.pcm!, sampleRate: event.outputRate));
+      _watchSpeakerIdle();
     }
   }
+
+  /// After a lead-in like 我看一下 the agent can run tools for a while in silence.
+  /// A 在说 over a quiet speaker looked frozen, so show the thinking seal until audio comes back.
+  void _watchSpeakerIdle() {
+    if (_watchingSpeaker) return;
+    _watchingSpeaker = true;
+    final seq = _pcmSeq;
+    _media.waitForPlaybackQueue().catchError((_) {}).whenComplete(() {
+      _watchingSpeaker = false;
+      if (!mounted || _disposing || !_playing || _phase != 'speaking') return;
+      if (seq != _pcmSeq) {
+        _watchSpeakerIdle();
+        return;
+      }
+      _speakerIdleTimer?.cancel();
+      _speakerIdleTimer = Timer(_speakerIdle, () {
+        _speakerIdleTimer = null;
+        if (!mounted || _disposing || seq != _pcmSeq || !_playing || _phase != 'speaking') return;
+        setState(() => _playing = false);
+      });
+    });
+  }
+
+  /// Gaps between sentences of one reply stay under this, so they keep 在说.
+  static const _speakerIdle = Duration(milliseconds: 700);
 
   void _applyState(String next) {
     if (next == 'barge') {
@@ -273,7 +304,7 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
       _checkMicAfterBarge();
       return;
     }
-    if ((next == 'listening' || next == 'audio_done') && _phase == 'speaking' && _playing) {
+    if ((next == 'listening' || next == 'audio_done') && _phase == 'speaking') {
       final hold = ++_listenHold;
       unawaited(_listenWhenPlaybackEnds(hold));
       return;
@@ -424,6 +455,8 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
     _micRetry = null;
     _bargeMicCheck?.cancel();
     _bargeMicCheck = null;
+    _speakerIdleTimer?.cancel();
+    _speakerIdleTimer = null;
     _watchBargeMic = false;
     _sub?.cancel();
     _sub = null;

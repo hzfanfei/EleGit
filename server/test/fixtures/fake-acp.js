@@ -5,6 +5,8 @@ const sessionId = "fake-acp-session";
 const seen = [];
 let askResume = null;
 let planOutcome = "";
+let slow = null;
+let slowUsed = false;
 
 function write(obj) {
   process.stdout.write(`${JSON.stringify(obj)}\n`);
@@ -20,6 +22,21 @@ rl.on("line", (line) => {
     return;
   }
   const reply = (result) => write({ jsonrpc: "2.0", id: msg.id, result });
+
+  // Like the real agents: the cancelled turn still streams a bit, then its prompt answers.
+  if (msg.method === "session/cancel") {
+    if (!slow) return;
+    const { msg: cancelled, timer } = slow;
+    slow = null;
+    clearTimeout(timer);
+    write({
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: { sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "stale-tail" } } },
+    });
+    setTimeout(() => write({ jsonrpc: "2.0", id: cancelled.id, result: { stopReason: "cancelled" } }), 100);
+    return;
+  }
 
   if (msg.method === "initialize") {
     reply({
@@ -91,8 +108,12 @@ rl.on("line", (line) => {
       return;
     }
     const delayMs = Number(process.env.FAKE_ACP_PROMPT_DELAY_MS || 0);
-    if (delayMs > 0) {
-      setTimeout(() => answerPrompt(msg), delayMs);
+    if (delayMs > 0 && !(process.env.FAKE_ACP_SLOW_ONCE === "1" && slowUsed)) {
+      slowUsed = true;
+      slow = { msg, timer: setTimeout(() => {
+        slow = null;
+        answerPrompt(msg);
+      }, delayMs) };
       return;
     }
     answerPrompt(msg);

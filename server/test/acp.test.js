@@ -805,4 +805,34 @@ describe("AcpChannel", () => {
       await channel.close();
     }
   });
+
+  it("does not speak the cancelled turn's tail as the next answer", async () => {
+    const channel = new AcpChannel({
+      command: { path: process.execPath, args: [fakeAcp] },
+      cwd: process.cwd(),
+      spawnImpl: (file, args, opts) =>
+        spawn(file, args, {
+          ...opts,
+          env: { ...opts.env, FAKE_ACP_PROMPT_DELAY_MS: "5000", FAKE_ACP_SLOW_ONCE: "1" },
+        }),
+      idleMs: 0,
+    });
+    try {
+      await channel.start();
+      const old = [];
+      const first = channel.prompt("slow question", { onDelta: (t) => old.push(t) }).catch((err) => err.code);
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      await channel.cancel();
+      assert.equal(await first, "cancelled");
+      const fresh = [];
+      const started = Date.now();
+      await channel.prompt("next question", { onDelta: (t) => fresh.push(t) });
+      assert.ok(Date.now() - started < 2000);
+      assert.deepEqual(old, []);
+      assert.equal(fresh.some((t) => t.includes("stale-tail")), false);
+      assert.equal(fresh.some((t) => t.includes(":1")), true);
+    } finally {
+      await channel.close();
+    }
+  });
 });

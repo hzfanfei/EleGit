@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'adpcm.dart';
@@ -74,9 +75,18 @@ class SocketVoiceClient implements VoiceCallClient {
 
   /// The socket is stored before this returns. Callers send hello immediately
   /// after listen(); an async* body would still be pending and drop that hello.
+  /// A tunnel that dies silently used to leave the call on 在说 or 思考中 forever.
+  /// Without a pong within this long the socket closes and the call shows 通话断了.
+  static const _pingInterval = Duration(seconds: 15);
+  static const _connectTimeout = Duration(seconds: 15);
+
   @override
   Stream<VoiceEvent> connect() {
-    final channel = WebSocketChannel.connect(uri);
+    final channel = IOWebSocketChannel.connect(
+      uri,
+      pingInterval: _pingInterval,
+      connectTimeout: _connectTimeout,
+    );
     _channel = channel;
     final events = StreamController<VoiceEvent>();
     _events = events;
