@@ -234,6 +234,7 @@ export async function* streamAnswer({
   staticFiles,
   workspaceRoot,
   bookId,
+  taskSettleMs = 1500,
 }) {
   const opts = { ...streamOpts, signal };
   const engine = detectEngine();
@@ -245,6 +246,32 @@ export async function* streamAnswer({
     let finished = false;
     let fail = null;
     let full = "";
+    let settleTimer = null;
+    let hintCleared = false;
+    function clearSettle() {
+      if (!settleTimer) return;
+      clearTimeout(settleTimer);
+      settleTimer = null;
+    }
+    function armSettle() {
+      const notice = taskCompletionNotice(full, { session, question, bookId });
+      if (!notice || !sessions?.interrupt) {
+        clearSettle();
+        return;
+      }
+      if (!hintCleared) {
+        hintCleared = true;
+        queue.push({ kind: "status", phase: "activity", detail: "" });
+        notify?.();
+      }
+      clearSettle();
+      settleTimer = setTimeout(() => {
+        settleTimer = null;
+        if (signal?.aborted) return;
+        sessions.interrupt(session);
+      }, taskSettleMs);
+      settleTimer.unref?.();
+    }
     sessions
       .prompt(session, {
         question,
@@ -259,9 +286,11 @@ export async function* streamAnswer({
           full += chunk;
           queue.push({ kind: "delta", text: chunk });
           notify?.();
+          armSettle();
         },
         onActivity: (detail) => {
           const label = String(detail ?? "").trim();
+          if (hintCleared) return;
           queue.push({ kind: "status", phase: "activity", detail: label });
           notify?.();
         },
@@ -271,16 +300,19 @@ export async function* streamAnswer({
         },
       })
       .then(() => {
+        clearSettle();
         finished = true;
         notify?.();
       })
       .catch((err) => {
+        clearSettle();
         fail = err;
         finished = true;
         notify?.();
       });
     while (!finished || queue.length) {
       if (signal?.aborted) {
+        clearSettle();
         sessions.cancel?.(session).catch(() => {});
         return;
       }

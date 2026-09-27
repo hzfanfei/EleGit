@@ -932,6 +932,7 @@ class _ChatPageState extends State<ChatPage> {
           _liveEngine.value = event.engine;
           _setLivePhase('repo');
         } else if (event.type == 'done') {
+          _liveActivity.value = '';
           _liveEngine.value = event.engine ?? _liveEngine.value;
           if (event.text.isNotEmpty && _typewriter.fullText.isEmpty) {
             _typewriter.push(event.text);

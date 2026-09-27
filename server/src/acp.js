@@ -787,6 +787,33 @@ function renderToolLog(log) {
   return log.items.map(renderToolItem).filter(Boolean).join("\n\n");
 }
 
+const TOOL_TERMINAL = new Set(["completed", "complete", "failed", "cancelled", "canceled", "error"]);
+
+function toolRunningFromUpdate(update, kind) {
+  const status = String(update?.status || update?.toolCall?.status || "").trim().toLowerCase();
+  if (TOOL_TERMINAL.has(status)) return false;
+  if (status === "in_progress" || status === "pending" || status === "running") return true;
+  if (kind === "tool_call") return true;
+  return null;
+}
+
+function planStillRunning(update) {
+  const entries = Array.isArray(update?.entries) ? update.entries : [];
+  if (!entries.length) return true;
+  return entries.some((entry) => {
+    const status = String(entry?.status || "").toLowerCase();
+    return status !== "completed" && status !== "complete" && status !== "cancelled" && status !== "canceled";
+  });
+}
+
+/** True when every tool and plan step has finished. A lone thought is still in progress. */
+export function toolLogSettled(log) {
+  const items = Array.isArray(log?.items) ? log.items : [];
+  const work = items.filter((item) => item.id !== "thought");
+  if (!work.length) return false;
+  return work.every((item) => item.running === false);
+}
+
 /**
  * Fold one ACP tool, plan, or thought update into a short bubble log.
  * Returns the text to show, or "" when this update is not a visible step.
@@ -821,10 +848,11 @@ export function pushAcpToolActivity(log, update) {
     const title = acpPlanActivityLabel(update);
     let item = log.items.find((entry) => entry.id === "plan");
     if (!item) {
-      item = { id: "plan", title, command: "", output: "" };
+      item = { id: "plan", title, command: "", output: "", running: planStillRunning(update) };
       log.items.push(item);
     } else {
       item.title = title;
+      item.running = planStillRunning(update);
     }
     capToolLog(log);
     return renderToolLog(log);
@@ -839,6 +867,7 @@ export function pushAcpToolActivity(log, update) {
   if (!item && kind === "tool_call_update" && log.items.length) {
     item = log.items[log.items.length - 1];
   }
+  const running = toolRunningFromUpdate(update, kind);
   if (!item) {
     const createdTitle = title || acpActivityLabelFromUpdate(update);
     if (!createdTitle && !command && !output) return renderToolLog(log);
@@ -847,12 +876,14 @@ export function pushAcpToolActivity(log, update) {
       title: createdTitle,
       command,
       output,
+      running: running !== false,
     };
     log.items.push(item);
   } else {
     if (title) item.title = title;
     if (command) item.command = command;
     if (output) item.output = output;
+    if (running != null) item.running = running;
   }
   capToolLog(log);
   return renderToolLog(log);
@@ -907,6 +938,7 @@ export class AcpChannel {
     this.onDelta = null;
     this.onActivity = null;
     this._toolLog = { items: [] };
+    this._promptId = null;
     this._lastDeltaAt = 0;
     this._usageAt = 0;
   }
@@ -1060,9 +1092,10 @@ export class AcpChannel {
         timeoutMs,
       );
     } finally {
-      this.onDelta = null;
-      this.onActivity = null;
-    }
+    this.onDelta = null;
+    this.onActivity = null;
+    this._promptId = null;
+  }
   }
 
   interruptPrompt() {
@@ -1078,6 +1111,17 @@ export class AcpChannel {
     } catch {
       // Best-effort; channel stays alive for the next turn.
     }
+  }
+
+  releasePrompt() {
+    this.interruptPrompt();
+    const id = this._promptId;
+    if (id == null) return;
+    const waiter = this.pending.get(id);
+    this._promptId = null;
+    if (!waiter) return;
+    this.pending.delete(id);
+    waiter.resolve({ stopReason: "end_turn" });
   }
 
   async _applyModel(created) {
@@ -1155,6 +1199,7 @@ export class AcpChannel {
 
   request(method, params, timeoutMs = 30_000) {
     const id = this.nextId++;
+    if (method === "session/prompt") this._promptId = id;
     return new Promise((resolve, reject) => {
       if (!this.child?.stdin) {
         reject(new Error("ACP process is not running"));
@@ -1162,17 +1207,17 @@ export class AcpChannel {
       }
       const timer = setTimeout(() => {
         this.pending.delete(id);
+        if (this._promptId === id) this._promptId = null;
         reject(new Error(`ACP ${method} timed out`));
       }, timeoutMs);
+      const finish = (fn, value) => {
+        clearTimeout(timer);
+        if (this._promptId === id) this._promptId = null;
+        fn(value);
+      };
       this.pending.set(id, {
-        resolve: (value) => {
-          clearTimeout(timer);
-          resolve(value);
-        },
-        reject: (err) => {
-          clearTimeout(timer);
-          reject(err);
-        },
+        resolve: (value) => finish(resolve, value),
+        reject: (err) => finish(reject, err),
       });
       this.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
     });
@@ -1211,10 +1256,11 @@ export class AcpChannel {
       const text = acpVisibleTextFromUpdate(update);
       if (text) {
         this.onDelta?.(text);
-        if (!this._toolLog.items.length) this.onActivity?.("");
+        if (!this._toolLog.items.length || toolLogSettled(this._toolLog)) this.onActivity?.("");
       }
       const traced = pushAcpToolActivity(this._toolLog, update);
-      if (traced) this.onActivity?.(traced);
+      if (toolLogSettled(this._toolLog)) this.onActivity?.("");
+      else if (traced) this.onActivity?.(traced);
       return;
     }
     if (msg.method === "fs/read_text_file") {
@@ -1612,6 +1658,12 @@ export function createSessionStore({
     if (entry?.channel) await entry.channel.cancel();
   }
 
+  function interrupt(session) {
+    if (!session) return;
+    const entry = channels.get(session.id);
+    entry?.channel?.releasePrompt?.();
+  }
+
   async function cancelById(id) {
     const session = sessions.get(String(id || ""));
     if (!session) return false;
@@ -1646,6 +1698,7 @@ export function createSessionStore({
     prompt,
     cancel,
     cancelById,
+    interrupt,
     answerInteraction,
     warm,
     warmRepo,

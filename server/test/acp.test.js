@@ -13,6 +13,7 @@ import {
   acpActivityLabelFromFsRead,
   acpActivityLabelFromUpdate,
   pushAcpToolActivity,
+  toolLogSettled,
   acpVisibleTextFromUpdate,
   applyAcpEnginePreference,
   acpEnginePreference,
@@ -251,6 +252,8 @@ describe("pushAcpToolActivity", () => {
     assert.match(done, /second line/);
     assert.doesNotMatch(done, /third line/);
     assert.equal(log.items.length, 1);
+    assert.equal(log.items[0].running, false);
+    assert.equal(toolLogSettled(log), true);
 
     const searched = pushAcpToolActivity(log, {
       sessionUpdate: "tool_call",

@@ -108,6 +108,40 @@ describe("streamAnswer", () => {
     assert.equal(events.at(-1).type, "done");
     assert.ok(events.findIndex((event) => event.type === "delta") < events.findIndex((event) => event.type === "done"));
   });
+
+  it("ends the turn after a finished task answer and drops the progress hint", async () => {
+    let release;
+    const hung = new Promise((resolve) => {
+      release = resolve;
+    });
+    let interrupted = 0;
+    const events = [];
+    const session = { id: "s1", owner: "acme", repo: "widget" };
+    for await (const event of streamAnswer({
+      question: "打包",
+      session,
+      taskSettleMs: 30,
+      detectEngine: () => ({ id: "cursor-acp" }),
+      sessions: {
+        async prompt(_session, opts) {
+          opts.onActivity?.("终端·打包");
+          opts.onDelta?.("===TASK_COMPLETED===\n打包结束了。");
+          await hung;
+        },
+        interrupt() {
+          interrupted += 1;
+          release();
+        },
+      },
+    })) {
+      events.push(event);
+    }
+    assert.equal(interrupted, 1);
+    assert.ok(events.some((event) => event.type === "status" && event.phase === "activity" && event.detail === ""));
+    const done = events.find((event) => event.type === "done");
+    assert.match(done.answer, /打包结束了/);
+    assert.equal(events.some((event) => event.type === "error"), false);
+  });
 });
 
 describe("taskCompletionNotice", () => {
