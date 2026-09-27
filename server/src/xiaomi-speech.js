@@ -1,4 +1,4 @@
-import { pcmHasSpeech } from "./voice-call.js";
+import { createUtteranceGate } from "./voice-call.js";
 import { isSpeakableTtsText } from "./spoken-tts.js";
 import {
   DEFAULT_XIAOMI_TTS_VOICE,
@@ -187,26 +187,12 @@ export function createXiaomiAsr({
 } = {}) {
   const chunks = [];
   let started = false;
-  let endpointTimer = null;
   let chain = Promise.resolve();
-  let speechRun = 0;
-  let announced = false;
-
-  function pcmBuffer() {
-    return chunks.length ? Buffer.concat(chunks) : Buffer.alloc(0);
-  }
-
-  function clearEndpoint() {
-    if (endpointTimer) {
-      clearTimeout(endpointTimer);
-      endpointTimer = null;
-    }
-  }
 
   function transcribe(buf) {
     chain = chain
       .then(async () => {
-        if (!buf.length) {
+        if (!buf?.length) {
           onFinal?.("");
           return;
         }
@@ -217,33 +203,28 @@ export function createXiaomiAsr({
         onFinal?.(text);
       })
       .catch((err) => {
-        onError?.({ message: String(err.message || err), err });
+        onError?.({ message: String(err.message || err) });
       });
     return chain;
   }
 
-  function resetUtterance() {
-    chunks.length = 0;
-    speechRun = 0;
-    announced = false;
-    clearEndpoint();
-  }
-
-  function finishUtterance() {
-    endpointTimer = null;
-    if (!started) return;
-    const buf = pcmBuffer();
-    const ready = announced && buf.length >= minEndpointBytes;
-    resetUtterance();
-    if (!ready) return;
-    transcribe(buf);
-  }
+  const gate = createUtteranceGate({
+    endpointSilenceMs,
+    minEndpointBytes,
+    speechStartBytes: SPEECH_START_BYTES,
+    onSpeechStart,
+    onEndpoint: (buf) => {
+      if (!started) return;
+      transcribe(buf);
+    },
+  });
 
   return {
     async start() {
       started = true;
       chain = Promise.resolve();
-      resetUtterance();
+      chunks.length = 0;
+      gate.reset();
     },
     push(pcm) {
       if (!started || !pcm) return;
@@ -253,36 +234,22 @@ export function createXiaomiAsr({
         chunks.push(buf);
         return;
       }
-      // The mic streams continuously, including silence. Endpoint on quiet
-      // audio, not on a gap between packets.
-      if (pcmHasSpeech(buf)) {
-        speechRun += buf.length;
-        chunks.push(buf);
-        clearEndpoint();
-        if (!announced && speechRun >= SPEECH_START_BYTES) {
-          announced = true;
-          onSpeechStart?.();
-        }
-        return;
-      }
-      if (!announced) {
-        resetUtterance();
-        return;
-      }
-      chunks.push(buf);
-      if (!endpointTimer) endpointTimer = setTimeout(finishUtterance, endpointSilenceMs);
+      gate.push(buf);
     },
     stop() {
       started = false;
-      clearEndpoint();
       chunks.length = 0;
+      gate.reset();
     },
     async finalize() {
       started = false;
-      clearEndpoint();
-      const buf = pcmBuffer();
-      chunks.length = 0;
-      await transcribe(buf);
+      if (pushToTalk) {
+        const buf = chunks.length ? Buffer.concat(chunks) : Buffer.alloc(0);
+        chunks.length = 0;
+        await transcribe(buf);
+        return;
+      }
+      await transcribe(gate.flush());
     },
   };
 }

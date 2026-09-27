@@ -103,6 +103,31 @@ describe("xiaomi speech", () => {
     assert.equal(text, "你好");
   });
 
+  it("sends a quieter phone utterance after a pause", async () => {
+    let text = "";
+    const asr = createXiaomiAsr({
+      xiaomi: { apiKey: "tp-test" },
+      endpointSilenceMs: 30,
+      onFinal: (value) => {
+        text = value;
+      },
+      fetchImpl: async () => jsonResponse({ choices: [{ message: { content: "下一句" } }] }),
+    });
+    await asr.start();
+    const soft = (ms) => {
+      const samples = Math.floor((16000 * ms) / 1000);
+      const buf = Buffer.alloc(samples * 2);
+      for (let i = 0; i < samples; i += 1) buf.writeInt16LE(800, i * 2);
+      return buf;
+    };
+    asr.push(soft(160));
+    asr.push(Buffer.alloc(640));
+    asr.push(soft(160));
+    asr.push(Buffer.alloc(3200));
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    assert.equal(text, "下一句");
+  });
+
   it("does not send a stream of silence to the recognizer", async () => {
     let called = false;
     const asr = createXiaomiAsr({

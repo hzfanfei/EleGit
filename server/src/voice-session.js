@@ -1,4 +1,4 @@
-import { createCallMachine, runVoiceTurn } from "./voice-call.js";
+import { createCallMachine, pcmRms, runVoiceTurn } from "./voice-call.js";
 
 export function createVoiceSession({
   config,
@@ -27,6 +27,28 @@ export function createVoiceSession({
   let assistantUtterance = "";
   let lastFinalText = "";
   let lastFinalAt = 0;
+  let micTimer = null;
+  let micFrames = 0;
+  let micMax = 0;
+
+  function stopMicLog() {
+    if (micTimer) clearInterval(micTimer);
+    micTimer = null;
+    micFrames = 0;
+    micMax = 0;
+  }
+
+  function startMicLog() {
+    stopMicLog();
+    micTimer = setInterval(() => {
+      if (micFrames > 0) {
+        console.log(`[voice] mic frames=${micFrames} maxRms=${Math.round(micMax)}`);
+      }
+      micFrames = 0;
+      micMax = 0;
+    }, 2000);
+    micTimer.unref?.();
+  }
 
   function emit(msg) {
     if (closed) return;
@@ -179,6 +201,7 @@ export function createVoiceSession({
           outputRate: 24000,
         });
         emit({ type: "state", state: "listening" });
+        startMicLog();
       } catch (err) {
         started = false;
         machine.fail();
@@ -200,7 +223,15 @@ export function createVoiceSession({
     },
     onPcm(buf) {
       if (!started || closed) return;
+      micFrames += 1;
+      const rms = pcmRms(buf);
+      if (rms > micMax) micMax = rms;
       asr?.push?.(buf);
+    },
+    onAsrFailure(message) {
+      if (!started || closed) return;
+      console.error(`[voice] asr ${String(message || "failed")}`);
+      emit({ type: "caption", role: "assistant", text: "没听清，再说一次", final: true });
     },
     barge(reason = "tap") {
       if (machine.state === "speaking" || machine.state === "thinking") {
@@ -210,6 +241,7 @@ export function createVoiceSession({
     hangup() {
       closed = true;
       started = false;
+      stopMicLog();
       abortTurn();
       asr?.stop?.();
       machine.hangup();

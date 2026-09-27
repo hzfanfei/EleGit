@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { createCallMachine, pcmHasSpeech, takeSpeakable } from "../src/voice-call.js";
+import { createCallMachine, createUtteranceGate, pcmHasSpeech, takeSpeakable } from "../src/voice-call.js";
 
 describe("call machine", () => {
   it("walks idle → connecting → listening → speaking → barge → listening", () => {
@@ -76,6 +76,61 @@ describe("takeSpeakable", () => {
     assert.equal(chunk.rest, "");
     const mid = takeSpeakable("前半句还没结束；");
     assert.equal(mid.speak, "");
+  });
+});
+
+function level(ms, amp) {
+  const samples = Math.floor((16000 * ms) / 1000);
+  const buf = Buffer.alloc(samples * 2);
+  for (let i = 0; i < samples; i += 1) buf.writeInt16LE(amp, i * 2);
+  return buf;
+}
+
+describe("utterance gate", () => {
+  it("keeps a quiet phone sentence across one soft frame and cuts on a pause", async () => {
+    const ends = [];
+    const gate = createUtteranceGate({
+      endpointSilenceMs: 30,
+      onEndpoint: (buf) => ends.push(buf.length),
+    });
+    gate.push(level(180, 800));
+    gate.push(level(20, 0));
+    gate.push(level(200, 800));
+    gate.push(level(40, 0));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(ends.length, 1);
+    assert.ok(ends[0] > 12800);
+  });
+
+  it("does not cut a flat silence", async () => {
+    let ends = 0;
+    const gate = createUtteranceGate({
+      endpointSilenceMs: 20,
+      onEndpoint: () => {
+        ends += 1;
+      },
+    });
+    gate.push(level(400, 0));
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    assert.equal(ends, 0);
+  });
+
+  it("cuts a long stretch even when the level never falls", () => {
+    let now = 0;
+    let ends = 0;
+    const gate = createUtteranceGate({
+      maxUtteranceMs: 1000,
+      speechStartBytes: 100,
+      minEndpointBytes: 100,
+      now: () => now,
+      onEndpoint: () => {
+        ends += 1;
+      },
+    });
+    gate.push(level(40, 2000));
+    now = 1001;
+    gate.push(level(40, 2000));
+    assert.equal(ends, 1);
   });
 });
 

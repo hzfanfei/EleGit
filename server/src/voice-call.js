@@ -92,6 +92,115 @@ export function pcmHasSpeech(buf, threshold = 1800) {
   return pcmRms(buf) >= threshold;
 }
 
+/** Phone call audio is often quieter than a raw mic, and one soft frame is not a pause. */
+export const CALL_MIN_RMS = 420;
+const BARGE_RMS = 1400;
+
+export function createUtteranceGate({
+  minRms = CALL_MIN_RMS,
+  bargeRms = BARGE_RMS,
+  endpointSilenceMs = 700,
+  armHangMs = 280,
+  maxUtteranceMs = 8000,
+  minEndpointBytes = 12800,
+  speechStartBytes = 6400,
+  onSpeechStart,
+  onEndpoint,
+  now = Date.now,
+  setTimer = setTimeout,
+  clearTimer = clearTimeout,
+} = {}) {
+  const chunks = [];
+  let speechBytes = 0;
+  let hardBytes = 0;
+  let announced = false;
+  let startedAt = null;
+  let endpointTimer = null;
+  let armTimer = null;
+
+  function clearEndpoint() {
+    if (!endpointTimer) return;
+    clearTimer(endpointTimer);
+    endpointTimer = null;
+  }
+
+  function clearArm() {
+    if (!armTimer) return;
+    clearTimer(armTimer);
+    armTimer = null;
+  }
+
+  function reset() {
+    chunks.length = 0;
+    speechBytes = 0;
+    hardBytes = 0;
+    announced = false;
+    startedAt = null;
+    clearEndpoint();
+    clearArm();
+  }
+
+  function take(force) {
+    const buf = chunks.length ? Buffer.concat(chunks) : Buffer.alloc(0);
+    const ready = buf.length >= minEndpointBytes && (announced || force);
+    reset();
+    return ready ? buf : null;
+  }
+
+  function finish(reason) {
+    const buf = take(false);
+    if (buf) onEndpoint?.(buf, { reason });
+  }
+
+  return {
+    push(pcm) {
+      if (!pcm?.length) return;
+      const buf = Buffer.isBuffer(pcm) ? pcm : Buffer.from(pcm);
+      const rms = pcmRms(buf);
+      if (rms >= minRms) {
+        clearArm();
+        clearEndpoint();
+        if (startedAt == null) startedAt = now();
+        speechBytes += buf.length;
+        if (rms >= bargeRms) hardBytes += buf.length;
+        chunks.push(buf);
+        if (!announced && speechBytes >= speechStartBytes) {
+          announced = true;
+          if (hardBytes >= speechStartBytes) onSpeechStart?.();
+        }
+        if (announced && now() - startedAt >= maxUtteranceMs) finish("max");
+        return;
+      }
+      if (!speechBytes) return;
+      chunks.push(buf);
+      if (!announced) {
+        if (!armTimer) {
+          armTimer = setTimer(() => {
+            armTimer = null;
+            reset();
+          }, armHangMs);
+        }
+        return;
+      }
+      if (!endpointTimer) {
+        endpointTimer = setTimer(() => {
+          endpointTimer = null;
+          finish("quiet");
+        }, endpointSilenceMs);
+      }
+    },
+    reset,
+    flush() {
+      clearEndpoint();
+      clearArm();
+      const buf = chunks.length ? Buffer.concat(chunks) : Buffer.alloc(0);
+      const ready = buf.length >= minEndpointBytes && speechBytes >= speechStartBytes;
+      reset();
+      return ready ? buf : Buffer.alloc(0);
+    },
+  };
+}
+
 export async function runVoiceTurn({
   question,
   ask,

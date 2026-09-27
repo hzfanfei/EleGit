@@ -170,6 +170,7 @@ export function attachVoiceGateway(httpServer, {
       onPartial: (text) => holder.session?.onTranscript(text, { final: false }),
       onFinal: (text) => holder.session?.onTranscript(text, { final: true }),
       onSpeechStart: () => holder.session?.barge("speech"),
+      onAsrError: (detail) => holder.session?.onAsrFailure?.(detail?.message),
     });
     const session = createVoiceSession({
       config,
