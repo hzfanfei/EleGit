@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../copy/errors.dart';
 import '../theme.dart';
@@ -265,6 +266,14 @@ class WxErrorPanel extends StatefulWidget {
 class _WxErrorPanelState extends State<WxErrorPanel> {
   bool _open = false;
 
+  Future<void> _copy(String text) async {
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      const SnackBar(content: Text('已复制')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final detail = errorDetail(widget.error);
@@ -305,6 +314,11 @@ class _WxErrorPanelState extends State<WxErrorPanel> {
                       TextButton(
                         onPressed: () => setState(() => _open = !_open),
                         child: Text(_open ? '收起详情' : '详情'),
+                      ),
+                    if (detail != null && _open)
+                      TextButton(
+                        onPressed: () => _copy(detail),
+                        child: const Text('复制'),
                       ),
                   ],
                 ),

@@ -58,14 +58,11 @@ void main() {
   });
 
   test('maps SSE drops without leaking stacks', () {
-    expect(
-      humanizeError(ApiException('ClientException: Connection closed before full headers were received')),
-      contains('连接中断'),
-    );
-    expect(
-      humanizeError(ApiException('ClientException: Connection closed before full headers were received')),
-      isNot(contains('ClientException')),
-    );
+    const raw = 'ClientException: Connection closed while receiving data, uri=http://192.168.110.169:8787/v1/chat';
+    expect(humanizeError(ApiException(raw)), contains('连接中断'));
+    expect(humanizeError(ApiException(raw)), isNot(contains('ClientException')));
+    expect(errorDetail(ApiException(raw)), contains('Connection closed while receiving data'));
+    expect(errorDetail(ApiException(raw)), contains('/v1/chat'));
   });
 
   test('maps stale ACP sessions after companion restart', () {

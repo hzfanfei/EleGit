@@ -49,11 +49,11 @@ String _explain(Object error) {
 }
 
 String? errorDetail(Object error) {
-  final raw = error.toString().trim();
+  final raw = redactSecrets(error.toString().trim());
   if (raw.isEmpty) return null;
   final human = humanizeError(error);
   if (raw == human || _readableChinese(raw)) return null;
-  return raw.length > 240 ? '${raw.substring(0, 240)}…' : raw;
+  return raw.length > 800 ? '${raw.substring(0, 800)}…' : raw;
 }
 
 bool _readableChinese(String text) {

@@ -21,7 +21,8 @@ export function redactSecrets(text) {
     .replace(/X-Wenxiang-Key\s*[:=]\s*\S+/gi, "X-Wenxiang-Key: [redacted]")
     .replace(/("apiKey"\s*:\s*")[^"]+/gi, '$1[redacted]')
     .replace(/\b(?:ghp_|github_pat_|sk-)[A-Za-z0-9_\-]+/g, "[redacted]")
-    .replace(/\bBearer\s+\S+/gi, "Bearer [redacted]");
+    .replace(/\bBearer\s+\S+/gi, "Bearer [redacted]")
+    .replace(/([?&]key=)[^&\s#]+/gi, "$1[redacted]");
 }
 
 export function sanitizeClientEntry(raw) {

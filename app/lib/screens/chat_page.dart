@@ -981,10 +981,11 @@ class _ChatPageState extends State<ChatPage> {
       if (!mounted) return;
       _typewriter.flushNow();
       final partial = _typewriter.fullText;
-      final shown = humanizeError(err);
+      final raw = err.toString().trim();
+      final reason = raw.isEmpty ? '出了点问题。请稍后重试。' : raw;
       setState(() {
         if (partial.isEmpty) {
-          _messages.add(ChatMessage(role: 'error', content: shown));
+          _messages.add(ChatMessage(role: 'error', content: reason));
         } else {
           _insertMessageAfterUser(
             userIndex,
@@ -994,7 +995,7 @@ class _ChatPageState extends State<ChatPage> {
               engine: _liveEngine.value,
             ),
           );
-          _messages.add(ChatMessage(role: 'error', content: shown));
+          _messages.add(ChatMessage(role: 'error', content: reason));
         }
         _live = false;
       });

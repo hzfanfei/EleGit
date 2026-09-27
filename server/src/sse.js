@@ -12,9 +12,35 @@ export function openSse(res) {
   res.setHeader("X-Accel-Buffering", "no");
   res.setHeader("Content-Encoding", "identity");
   res.socket?.setNoDelay?.(true);
+  res.socket?.setTimeout?.(0);
   res.flushHeaders?.();
   res.write(PAD);
   flushSse(res);
+  startSseHeartbeat(res);
+}
+
+/** Comment frames so a quiet thinking stretch does not look like a dead socket. */
+export function startSseHeartbeat(res, intervalMs = 15000) {
+  if (!res || typeof res.write !== "function") return () => {};
+  const timer = setInterval(() => {
+    if (res.writableEnded || res.destroyed || res.socket?.destroyed) {
+      clearInterval(timer);
+      return;
+    }
+    try {
+      res.write(": ping\n\n");
+      flushSse(res);
+    } catch {
+      clearInterval(timer);
+    }
+  }, intervalMs);
+  timer.unref?.();
+  const stop = () => clearInterval(timer);
+  if (typeof res.on === "function") {
+    res.on("close", stop);
+    res.on("finish", stop);
+  }
+  return stop;
 }
 
 export function writeSse(res, event) {

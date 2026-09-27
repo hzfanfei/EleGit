@@ -161,7 +161,11 @@ String redactSecrets(String text) {
         (match) => '${match[1]}[redacted]',
       )
       .replaceAll(RegExp(r'\b(?:ghp_|github_pat_|sk-)[A-Za-z0-9_\-]+'), '[redacted]')
-      .replaceAll(RegExp(r'\bBearer\s+\S+', caseSensitive: false), 'Bearer [redacted]');
+      .replaceAll(RegExp(r'\bBearer\s+\S+', caseSensitive: false), 'Bearer [redacted]')
+      .replaceAllMapped(
+        RegExp(r'([?&]key=)[^&\s#]+', caseSensitive: false),
+        (match) => '${match[1]}[redacted]',
+      );
 }
 
 String _clip(String value, int max) {

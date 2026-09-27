@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { flushSse, openSse, writeSse } from "../src/sse.js";
+import { flushSse, openSse, startSseHeartbeat, writeSse } from "../src/sse.js";
 
 function mockRes() {
   const headers = {};
@@ -73,5 +73,28 @@ describe("SSE writer", () => {
   it("flushSse is a no-op when the response has no flush hook", () => {
     const res = { write() {} };
     flushSse(res);
+  });
+
+  it("writes a comment ping and stops when the response closes", async () => {
+    const writes = [];
+    const listeners = {};
+    const res = {
+      writes,
+      write(chunk) {
+        writes.push(String(chunk));
+        return true;
+      },
+      on(event, fn) {
+        listeners[event] = fn;
+      },
+    };
+    const stop = startSseHeartbeat(res, 15);
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    assert.ok(writes.some((chunk) => chunk.startsWith(": ping")));
+    listeners.close();
+    const count = writes.length;
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    assert.equal(writes.length, count);
+    stop();
   });
 });

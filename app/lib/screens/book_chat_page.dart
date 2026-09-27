@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../api/wenxiang_api.dart';
-import '../copy/errors.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../widgets/agent_decision_card.dart';
@@ -172,7 +171,11 @@ class _BookChatPageState extends State<BookChatPage> {
     } catch (err) {
       if (!mounted) return;
       setState(() {
-        _messages.add(ChatMessage(role: 'error', content: humanizeError(err)));
+        final raw = err.toString().trim();
+        _messages.add(ChatMessage(
+          role: 'error',
+          content: raw.isEmpty ? '出了点问题。请稍后重试。' : raw,
+        ));
         _live = false;
       });
       _typewriter.reset();
@@ -284,6 +287,12 @@ class _BookChatPageState extends State<BookChatPage> {
                   );
                 }
                 final msg = _messages[index - base];
+                if (msg.role == 'error') {
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: WxErrorPanel(error: msg.content),
+                  );
+                }
                 return _Bubble(
                   role: msg.role,
                   child: Column(

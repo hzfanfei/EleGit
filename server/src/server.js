@@ -1335,6 +1335,8 @@ app.post("/v1/inbox", async (req, res) => {
 });
 
 const httpServer = createServer(app);
+httpServer.requestTimeout = 0;
+httpServer.timeout = 0;
 
 attachVoiceGateway(httpServer, {
   getApiKey: () => store.config.apiKey,
