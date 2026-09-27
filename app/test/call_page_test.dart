@@ -98,6 +98,8 @@ void main() {
     await tester.pump();
     expect(find.text('在说'), findsOneWidget);
     expect(find.text('思考中'), findsNothing);
+    expect(find.text('点击打断'), findsOneWidget);
+    expect(find.text('静音'), findsOneWidget);
 
     client.emit(VoiceEvent(type: 'state', state: 'barge'));
     client.emit(VoiceEvent(type: 'state', state: 'listening'));
@@ -105,6 +107,7 @@ void main() {
     expect(find.text('在听'), findsOneWidget);
     expect(find.text('你打断了'), findsNothing);
     expect(find.text('在说'), findsNothing);
+    expect(find.text('点击打断'), findsNothing);
     expect(media.stopPlayCalls, greaterThan(0));
   });
 
