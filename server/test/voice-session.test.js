@@ -274,4 +274,75 @@ describe("createVoiceSession", () => {
     assert.equal(asked[0].chapter, "第一章");
     assert.equal(session.state, "listening");
   });
+
+  it("keeps speaking until the phone finishes playback", async () => {
+    const sent = [];
+    const session = createVoiceSession({
+      config: { ready: true, provider: "volc" },
+      send: (msg) => sent.push(msg),
+      sendAudio: () => {},
+      checkout: async () => ({ dest: "/tmp/octo/demo" }),
+      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      ask: async function* () {
+        yield { type: "delta", text: "先说到这里。" };
+        yield { type: "done", engine: "acp", answer: "先说到这里。" };
+      },
+      tts: async () => Buffer.from("pcm"),
+    });
+
+    await session.start({ owner: "octo", repo: "demo", sessionId: "s1" });
+    session.onTranscript("最近在做什么？", { final: true });
+    await new Promise((r) => setTimeout(r, 40));
+
+    assert.equal(session.state, "speaking");
+    const states = sent.filter((msg) => msg.type === "state").map((msg) => msg.state);
+    assert.equal(states.at(-1), "audio_done");
+
+    session.playbackDone();
+    assert.equal(session.state, "listening");
+  });
+
+  it("returns to listening if the phone never reports playback", async () => {
+    const session = createVoiceSession({
+      config: { ready: true, provider: "volc" },
+      send: () => {},
+      sendAudio: () => {},
+      checkout: async () => ({ dest: "/tmp/octo/demo" }),
+      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      ask: async function* () {
+        yield { type: "delta", text: "先说到这里。" };
+        yield { type: "done", engine: "acp", answer: "先说到这里。" };
+      },
+      tts: async () => Buffer.from("pcm"),
+    });
+
+    await session.start({ owner: "octo", repo: "demo", sessionId: "s1" });
+    session.onTranscript("最近在做什么？", { final: true });
+    await new Promise((r) => setTimeout(r, 40));
+    assert.equal(session.state, "speaking");
+    await new Promise((r) => setTimeout(r, 1400));
+    assert.equal(session.state, "listening");
+  });
+
+  it("stays on the call when one turn fails", async () => {
+    const sent = [];
+    const session = createVoiceSession({
+      config: { ready: true, provider: "volc" },
+      send: (msg) => sent.push(msg),
+      checkout: async () => ({ dest: "/tmp/octo/demo" }),
+      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      ask: async function* () {
+        throw new Error("agent down");
+      },
+      tts: async () => Buffer.from("pcm"),
+    });
+
+    await session.start({ owner: "octo", repo: "demo", sessionId: "s1" });
+    session.onTranscript("最近在做什么？", { final: true });
+    await new Promise((r) => setTimeout(r, 40));
+
+    assert.equal(sent.some((msg) => msg.type === "error"), false);
+    assert.ok(sent.some((msg) => msg.type === "caption" && msg.text === "这句没说成，再说一次"));
+    assert.equal(session.state, "listening");
+  });
 });

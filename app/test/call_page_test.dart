@@ -166,6 +166,7 @@ void main() {
     await tester.pump();
     expect(find.text('在听'), findsOneWidget);
     expect(find.text('在说'), findsNothing);
+    expect(client.playedCalls, 1);
   });
 
   testWidgets('a live channel error hangs up onto a single retry', (tester) async {

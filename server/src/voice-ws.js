@@ -217,12 +217,23 @@ export function attachVoiceGateway(httpServer, {
       }
       if (msg.type === "hello") session.start(msg);
       else if (msg.type === "barge") session.barge();
+      else if (msg.type === "played") session.playbackDone();
       else if (msg.type === "hangup") {
         session.hangup();
         ws.close();
       }
     });
-    ws.on("close", () => session.hangup());
+    const beat = setInterval(() => {
+      if (ws.readyState === 1) {
+        try { ws.ping(); } catch { /* already closing */ }
+      }
+    }, 20000);
+    ws.on("close", (code, reason) => {
+      clearInterval(beat);
+      const why = Buffer.isBuffer(reason) ? reason.toString() : String(reason || "");
+      console.log(`[voice] socket closed code=${code} reason=${why}`);
+      session.hangup();
+    });
   });
 
   return wss;

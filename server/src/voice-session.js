@@ -32,6 +32,9 @@ export function createVoiceSession({
   let assistantUtterance = "";
   let lastFinalText = "";
   let lastFinalAt = 0;
+  let playbackOpen = false;
+  let playbackBytes = 0;
+  let playbackTimer = null;
   let micTimer = null;
   let micFrames = 0;
   let micMax = 0;
@@ -90,9 +93,37 @@ export function createVoiceSession({
     if (currentSession) turnSessions?.cancel?.(currentSession).catch(() => {});
   }
 
+  function clearPlaybackTimer() {
+    if (playbackTimer) clearTimeout(playbackTimer);
+    playbackTimer = null;
+  }
+
+  function finishListen() {
+    clearPlaybackTimer();
+    playbackOpen = false;
+    playbackBytes = 0;
+    if (machine.state === "speaking" || machine.state === "thinking") {
+      machine.listen();
+      emit({ type: "state", state: "listening" });
+    }
+  }
+
+  function armPlaybackWatch() {
+    clearPlaybackTimer();
+    const ms = Math.min(120000, Math.ceil((playbackBytes / 48000) * 1000) + 1200);
+    playbackTimer = setTimeout(() => {
+      playbackTimer = null;
+      if (playbackOpen) finishListen();
+    }, ms);
+    playbackTimer.unref?.();
+  }
+
   function bargeIn(reason = "speech") {
     const action = machine.barge();
     if (!action.stopTts && !action.cancelTurn) return false;
+    clearPlaybackTimer();
+    playbackOpen = false;
+    playbackBytes = 0;
     abortTurn();
     emit({ type: "state", state: "barge", reason });
     machine.afterBarge();
@@ -112,6 +143,9 @@ export function createVoiceSession({
     const fromInterrupt = acceptInterruptFinal;
     if (!fromInterrupt && Date.now() < bargeHoldUntil) return;
     acceptInterruptFinal = false;
+    clearPlaybackTimer();
+    playbackOpen = false;
+    playbackBytes = 0;
     abortTurn();
     const gen = ++turnGen;
     turnAbort = new AbortController();
@@ -172,6 +206,10 @@ export function createVoiceSession({
         onAudio: async (buf) => {
           if (signal.aborted) return;
           beginSpeaking();
+          if (sendAudio) {
+            playbackOpen = true;
+            playbackBytes += buf?.length || 0;
+          }
           sendAudio?.(buf);
         },
         onDone: ({ text, engine }) => {
@@ -184,12 +222,16 @@ export function createVoiceSession({
       }
     } catch (err) {
       if (signal.aborted || err?.code === "cancelled") return;
-      emit({ type: "error", code: "turn", hint: "通话断了" });
+      console.error(`[voice] turn ${err?.code || ""} ${err?.message || err}`);
+      emit({ type: "caption", role: "assistant", text: "这句没说成，再说一次", final: true });
     } finally {
-      if (gen === turnGen && (machine.state === "speaking" || machine.state === "thinking")) {
-        machine.listen();
-        emit({ type: "state", state: "listening" });
+      if (gen !== turnGen || signal.aborted) return;
+      if (playbackOpen) {
+        emit({ type: "state", state: "audio_done" });
+        armPlaybackWatch();
+        return;
       }
+      finishListen();
     }
   }
 
@@ -270,9 +312,14 @@ export function createVoiceSession({
         bargeIn(reason === "tap" ? "tap" : "speech");
       }
     },
+    playbackDone() {
+      if (!playbackOpen) return;
+      finishListen();
+    },
     hangup() {
       closed = true;
       started = false;
+      clearPlaybackTimer();
       stopMicLog();
       abortTurn();
       asr?.stop?.();

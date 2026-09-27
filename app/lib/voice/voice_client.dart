@@ -55,6 +55,7 @@ abstract class VoiceCallClient {
   });
   void sendPcm(Uint8List pcm);
   void barge();
+  void played();
   void hangup();
 }
 
@@ -133,6 +134,11 @@ class SocketVoiceClient implements VoiceCallClient {
   }
 
   @override
+  void played() {
+    _send({'type': 'played'});
+  }
+
+  @override
   void hangup() {
     _send({'type': 'hangup'});
     _socketSub?.cancel();
@@ -154,6 +160,7 @@ class FakeVoiceClient implements VoiceCallClient {
   int connectCalls = 0;
   int hangupCalls = 0;
   int bargeCalls = 0;
+  int playedCalls = 0;
 
   void emit(VoiceEvent event) {
     _out.add(event);
@@ -201,6 +208,12 @@ class FakeVoiceClient implements VoiceCallClient {
   void barge() {
     bargeCalls += 1;
     sent.add({'type': 'barge'});
+  }
+
+  @override
+  void played() {
+    playedCalls += 1;
+    sent.add({'type': 'played'});
   }
 
   @override

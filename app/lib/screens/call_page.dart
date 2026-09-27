@@ -264,7 +264,7 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
       });
       return;
     }
-    if (next == 'listening' && _phase == 'speaking') {
+    if ((next == 'listening' || next == 'audio_done') && _phase == 'speaking') {
       final hold = ++_listenHold;
       unawaited(_listenWhenPlaybackEnds(hold));
       return;
@@ -287,6 +287,7 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
       await _media.waitForPlaybackQueue();
     } catch (_) {}
     if (!mounted || _disposing || hold != _listenHold || _phase != 'speaking') return;
+    _client?.played();
     setState(() {
       _phase = 'listening';
       _assistantLive = '';
@@ -311,6 +312,8 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
         return 'speaking';
       case 'barge':
         return 'barge';
+      case 'audio_done':
+        return 'audio_done';
       default:
         return _phase;
     }
