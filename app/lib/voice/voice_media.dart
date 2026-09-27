@@ -21,6 +21,17 @@ abstract class VoiceMedia {
   void dispose();
 }
 
+/// Loudest absolute sample in 16-bit LE PCM.
+int pcm16Peak(Uint8List pcm) {
+  final view = ByteData.view(pcm.buffer, pcm.offsetInBytes, pcm.lengthInBytes);
+  var peak = 0;
+  for (var i = 0; i + 1 < pcm.length; i += 2) {
+    final abs = view.getInt16(i, Endian.little).abs();
+    if (abs > peak) peak = abs;
+  }
+  return peak;
+}
+
 /// Above this share of full scale, boosted samples are bent down instead of cut off.
 const double _limiterKnee = 0.8;
 

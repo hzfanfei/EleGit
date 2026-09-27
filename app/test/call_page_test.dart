@@ -294,6 +294,48 @@ void main() {
     expect(find.text('需要麦克风才能通话'), findsNothing);
   });
 
+  testWidgets('talking over the answer keeps the mic open so the rest of the sentence is heard', (tester) async {
+    final media = _LiveMicMedia();
+    final client = FakeVoiceClient();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: CallPage(
+          api: FakeWenxiangApi(voiceReady: true),
+          repo: sampleRepo(),
+          onBack: () {},
+          media: media,
+          client: client,
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    await tester.tap(find.text('开始通话'));
+    await tester.pump();
+    client.emit(VoiceEvent(type: 'state', state: 'speaking'));
+    client.emit(VoiceEvent(type: 'pcm', pcm: Uint8List.fromList([1, 0, 2, 0])));
+    await tester.pump();
+
+    client.emit(VoiceEvent(type: 'state', state: 'barge'));
+    client.emit(VoiceEvent(type: 'state', state: 'listening'));
+    await tester.pump();
+    media.speak(9000);
+    await tester.pump(const Duration(milliseconds: 1300));
+    expect(media.stopMicCalls, 0);
+    expect(media.startCalls, 1);
+
+    client.emit(VoiceEvent(type: 'state', state: 'speaking'));
+    client.emit(VoiceEvent(type: 'pcm', pcm: Uint8List.fromList([1, 0, 2, 0])));
+    await tester.pump();
+    client.emit(VoiceEvent(type: 'state', state: 'barge'));
+    await tester.pump();
+    media.speak(0);
+    await tester.pump(const Duration(milliseconds: 1300));
+    expect(media.stopMicCalls, 1);
+    expect(media.startCalls, 2);
+  });
+
   testWidgets('microphone denial stays on a short Chinese retry', (tester) async {
     final media = FakeVoiceMedia(micGranted: false);
     await tester.pumpWidget(
@@ -327,6 +369,24 @@ class _DroppingMicMedia extends FakeVoiceMedia {
       return Stream<Uint8List>.value(Uint8List.fromList([1, 0, 0, 0]));
     }
     return StreamController<Uint8List>.broadcast().stream;
+  }
+}
+
+class _LiveMicMedia extends FakeVoiceMedia {
+  final _mic = StreamController<Uint8List>.broadcast();
+
+  void speak(int level) {
+    final frame = Uint8List(4);
+    ByteData.view(frame.buffer)
+      ..setInt16(0, level, Endian.little)
+      ..setInt16(2, -level, Endian.little);
+    _mic.add(frame);
+  }
+
+  @override
+  Stream<Uint8List> startMic() {
+    startCalls += 1;
+    return _mic.stream;
   }
 }
 

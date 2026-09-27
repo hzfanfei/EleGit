@@ -97,6 +97,9 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
   bool _backgroundHeld = false;
   bool _playing = false;
   Timer? _micRetry;
+  Timer? _bargeMicCheck;
+  bool _watchBargeMic = false;
+  int _bargeMicPeak = 0;
   int _listenHold = 0;
   int _micEpoch = 0;
   int _micReopens = 0;
@@ -267,7 +270,7 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
         _assistantLive = '';
       });
       unawaited(_media.stopPlayback());
-      unawaited(_reopenMicAfterSpeaker());
+      _checkMicAfterBarge();
       return;
     }
     if ((next == 'listening' || next == 'audio_done') && _phase == 'speaking' && _playing) {
@@ -300,6 +303,26 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
     unawaited(_reopenMicAfterSpeaker());
   }
 
+  /// A barge means the mic just heard the user over the speaker, mid-sentence.
+  /// Restarting it here dropped the rest of that sentence. Reopen only if it went silent.
+  void _checkMicAfterBarge() {
+    _bargeMicCheck?.cancel();
+    _bargeMicPeak = 0;
+    _watchBargeMic = true;
+    final epoch = _micEpoch;
+    _bargeMicCheck = Timer(_bargeMicWindow, () {
+      _bargeMicCheck = null;
+      _watchBargeMic = false;
+      if (!_live || _disposing || epoch != _micEpoch) return;
+      if (_bargeMicPeak < _deadMicPeak) unawaited(_reopenMicAfterSpeaker());
+    });
+  }
+
+  static const _bargeMicWindow = Duration(milliseconds: 1200);
+
+  /// Room noise on a live phone mic peaks well above this; a suppressed one sends near-zero.
+  static const _deadMicPeak = 200;
+
   /// The call mic stays suppressed after the speaker. Open it again so the next sentence is recorded.
   Future<void> _reopenMicAfterSpeaker() async {
     if (!_live || _disposing) return;
@@ -320,6 +343,10 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
     _micSub = _media.startMic().listen((pcm) {
       frames += 1;
       _micReopens = 0;
+      if (_watchBargeMic) {
+        final peak = pcm16Peak(pcm);
+        if (peak > _bargeMicPeak) _bargeMicPeak = peak;
+      }
       _client?.sendPcm(pcm);
     }, onError: (_) {
       _reviveMic(epoch, started, frames);
@@ -389,6 +416,9 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
     _micEpoch++;
     _micRetry?.cancel();
     _micRetry = null;
+    _bargeMicCheck?.cancel();
+    _bargeMicCheck = null;
+    _watchBargeMic = false;
     _sub?.cancel();
     _sub = null;
     _micSub?.cancel();
