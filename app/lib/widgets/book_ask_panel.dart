@@ -359,7 +359,7 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
     } catch (_) {}
   }
 
-  Future<void> _openCall() async {
+  Future<void> openCall() async {
     if (!_voiceCall || _busy || _live || _hold.holding || _hold.sttBusy) return;
     await openVoiceCall(
       context,
@@ -843,7 +843,7 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
                             showAllScope: false,
                             onAllScope: () => _setScope(BookAskScope.all),
                             onExpandAnswer: _expandForAnswer,
-                            onCall: _voiceCall ? _openCall : null,
+                            onCall: _voiceCall ? openCall : null,
                             callEnabled: !_busy && !_live && !_hold.holding && !_hold.sttBusy,
                           ),
                         ],

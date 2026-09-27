@@ -9,6 +9,8 @@ import 'package:wenxiang/persist/app_memory.dart';
 import 'package:wenxiang/persist/book_reader_prefs.dart';
 import 'package:wenxiang/screens/book_reader_page.dart';
 import 'package:wenxiang/theme.dart';
+import 'package:wenxiang/voice/voice_client.dart';
+import 'package:wenxiang/voice/voice_media.dart';
 import 'package:wenxiang/widgets/book_ask_panel.dart';
 import 'package:wenxiang/widgets/book_reader_chrome.dart';
 
@@ -460,6 +462,63 @@ void main() {
     await _pumpBookReader(tester, expandAsk: true, keyboard: 320, theme: ReaderThemeMode.light);
     expect(_overlayStyle(tester).statusBarColor, ReaderPalette.forMode(ReaderThemeMode.light).paper);
     expect(tester.getRect(find.byKey(const Key('book-reader-body'))).top, closeTo(0, 0.5));
+  });
+
+  testWidgets('reader top bar opens the book voice call', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final client = FakeVoiceClient();
+    final media = FakeVoiceMedia();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: MediaQuery(
+          data: const MediaQueryData(
+            size: Size(390, 844),
+            padding: EdgeInsets.only(top: 47, bottom: 34),
+          ),
+          child: BookReaderPage(
+            api: FakeWenxiangApi(voiceReady: true, voiceCall: true),
+            prefs: prefs,
+            memory: AppMemory(prefs),
+            callClient: client,
+            callMedia: media,
+            book: BookItem(
+              id: 'demo',
+              filename: 'demo.epub',
+              title: '演示书',
+              author: '作者',
+              language: 'zh',
+              size: 1000,
+              modifiedAt: '2026-09-15T00:00:00Z',
+              hasCover: false,
+            ),
+            onBack: () {},
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 80));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.byKey(const Key('wx-reader-call')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('wx-reader-call')));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('连接中'), findsOneWidget);
+    expect(
+      client.sent.any((message) => message['bookId'] == 'demo' && message['chapter'] == '第一章'),
+      isTrue,
+    );
+    expect(client.sent.any((message) => message['repo'] == 'demo'), isFalse);
   });
 }
 

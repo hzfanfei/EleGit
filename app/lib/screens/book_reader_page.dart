@@ -16,6 +16,8 @@ import '../utils/book_markdown_markup.dart';
 import '../utils/book_reader_markdown_style.dart';
 import '../utils/book_reader_prefetch.dart';
 import '../voice/book_quick_voice_session.dart';
+import '../voice/voice_client.dart';
+import '../voice/voice_media.dart';
 import '../voice/volc_tts_voices.dart';
 import '../widgets/book_ask_panel.dart';
 import '../widgets/book_quick_voice_fab.dart';
@@ -34,6 +36,8 @@ class BookReaderPage extends StatefulWidget {
     this.expandAsk = false,
     this.prefs,
     this.memory,
+    this.callMedia,
+    this.callClient,
   });
 
   final WenxiangApi api;
@@ -42,6 +46,8 @@ class BookReaderPage extends StatefulWidget {
   final bool expandAsk;
   final SharedPreferences? prefs;
   final AppMemory? memory;
+  final VoiceMedia? callMedia;
+  final VoiceCallClient? callClient;
 
   @override
   State<BookReaderPage> createState() => _BookReaderPageState();
@@ -80,6 +86,7 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
   double _scrollFraction = 0;
   late final BookQuickVoiceSession _quickVoice;
   bool _voiceReady = false;
+  bool _voiceCall = false;
   // Set by BookMarkdownBody#onTapLink before our pointer-up Listener fires.
   // Stops the chrome from toggling when the tap was actually a link click.
   bool _linkTappedThisGesture = false;
@@ -159,10 +166,16 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
     try {
       final status = await widget.api.status();
       if (!mounted) return;
-      setState(() => _voiceReady = status.voiceReady);
+      setState(() {
+        _voiceReady = status.voiceReady;
+        _voiceCall = status.voiceCall;
+      });
     } catch (_) {
       if (!mounted) return;
-      setState(() => _voiceReady = false);
+      setState(() {
+        _voiceReady = false;
+        _voiceCall = false;
+      });
     }
   }
 
@@ -876,6 +889,7 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
                         onBack: _leave,
                         onOpenToc: _showToc,
                         onOpenSettings: _showSettings,
+                        onCall: _voiceCall ? () => unawaited(_askPanelKey.currentState?.openCall()) : null,
                       ),
                     ),
                   ),
@@ -923,6 +937,8 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
                       chapterHint: _chapterHint,
                       readingPlace: _readingPlace,
                       memory: widget.memory,
+                      callMedia: widget.callMedia,
+                      callClient: widget.callClient,
                       onRequestExpand: () => unawaited(_ensureAskHalf()),
                       onRequestStepUp: () =>
                           unawaited(_setAskLevel(stepAskSheetUp(_askLevel))),

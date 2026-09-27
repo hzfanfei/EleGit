@@ -45,6 +45,7 @@ class BookReaderChrome extends StatelessWidget {
     required this.onBack,
     required this.onOpenToc,
     required this.onOpenSettings,
+    this.onCall,
   });
 
   final String title;
@@ -54,6 +55,7 @@ class BookReaderChrome extends StatelessWidget {
   final VoidCallback onBack;
   final VoidCallback onOpenToc;
   final VoidCallback onOpenSettings;
+  final VoidCallback? onCall;
 
   @override
   Widget build(BuildContext context) {
@@ -118,6 +120,13 @@ class BookReaderChrome extends StatelessWidget {
                       ),
                     ),
                   ),
+                  if (onCall != null)
+                    IconButton(
+                      key: const Key('wx-reader-call'),
+                      tooltip: '电话',
+                      onPressed: onCall,
+                      icon: Icon(Icons.phone_outlined, color: palette.ink),
+                    ),
                   IconButton(
                     tooltip: '目录',
                     onPressed: onOpenToc,
