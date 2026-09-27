@@ -483,7 +483,8 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    expect(find.text('连接中'), findsOneWidget);
+    expect(find.text('在听'), findsOneWidget);
+    expect(find.text('连接中'), findsNothing);
     expect(client.connectCalls, 1);
     expect(media.startCalls, 1);
   });

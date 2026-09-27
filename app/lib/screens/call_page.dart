@@ -82,8 +82,6 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
     duration: Wx.breath,
   );
 
-  static const _bargeHold = Duration(milliseconds: 480);
-
   String _phase = 'idle';
   String? _error;
   Object? _fault;
@@ -97,7 +95,7 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
   String _assistantLive = '';
   bool _disposing = false;
   bool _backgroundHeld = false;
-  Timer? _bargeFlash;
+  bool _playing = false;
   Timer? _micRetry;
   int _listenHold = 0;
   int _micEpoch = 0;
@@ -136,23 +134,17 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
     }
   }
 
+  /// Live call shows only three labels: 在听 while the mic takes a turn, 思考中 until
+  /// playback starts, 在说 only while that audio is actually playing.
   String get statusLabel {
     if (_checking && !_live) return '';
     if (_error != null && !_live) return _error!;
-    switch (_phase) {
-      case 'connecting':
-        return '连接中';
-      case 'listening':
-        return '在听';
-      case 'thinking':
-        return '思考中';
-      case 'speaking':
-        return '在说';
-      case 'barge':
-        return '你打断了';
-      default:
-        return _voiceReady ? '' : (_error ?? '还没配语音密钥');
+    if (_live) {
+      if (_playing) return '在说';
+      if (_phase == 'thinking' || _phase == 'speaking') return '思考中';
+      return '在听';
     }
+    return _voiceReady ? '' : (_error ?? '还没配语音密钥');
   }
 
   String get mainActionLabel {
@@ -186,6 +178,7 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
       _fault = null;
       _detailOpen = false;
       _phase = 'connecting';
+      _playing = false;
       _live = true;
     });
     final allowed = await _media.requestMic();
@@ -256,39 +249,42 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
       });
       return;
     }
-    if (event.type == 'pcm' && event.pcm != null && _phase == 'speaking') {
+    if (event.type == 'pcm' && event.pcm != null && (_phase == 'speaking' || _phase == 'thinking')) {
+      if (!_playing) {
+        setState(() {
+          _phase = 'speaking';
+          _playing = true;
+        });
+      }
       unawaited(_media.playPcm(event.pcm!, sampleRate: event.outputRate));
     }
   }
 
   void _applyState(String next) {
-    if (next == 'listening' && _phase == 'barge') {
-      _bargeFlash?.cancel();
-      _bargeFlash = Timer(_bargeHold, () {
-        if (!mounted || _disposing || _phase != 'barge') return;
-        setState(() {
-          _phase = 'listening';
-          _assistantLive = '';
-        });
+    if (next == 'barge') {
+      _listenHold++;
+      setState(() {
+        _phase = 'listening';
+        _playing = false;
+        _assistantLive = '';
       });
+      unawaited(_media.stopPlayback());
+      unawaited(_reopenMicAfterSpeaker());
       return;
     }
-    if ((next == 'listening' || next == 'audio_done') && _phase == 'speaking') {
+    if ((next == 'listening' || next == 'audio_done') && _phase == 'speaking' && _playing) {
       final hold = ++_listenHold;
       unawaited(_listenWhenPlaybackEnds(hold));
       return;
     }
     _listenHold++;
-    _bargeFlash?.cancel();
-    _bargeFlash = null;
     setState(() {
-      _phase = next;
-      if (next == 'listening') _assistantLive = '';
+      _phase = next == 'audio_done' ? 'listening' : next;
+      if (next == 'listening' || next == 'thinking' || next == 'audio_done') {
+        _playing = false;
+        _assistantLive = '';
+      }
     });
-    if (next == 'barge') {
-      unawaited(_media.stopPlayback());
-      unawaited(_reopenMicAfterSpeaker());
-    }
   }
 
   /// Server marks the turn done as soon as audio is sent. Stay on 在说 until the phone finishes playing it.
@@ -300,6 +296,7 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
     _client?.played();
     setState(() {
       _phase = 'listening';
+      _playing = false;
       _assistantLive = '';
     });
     unawaited(_reopenMicAfterSpeaker());
@@ -394,8 +391,6 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
     _micEpoch++;
     _micRetry?.cancel();
     _micRetry = null;
-    _bargeFlash?.cancel();
-    _bargeFlash = null;
     _sub?.cancel();
     _sub = null;
     _micSub?.cancel();
@@ -409,6 +404,7 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
     }
     _live = false;
     _phase = 'idle';
+    _playing = false;
     if (!_disposing && mounted) {
       setState(() {});
     }
@@ -445,8 +441,8 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
 
   @override
   Widget build(BuildContext context) {
-    final speaking = _phase == 'speaking';
-    final listening = _phase == 'listening';
+    final speaking = _playing;
+    final listening = _live && !_playing && _phase != 'thinking' && _phase != 'speaking';
     return Scaffold(
       body: Column(
         children: [

@@ -513,7 +513,8 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    expect(find.text('连接中'), findsOneWidget);
+    expect(find.text('在听'), findsOneWidget);
+    expect(find.text('连接中'), findsNothing);
     expect(
       client.sent.any((message) => message['bookId'] == 'demo' && message['chapter'] == '第一章'),
       isTrue,

@@ -49,7 +49,7 @@ void main() {
     expect(find.textContaining('还没配语音密钥'), findsOneWidget);
   });
 
-  testWidgets('ready call walks 连接中 / 在听 / 在说 / 你打断了', (tester) async {
+  testWidgets('ready call walks 在听 / 思考中 / 在说', (tester) async {
     final media = FakeVoiceMedia();
     final client = FakeVoiceClient();
     await tester.pumpWidget(
@@ -68,10 +68,12 @@ void main() {
     await tester.pump();
 
     expect(find.text('开始通话'), findsOneWidget);
-    expect(find.text('连接中'), findsNothing);
+    expect(find.text('在听'), findsNothing);
     await tester.tap(find.text('开始通话'));
     await tester.pump();
-    expect(find.text('连接中'), findsOneWidget);
+    expect(find.text('在听'), findsOneWidget);
+    expect(find.text('连接中'), findsNothing);
+    expect(find.text('你打断了'), findsNothing);
     expect(client.connectCalls, 1);
     expect(media.requestCalls, 1);
     expect(media.startCalls, 1);
@@ -89,18 +91,21 @@ void main() {
 
     client.emit(VoiceEvent(type: 'state', state: 'speaking'));
     await tester.pump();
+    expect(find.text('思考中'), findsOneWidget);
+    expect(find.text('在说'), findsNothing);
+
+    client.emit(VoiceEvent(type: 'pcm', pcm: Uint8List.fromList([1, 0, 2, 0])));
+    await tester.pump();
     expect(find.text('在说'), findsOneWidget);
+    expect(find.text('思考中'), findsNothing);
 
     client.emit(VoiceEvent(type: 'state', state: 'barge'));
     client.emit(VoiceEvent(type: 'state', state: 'listening'));
     await tester.pump();
-    expect(find.text('你打断了'), findsOneWidget);
-    expect(find.text('在听'), findsNothing);
-    expect(media.stopPlayCalls, greaterThan(0));
-
-    await tester.pump(const Duration(milliseconds: 500));
     expect(find.text('在听'), findsOneWidget);
     expect(find.text('你打断了'), findsNothing);
+    expect(find.text('在说'), findsNothing);
+    expect(media.stopPlayCalls, greaterThan(0));
   });
 
   testWidgets('tapping the stage barges and drops leftover TTS', (tester) async {
@@ -130,7 +135,8 @@ void main() {
     await tester.tap(find.byKey(const Key('wx-call-stage')));
     await tester.pump();
     expect(client.bargeCalls, 1);
-    expect(find.text('你打断了'), findsOneWidget);
+    expect(find.text('在听'), findsOneWidget);
+    expect(find.text('你打断了'), findsNothing);
 
     client.emit(VoiceEvent(type: 'pcm', pcm: Uint8List.fromList([3, 0, 4, 0])));
     await tester.pump();
