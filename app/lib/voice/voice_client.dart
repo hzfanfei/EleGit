@@ -46,7 +46,13 @@ class VoiceEvent {
 
 abstract class VoiceCallClient {
   Stream<VoiceEvent> connect();
-  void hello({required String owner, required String repo, String? sessionId});
+  void hello({
+    String owner = '',
+    String repo = '',
+    String? sessionId,
+    String? bookId,
+    String? chapter,
+  });
   void sendPcm(Uint8List pcm);
   void barge();
   void hangup();
@@ -99,12 +105,20 @@ class SocketVoiceClient implements VoiceCallClient {
   }
 
   @override
-  void hello({required String owner, required String repo, String? sessionId}) {
+  void hello({
+    String owner = '',
+    String repo = '',
+    String? sessionId,
+    String? bookId,
+    String? chapter,
+  }) {
     _send({
       'type': 'hello',
-      'owner': owner,
-      'repo': repo,
+      if (owner.isNotEmpty) 'owner': owner,
+      if (repo.isNotEmpty) 'repo': repo,
       if (sessionId != null && sessionId.isNotEmpty) 'sessionId': sessionId,
+      if (bookId != null && bookId.isNotEmpty) 'bookId': bookId,
+      if (chapter != null && chapter.isNotEmpty) 'chapter': chapter,
     });
   }
 
@@ -161,8 +175,21 @@ class FakeVoiceClient implements VoiceCallClient {
   }
 
   @override
-  void hello({required String owner, required String repo, String? sessionId}) {
-    sent.add({'type': 'hello', 'owner': owner, 'repo': repo, 'sessionId': sessionId});
+  void hello({
+    String owner = '',
+    String repo = '',
+    String? sessionId,
+    String? bookId,
+    String? chapter,
+  }) {
+    sent.add({
+      'type': 'hello',
+      'owner': owner,
+      'repo': repo,
+      'sessionId': sessionId,
+      if (bookId != null && bookId.isNotEmpty) 'bookId': bookId,
+      if (chapter != null && chapter.isNotEmpty) 'chapter': chapter,
+    });
   }
 
   @override

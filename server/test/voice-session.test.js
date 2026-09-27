@@ -232,4 +232,46 @@ describe("createVoiceSession", () => {
     assert.deepEqual(asked, ["最近在做什么？"]);
     assert.equal(session.state, "speaking");
   });
+
+  it("asks the open book without checking out a repo", async () => {
+    const asked = [];
+    let prepared = 0;
+    const session = createVoiceSession({
+      config: { ready: true, provider: "volc" },
+      send: () => {},
+      prepareContext: async ({ bookId, chapter, sessionId }) => {
+        prepared += 1;
+        assert.equal(bookId, "b1");
+        assert.equal(chapter, "第一章");
+        assert.equal(sessionId, "book-s1");
+        return {
+          book: { id: "b1", title: "演示书" },
+          materialized: { cacheDir: "/tmp/book" },
+          session: { id: "book-s1" },
+          sessions: { cancel: async () => {} },
+        };
+      },
+      checkout: async () => {
+        throw new Error("book call must not checkout a repo");
+      },
+      ask: async function* (opts) {
+        asked.push(opts);
+        yield { type: "delta", text: "墙纸是压抑。" };
+        yield { type: "done", engine: "acp", answer: "墙纸是压抑。" };
+      },
+      tts: async () => Buffer.from("pcm"),
+    });
+
+    await session.start({ bookId: "b1", chapter: "第一章", sessionId: "book-s1" });
+    assert.equal(session.state, "listening");
+    session.onTranscript("墙纸象征什么", { final: true });
+    await new Promise((r) => setTimeout(r, 40));
+
+    assert.equal(prepared, 1);
+    assert.equal(asked.length, 1);
+    assert.equal(asked[0].question, "墙纸象征什么");
+    assert.equal(asked[0].book.id, "b1");
+    assert.equal(asked[0].chapter, "第一章");
+    assert.equal(session.state, "listening");
+  });
 });

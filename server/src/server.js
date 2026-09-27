@@ -11,7 +11,7 @@ import {
   detectCursorEngine,
   sanitizeAcpEngine,
 } from "./acp.js";
-import { handleBookVoiceTurn } from "./book-voice-turn.js";
+import { createBookAskIterator, handleBookVoiceTurn } from "./book-voice-turn.js";
 import { handleRepoVoiceTurn } from "./repo-voice-turn.js";
 import { streamAnswer, synthesizeBookAnswer, answerReadyNotice } from "./ask.js";
 import { setPhoneForeground, phoneInForeground } from "./phone-presence.js";
@@ -1339,6 +1339,25 @@ const httpServer = createServer(app);
 attachVoiceGateway(httpServer, {
   getApiKey: () => store.config.apiKey,
   checkoutRepo: (owner, repo, signal) => checkoutRepo(owner, repo, signal, { fast: true }),
+  prepareContext: async ({ bookId, sessionId }) => {
+    const book = await resolveBook(store.config.workspaceRoot, bookId);
+    const materialized = await ensureBookMaterialized(store.config.workspaceRoot, book);
+    const session = bookSessions.resolveForChat(bookSessionOwner(), book.id, sessionId);
+    await bookSessions.warm(session, materialized.cacheDir).catch(() => {});
+    return { book, materialized, session, sessions: bookSessions };
+  },
+  createBookAsk: () => async function* (opts, signal) {
+    const ask = createBookAskIterator({
+      book: opts.book,
+      materialized: opts.materialized,
+      session: opts.session,
+      bookSessions: opts.sessions,
+      chapter: opts.chapter,
+      history: opts.history || [],
+      signal,
+    });
+    yield* ask(opts.question, signal);
+  },
   sessions,
 });
 attachSttGateway(httpServer, {

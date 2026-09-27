@@ -133,9 +133,11 @@ export function createVoiceProviders(config, hooks = {}) {
 export function attachVoiceGateway(httpServer, {
   getApiKey,
   checkoutRepo,
+  prepareContext,
   sessions,
   resolveConfig = resolveVoiceConfig,
   createAsk = createDefaultAsk,
+  createBookAsk,
   createProviders = createVoiceProviders,
 } = {}) {
   const wss = new WebSocketServer({ noServer: true });
@@ -164,7 +166,16 @@ export function attachVoiceGateway(httpServer, {
 
   wss.on("connection", (ws) => {
     const config = resolveConfig();
-    const ask = createAsk();
+    const repoAsk = createAsk();
+    const bookAsk = createBookAsk?.();
+    const ask = async function* (opts, signal) {
+      if (opts?.book) {
+        if (!bookAsk) return;
+        yield* bookAsk(opts, signal);
+        return;
+      }
+      yield* repoAsk(opts, signal);
+    };
     const holder = { session: null };
     const providers = createProviders(config, {
       onPartial: (text) => holder.session?.onTranscript(text, { final: false }),
@@ -181,6 +192,7 @@ export function attachVoiceGateway(httpServer, {
         if (ws.readyState === 1 && buf?.length) ws.send(buf);
       },
       checkout: checkoutRepo,
+      prepareContext,
       sessions,
       ask,
       tts: providers.tts,

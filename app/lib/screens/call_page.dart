@@ -16,8 +16,10 @@ class CallPage extends StatefulWidget {
   const CallPage({
     super.key,
     required this.api,
-    required this.repo,
     required this.onBack,
+    this.repo,
+    this.book,
+    this.chapter = '',
     this.sessionId,
     this.onTranscript,
     this.media,
@@ -26,7 +28,9 @@ class CallPage extends StatefulWidget {
   });
 
   final WenxiangApi api;
-  final RepoItem repo;
+  final RepoItem? repo;
+  final BookItem? book;
+  final String chapter;
   final VoidCallback onBack;
   final String? sessionId;
   final void Function(List<ChatMessage> captions)? onTranscript;
@@ -161,7 +165,19 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
       _sub = client.connect().listen(_onEvent, onError: (_) => _drop(), onDone: () {
         if (_live) _drop();
       });
-      client.hello(owner: widget.repo.owner, repo: widget.repo.name, sessionId: widget.sessionId);
+      if (widget.book != null) {
+        client.hello(
+          bookId: widget.book!.id,
+          chapter: widget.chapter,
+          sessionId: widget.sessionId,
+        );
+      } else {
+        client.hello(
+          owner: widget.repo?.owner ?? '',
+          repo: widget.repo?.name ?? '',
+          sessionId: widget.sessionId,
+        );
+      }
       _micSub = _media.startMic().listen(client.sendPcm, onError: (_) {
         _fail('需要麦克风才能通话');
       });
@@ -317,7 +333,9 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
           WxPageHeader(
             onBack: () => hangup(pop: true),
             backTooltip: '挂断并返回',
-            title: widget.repo.fullName,
+            title: widget.book != null
+                ? (widget.book!.title.isEmpty ? '问书' : widget.book!.title)
+                : (widget.repo?.fullName ?? '通话'),
           ),
           const WxHairline(),
           Expanded(

@@ -13,7 +13,10 @@ import '../persist/app_memory.dart';
 import '../persist/book_chat_store.dart';
 import '../theme.dart';
 import '../utils/ask_live_phase.dart';
+import '../screens/call_page.dart';
 import '../voice/hold_to_speak_session.dart';
+import '../voice/voice_client.dart';
+import '../voice/voice_media.dart';
 import '../voice/voice_stt_client.dart';
 import 'wx_hold_to_speak.dart';
 import 'wx_motion.dart';
@@ -105,6 +108,8 @@ class BookAskPanel extends StatefulWidget {
     this.readingPlace,
     this.memory,
     this.sttClient,
+    this.callMedia,
+    this.callClient,
     this.onRequestExpand,
     this.onRequestStepUp,
     this.onRequestCollapse,
@@ -123,6 +128,8 @@ class BookAskPanel extends StatefulWidget {
   final ValueNotifier<BookReadingPlace>? readingPlace;
   final AppMemory? memory;
   final VoiceSttClient? sttClient;
+  final VoiceMedia? callMedia;
+  final VoiceCallClient? callClient;
   final VoidCallback? onRequestExpand;
   final VoidCallback? onRequestStepUp;
   final VoidCallback? onRequestCollapse;
@@ -171,6 +178,7 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
   bool _live = false;
   bool _busy = false;
   bool _voiceReady = false;
+  bool _voiceCall = false;
   bool _voiceInputMode = false;
   String _voiceHint = '';
   String? _peekAnswer;
@@ -351,12 +359,53 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
     } catch (_) {}
   }
 
+  Future<void> _openCall() async {
+    if (!_voiceCall || _busy || _live || _hold.holding || _hold.sttBusy) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (routeContext) => CallPage(
+          api: widget.api,
+          book: widget.book,
+          chapter: _place.chapter,
+          sessionId: _sessionId,
+          autoStart: true,
+          media: widget.callMedia,
+          client: widget.callClient,
+          onBack: () => Navigator.of(routeContext).pop(),
+          onTranscript: _foldCallTranscript,
+        ),
+      ),
+    );
+  }
+
+  void _foldCallTranscript(List<ChatMessage> captions) {
+    if (!mounted || captions.isEmpty) return;
+    setState(() {
+      for (final item in captions) {
+        _messages.add(ChatMessage(
+          role: item.role,
+          content: item.content,
+          engine: item.engine,
+          via: 'voice',
+        ));
+      }
+      for (final item in captions.reversed) {
+        if (item.role == 'assistant' && item.content.trim().isNotEmpty) {
+          _peekAnswer = item.content;
+          break;
+        }
+      }
+    });
+    unawaited(_persistStore());
+  }
+
   Future<void> _loadVoice() async {
     try {
       final status = await widget.api.status();
       if (!mounted) return;
       setState(() {
         _voiceReady = status.voiceReady;
+        _voiceCall = status.voiceCall;
         _voiceHint = status.voiceReady
             ? ''
             : (status.voiceHint.isEmpty ? humanizeSttEvent(code: 'unconfigured') : status.voiceHint);
@@ -365,6 +414,7 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
       if (!mounted) return;
       setState(() {
         _voiceReady = false;
+        _voiceCall = false;
         _voiceHint = '语音暂不可用';
       });
     }
@@ -798,6 +848,8 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
                             showAllScope: false,
                             onAllScope: () => _setScope(BookAskScope.all),
                             onExpandAnswer: _expandForAnswer,
+                            onCall: _voiceCall ? _openCall : null,
+                            callEnabled: !_busy && !_live && !_hold.holding && !_hold.sttBusy,
                           ),
                         ],
                       ),
@@ -975,6 +1027,8 @@ class _AskHeaderRow extends StatelessWidget {
     required this.showAllScope,
     required this.onAllScope,
     required this.onExpandAnswer,
+    this.onCall,
+    this.callEnabled = true,
   });
 
   final ThemeData theme;
@@ -986,6 +1040,8 @@ class _AskHeaderRow extends StatelessWidget {
   final bool showAllScope;
   final VoidCallback onAllScope;
   final VoidCallback onExpandAnswer;
+  final VoidCallback? onCall;
+  final bool callEnabled;
 
   @override
   Widget build(BuildContext context) {
@@ -1011,6 +1067,14 @@ class _AskHeaderRow extends StatelessWidget {
               ),
             ),
           ),
+          if (onCall != null)
+            IconButton(
+              key: const Key('wx-book-call'),
+              tooltip: '电话',
+              visualDensity: VisualDensity.compact,
+              onPressed: callEnabled ? onCall : null,
+              icon: const Icon(Icons.phone_outlined, size: 20),
+            ),
           if (expanded && showAllScope)
             TextButton(
               onPressed: onAllScope,

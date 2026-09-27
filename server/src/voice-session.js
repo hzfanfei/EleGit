@@ -5,6 +5,7 @@ export function createVoiceSession({
   send,
   sendAudio,
   checkout,
+  prepareContext,
   sessions,
   ask,
   tts,
@@ -16,7 +17,11 @@ export function createVoiceSession({
   let closed = false;
   let owner = "";
   let repo = "";
+  let bookId = "";
+  let chapter = "";
+  let bookMode = false;
   let sessionId = "";
+  let turnSessions = sessions;
   let history = [];
   let turnAbort = null;
   let ttsAbort = null;
@@ -82,7 +87,7 @@ export function createVoiceSession({
     } catch {
       /* ignore */
     }
-    if (currentSession) sessions?.cancel?.(currentSession).catch(() => {});
+    if (currentSession) turnSessions?.cancel?.(currentSession).catch(() => {});
   }
 
   function bargeIn(reason = "speech") {
@@ -115,10 +120,29 @@ export function createVoiceSession({
     machine.think();
     emit({ type: "state", state: "thinking" });
     try {
-      const ctx = await checkout?.(owner, repo, signal);
-      if (signal.aborted) return;
-      currentSession = sessions?.resolveForChat?.(owner, repo, sessionId) || { id: sessionId };
-      sessionId = currentSession?.id || sessionId;
+      let ctx = null;
+      if (bookMode) {
+        try {
+          ctx = await prepareContext?.({ bookId, chapter, sessionId, signal });
+        } catch {
+          emit({ type: "error", code: "book", hint: "没找到这本书" });
+          return;
+        }
+        if (signal.aborted) return;
+        if (!ctx?.book || !ctx?.materialized) {
+          emit({ type: "error", code: "book", hint: "没找到这本书" });
+          return;
+        }
+        currentSession = ctx.session || { id: sessionId };
+        sessionId = currentSession?.id || sessionId;
+        turnSessions = ctx.sessions || sessions;
+      } else {
+        ctx = await checkout?.(owner, repo, signal);
+        if (signal.aborted) return;
+        turnSessions = sessions;
+        currentSession = sessions?.resolveForChat?.(owner, repo, sessionId) || { id: sessionId };
+        sessionId = currentSession?.id || sessionId;
+      }
       const result = await runVoiceTurn({
         question,
         signal,
@@ -129,10 +153,14 @@ export function createVoiceSession({
               question: q,
               owner,
               repo,
+              bookId,
+              chapter,
               history,
               session: currentSession,
-              sessions,
-              checkout: ctx,
+              sessions: turnSessions,
+              checkout: bookMode ? undefined : ctx,
+              book: ctx?.book,
+              materialized: ctx?.materialized,
               signal: askSignal,
             },
             askSignal,
@@ -178,13 +206,17 @@ export function createVoiceSession({
     async start(opts = {}) {
       owner = String(opts.owner || "").trim();
       repo = String(opts.repo || "").trim();
+      bookId = String(opts.bookId || "").trim();
+      chapter = String(opts.chapter || "").trim();
+      bookMode = Boolean(bookId);
       sessionId = String(opts.sessionId || "").trim();
       history = Array.isArray(opts.history) ? opts.history : [];
+      turnSessions = sessions;
       if (!config?.ready) {
         emit({ type: "error", code: "unconfigured", hint: config?.hint || "还没配语音密钥" });
         return;
       }
-      if (!owner || !repo) {
+      if (!bookMode && (!owner || !repo)) {
         emit({ type: "error", code: "repo", hint: "还没选仓库" });
         return;
       }

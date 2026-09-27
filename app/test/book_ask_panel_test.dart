@@ -5,6 +5,8 @@ import 'package:wenxiang/models.dart';
 import 'package:wenxiang/persist/app_memory.dart';
 import 'package:wenxiang/persist/book_chat_store.dart';
 import 'package:wenxiang/theme.dart';
+import 'package:wenxiang/voice/voice_client.dart';
+import 'package:wenxiang/voice/voice_media.dart';
 import 'package:wenxiang/widgets/book_ask_panel.dart';
 
 import 'support/fake_api.dart';
@@ -212,5 +214,53 @@ void main() {
 
     expect(find.text('黄色墙纸象征被困住的精神状态。'), findsOneWidget);
     expect(find.byTooltip('收起回答'), findsOneWidget);
+  });
+
+  testWidgets('expanded ask opens a call for this book', (tester) async {
+    final sheetSize = ValueNotifier<double>(1);
+    final scroll = ScrollController();
+    addTearDown(sheetSize.dispose);
+    addTearDown(scroll.dispose);
+    final client = FakeVoiceClient();
+    final media = FakeVoiceMedia();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: Scaffold(
+          body: BookAskPanel(
+            api: FakeWenxiangApi(voiceReady: true, voiceCall: true),
+            book: BookItem(
+              id: 'demo',
+              filename: 'demo.epub',
+              title: '演示书',
+              author: '作者',
+              language: 'zh',
+              size: 1000,
+              modifiedAt: '2026-09-15T00:00:00Z',
+              hasCover: false,
+            ),
+            scrollController: scroll,
+            sheetSize: sheetSize,
+            expanded: true,
+            chapterHint: '第一章',
+            callClient: client,
+            callMedia: media,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byKey(const Key('wx-book-call')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('wx-book-call')));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('演示书'), findsWidgets);
+    expect(find.text('连接中'), findsOneWidget);
+    expect(client.sent.any((message) => message['bookId'] == 'demo' && message['chapter'] == '第一章'), isTrue);
+    expect(client.sent.any((message) => message['repo'] == 'demo'), isFalse);
   });
 }
