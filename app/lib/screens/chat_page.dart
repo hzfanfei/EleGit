@@ -28,6 +28,7 @@ import '../widgets/wx_link_route.dart';
 import '../widgets/wx_hold_to_speak.dart';
 import '../widgets/wx_rich_text.dart';
 import '../widgets/wx_typewriter_stream.dart';
+import 'call_page.dart';
 
 /// Mic sits this far above the system inset, clear of the 64px composer
 /// (8 + 48 + 8). The list keeps the same gap so the last line is not under the button.
@@ -45,6 +46,8 @@ class ChatPage extends StatefulWidget {
     this.memory,
     this.voiceMedia,
     this.sttClient,
+    this.callMedia,
+    this.callClient,
   });
 
   final WenxiangApi api;
@@ -53,6 +56,8 @@ class ChatPage extends StatefulWidget {
   final AppMemory? memory;
   final VoiceMedia? voiceMedia;
   final VoiceSttClient? sttClient;
+  final VoiceMedia? callMedia;
+  final VoiceCallClient? callClient;
 
   @override
   State<ChatPage> createState() => _ChatPageState();
@@ -95,6 +100,7 @@ class _ChatPageState extends State<ChatPage> {
   int? _editingIndex;
   String? _lastUser;
   bool _voiceReady = false;
+  bool _voiceCall = false;
   String _voiceHint = '还没配语音密钥。请在本机问象服务的 .env 里配置。';
   bool _voiceInputMode = false;
   bool _holding = false;
@@ -276,6 +282,7 @@ class _ChatPageState extends State<ChatPage> {
         if (!mounted) return;
         setState(() {
           _voiceReady = status.voiceReady;
+          _voiceCall = status.voiceCall;
           _voiceHint = status.voiceReady
               ? ''
               : (status.voiceHint.isEmpty ? humanizeSttEvent(code: 'unconfigured') : status.voiceHint);
@@ -290,6 +297,7 @@ class _ChatPageState extends State<ChatPage> {
     if (!mounted) return;
     setState(() {
       _voiceReady = false;
+      _voiceCall = false;
       _voiceHint = '连不上问象服务，暂时无法使用语音。请确认电脑上的服务已启动。';
     });
   }
@@ -311,6 +319,42 @@ class _ChatPageState extends State<ChatPage> {
       if (_voiceInputMode) _focus.unfocus();
     });
     unawaited(widget.memory?.saveChatVoiceInput(_voiceInputMode));
+  }
+
+  Future<void> _openCall() async {
+    if (!_voiceCall || _preparingChat || _busy || _live || _holding || _holdPending || _sttBusy) return;
+    _quickVoice.interruptReply();
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (routeContext) => CallPage(
+          api: widget.api,
+          repo: widget.repo,
+          sessionId: _sessionId,
+          autoStart: true,
+          media: widget.callMedia,
+          client: widget.callClient,
+          onBack: () => Navigator.of(routeContext).pop(),
+          onTranscript: _foldCallTranscript,
+        ),
+      ),
+    );
+  }
+
+  void _foldCallTranscript(List<ChatMessage> captions) {
+    if (!mounted || captions.isEmpty) return;
+    setState(() {
+      for (final item in captions) {
+        _messages.add(ChatMessage(
+          role: item.role,
+          content: item.content,
+          engine: item.engine,
+          via: 'voice',
+        ));
+      }
+    });
+    unawaited(_persist());
+    _jumpToLatest(force: true);
   }
 
   Future<void> _beginHold(double globalY) async {
@@ -1163,6 +1207,13 @@ class _ChatPageState extends State<ChatPage> {
                   widget.memory?.saveAgentMode(widget.repo.fullName, value);
                 },
               ),
+              if (_voiceCall)
+                IconButton(
+                  key: const Key('wx-call'),
+                  tooltip: '电话',
+                  onPressed: _preparingChat || _busy || _live ? null : _openCall,
+                  icon: const Icon(Icons.phone_outlined),
+                ),
               PopupMenuButton<String>(
                 key: const Key('wx-chat-more'),
                 tooltip: '更多',

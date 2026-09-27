@@ -341,7 +341,10 @@ app.get("/v1/status", (_req, res) => {
       },
       fallback: "local-progress",
     },
-    voice: publicVoiceStatus(withTtsVoice(resolveVoiceConfig(), store.config.ttsVoice)),
+    voice: {
+      ...publicVoiceStatus(withTtsVoice(resolveVoiceConfig(), store.config.ttsVoice)),
+      call: isVoiceCallEnabled(),
+    },
     books: (() => {
       const acp = cursorBook;
       return {
@@ -1398,7 +1401,7 @@ function logCompanionStartup() {
   console.log(
     isVoiceCallEnabled()
       ? "Voice call (/v1/voice): enabled"
-      : "Voice call (/v1/voice): disabled (set WENXIANG_VOICE_CALL_ENABLED=true to debug)",
+      : "Voice call (/v1/voice): disabled (set WENXIANG_VOICE_CALL_ENABLED=true)",
   );
 }
 

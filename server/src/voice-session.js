@@ -22,6 +22,8 @@ export function createVoiceSession({
   let ttsAbort = null;
   let currentSession = null;
   let bargeHoldUntil = 0;
+  let acceptInterruptFinal = false;
+  let turnGen = 0;
 
   function emit(msg) {
     if (closed) return;
@@ -58,12 +60,16 @@ export function createVoiceSession({
     machine.afterBarge();
     emit({ type: "state", state: "listening" });
     bargeHoldUntil = Date.now() + 350;
+    if (reason === "asr") acceptInterruptFinal = true;
     return true;
   }
 
   async function runAsk(question) {
-    if (Date.now() < bargeHoldUntil) return;
+    const fromInterrupt = acceptInterruptFinal;
+    if (!fromInterrupt && Date.now() < bargeHoldUntil) return;
+    acceptInterruptFinal = false;
     abortTurn();
+    const gen = ++turnGen;
     turnAbort = new AbortController();
     ttsAbort = new AbortController();
     const signal = turnAbort.signal;
@@ -109,7 +115,7 @@ export function createVoiceSession({
       if (signal.aborted || err?.code === "cancelled") return;
       emit({ type: "error", code: "turn", hint: "通话断了" });
     } finally {
-      if (machine.state === "speaking") {
+      if (gen === turnGen && machine.state === "speaking") {
         machine.connected();
         emit({ type: "state", state: "listening" });
       }

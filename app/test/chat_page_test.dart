@@ -5,6 +5,7 @@ import 'package:wenxiang/models.dart';
 import 'package:wenxiang/persist/app_memory.dart';
 import 'package:wenxiang/screens/chat_page.dart';
 import 'package:wenxiang/theme.dart';
+import 'package:wenxiang/voice/voice_client.dart';
 import 'package:wenxiang/voice/voice_media.dart';
 import 'package:wenxiang/voice/voice_stt_client.dart';
 
@@ -457,6 +458,33 @@ void main() {
     expect(find.text('按住 说话'), findsOneWidget);
     expect(find.byKey(const Key('wx-hold-speak')), findsOneWidget);
     expect(find.text('松手自动发送，上滑取消'), findsOneWidget);
+  });
+
+  testWidgets('phone button opens the call when the server allows it', (tester) async {
+    final media = FakeVoiceMedia();
+    final client = FakeVoiceClient();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: ChatPage(
+          api: FakeWenxiangApi(voiceReady: true, voiceCall: true),
+          repo: sampleRepo(),
+          onBack: () {},
+          callMedia: media,
+          callClient: client,
+        ),
+      ),
+    );
+    await _pumpUntilChatReady(tester);
+
+    expect(find.byKey(const Key('wx-call')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('wx-call')));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('连接中'), findsOneWidget);
+    expect(client.connectCalls, 1);
+    expect(media.startCalls, 1);
   });
 
   testWidgets('repo chat reopens in the last voice input mode', (tester) async {

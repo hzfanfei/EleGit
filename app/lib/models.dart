@@ -22,6 +22,7 @@ class ServerStatus {
     required this.lanUrls,
     required this.workspaceRoot,
     this.voiceReady = false,
+    this.voiceCall = false,
     this.voiceHint = '还没配语音密钥。请在本机问象服务的 .env 里配置。',
     this.voiceProfile = const VoiceServiceProfile(),
     this.publicReachable,
@@ -44,6 +45,7 @@ class ServerStatus {
   final List<String> lanUrls;
   final String workspaceRoot;
   final bool voiceReady;
+  final bool voiceCall;
   final String voiceHint;
   final VoiceServiceProfile voiceProfile;
   final bool? publicReachable;
@@ -87,6 +89,7 @@ class ServerStatus {
       lanUrls: ((json['lanUrls'] as List?) ?? []).map((e) => e.toString()).toList(),
       workspaceRoot: (workspace['root'] ?? '').toString(),
       voiceReady: voice['ready'] == true,
+      voiceCall: voice['call'] == true,
       voiceHint: voice['ready'] == true
           ? ''
           : (voice['hint'] ?? '还没配语音密钥。请在本机问象服务的 .env 里配置。').toString(),

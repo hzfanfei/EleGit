@@ -29,6 +29,7 @@ class FakeWenxiangApi extends WenxiangApi {
     this.streamDelay = Duration.zero,
     this.streamPace = Duration.zero,
     this.voiceReady = false,
+    this.voiceCall = false,
     this.voiceHint = '还没配语音密钥。请在本机问象服务的 .env 里配置。',
     this.voiceTtsProvider = 'volc',
     this.bookVoiceTurnEvents,
@@ -54,6 +55,7 @@ class FakeWenxiangApi extends WenxiangApi {
   Duration streamDelay;
   Duration streamPace;
   bool voiceReady;
+  bool voiceCall;
   String voiceHint;
   String voiceTtsProvider;
   int startOAuthCalls = 0;
@@ -282,6 +284,7 @@ class FakeWenxiangApi extends WenxiangApi {
       lanUrls: const [],
       workspaceRoot: '/home/fei/问象',
       voiceReady: voiceReady,
+      voiceCall: voiceCall,
       voiceHint: voiceReady ? '' : voiceHint,
       voiceProfile: _voiceProfileForFake(),
     );

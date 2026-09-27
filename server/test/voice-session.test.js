@@ -79,4 +79,46 @@ describe("createVoiceSession", () => {
     const captions = sent.filter((m) => m.type === "caption");
     assert.equal(captions.some((m) => m.role === "user" && m.text.includes("最近在做什么")), true);
   });
+
+  it("answers the sentence that interrupted the reply", async () => {
+    const asked = [];
+    const session = createVoiceSession({
+      config: { ready: true, provider: "volc" },
+      send: () => {},
+      checkout: async () => ({ dest: "/tmp/octo/demo" }),
+      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      ask: async function* (opts) {
+        asked.push(opts.question);
+        yield { type: "delta", text: "先说到这里。" };
+        yield { type: "done", engine: "acp", answer: "先说到这里。" };
+      },
+      tts: async (_text, signal) => {
+        await new Promise((resolve) => {
+          const timer = setTimeout(resolve, 400);
+          signal?.addEventListener("abort", () => {
+            clearTimeout(timer);
+            resolve();
+          }, { once: true });
+        });
+        if (signal?.aborted) {
+          const err = new Error("cancelled");
+          err.code = "cancelled";
+          throw err;
+        }
+        return Buffer.from("pcm");
+      },
+    });
+
+    await session.start({ owner: "octo", repo: "demo", sessionId: "s1" });
+    session.onTranscript("最近在做什么？", { final: true });
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(asked[0], "最近在做什么？");
+    assert.equal(session.state, "speaking");
+
+    session.onTranscript("换个话题", { final: true });
+    await new Promise((r) => setTimeout(r, 40));
+
+    assert.deepEqual(asked, ["最近在做什么？", "换个话题"]);
+    assert.equal(session.state, "speaking");
+  });
 });
