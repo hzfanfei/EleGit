@@ -224,6 +224,39 @@ void main() {
     expect(client.playedCalls, 1);
   });
 
+  testWidgets('a heard voice draws ripples around the orb, silence does not', (tester) async {
+    final media = _LiveMicMedia();
+    final client = FakeVoiceClient();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: CallPage(
+          api: FakeWenxiangApi(voiceReady: true),
+          repo: sampleRepo(),
+          onBack: () {},
+          media: media,
+          client: client,
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    await tester.tap(find.text('开始通话'));
+    await tester.pump();
+    expect(find.byKey(const Key('call-voice-ripple')), findsNothing);
+
+    media.speak(9000);
+    await tester.pump();
+    expect(find.byKey(const Key('call-voice-ripple')), findsOneWidget);
+
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byKey(const Key('call-voice-ripple')), findsNothing);
+
+    media.speak(40);
+    await tester.pump();
+    expect(find.byKey(const Key('call-voice-ripple')), findsNothing);
+  });
+
   testWidgets('a live channel error hangs up onto a single retry', (tester) async {
     final client = FakeVoiceClient();
     final key = GlobalKey<CallPageState>();

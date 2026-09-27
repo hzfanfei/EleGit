@@ -72,7 +72,7 @@ class CallPage extends StatefulWidget {
   State<CallPage> createState() => CallPageState();
 }
 
-class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin {
+class CallPageState extends State<CallPage> with TickerProviderStateMixin {
   late final VoiceMedia _media = widget.media ?? DeviceVoiceMedia(telephonyCapture: true);
   VoiceCallClient? _client;
   StreamSubscription<VoiceEvent>? _sub;
@@ -80,6 +80,10 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
   late final AnimationController _orb = AnimationController(
     vsync: this,
     duration: Wx.breath,
+  );
+  late final AnimationController _ripple = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1400),
   );
 
   String _phase = 'idle';
@@ -106,6 +110,8 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
   int _listenHold = 0;
   int _micEpoch = 0;
   int _micReopens = 0;
+  double _voiceLevel = 0;
+  Timer? _voiceFade;
 
   bool get isLive => _live;
 
@@ -113,6 +119,7 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
   void initState() {
     super.initState();
     _orb.repeat(reverse: true);
+    _ripple.repeat();
     _loadStatus();
   }
 
@@ -360,6 +367,23 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
   /// Room noise on a live phone mic peaks well above this; a suppressed one sends near-zero.
   static const _deadMicPeak = 200;
 
+  /// A spoken word on this phone sits above this. Silence, and a mic the echo
+  /// cancel has wiped to zero, stay under it, so the rings mean the voice was captured.
+  static const _voiceSeenPeak = 800;
+
+  void _noteHeard(int peak) {
+    if (!_live || peak < _voiceSeenPeak) return;
+    _voiceLevel = (0.45 + (peak - _voiceSeenPeak) / 8000).clamp(0.45, 1.0);
+    final first = _voiceFade == null;
+    _voiceFade?.cancel();
+    _voiceFade = Timer(const Duration(milliseconds: 280), () {
+      _voiceFade = null;
+      _voiceLevel = 0;
+      if (mounted && !_disposing) setState(() {});
+    });
+    if (first && mounted && !_disposing) setState(() {});
+  }
+
   /// The call mic stays suppressed after the speaker. Open it again so the next sentence is recorded.
   Future<void> _reopenMicAfterSpeaker() async {
     if (!_live || _disposing) return;
@@ -380,10 +404,9 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
     _micSub = _media.startMic().listen((pcm) {
       frames += 1;
       _micReopens = 0;
-      if (_watchBargeMic) {
-        final peak = pcm16Peak(pcm);
-        if (peak > _bargeMicPeak) _bargeMicPeak = peak;
-      }
+      final peak = pcm16Peak(pcm);
+      if (_watchBargeMic && peak > _bargeMicPeak) _bargeMicPeak = peak;
+      _noteHeard(peak);
       _client?.sendPcm(pcm);
     }, onError: (_) {
       _reviveMic(epoch, started, frames);
@@ -457,6 +480,9 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
     _bargeMicCheck = null;
     _speakerIdleTimer?.cancel();
     _speakerIdleTimer = null;
+    _voiceFade?.cancel();
+    _voiceFade = null;
+    _voiceLevel = 0;
     _watchBargeMic = false;
     _sub?.cancel();
     _sub = null;
@@ -495,6 +521,7 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
     hangup(pop: false);
     if (widget.media == null) _media.dispose();
     _orb.dispose();
+    _ripple.dispose();
     super.dispose();
   }
 
@@ -539,36 +566,58 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
               child: Column(
                 children: [
                   const Spacer(),
-                  AnimatedBuilder(
-                    animation: _orb,
-                    builder: (context, child) {
-                      final opacity = speaking
-                          ? 0.55 + (_orb.value * 0.45)
-                          : listening
-                              ? 0.72 + (_orb.value * 0.28)
-                              : 1.0;
-                      return Opacity(opacity: opacity, child: child);
-                    },
-                    child: Container(
-                      width: 168,
-                      height: 168,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: speaking ? const Color(0x38C9845A) : Wx.raised,
-                        border: Border.all(
-                          color: speaking ? Wx.accent : Wx.hairline,
-                          width: speaking ? 2 : 1,
+                  Stack(
+                    alignment: Alignment.center,
+                    clipBehavior: Clip.none,
+                    children: [
+                      if (_voiceLevel > 0)
+                        SizedBox(
+                          key: const Key('call-voice-ripple'),
+                          width: 168,
+                          height: 168,
+                          child: AnimatedBuilder(
+                            animation: _ripple,
+                            builder: (context, _) => CustomPaint(
+                              painter: _VoiceRipplePainter(
+                                t: _ripple.value,
+                                level: _voiceLevel,
+                                color: Wx.accent,
+                              ),
+                            ),
+                          ),
+                        ),
+                      AnimatedBuilder(
+                        animation: _orb,
+                        builder: (context, child) {
+                          final opacity = speaking
+                              ? 0.55 + (_orb.value * 0.45)
+                              : listening
+                                  ? 0.72 + (_orb.value * 0.28)
+                                  : 1.0;
+                          return Opacity(opacity: opacity, child: child);
+                        },
+                        child: Container(
+                          width: 168,
+                          height: 168,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: speaking ? const Color(0x38C9845A) : Wx.raised,
+                            border: Border.all(
+                              color: speaking ? Wx.accent : Wx.hairline,
+                              width: speaking ? 2 : 1,
+                            ),
+                          ),
+                          alignment: Alignment.center,
+                          child: _thinking
+                              ? Semantics(
+                                  label: statusLabel,
+                                  excludeSemantics: true,
+                                  child: const WxLoading(size: 56),
+                                )
+                              : null,
                         ),
                       ),
-                      alignment: Alignment.center,
-                      child: _thinking
-                          ? Semantics(
-                              label: statusLabel,
-                              excludeSemantics: true,
-                              child: const WxLoading(size: 56),
-                            )
-                          : null,
-                    ),
+                    ],
                   ),
                   const SizedBox(height: 28),
                   _status(context),
@@ -669,4 +718,32 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
       ),
     );
   }
+}
+
+/// Three rings leave the orb edge and fade. Louder speech reaches farther.
+class _VoiceRipplePainter extends CustomPainter {
+  _VoiceRipplePainter({required this.t, required this.level, required this.color});
+
+  final double t;
+  final double level;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    const edge = 84.0;
+    final reach = 26 + 24 * level;
+    for (var i = 0; i < 3; i++) {
+      final p = (t + i / 3) % 1.0;
+      final paint = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.6
+        ..color = color.withValues(alpha: (1 - p) * 0.55 * level);
+      canvas.drawCircle(center, edge + reach * p, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _VoiceRipplePainter old) =>
+      old.t != t || old.level != level || old.color != color;
 }
