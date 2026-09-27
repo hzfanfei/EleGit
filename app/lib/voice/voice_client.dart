@@ -57,22 +57,41 @@ class SocketVoiceClient implements VoiceCallClient {
 
   final Uri uri;
   WebSocketChannel? _channel;
+  StreamSubscription<dynamic>? _socketSub;
+  StreamController<VoiceEvent>? _events;
 
+  /// The socket is stored before this returns. Callers send hello immediately
+  /// after listen(); an async* body would still be pending and drop that hello.
   @override
-  Stream<VoiceEvent> connect() async* {
+  Stream<VoiceEvent> connect() {
     final channel = WebSocketChannel.connect(uri);
     _channel = channel;
-    await channel.ready;
-    await for (final message in channel.stream) {
-      if (message is List<int>) {
-        yield VoiceEvent(type: 'pcm', pcm: Uint8List.fromList(message));
-      } else {
-        final decoded = jsonDecode(message.toString());
-        if (decoded is Map<String, dynamic>) {
-          yield VoiceEvent.fromJson(decoded);
+    final events = StreamController<VoiceEvent>();
+    _events = events;
+    channel.ready.then((_) {
+      if (!identical(_channel, channel) || events.isClosed) return;
+      _socketSub = channel.stream.listen((message) {
+        if (events.isClosed) return;
+        if (message is List<int>) {
+          events.add(VoiceEvent(type: 'pcm', pcm: Uint8List.fromList(message)));
+          return;
         }
+        final decoded = jsonDecode(message.toString());
+        if (decoded is Map) {
+          events.add(VoiceEvent.fromJson(Map<String, dynamic>.from(decoded)));
+        }
+      }, onError: (Object err, StackTrace stack) {
+        if (!events.isClosed) events.addError(err, stack);
+      }, onDone: () {
+        if (!events.isClosed) events.close();
+      });
+    }).catchError((Object err, StackTrace stack) {
+      if (!events.isClosed) {
+        events.addError(err, stack);
+        events.close();
       }
-    }
+    });
+    return events.stream;
   }
 
   void _send(Map<String, dynamic> msg) {
@@ -102,8 +121,13 @@ class SocketVoiceClient implements VoiceCallClient {
   @override
   void hangup() {
     _send({'type': 'hangup'});
+    _socketSub?.cancel();
+    _socketSub = null;
     _channel?.sink.close();
     _channel = null;
+    final events = _events;
+    _events = null;
+    if (events != null && !events.isClosed) events.close();
   }
 }
 
