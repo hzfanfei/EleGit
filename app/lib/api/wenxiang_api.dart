@@ -436,6 +436,19 @@ class WenxiangApi {
     }
   }
 
+  Future<void> setCursorModel(String model) async {
+    final res = await http
+        .put(
+          _uri('/v1/settings/cursor-model'),
+          headers: _headers,
+          body: jsonEncode({'model': model}),
+        )
+        .timeout(const Duration(seconds: 20));
+    if (res.statusCode >= 400) {
+      await _json(res, fallback: '保存 Cursor 模型失败');
+    }
+  }
+
   Future<void> setAskEngine(String engine, {required AskEngineScope scope}) async {
     final res = await http
         .put(

@@ -25,6 +25,30 @@ export function acpPromptTimeoutMs(env = process.env) {
 const WRITE_TOOL = /edit|write|delete|move|apply_patch|overwrite|commit/i;
 
 export const DEFAULT_ACP_MODEL = "grok-4.7-high-fast";
+export const CURSOR_MODEL_COMPOSER_FAST = "composer-2.5-fast";
+export const CURSOR_MODEL_GROK_HIGH_FAST = "grok-4.7-high-fast";
+
+const CURSOR_MODEL_IDS = new Set([CURSOR_MODEL_COMPOSER_FAST, CURSOR_MODEL_GROK_HIGH_FAST]);
+
+/** Phone settings choice. Empty means fall through to env, then the default. */
+let cursorModelChoice = "";
+
+export function sanitizeCursorModel(raw) {
+  const value = String(raw || "").trim();
+  return CURSOR_MODEL_IDS.has(value) ? value : null;
+}
+
+export function setCursorModelPreference(model) {
+  cursorModelChoice = sanitizeCursorModel(model) || "";
+  return cursorModelId();
+}
+
+/** Cursor model the next session will start with. */
+export function cursorModelId(env = process.env) {
+  if (cursorModelChoice) return cursorModelChoice;
+  const fromEnv = String(env.WENXIANG_CURSOR_MODEL || env.CURSOR_MODEL || "").trim();
+  return fromEnv || DEFAULT_ACP_MODEL;
+}
 
 export function sanitizeAcpEngine(raw) {
   const value = String(raw || "").trim().toLowerCase();
@@ -98,7 +122,7 @@ export function acpModelId(env = process.env, settings, engineOverride) {
     const configured = claudeConfiguredModel(settings === undefined ? readClaudeUserSettings() : settings);
     return configured || CLAUDE_DEFAULT_MODEL;
   }
-  return String(env.WENXIANG_CURSOR_MODEL || env.CURSOR_MODEL || "").trim() || DEFAULT_ACP_MODEL;
+  return cursorModelId(env);
 }
 
 function modelArgs(enginePref) {

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../copy/ask_engine.dart';
+import '../copy/cursor_model.dart';
 import '../models.dart';
 import '../voice/volc_tts_voices.dart';
 import 'book_chat_store.dart';
@@ -22,6 +23,7 @@ class AppMemory {
   static const askEngineKey = 'wx.askEngine';
   static const askEngineBookKey = 'wx.askEngine.book';
   static const askEngineRepoKey = 'wx.askEngine.repo';
+  static const cursorModelKey = 'wx.cursorModel';
 
   static String chatsKey(String fullName) => 'wx.chats.$fullName';
   static String bookChatsKey(String bookId) => 'wx.bookChats.$bookId';
@@ -81,6 +83,14 @@ class AppMemory {
 
   Future<void> saveAskEngine(AskEngineChoice choice) {
     return saveAskEngineFor(AskEngineScope.repo, choice);
+  }
+
+  bool cursorModelIsExplicit() => prefs.containsKey(cursorModelKey);
+
+  CursorModelChoice cursorModel() => parseCursorModelChoice(prefs.getString(cursorModelKey));
+
+  Future<void> saveCursorModel(CursorModelChoice choice) {
+    return prefs.setString(cursorModelKey, cursorModelChoiceId(choice));
   }
 
   Future<void> saveTtsVoice(String voice) {

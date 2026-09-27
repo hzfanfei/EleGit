@@ -76,6 +76,7 @@ class FakeWenxiangApi extends WenxiangApi {
   String? lastSetTtsVoice;
   String? lastSetAskEngine;
   String? lastSetAskEngineScope;
+  String? lastSetCursorModel;
   String? lastSetVoiceStack;
   int createSessionCalls = 0;
   final List<ChatSession> sessions = [
@@ -124,6 +125,10 @@ class FakeWenxiangApi extends WenxiangApi {
   }
 
   @override
+  Future<void> setCursorModel(String model) async {
+    lastSetCursorModel = model;
+  }
+
   Future<void> setAskEngine(String engine, {required AskEngineScope scope}) async {
     lastSetAskEngine = engine;
     lastSetAskEngineScope = askEngineScopeId(scope);

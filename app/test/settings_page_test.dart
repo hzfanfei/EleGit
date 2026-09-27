@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wenxiang/copy/ask_engine.dart';
+import 'package:wenxiang/copy/cursor_model.dart';
 import 'package:wenxiang/persist/app_memory.dart';
 import 'package:wenxiang/screens/settings_page.dart';
 import 'package:wenxiang/theme.dart';
@@ -42,6 +43,7 @@ void main() {
     expect(find.text('Claude Code'), findsWidgets);
     expect(find.text('问书'), findsOneWidget);
     expect(find.text('问象（仓库进度）'), findsOneWidget);
+    await _reveal(tester, find.text('语音'));
     expect(find.text('语音'), findsOneWidget);
     final yunzhou = find.textContaining('云舟');
     await _reveal(tester, yunzhou);
@@ -63,6 +65,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    await _reveal(tester, find.textContaining('CosyVoice3'));
     expect(find.textContaining('CosyVoice3'), findsWidgets);
     final xiaohe = find.textContaining('小何');
     await _reveal(tester, xiaohe);
@@ -83,7 +86,9 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    await _reveal(tester, find.text('语音'));
     expect(find.text('语音'), findsOneWidget);
+    await _reveal(tester, find.text('本地'));
     expect(find.text('本地'), findsOneWidget);
     expect(find.text('火山'), findsOneWidget);
     expect(find.textContaining('FunASR'), findsWidgets);
@@ -109,6 +114,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    await _reveal(tester, find.text('小米'));
     expect(find.text('小米'), findsOneWidget);
     expect(find.text('小米识别，小米合成。'), findsOneWidget);
 
@@ -119,7 +125,7 @@ void main() {
     expect(api.lastSetVoiceStack, 'xiaomi');
     expect(find.textContaining('小米 MiMo 语音'), findsOneWidget);
     await _reveal(tester, find.text('冰糖'));
-    expect(find.text('冰糖'), findsOneWidget);
+    expect(find.text('冰糖'), findsWidgets);
   });
 
   testWidgets('settings page saves ask engine choice', (tester) async {
@@ -180,5 +186,26 @@ void main() {
     expect(memory.askEngineBook(), AskEngineChoice.cursor);
     expect(api.lastSetAskEngine, 'cursor');
     expect(api.lastSetAskEngineScope, 'book');
+  });
+
+  testWidgets('settings page switches the Cursor model', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final memory = AppMemory(await SharedPreferences.getInstance());
+    final api = FakeWenxiangApi();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme().copyWith(splashFactory: NoSplash.splashFactory),
+        home: SettingsPage(api: api, memory: memory),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Grok 4.7 High Fast'), findsWidgets);
+    await tester.scrollUntilVisible(find.text('Composer 2.5 Fast'), 400);
+    await tester.tap(find.text('Composer 2.5 Fast'));
+    await tester.pumpAndSettle();
+
+    expect(memory.cursorModel(), CursorModelChoice.composerFast);
+    expect(api.lastSetCursorModel, 'composer-2.5-fast');
   });
 }

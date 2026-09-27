@@ -15,6 +15,7 @@ class ServerStatus {
     required this.askEnginePreference,
     required this.askEngineBookPreference,
     required this.askEngineRepoPreference,
+    this.cursorModel = 'grok-4.7-high-fast',
     this.bookAskReady = false,
     required this.tunnelUrl,
     required this.tunnelRunning,
@@ -38,6 +39,7 @@ class ServerStatus {
   final String askEnginePreference;
   final String askEngineBookPreference;
   final String askEngineRepoPreference;
+  final String cursorModel;
   final bool bookAskReady;
   final String tunnelUrl;
   final bool tunnelRunning;
@@ -82,6 +84,7 @@ class ServerStatus {
               cursor['preference'] ??
               'claude')
           .toString(),
+      cursorModel: (cursor['cursorModel'] ?? 'grok-4.7-high-fast').toString(),
       bookAskReady: books['ready'] == true,
       tunnelUrl: (tunnel['publicUrl'] ?? '').toString(),
       tunnelRunning: tunnel['running'] == true,

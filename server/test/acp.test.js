@@ -8,6 +8,7 @@ import {
   AcpChannel,
   DEFAULT_ACP_MODEL,
   acpModelId,
+  setCursorModelPreference,
   acpPromptTimeoutMs,
   claudeConfiguredModel,
   acpActivityLabelFromFsRead,
@@ -114,10 +115,16 @@ describe("acpModelId", () => {
     delete process.env.CURSOR_MODEL;
     delete process.env.WENXIANG_ACP_MODEL;
     process.env.WENXIANG_ACP_ENGINE = "cursor";
+    setCursorModelPreference("");
     try {
       assert.equal(acpModelId(), "grok-4.7-high-fast");
       assert.equal(DEFAULT_ACP_MODEL, "grok-4.7-high-fast");
+      setCursorModelPreference("composer-2.5-fast");
+      assert.equal(acpModelId(), "composer-2.5-fast");
+      setCursorModelPreference("nope");
+      assert.equal(acpModelId(), "grok-4.7-high-fast");
     } finally {
+      setCursorModelPreference("");
       if (prev !== undefined) process.env.WENXIANG_CURSOR_MODEL = prev;
       if (prev2 !== undefined) process.env.CURSOR_MODEL = prev2;
       if (prevEngine !== undefined) process.env.WENXIANG_ACP_ENGINE = prevEngine;

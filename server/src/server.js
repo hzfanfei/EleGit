@@ -5,6 +5,10 @@ import { corsOptions } from "./cors.js";
 import { loadLocalEnv } from "./env.js";
 import {
   setAcpEnginePreferences,
+  setCursorModelPreference,
+  cursorModelId,
+  sanitizeCursorModel,
+  acpEnginePreference,
   resolveAgentCommand,
   buildBookAcpPrompt,
   createSessionStore,
@@ -122,6 +126,7 @@ function syncAcpEngineConfig(config) {
 }
 
 syncAcpEngineConfig(store.config);
+setCursorModelPreference(store.config.cursorModel);
 setPreferredVoiceStack(store.config.voiceStack);
 
 const sessions = createSessionStore({
@@ -336,6 +341,7 @@ app.get("/v1/status", (_req, res) => {
       mode: cursorRepo?.mode || null,
       model: cursorRepo?.model || null,
       transport: cursorRepo?.transport || null,
+      cursorModel: cursorModelId(),
       preference: store.config.acpEngineRepo || "claude",
       preferences: {
         book: store.config.acpEngineBook || "claude",
@@ -876,6 +882,26 @@ app.put("/v1/settings/voice-stack", async (req, res) => {
       throw err;
     }
     res.json({ stack, ...publicVoiceStatus(withTtsVoice(next, ttsVoice)) });
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.put("/v1/settings/cursor-model", async (req, res) => {
+  try {
+    const model = sanitizeCursorModel(req.body?.model);
+    if (!model) {
+      res.status(400).json({ error: "model must be composer-2.5-fast or grok-4.7-high-fast" });
+      return;
+    }
+    store.config.cursorModel = model;
+    setCursorModelPreference(model);
+    await store.save();
+    const resets = [];
+    if (acpEnginePreference("repo") === "cursor") resets.push(sessions.resetAllChannels());
+    if (acpEnginePreference("book") === "cursor") resets.push(bookSessions.resetAllChannels());
+    await Promise.all(resets);
+    res.json({ model });
   } catch (err) {
     sendError(res, err);
   }

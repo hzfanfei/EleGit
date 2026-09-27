@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api/wenxiang_api.dart';
 import '../copy/ask_engine.dart';
+import '../copy/cursor_model.dart';
 import '../models/diagnostics.dart';
 import '../persist/app_memory.dart';
 import '../theme.dart';
@@ -36,13 +37,16 @@ class _SettingsPageState extends State<SettingsPage> {
   VoiceServiceProfile _voiceProfile = const VoiceServiceProfile();
   late AskEngineChoice _askEngineBook;
   late AskEngineChoice _askEngineRepo;
+  late CursorModelChoice _cursorModel;
   bool _saving = false;
   bool _savingAskEngineBook = false;
   bool _savingAskEngineRepo = false;
+  bool _savingCursorModel = false;
   bool _savingVoiceStack = false;
   String? _saveError;
   String? _askEngineBookSaveError;
   String? _askEngineRepoSaveError;
+  String? _cursorModelSaveError;
   String? _voiceStackError;
   bool _probing = false;
   DiagnosticsProbeResult? _probeResult;
@@ -61,6 +65,7 @@ class _SettingsPageState extends State<SettingsPage> {
     _voiceId = _memory?.ttsVoice() ?? kDefaultVolcTtsVoice;
     _askEngineBook = _memory?.askEngineBook() ?? kDefaultAskEngine;
     _askEngineRepo = _memory?.askEngineRepo() ?? kDefaultAskEngine;
+    _cursorModel = _memory?.cursorModel() ?? kDefaultCursorModel;
     if (_memory == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) unawaited(_loadMemory());
@@ -69,6 +74,7 @@ class _SettingsPageState extends State<SettingsPage> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           unawaited(_alignAskEngineWithServer());
+          unawaited(_alignCursorModelWithServer());
           unawaited(_loadVoiceProfile());
         }
       });
@@ -130,8 +136,10 @@ class _SettingsPageState extends State<SettingsPage> {
         _voiceId = _memory!.ttsVoice();
         _askEngineBook = _memory!.askEngineBook();
         _askEngineRepo = _memory!.askEngineRepo();
+        _cursorModel = _memory!.cursorModel();
       });
       unawaited(_alignAskEngineWithServer());
+      unawaited(_alignCursorModelWithServer());
       unawaited(_loadVoiceProfile());
     } catch (_) {}
   }
@@ -167,6 +175,39 @@ class _SettingsPageState extends State<SettingsPage> {
         );
       }
     } catch (_) {}
+  }
+
+  Future<void> _alignCursorModelWithServer() async {
+    if (widget.api == null || _memory == null) return;
+    try {
+      final status = await widget.api!.status();
+      final remote = parseCursorModelChoice(status.cursorModel);
+      final local = _memory!.cursorModel();
+      if (!_memory!.cursorModelIsExplicit()) {
+        if (remote != local) {
+          await _memory!.saveCursorModel(remote);
+          if (mounted) setState(() => _cursorModel = remote);
+        }
+      } else if (remote != local) {
+        await widget.api!.setCursorModel(cursorModelChoiceId(local));
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _selectCursorModel(CursorModelChoice choice) async {
+    setState(() {
+      _cursorModel = choice;
+      _cursorModelSaveError = null;
+      _savingCursorModel = true;
+    });
+    await _memory?.saveCursorModel(choice);
+    try {
+      await widget.api?.setCursorModel(cursorModelChoiceId(choice));
+    } catch (err) {
+      if (mounted) setState(() => _cursorModelSaveError = err.toString());
+    } finally {
+      if (mounted) setState(() => _savingCursorModel = false);
+    }
   }
 
   Future<void> _selectAskEngine(AskEngineScope scope, AskEngineChoice choice) async {
@@ -382,6 +423,32 @@ class _SettingsPageState extends State<SettingsPage> {
                   scope: AskEngineScope.repo,
                   selected: _askEngineRepo,
                   onSelect: (c) => _selectAskEngine(AskEngineScope.repo, c),
+                ),
+                const SizedBox(height: 20),
+                _SectionLabel(
+                  title: 'Cursor 模型',
+                  value: cursorModelChoiceLabel(_cursorModel),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  '只影响 Cursor。下一条 Cursor 对话会换成所选模型。',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.muted),
+                ),
+                if (_savingCursorModel) ...[
+                  const SizedBox(height: 6),
+                  Text('正在同步 Cursor 模型…', style: Theme.of(context).textTheme.labelSmall),
+                ],
+                if (_cursorModelSaveError != null) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    '已记在手机上，但还没同步到本机服务。$_cursorModelSaveError',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.danger),
+                  ),
+                ],
+                const SizedBox(height: 8),
+                _CursorModelPicker(
+                  selected: _cursorModel,
+                  onSelect: _selectCursorModel,
                 ),
                 const SizedBox(height: 28),
                 _SectionLabel(
@@ -889,6 +956,82 @@ class _AskEngineTile extends StatelessWidget {
                     isDefault
                         ? '默认 · ${askEngineChoiceBlurb(choice, scope)}'
                         : askEngineChoiceBlurb(choice, scope),
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.faint),
+                  ),
+                ],
+              ),
+            ),
+            if (selected) const Icon(Icons.check_rounded, color: Wx.accent, size: 20),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CursorModelPicker extends StatelessWidget {
+  const _CursorModelPicker({required this.selected, required this.onSelect});
+
+  final CursorModelChoice selected;
+  final ValueChanged<CursorModelChoice> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Wx.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(Wx.radius),
+        side: const BorderSide(color: Wx.hairline),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          for (var i = 0; i < CursorModelChoice.values.length; i++) ...[
+            if (i > 0) const WxHairline(),
+            _CursorModelTile(
+              choice: CursorModelChoice.values[i],
+              selected: CursorModelChoice.values[i] == selected,
+              onTap: () => onSelect(CursorModelChoice.values[i]),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _CursorModelTile extends StatelessWidget {
+  const _CursorModelTile({
+    required this.choice,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final CursorModelChoice choice;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDefault = choice == kDefaultCursorModel;
+    return InkWell(
+      splashFactory: NoSplash.splashFactory,
+      overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(cursorModelChoiceLabel(choice), style: Theme.of(context).textTheme.titleSmall),
+                  const SizedBox(height: 2),
+                  Text(
+                    isDefault
+                        ? '默认 · ${cursorModelChoiceBlurb(choice)}'
+                        : cursorModelChoiceBlurb(choice),
                     style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.faint),
                   ),
                 ],
