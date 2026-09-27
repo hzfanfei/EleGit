@@ -16,6 +16,36 @@ import { runVoiceTurn } from "./voice-call.js";
 import { resolveTurnTtsVoice, resolveVoiceConfig, withTtsVoice } from "./voice-config.js";
 import { createVoiceProviders } from "./voice-ws.js";
 
+export async function prepareBookTurnContext({
+  workspaceRoot,
+  bookSessions,
+  bookId,
+  sessionId,
+  warm = true,
+}) {
+  const book = await resolveBook(workspaceRoot, bookId);
+  const materialized = await ensureBookMaterialized(workspaceRoot, book);
+  const session = bookSessions.resolveForChat(bookSessionOwner(), book.id, sessionId);
+  if (warm) {
+    await bookSessions.warm(session, materialized.cacheDir).catch(() => {});
+  }
+  return { book, materialized, session, sessions: bookSessions };
+}
+
+/** Same spoken ask as quick voice, shaped for the shared call gateway. */
+export async function* askBookOnCall(opts, signal) {
+  const ask = createBookAskIterator({
+    book: opts.book,
+    materialized: opts.materialized,
+    session: opts.session,
+    bookSessions: opts.sessions,
+    chapter: opts.chapter,
+    history: opts.history || [],
+    signal,
+  });
+  yield* ask(opts.question, signal);
+}
+
 export function createBookAskIterator({
   book,
   materialized,
@@ -105,30 +135,36 @@ export async function handleBookVoiceTurn(
 
   let session = null;
   try {
-    const book = await resolveBook(store.config.workspaceRoot, bookId);
-    const materialized = await ensureBookMaterialized(store.config.workspaceRoot, book);
-    const owner = bookSessionOwner();
-    session = bookSessions.resolveForChat(owner, bookId, sessionId);
-    writeSse(res, { type: "meta", sessionId: session.id, bookId: book.id });
+    const prepared = await prepareBookTurnContext({
+      workspaceRoot: store.config.workspaceRoot,
+      bookSessions,
+      bookId,
+      sessionId,
+      warm: false,
+    });
+    session = prepared.session;
+    writeSse(res, { type: "meta", sessionId: session.id, bookId: prepared.book.id });
     req.on("close", () => {
       bookSessions.cancel?.(session).catch(() => {});
     });
-    await bookSessions.warm(session, materialized.cacheDir).catch(() => {});
+    await bookSessions.warm(session, prepared.materialized.cacheDir).catch(() => {});
     if (signal.aborted) {
       res.end();
       return;
     }
 
     writeSse(res, { type: "state", phase: "think" });
-    const ask = createBookAskIterator({
-      book,
-      materialized,
-      session,
-      bookSessions,
-      chapter,
-      history,
-      signal,
-    });
+    const ask = (question, askSignal) =>
+      askBookOnCall(
+        {
+          ...prepared,
+          session,
+          chapter,
+          history,
+          question,
+        },
+        askSignal,
+      );
 
     await runVoiceTurn({
       question: message,

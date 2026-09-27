@@ -325,19 +325,14 @@ class _ChatPageState extends State<ChatPage> {
     if (!_voiceCall || _preparingChat || _busy || _live || _holding || _holdPending || _sttBusy) return;
     _quickVoice.interruptReply();
     if (!mounted) return;
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (routeContext) => CallPage(
-          api: widget.api,
-          repo: widget.repo,
-          sessionId: _sessionId,
-          autoStart: true,
-          media: widget.callMedia,
-          client: widget.callClient,
-          onBack: () => Navigator.of(routeContext).pop(),
-          onTranscript: _foldCallTranscript,
-        ),
-      ),
+    await openVoiceCall(
+      context,
+      api: widget.api,
+      repo: widget.repo,
+      sessionId: _sessionId,
+      media: widget.callMedia,
+      client: widget.callClient,
+      onTranscript: _foldCallTranscript,
     );
   }
 

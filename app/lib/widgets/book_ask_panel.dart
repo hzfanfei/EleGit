@@ -361,20 +361,15 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
 
   Future<void> _openCall() async {
     if (!_voiceCall || _busy || _live || _hold.holding || _hold.sttBusy) return;
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (routeContext) => CallPage(
-          api: widget.api,
-          book: widget.book,
-          chapter: _place.chapter,
-          sessionId: _sessionId,
-          autoStart: true,
-          media: widget.callMedia,
-          client: widget.callClient,
-          onBack: () => Navigator.of(routeContext).pop(),
-          onTranscript: _foldCallTranscript,
-        ),
-      ),
+    await openVoiceCall(
+      context,
+      api: widget.api,
+      book: widget.book,
+      chapter: _place.chapter,
+      sessionId: _sessionId,
+      media: widget.callMedia,
+      client: widget.callClient,
+      onTranscript: _foldCallTranscript,
     );
   }
 

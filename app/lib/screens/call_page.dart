@@ -12,6 +12,35 @@ import '../voice/voice_client.dart';
 import '../voice/voice_media.dart';
 import '../widgets/wx_chrome.dart';
 
+Future<void> openVoiceCall(
+  BuildContext context, {
+  required WenxiangApi api,
+  RepoItem? repo,
+  BookItem? book,
+  String chapter = '',
+  String? sessionId,
+  VoiceMedia? media,
+  VoiceCallClient? client,
+  void Function(List<ChatMessage> captions)? onTranscript,
+}) {
+  return Navigator.of(context).push<void>(
+    MaterialPageRoute<void>(
+      builder: (routeContext) => CallPage(
+        api: api,
+        repo: repo,
+        book: book,
+        chapter: chapter,
+        sessionId: sessionId,
+        autoStart: true,
+        media: media,
+        client: client,
+        onBack: () => Navigator.of(routeContext).pop(),
+        onTranscript: onTranscript,
+      ),
+    ),
+  );
+}
+
 class CallPage extends StatefulWidget {
   const CallPage({
     super.key,
