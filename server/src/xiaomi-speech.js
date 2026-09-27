@@ -216,6 +216,9 @@ export function createXiaomiAsr({
     endpointSilenceMs,
     minEndpointBytes,
     speechStartBytes: SPEECH_START_BYTES,
+    // Echo cancel punches holes in the mic after the speaker plays. A short
+    // hole used to throw away the next sentence before it was long enough.
+    armHangMs: 1100,
     onSpeechStart,
     onEndpoint: (buf) => {
       if (!started) return;

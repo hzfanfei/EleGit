@@ -565,6 +565,79 @@ describe("createVoiceSession", () => {
     assert.deepEqual(asked, ["最近在做什么？", "换个话题吧"]);
   });
 
+  it("a hole in the user's voice during playback still interrupts", async () => {
+    const asked = [];
+    const session = createVoiceSession({
+      config: { ready: true, provider: "volc" },
+      send: () => {},
+      sendAudio: () => {},
+      asr: { async start() {}, push() {} },
+      checkout: async () => ({ dest: "/tmp/octo/demo" }),
+      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      ask: async function* (opts) {
+        asked.push(opts.question);
+        yield { type: "delta", text: "我是问象，可以帮你看仓库进度，也可以聊天。" };
+        yield { type: "done", engine: "acp", answer: "我是问象，可以帮你看仓库进度，也可以聊天。" };
+      },
+      tts: async () => Buffer.from("pcm-audio-bytes"),
+    });
+
+    await session.start({ owner: "octo", repo: "demo", sessionId: "s1" });
+    session.onTranscript("你是谁", { final: true });
+    await new Promise((r) => setTimeout(r, 40));
+    assert.equal(session.state, "speaking");
+
+    const loud = Buffer.alloc(16000 * 2 * 0.2);
+    for (let i = 0; i < loud.length; i += 2) loud.writeInt16LE(2500, i);
+    const hole = Buffer.alloc(16000 * 2 * 0.4);
+    session.onPcm(loud);
+    session.onPcm(hole);
+    session.onPcm(loud);
+    assert.equal(session.state, "listening");
+
+    session.onTranscript("可以帮你看仓库进度", { final: true });
+    await new Promise((r) => setTimeout(r, 40));
+    assert.deepEqual(asked, ["你是谁", "可以帮你看仓库进度"]);
+  });
+
+  it("after the answer, the next question is heard even if it shares words", async () => {
+    const asked = [];
+    const pushed = [];
+    const session = createVoiceSession({
+      config: { ready: true, provider: "volc" },
+      send: () => {},
+      sendAudio: () => {},
+      asr: {
+        async start() {},
+        push(buf) {
+          pushed.push(buf);
+        },
+      },
+      checkout: async () => ({ dest: "/tmp/octo/demo" }),
+      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      ask: async function* (opts) {
+        asked.push(opts.question);
+        yield { type: "delta", text: "我是问象，可以帮你看仓库进度，也可以聊天。" };
+        yield { type: "done", engine: "acp", answer: "我是问象，可以帮你看仓库进度，也可以聊天。" };
+      },
+      tts: async () => Buffer.from("pcm-audio-bytes"),
+    });
+
+    await session.start({ owner: "octo", repo: "demo", sessionId: "s1" });
+    session.onTranscript("你是谁", { final: true });
+    await new Promise((r) => setTimeout(r, 40));
+    session.playbackDone();
+    assert.equal(session.state, "listening");
+
+    session.onPcm(loudPcm());
+    assert.equal(pushed.length, 1);
+    await new Promise((r) => setTimeout(r, 1600));
+    session.onTranscript("可以帮你看仓库进度", { final: true });
+    await new Promise((r) => setTimeout(r, 40));
+    assert.deepEqual(asked, ["你是谁", "可以帮你看仓库进度"]);
+    assert.equal(session.state, "speaking");
+  });
+
   it("keeps the question when a later decode arrives before any speech", async () => {
     const asked = [];
     let aborted = false;

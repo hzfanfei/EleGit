@@ -287,6 +287,7 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
     });
     if (next == 'barge') {
       unawaited(_media.stopPlayback());
+      unawaited(_reopenMicAfterSpeaker());
     }
   }
 
@@ -301,6 +302,18 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
       _phase = 'listening';
       _assistantLive = '';
     });
+    unawaited(_reopenMicAfterSpeaker());
+  }
+
+  /// The call mic stays suppressed after the speaker. Open it again so the next sentence is recorded.
+  Future<void> _reopenMicAfterSpeaker() async {
+    if (!_live || _disposing) return;
+    final epoch = ++_micEpoch;
+    await _micSub?.cancel();
+    _micSub = null;
+    await _media.stopMic();
+    if (!_live || _disposing || epoch != _micEpoch) return;
+    _armMic();
   }
 
   /// A recorder glitch used to hang the call up. Reopen unless it never really started.

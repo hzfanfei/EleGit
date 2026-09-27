@@ -9,7 +9,8 @@ const INTERRUPT_SPEECH_BYTES = 16000 * 2 * 0.4;
  */
 const PLAYBACK_BARGE_RMS = 800;
 const PLAYBACK_BARGE_BYTES = 16000 * 2 * 0.25;
-const PLAYBACK_BARGE_GAP_MS = 280;
+// A breath or an echo-cancel hole must not wipe the sentence being spoken over the answer.
+const PLAYBACK_BARGE_GAP_MS = 1100;
 
 export function createVoiceSession({
   config,
@@ -93,7 +94,15 @@ export function createVoiceSession({
     const spoken = compact(assistantUtterance);
     if (!heard || !spoken) return false;
     if (loose && heard.length >= 2 && spoken.includes(heard)) return true;
-    if (heard.length >= 8 && spoken.length >= 8 && (spoken.includes(heard) || heard.includes(spoken))) return true;
+    if (heard.length >= 8 && spoken.length >= 8) {
+      const contained = spoken.includes(heard) || heard.includes(spoken);
+      if (contained) {
+        const shorter = Math.min(heard.length, spoken.length);
+        const longer = Math.max(heard.length, spoken.length);
+        // A follow-up can share a few words with the answer. Only a near-copy is the speaker.
+        if (shorter / longer >= 0.6) return true;
+      }
+    }
     if (!loose || heard.length < 6 || spoken.length < 6) return false;
     let hit = 0;
     const pairs = heard.length - 1;
@@ -444,7 +453,14 @@ export function createVoiceSession({
       micFrames += 1;
       const rms = pcmRms(bytes);
       if (rms > micMax) micMax = rms;
-      // Speaker bleed stays out of recognition. A loud stretch talks over it.
+      // 在听 must take the next sentence. A stuck playback flag used to drop it.
+      if (machine.state === "listening" && playbackOpen) {
+        clearPlaybackTimer();
+        resetPlaybackBarge();
+        playbackOpen = false;
+        playbackBytes = 0;
+      }
+      // Speaker bleed stays out of recognition. A stretch of the user's voice talks over it.
       if (playbackOpen) {
         notePlaybackPcm(bytes, rms);
         return;
