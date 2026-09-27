@@ -1,4 +1,4 @@
-import { createUtteranceGate } from "./voice-call.js";
+import { CALL_MIN_RMS, createUtteranceGate } from "./voice-call.js";
 import { isSpeakableTtsText } from "./spoken-tts.js";
 import {
   DEFAULT_XIAOMI_TTS_VOICE,
@@ -300,6 +300,8 @@ export function createXiaomiAsr({
   });
 
   return {
+    /** Frames under this RMS never reach recognition; streaming ASR has no such floor. */
+    speechFloorRms: CALL_MIN_RMS,
     async start() {
       started = true;
       chain = Promise.resolve();

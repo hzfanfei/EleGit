@@ -600,6 +600,59 @@ describe("createVoiceSession", () => {
     assert.deepEqual(asked, ["最近在做什么？", "换个话题吧"]);
   });
 
+  it("lifts a squeezed interruption over a gated recognizer's speech floor", async () => {
+    const { pcmRms } = await import("../src/voice-call.js");
+    for (const floor of [420, undefined]) {
+      const pushed = [];
+      const session = createVoiceSession({
+        config: { ready: true, provider: "xiaomi" },
+        send: () => {},
+        sendAudio: () => {},
+        asr: {
+          speechFloorRms: floor,
+          async start() {},
+          push(buf) {
+            pushed.push(buf);
+          },
+        },
+        checkout: async () => ({ dest: "/tmp/octo/demo" }),
+        sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+        ask: async function* () {
+          yield { type: "delta", text: "仓库最近在修登录。" };
+          yield { type: "done", engine: "acp", answer: "仓库最近在修登录。" };
+        },
+        tts: async () => Buffer.from("pcm-audio-bytes"),
+      });
+
+      await session.start({ owner: "octo", repo: "demo", sessionId: "s1" });
+      session.onTranscript("最近在做什么？", { final: true });
+      await new Promise((r) => setTimeout(r, 40));
+
+      const frame = (level) => {
+        const buf = Buffer.alloc(2560);
+        for (let i = 0; i < buf.length; i += 2) buf.writeInt16LE(i % 4 ? -level : level, i);
+        return buf;
+      };
+      for (let i = 0; i < 15; i += 1) session.onPcm(frame(0));
+      for (let i = 0; i < 4; i += 1) session.onPcm(frame(250));
+      assert.equal(session.state, "listening");
+      session.onPcm(frame(200));
+      session.onPcm(frame(0));
+      session.onPcm(frame(3000));
+
+      assert.equal(pushed.length, 4);
+      if (floor) {
+        assert.ok(pcmRms(pushed[0]) >= 1400);
+        assert.ok(pcmRms(pushed[1]) >= 1400);
+      } else {
+        assert.equal(Math.round(pcmRms(pushed[0])), 250);
+        assert.equal(Math.round(pcmRms(pushed[1])), 200);
+      }
+      assert.equal(pcmRms(pushed[2]), 0);
+      assert.equal(Math.round(pcmRms(pushed[3])), 3000);
+    }
+  });
+
   it("a leaky speaker keeps the loud bar during playback", async () => {
     const session = createVoiceSession({
       config: { ready: true, provider: "volc" },

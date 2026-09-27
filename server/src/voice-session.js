@@ -18,6 +18,26 @@ const PLAYBACK_ECHO_MARGIN = 2.5;
 const PLAYBACK_ECHO_LEARN_BYTES = 16000 * 2 * 1;
 const PLAYBACK_ECHO_HALF_LIFE_BYTES = 16000 * 2 * 3;
 const PLAYBACK_BARGE_BYTES = 16000 * 2 * 0.25;
+/**
+ * The squeezed interruption sits under Xiaomi's speech floor, so its gate threw the
+ * words away and the call went quiet. Lift it to talking level for such recognizers,
+ * for the barge audio and until the phone has stopped its speaker.
+ */
+const BARGE_LIFT_RMS = 1500;
+const BARGE_LIFT_MIN_RMS = 60;
+const BARGE_LIFT_MAX_GAIN = 12;
+const BARGE_LIFT_MS = 1200;
+
+function liftQuietSpeech(buf, floorRms) {
+  const rms = pcmRms(buf);
+  if (rms >= floorRms || rms < BARGE_LIFT_MIN_RMS) return buf;
+  const gain = Math.min(BARGE_LIFT_MAX_GAIN, BARGE_LIFT_RMS / rms);
+  const out = Buffer.alloc(buf.length - (buf.length % 2));
+  for (let i = 0; i < out.length; i += 2) {
+    out.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(buf.readInt16LE(i) * gain))), i);
+  }
+  return out;
+}
 // A breath or an echo-cancel hole must not wipe the sentence being spoken over the answer.
 const PLAYBACK_BARGE_GAP_MS = 1100;
 
@@ -70,6 +90,7 @@ export function createVoiceSession({
   let bargeHardBytes = 0;
   let echoBytes = 0;
   let echoPeak = 0;
+  let bargeLiftUntil = 0;
   let bargeGapTimer = null;
   let checkoutPromise = null;
   const callAbort = new AbortController();
@@ -224,9 +245,12 @@ export function createVoiceSession({
       bargeHardBytes += bytes.length;
       bargeChunks.push(bytes);
       if (bargeHardBytes < PLAYBACK_BARGE_BYTES) return;
-      const buffered = Buffer.concat(bargeChunks);
+      const chunks = bargeChunks;
       if (!bargeIn("speech")) return;
       heardPcmSinceTurn = true;
+      const floor = asr?.speechFloorRms;
+      if (floor) bargeLiftUntil = Date.now() + BARGE_LIFT_MS;
+      const buffered = Buffer.concat(floor ? chunks.map((c) => liftQuietSpeech(c, floor)) : chunks);
       speechBytesSinceTurn += buffered.length;
       asr?.push?.(buffered);
       return;
@@ -322,6 +346,7 @@ export function createVoiceSession({
     playbackBytes = 0;
     heardPcmSinceTurn = false;
     speechBytesSinceTurn = 0;
+    bargeLiftUntil = 0;
     abortTurn();
     asr?.discard?.();
     const gen = ++turnGen;
@@ -523,8 +548,9 @@ export function createVoiceSession({
         return;
       }
       heardPcmSinceTurn = true;
-      if (rms >= CALL_MIN_RMS) speechBytesSinceTurn += bytes.length;
-      asr?.push?.(bytes);
+      const lifted = asr?.speechFloorRms && Date.now() < bargeLiftUntil ? liftQuietSpeech(bytes, asr.speechFloorRms) : bytes;
+      if (lifted === bytes ? rms >= CALL_MIN_RMS : pcmRms(lifted) >= CALL_MIN_RMS) speechBytesSinceTurn += bytes.length;
+      asr?.push?.(lifted);
     },
     onAsrFailure(message) {
       if (!started || closed) return;
