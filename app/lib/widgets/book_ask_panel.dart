@@ -1544,6 +1544,7 @@ class _MessageBody extends StatelessWidget {
             ),
           ),
         WxReadableText(message.content),
+        if (message.role == 'assistant') WxCopyAnswerButton(text: message.content),
       ],
     );
   }

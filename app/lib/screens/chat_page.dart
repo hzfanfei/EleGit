@@ -1649,18 +1649,24 @@ class _FinishedTurn extends StatelessWidget {
         ),
       );
     }
+    final note = engineFootnote(message.engine);
     return _VoiceTurn(
       voice: '问象',
       voiceColor: Wx.text,
       railColor: Wx.hairline,
       railWidth: 2,
       bottom: 16,
-      footer: engineFootnote(message.engine).isEmpty
-          ? null
-          : Text(
-              engineFootnote(message.engine),
+      footer: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (note.isNotEmpty)
+            Text(
+              note,
               style: Theme.of(context).textTheme.labelSmall,
             ),
+          WxCopyAnswerButton(text: message.content),
+        ],
+      ),
       child: GestureDetector(
         onLongPress: () async {
           await Clipboard.setData(ClipboardData(text: message.content));

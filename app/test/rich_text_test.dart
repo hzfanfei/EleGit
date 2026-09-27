@@ -180,6 +180,32 @@ void main() {
     expect(copied, 'void main() {}');
   });
 
+  testWidgets('answer copy button puts the whole reply on the clipboard', (tester) async {
+    String? copied;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.setData') {
+        copied = (call.arguments as Map)['text'] as String?;
+        return;
+      }
+      return null;
+    });
+    addTearDown(() {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null);
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: const Scaffold(
+          body: WxCopyAnswerButton(text: '  仓库最近在修登录。  '),
+        ),
+      ),
+    );
+    await tester.tap(find.byTooltip('复制回答'));
+    await tester.pump();
+    expect(copied, '仓库最近在修登录。');
+    expect(find.text('已复制回答'), findsOneWidget);
+  });
+
   testWidgets('renders table columns without raw pipes', (tester) async {
     await tester.pumpWidget(
       MaterialApp(

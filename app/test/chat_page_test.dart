@@ -390,6 +390,7 @@ void main() {
     expect(find.textContaining('最近在修登录'), findsOneWidget);
     expect(find.text('你问'), findsOneWidget);
     expect(find.textContaining('从进度问起'), findsNothing);
+    expect(find.byTooltip('复制回答'), findsOneWidget);
   });
 
   testWidgets('opens a restored repo chat at the latest message', (tester) async {

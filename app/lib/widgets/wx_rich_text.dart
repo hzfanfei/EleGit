@@ -567,6 +567,39 @@ class _CodeBlock extends StatelessWidget {
   }
 }
 
+/// Sits at the end of a finished answer so the whole reply can be copied.
+class WxCopyAnswerButton extends StatelessWidget {
+  const WxCopyAnswerButton({super.key, required this.text});
+
+  final String text;
+
+  Future<void> _copy(BuildContext context) async {
+    final value = text.trim();
+    if (value.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: value));
+    if (!context.mounted) return;
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      const SnackBar(content: Text('已复制回答'), duration: Duration(milliseconds: 1200)),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (text.trim().isEmpty) return const SizedBox.shrink();
+    return Align(
+      alignment: Alignment.centerRight,
+      child: IconButton(
+        tooltip: '复制回答',
+        onPressed: () => _copy(context),
+        icon: const Icon(Icons.copy_outlined, size: 16, color: Wx.muted),
+        visualDensity: VisualDensity.compact,
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+      ),
+    );
+  }
+}
+
 class WxFencedCode extends StatelessWidget {
   const WxFencedCode({
     super.key,
