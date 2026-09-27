@@ -332,31 +332,43 @@ export function createVoiceSession({
     onTranscript(text, { final = false } = {}) {
       const spoken = String(text || "").trim();
       if (!spoken || !started) return;
-      const busy = playbackOpen || machine.state === "speaking" || machine.state === "thinking";
+      // Speaker audio is still in the room until the phone finishes this clip.
+      // A final that does not match the line used to become the next question.
+      if (playbackOpen) return;
+      const busy = machine.state === "speaking" || machine.state === "thinking";
       if (echoOfAssistant(spoken, { loose: busy || Date.now() < echoLooseUntil })) return;
-      // Partials of the speaker arrive before the full line and used to cut playback.
-      if (playbackOpen && !final) return;
       if (busy && compact(spoken).length < 4) return;
+      if (final && spoken === lastFinalText) {
+        const now = Date.now();
+        // Recognition often repeats the line it just accepted. Cutting the
+        // answer on that repeat makes the call stutter a few seconds in.
+        if (busy || now - lastFinalAt < 1200) return;
+      }
       if (machine.state === "speaking" || machine.state === "thinking") bargeIn("asr");
       pushCaption("user", spoken, { final });
       if (!final) return;
-      const now = Date.now();
-      if (spoken === lastFinalText && now - lastFinalAt < 1200) return;
       lastFinalText = spoken;
-      lastFinalAt = now;
+      lastFinalAt = Date.now();
       runAsk(spoken).catch(() => {});
     },
     onPcm(buf) {
       if (!started || closed) return;
+      const bytes = Buffer.isBuffer(buf) ? buf : Buffer.from(buf || []);
+      if (!bytes.length) return;
       micFrames += 1;
-      const rms = pcmRms(buf);
+      const rms = pcmRms(bytes);
       if (rms > micMax) micMax = rms;
-      asr?.push?.(buf);
+      // The speaker is still in the room. Loud or quiet, this audio is not the next question.
+      if (playbackOpen) return;
+      asr?.push?.(bytes);
     },
     onAsrFailure(message) {
       if (!started || closed) return;
       console.error(`[voice] asr ${String(message || "failed")}`);
-      emit({ type: "caption", role: "assistant", text: "没听清，再说一次", final: true });
+      const busy = playbackOpen || machine.state === "speaking" || machine.state === "thinking";
+      if (!busy) {
+        emit({ type: "caption", role: "assistant", text: "没听清，再说一次", final: true });
+      }
       const now = Date.now();
       if (now < asrRecoverAt) return;
       asrRecoverAt = now + 3000;

@@ -203,6 +203,34 @@ void main() {
     expect(client.hangupCalls, greaterThan(0));
   });
 
+  testWidgets('a mic that drops mid-call reopens instead of hanging up', (tester) async {
+    final media = _DroppingMicMedia();
+    final key = GlobalKey<CallPageState>();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: CallPage(
+          key: key,
+          api: FakeWenxiangApi(voiceReady: true),
+          repo: sampleRepo(),
+          onBack: () {},
+          media: media,
+          client: FakeVoiceClient(),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    await tester.tap(find.text('开始通话'));
+    await tester.pump();
+    expect(media.startCalls, 1);
+
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(media.startCalls, 2);
+    expect(key.currentState!.isLive, isTrue);
+    expect(find.text('需要麦克风才能通话'), findsNothing);
+  });
+
   testWidgets('microphone denial stays on a short Chinese retry', (tester) async {
     final media = FakeVoiceMedia(micGranted: false);
     await tester.pumpWidget(
@@ -226,6 +254,17 @@ void main() {
     expect(find.text('开始通话'), findsNothing);
     expect(find.text('在听'), findsNothing);
   });
+}
+
+class _DroppingMicMedia extends FakeVoiceMedia {
+  @override
+  Stream<Uint8List> startMic() {
+    startCalls += 1;
+    if (startCalls == 1) {
+      return Stream<Uint8List>.value(Uint8List.fromList([1, 0, 0, 0]));
+    }
+    return StreamController<Uint8List>.broadcast().stream;
+  }
 }
 
 class _HoldingVoiceMedia extends FakeVoiceMedia {

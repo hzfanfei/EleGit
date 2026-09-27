@@ -95,7 +95,10 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
   bool _disposing = false;
   bool _backgroundHeld = false;
   Timer? _bargeFlash;
+  Timer? _micRetry;
   int _listenHold = 0;
+  int _micEpoch = 0;
+  int _micReopens = 0;
 
   bool get isLive => _live;
 
@@ -208,9 +211,7 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
           sessionId: widget.sessionId,
         );
       }
-      _micSub = _media.startMic().listen(client.sendPcm, onError: (_) {
-        _fail('需要麦克风才能通话');
-      });
+      _armMic();
     } catch (_) {
       _drop(hint: '通话断了');
     }
@@ -294,6 +295,39 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
     });
   }
 
+  /// A recorder glitch used to hang the call up. Reopen unless it never really started.
+  void _armMic() {
+    final epoch = ++_micEpoch;
+    final started = DateTime.now();
+    var frames = 0;
+    _micSub?.cancel();
+    _micSub = _media.startMic().listen((pcm) {
+      frames += 1;
+      _micReopens = 0;
+      _client?.sendPcm(pcm);
+    }, onError: (_) {
+      _reviveMic(epoch, started, frames);
+    }, onDone: () {
+      _reviveMic(epoch, started, frames);
+    });
+  }
+
+  void _reviveMic(int epoch, DateTime started, int frames) {
+    if (epoch != _micEpoch || !_live || _disposing) return;
+    final brief = frames == 0 && DateTime.now().difference(started) < const Duration(milliseconds: 300);
+    if (brief) return;
+    if (_micReopens >= 2) {
+      _fail('需要麦克风才能通话');
+      return;
+    }
+    _micReopens += 1;
+    _micRetry?.cancel();
+    _micRetry = Timer(const Duration(milliseconds: 350), () {
+      if (!_live || _disposing || epoch != _micEpoch) return;
+      _armMic();
+    });
+  }
+
   void _fail(String hint) {
     hangup(pop: false);
     if (!mounted || _disposing) return;
@@ -328,6 +362,9 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
   void hangup({bool pop = false}) {
     _freeBackground();
     _listenHold++;
+    _micEpoch++;
+    _micRetry?.cancel();
+    _micRetry = null;
     _bargeFlash?.cancel();
     _bargeFlash = null;
     _sub?.cancel();

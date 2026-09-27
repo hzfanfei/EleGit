@@ -188,10 +188,13 @@ export function createXiaomiAsr({
   const chunks = [];
   let started = false;
   let chain = Promise.resolve();
+  let generation = 0;
 
   function transcribe(buf) {
+    const ticket = generation;
     chain = chain
       .then(async () => {
+        if (ticket !== generation) return;
         if (!buf?.length) {
           onFinal?.("");
           return;
@@ -200,6 +203,7 @@ export function createXiaomiAsr({
           sampleRate: xiaomi?.inputRate || 16000,
           fetchImpl,
         });
+        if (ticket !== generation) return;
         onFinal?.(text);
       })
       .catch((err) => {
@@ -237,6 +241,7 @@ export function createXiaomiAsr({
       gate.push(buf);
     },
     discard() {
+      generation += 1;
       chunks.length = 0;
       gate.reset();
     },

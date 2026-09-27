@@ -240,7 +240,14 @@ class DeviceVoiceMedia implements VoiceMedia {
 
 
 
+  /// Call route is set once. Resetting it on every spoken chunk drops the mic.
+  bool _callRouteReady = false;
+
+
+
   Future<void> _prepareCallAudio() async {
+
+    if (_callRouteReady) return;
 
     try {
 
@@ -285,6 +292,8 @@ class DeviceVoiceMedia implements VoiceMedia {
 
       );
 
+      _callRouteReady = true;
+
     } catch (_) {
 
       // Desktop tests and missing platform views still record.
@@ -322,6 +331,8 @@ class DeviceVoiceMedia implements VoiceMedia {
       return;
 
     }
+
+    _callRouteReady = false;
 
     try {
 

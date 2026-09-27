@@ -94,7 +94,8 @@ export function pcmHasSpeech(buf, threshold = 1800) {
 
 /** Phone call audio is often quieter than a raw mic, and one soft frame is not a pause. */
 export const CALL_MIN_RMS = 420;
-const BARGE_RMS = 1400;
+/** Loud enough to talk over the speaker. Quieter frames during playback are the speaker itself. */
+export const BARGE_RMS = 1400;
 
 export function createUtteranceGate({
   minRms = CALL_MIN_RMS,

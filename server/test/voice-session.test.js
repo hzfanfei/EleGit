@@ -386,6 +386,12 @@ describe("createVoiceSession", () => {
 
     session.onTranscript("换个话题吧", { final: true });
     await new Promise((r) => setTimeout(r, 40));
+    assert.deepEqual(asked, ["最近在做什么？"]);
+    assert.equal(session.state, "speaking");
+
+    session.playbackDone();
+    session.onTranscript("换个话题吧", { final: true });
+    await new Promise((r) => setTimeout(r, 40));
     assert.deepEqual(asked, ["最近在做什么？", "换个话题吧"]);
   });
 
@@ -408,6 +414,106 @@ describe("createVoiceSession", () => {
     assert.ok(sent.some((msg) => msg.type === "caption" && msg.text === "没找到这本书"));
     assert.equal(session.started, true);
     assert.equal(session.state, "listening");
+  });
+
+  it("stays on the call when the book answer fails", async () => {
+    const sent = [];
+    const session = createVoiceSession({
+      config: { ready: true, provider: "volc" },
+      send: (msg) => sent.push(msg),
+      prepareContext: async () => ({
+        book: { id: "b1", title: "演示书" },
+        materialized: { cacheDir: "/tmp/book" },
+        session: { id: "book-s1" },
+        sessions: { cancel: async () => {} },
+      }),
+      ask: async function* () {
+        throw new Error("agent down");
+      },
+      tts: async () => Buffer.alloc(0),
+    });
+
+    await session.start({ bookId: "b1", chapter: "第一章", sessionId: "book-s1" });
+    session.onTranscript("墙纸象征什么", { final: true });
+    await new Promise((r) => setTimeout(r, 40));
+
+    assert.equal(sent.some((msg) => msg.type === "error"), false);
+    assert.ok(sent.some((msg) => msg.type === "caption" && msg.text === "这句没说成，再说一次"));
+    assert.equal(session.started, true);
+    assert.equal(session.state, "listening");
+  });
+
+  it("does not feed speaker-level mic audio into recognition while playback is open", async () => {
+    const pushed = [];
+    const session = createVoiceSession({
+      config: { ready: true, provider: "volc" },
+      send: () => {},
+      sendAudio: () => {},
+      asr: {
+        async start() {},
+        push(buf) {
+          pushed.push(buf);
+        },
+      },
+      checkout: async () => ({ dest: "/tmp/octo/demo" }),
+      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      ask: async function* () {
+        yield { type: "delta", text: "仓库最近在修登录。" };
+        yield { type: "done", engine: "acp", answer: "仓库最近在修登录。" };
+      },
+      tts: async () => Buffer.from("pcm-audio-bytes"),
+    });
+
+    await session.start({ owner: "octo", repo: "demo", sessionId: "s1" });
+    session.onTranscript("最近在做什么？", { final: true });
+    await new Promise((r) => setTimeout(r, 40));
+    assert.equal(session.state, "speaking");
+
+    const quiet = Buffer.alloc(640);
+    for (let i = 0; i < quiet.length; i += 2) quiet.writeInt16LE(200, i);
+    session.onPcm(quiet);
+    session.onPcm(loudPcm());
+    assert.equal(pushed.length, 0);
+
+    session.playbackDone();
+    session.onPcm(loudPcm());
+    assert.equal(pushed.length, 1);
+  });
+
+  it("does not restart the answer when recognition repeats the same line", async () => {
+    const asked = [];
+    const session = createVoiceSession({
+      config: { ready: true, provider: "volc" },
+      send: () => {},
+      sendAudio: () => {},
+      checkout: async () => ({ dest: "/tmp/octo/demo" }),
+      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      ask: async function* (opts) {
+        asked.push(opts.question);
+        yield { type: "delta", text: "先说到这里。" };
+        yield { type: "done", engine: "acp", answer: "先说到这里。" };
+      },
+      tts: (_text, signal) =>
+        new Promise((resolve) => {
+          if (signal?.aborted) {
+            resolve(Buffer.alloc(0));
+            return;
+          }
+          signal?.addEventListener("abort", () => resolve(Buffer.alloc(0)), { once: true });
+        }),
+    });
+
+    await session.start({ owner: "octo", repo: "demo", sessionId: "s1" });
+    session.onTranscript("最近在做什么？", { final: true });
+    await new Promise((r) => setTimeout(r, 1300));
+    session.onTranscript("最近在做什么？", { final: true });
+    await new Promise((r) => setTimeout(r, 40));
+    assert.deepEqual(asked, ["最近在做什么？"]);
+
+    session.onTranscript("换个话题", { final: true });
+    await new Promise((r) => setTimeout(r, 40));
+    assert.deepEqual(asked, ["最近在做什么？", "换个话题"]);
+    session.hangup();
   });
 
   it("restarts recognition after one asr failure and stays on the call", async () => {

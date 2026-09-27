@@ -160,6 +160,7 @@ export function createFunasrAsr({
   let lastPartial = "";
   let inferChain = Promise.resolve();
   let endpointTimer = null;
+  let generation = 0;
 
   function baseUrl() {
     return funasr?.baseUrl || activeLayout?.baseUrl || resolveFunasrLayout().baseUrl;
@@ -170,15 +171,18 @@ export function createFunasrAsr({
   }
 
   function queueInfer(final, { endpoint = false } = {}) {
+    const ticket = generation;
     const buf = pcmBuffer();
     inferChain = inferChain
       .then(async () => {
+        if (ticket !== generation) return;
         if (!started && !final) return;
         if (!buf.length) {
           if (final) onFinal?.("");
           return;
         }
         const json = await funasrInfer(baseUrl(), buf, { final, fetchImpl });
+        if (ticket !== generation) return;
         const text = String(json?.text || "").trim();
         if (!text) {
           if (final) onFinal?.("");
@@ -248,6 +252,7 @@ export function createFunasrAsr({
       if (!pushToTalk) scheduleEndpoint();
     },
     discard() {
+      generation += 1;
       clearEndpointTimer();
       chunks.length = 0;
       lastPartial = "";
