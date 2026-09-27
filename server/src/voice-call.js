@@ -7,6 +7,12 @@ const CLAUSE_PAUSE = /[，,、；;]/;
 const SPEAK_HARD_LEN = 320;
 /** Nothing has been said yet: a clause this long is worth saying instead of waiting for the full stop. */
 const FIRST_CLAUSE_MIN = 6;
+/**
+ * Each send waits for its whole synthesis, so a fast model dumping three sentences
+ * at once held the voice until all of them were synthesized. Cut at the sentence
+ * end that keeps one request under this many characters.
+ */
+const SPEAK_TARGET_LEN = 40;
 
 export function createCallMachine() {
   let state = "idle";
@@ -53,30 +59,23 @@ export function createCallMachine() {
 export function takeSpeakable(buffer, hardLen = SPEAK_HARD_LEN, { firstClause = false } = {}) {
   const text = String(buffer || "");
   if (!text) return { speak: "", rest: "" };
-  let lastSentence = -1;
-  for (let i = 0; i < text.length; i += 1) {
-    if (SENTENCE_END.test(text[i])) lastSentence = i;
-  }
-  if (lastSentence >= 0) {
-    return {
-      speak: text.slice(0, lastSentence + 1).trim(),
-      rest: text.slice(lastSentence + 1),
-    };
-  }
-  let lastClause = -1;
+  const lead = text.length - text.trimStart().length;
+  const cutAt = (i) => ({ speak: text.slice(0, i + 1).trim(), rest: text.slice(i + 1) });
   if (firstClause) {
-    for (let i = 0; i < text.length; i += 1) {
-      if (CLAUSE_PAUSE.test(text[i])) lastClause = i;
-    }
-    if (lastClause >= FIRST_CLAUSE_MIN - 1) {
-      return {
-        speak: text.slice(0, lastClause + 1).trim(),
-        rest: text.slice(lastClause + 1),
-      };
+    for (let i = lead; i < text.length; i += 1) {
+      if (SENTENCE_END.test(text[i])) return cutAt(i);
+      if (CLAUSE_PAUSE.test(text[i]) && i - lead >= FIRST_CLAUSE_MIN - 1) return cutAt(i);
     }
   }
+  let sentence = -1;
+  for (let i = lead; i < text.length; i += 1) {
+    if (!SENTENCE_END.test(text[i])) continue;
+    if (sentence < 0 || i - lead < SPEAK_TARGET_LEN) sentence = i;
+    else break;
+  }
+  if (sentence >= 0) return cutAt(sentence);
   if (text.length < hardLen) return { speak: "", rest: text };
-  lastClause = -1;
+  let lastClause = -1;
   for (let i = 0; i < text.length; i += 1) {
     if (CLAUSE_PAUSE.test(text[i])) lastClause = i;
   }
@@ -305,24 +304,29 @@ export async function runVoiceTurn({
     return chars.slice(0, remain).join("");
   };
 
-  const flush = (force = false) => {
-    if (speakStrategy === "final") return;
-    if (capped && !force) return;
-    const chunk = force
-      ? { speak: pending.trim(), rest: "" }
-      : takeSpeakable(pending, SPEAK_HARD_LEN, { firstClause: spokenChars === 0 });
-    if (!chunk.speak) {
-      pending = chunk.rest || pending;
-      return;
-    }
-    pending = chunk.rest;
-    const speak = capChunk(cleanForSpeech(chunk.speak));
+  const queueSpeak = (text) => {
+    const speak = capChunk(cleanForSpeech(text));
     if (!speak) return;
     spokenChars += [...speak].length;
     speakQueue.push(speak);
     speaking = speaking.then(() => speakOne(speak)).catch((err) => {
       speakFail = speakFail || err;
     });
+  };
+
+  const flush = (force = false) => {
+    if (speakStrategy === "final") return;
+    while (!capped || force) {
+      const chunk = takeSpeakable(pending, SPEAK_HARD_LEN, { firstClause: spokenChars === 0 });
+      if (!chunk.speak) break;
+      pending = chunk.rest;
+      queueSpeak(chunk.speak);
+    }
+    if (force && pending.trim()) {
+      const tail = pending.trim();
+      pending = "";
+      queueSpeak(tail);
+    }
   };
 
   for await (const event of ask(question, signal)) {

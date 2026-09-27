@@ -70,6 +70,17 @@ describe("takeSpeakable", () => {
     assert.equal(done.rest, "");
   });
 
+  it("does not hand several sentences to one synthesis request", () => {
+    const text = "第一句先说结论。第二句讲一下原因，稍微长一点也没关系。第三句收尾，这句要留给下一次合成。";
+    const chunk = takeSpeakable(text);
+    assert.equal(chunk.speak, "第一句先说结论。第二句讲一下原因，稍微长一点也没关系。");
+    assert.equal(takeSpeakable(chunk.rest).speak, "第三句收尾，这句要留给下一次合成。");
+    const opening = takeSpeakable(text, 320, { firstClause: true });
+    assert.equal(opening.speak, "第一句先说结论。");
+    assert.equal(takeSpeakable("我先看一下代码，这个仓库最近在修登录。", 320, { firstClause: true }).speak, "我先看一下代码，");
+    assert.equal(takeSpeakable("\n好的。", 320, { firstClause: true }).speak, "好的。");
+  });
+
   it("does not split one sentence on a semicolon", () => {
     const text = "前半句还没结束；后半句才收束。";
     const chunk = takeSpeakable(text);
@@ -193,6 +204,23 @@ describe("first words", () => {
     assert.deepEqual(takeSpeakable("默认用小米的识别，", 320, { firstClause: true }), { speak: "默认用小米的识别，", rest: "" });
     assert.deepEqual(takeSpeakable("嗯，", 320, { firstClause: true }), { speak: "", rest: "嗯，" });
     assert.deepEqual(takeSpeakable("默认用小米的识别，", 320), { speak: "", rest: "默认用小米的识别，" });
+  });
+
+  it("starts speaking the first sentence while later ones are still in one burst", async () => {
+    const asked = [];
+    await runVoiceTurn({
+      question: "q",
+      ask: async function* () {
+        yield { type: "delta", text: "先说结论。原因有两点，第一点是缓存。第二点是网络也慢，而且会重试好几次才放弃。最后一句话用来收个尾。" };
+        yield { type: "done", answer: "" };
+      },
+      tts: async (text) => {
+        asked.push(text);
+        return Buffer.alloc(4, 1);
+      },
+      onAudio: async () => {},
+    });
+    assert.deepEqual(asked, ["先说结论。", "原因有两点，第一点是缓存。第二点是网络也慢，而且会重试好几次才放弃。", "最后一句话用来收个尾。"]);
   });
 
   it("sends a streamed sentence to the phone as one clip", async () => {
