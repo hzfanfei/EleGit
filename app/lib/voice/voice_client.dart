@@ -197,6 +197,10 @@ class FakeVoiceClient implements VoiceCallClient {
     _out.add(event);
   }
 
+  void end() {
+    if (!_out.isClosed) _out.addError(StateError('socket closed'));
+  }
+
   @override
   Stream<VoiceEvent> connect() {
     connectCalls += 1;
@@ -204,7 +208,7 @@ class FakeVoiceClient implements VoiceCallClient {
       for (final event in events) {
         listener.add(event);
       }
-      final sub = _out.stream.listen(listener.add, onError: listener.addError);
+      final sub = _out.stream.listen(listener.add, onError: listener.addError, onDone: listener.close);
       listener
         ..onPause = sub.pause
         ..onResume = sub.resume

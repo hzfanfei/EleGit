@@ -257,6 +257,43 @@ void main() {
     expect(find.byKey(const Key('call-voice-ripple')), findsNothing);
   });
 
+  testWidgets('a socket that dies mid-call is opened again', (tester) async {
+    final clients = <FakeVoiceClient>[];
+    final key = GlobalKey<CallPageState>();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: CallPage(
+          key: key,
+          api: FakeWenxiangApi(voiceReady: true),
+          repo: sampleRepo(),
+          onBack: () {},
+          media: FakeVoiceMedia(),
+          clientFactory: () {
+            final client = FakeVoiceClient();
+            clients.add(client);
+            return client;
+          },
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    await tester.tap(find.text('开始通话'));
+    await tester.pump();
+    expect(clients, hasLength(1));
+    expect(key.currentState!.isLive, isTrue);
+
+    clients.first.end();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
+    expect(key.currentState!.linkResets, 1);
+    expect(key.currentState!.isLive, isTrue);
+    expect(clients, hasLength(2));
+    expect(clients.last.sent.any((msg) => msg['type'] == 'hello'), isTrue);
+    expect(find.text('通话断了'), findsNothing);
+  });
+
   testWidgets('a live channel error hangs up onto a single retry', (tester) async {
     final client = FakeVoiceClient();
     final key = GlobalKey<CallPageState>();

@@ -35,6 +35,22 @@ export function isVoiceCallEnabled(env = process.env) {
   return String(env.WENXIANG_VOICE_CALL_ENABLED || "").trim().toLowerCase() === "true";
 }
 
+/** Bytes already sitting on a socket the phone has stopped acknowledging. */
+export const DOWNLINK_STALL_BYTES = 32 * 1024;
+/** How long that queue may sit still before the socket is thrown away. */
+export const DOWNLINK_STALL_MS = 2000;
+
+/**
+ * A queue under the limit is healthy. Above it, remember when it first stuck.
+ * Once it has not dropped for [holdMs], the phone will not read those bytes and
+ * the connection has to be reset. A graceful close would wait behind them.
+ */
+export function noteDownlinkQueue(queued, stuckSince, now = Date.now(), holdMs = DOWNLINK_STALL_MS) {
+  if ((queued || 0) < DOWNLINK_STALL_BYTES) return { stuckSince: 0, reset: false };
+  const since = stuckSince || now;
+  return { stuckSince: since, reset: now - since >= holdMs };
+}
+
 export function createDefaultAsk() {
   return async function* (opts, signal) {
     const checkout = opts.checkout || {};
@@ -233,8 +249,20 @@ export function attachVoiceGateway(httpServer, {
         try { ws.ping(); } catch { /* already closing */ }
       }
     }, 20000);
+    let stuckSince = 0;
+    const stall = setInterval(() => {
+      if (ws.readyState !== 1) return;
+      const next = noteDownlinkQueue(ws.bufferedAmount, stuckSince);
+      stuckSince = next.stuckSince;
+      if (!next.reset) return;
+      clearInterval(stall);
+      console.log(`[voice] downlink stalled queued=${ws.bufferedAmount} resetting`);
+      try { ws.terminate(); } catch { /* already gone */ }
+    }, 500);
+    stall.unref?.();
     ws.on("close", (code, reason) => {
       clearInterval(beat);
+      clearInterval(stall);
       const why = Buffer.isBuffer(reason) ? reason.toString() : String(reason || "");
       console.log(`[voice] socket closed code=${code} reason=${why}`);
       session.hangup();

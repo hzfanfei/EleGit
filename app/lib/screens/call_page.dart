@@ -54,6 +54,7 @@ class CallPage extends StatefulWidget {
     this.onTranscript,
     this.media,
     this.client,
+    this.clientFactory,
     this.autoStart = false,
   });
 
@@ -66,6 +67,7 @@ class CallPage extends StatefulWidget {
   final void Function(List<ChatMessage> captions)? onTranscript;
   final VoiceMedia? media;
   final VoiceCallClient? client;
+  final VoiceCallClient Function()? clientFactory;
   final bool autoStart;
 
   @override
@@ -110,10 +112,15 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
   int _listenHold = 0;
   int _micEpoch = 0;
   int _micReopens = 0;
+  int _linkResets = 0;
+  bool _closing = false;
+  bool _relinking = false;
   double _voiceLevel = 0;
   Timer? _voiceFade;
 
   bool get isLive => _live;
+
+  int get linkResets => _linkResets;
 
   @override
   void initState() {
@@ -203,29 +210,80 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
       return;
     }
     _holdBackground();
-    final client = widget.client ?? SocketVoiceClient(widget.api.voiceUri());
+    _linkResets = 0;
+    _closing = false;
+    _openSocket(_newClient());
+    if (_live) _armMic();
+  }
+
+  VoiceCallClient _newClient() {
+    return widget.client ?? widget.clientFactory?.call() ?? SocketVoiceClient(widget.api.voiceUri());
+  }
+
+  void _sayHello(VoiceCallClient client) {
+    if (widget.book != null) {
+      client.hello(
+        bookId: widget.book!.id,
+        chapter: widget.chapter,
+        sessionId: widget.sessionId,
+      );
+      return;
+    }
+    client.hello(
+      owner: widget.repo?.owner ?? '',
+      repo: widget.repo?.name ?? '',
+      sessionId: widget.sessionId,
+    );
+  }
+
+  void _openSocket(VoiceCallClient client) {
     _client = client;
     try {
-      _sub = client.connect().listen(_onEvent, onError: (Object err) => _drop(cause: err), onDone: () {
-        if (_live) _drop();
-      });
-      if (widget.book != null) {
-        client.hello(
-          bookId: widget.book!.id,
-          chapter: widget.chapter,
-          sessionId: widget.sessionId,
-        );
-      } else {
-        client.hello(
-          owner: widget.repo?.owner ?? '',
-          repo: widget.repo?.name ?? '',
-          sessionId: widget.sessionId,
-        );
-      }
-      _armMic();
+      _sub = client.connect().listen(
+        _onEvent,
+        onError: (Object err) => _onSocketGone(err),
+        onDone: () => _onSocketGone(null),
+      );
+      _sayHello(client);
     } catch (err) {
       _drop(cause: err);
     }
+  }
+
+  /// The bytes stuck in a send buffer are only dropped by tearing the socket down.
+  /// Open another one and keep the call, instead of ending it on the first stall.
+  void _onSocketGone(Object? cause) {
+    if (!_live || _closing || _relinking || _disposing) return;
+    if (widget.client != null || _linkResets >= 2) {
+      _drop(cause: cause);
+      return;
+    }
+    _linkResets += 1;
+    // onDone is still on the stack. Cancelling that subscription here never finishes.
+    Timer(Duration.zero, () {
+      if (!_live || _closing || _disposing) return;
+      _relink();
+    });
+  }
+
+  void _relink() {
+    _relinking = true;
+    _listenHold++;
+    _speakerIdleTimer?.cancel();
+    _speakerIdleTimer = null;
+    final previous = _sub;
+    _sub = null;
+    _client?.hangup();
+    unawaited(previous?.cancel());
+    unawaited(_media.stopPlayback().catchError((_) {}));
+    _relinking = false;
+    if (!_live || _closing || _disposing || !mounted) return;
+    setState(() {
+      _phase = 'listening';
+      _playing = false;
+      _assistantLive = '';
+    });
+    _openSocket(_newClient());
   }
 
   void _onEvent(VoiceEvent event) {
@@ -471,6 +529,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
   }
 
   void hangup({bool pop = false}) {
+    _closing = true;
     _freeBackground();
     _listenHold++;
     _micEpoch++;
