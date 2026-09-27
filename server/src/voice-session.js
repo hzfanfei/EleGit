@@ -1,3 +1,4 @@
+import { encodeAdpcm } from "./adpcm.js";
 import { CALL_MIN_RMS, createCallMachine, pcmRms, runVoiceTurn } from "./voice-call.js";
 
 /** Speech long enough to be a real interrupt, not the tail of the question just asked. */
@@ -25,6 +26,11 @@ const PLAYBACK_ECHO_LEARN_BYTES = 16000 * 2 * 1;
  */
 const PLAYBACK_AHEAD_MS = 4000;
 const PCM_BYTES_PER_MS = 48;
+/**
+ * Unsent bytes on the socket. State messages queue behind audio, so a stalled
+ * link kept the phone on 在说 after a barge. Hold further audio past this.
+ */
+const DOWNLINK_BACKLOG_BYTES = 32 * 1024;
 
 function looksLikeMp3(buf) {
   if (!buf || buf.length < 3) return false;
@@ -121,6 +127,11 @@ export function createVoiceSession({
   let callBargeRms = null;
   let bargeLiftUntil = 0;
   let speakerBusyUntil = 0;
+  let downlinkAdpcm = false;
+
+  function pushAudio(buf) {
+    sendAudio?.(downlinkAdpcm && buf?.length && !looksLikeMp3(buf) ? encodeAdpcm(buf, 24000) : buf);
+  }
   let bargeGapTimer = null;
   let checkoutPromise = null;
   const callAbort = new AbortController();
@@ -349,7 +360,7 @@ export function createVoiceSession({
           asr?.discard?.();
         }
       }
-      sendAudio?.(audio);
+      pushAudio(audio);
     } catch {
       /* stay on the call even when this line cannot be spoken */
     }
@@ -455,6 +466,7 @@ export function createVoiceSession({
           if (!looksLikeMp3(buf)) {
             const ahead = speakerBusyUntil - Date.now();
             if (ahead > PLAYBACK_AHEAD_MS) await sleep(ahead - PLAYBACK_AHEAD_MS, signal);
+            while (!signal.aborted && (socketBacklog?.() || 0) > DOWNLINK_BACKLOG_BYTES) await sleep(50, signal);
             if (signal.aborted) return;
             speakerBusyUntil = Math.max(Date.now(), speakerBusyUntil) + (buf?.length || 0) / PCM_BYTES_PER_MS;
           }
@@ -468,7 +480,7 @@ export function createVoiceSession({
               asr?.discard?.();
             }
           }
-          sendAudio?.(buf);
+          pushAudio(buf);
         },
         onDone: ({ text, engine }) => {
           pushCaption("assistant", text, { engine, final: true });
@@ -516,6 +528,7 @@ export function createVoiceSession({
       bookMode = Boolean(bookId);
       sessionId = String(opts.sessionId || "").trim();
       history = Array.isArray(opts.history) ? opts.history : [];
+      downlinkAdpcm = opts.audio === "adpcm";
       turnSessions = sessions;
       if (!config?.ready) {
         emit({ type: "error", code: "unconfigured", hint: config?.hint || "还没配语音密钥" });
@@ -536,6 +549,7 @@ export function createVoiceSession({
           ok: true,
           inputRate: 16000,
           outputRate: 24000,
+          audio: downlinkAdpcm ? "adpcm" : "pcm",
         });
         emit({ type: "state", state: "listening" });
         startMicLog();

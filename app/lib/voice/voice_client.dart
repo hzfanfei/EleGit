@@ -4,6 +4,8 @@ import 'dart:typed_data';
 
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import 'adpcm.dart';
+
 class VoiceEvent {
   VoiceEvent({
     required this.type,
@@ -83,7 +85,11 @@ class SocketVoiceClient implements VoiceCallClient {
       _socketSub = channel.stream.listen((message) {
         if (events.isClosed) return;
         if (message is List<int>) {
-          events.add(VoiceEvent(type: 'pcm', pcm: Uint8List.fromList(message)));
+          final bytes = Uint8List.fromList(message);
+          final adpcm = decodeAdpcm(bytes);
+          events.add(adpcm == null
+              ? VoiceEvent(type: 'pcm', pcm: bytes)
+              : VoiceEvent(type: 'pcm', pcm: adpcm.pcm, outputRate: adpcm.sampleRate));
           return;
         }
         final decoded = jsonDecode(message.toString());
@@ -129,6 +135,7 @@ class SocketVoiceClient implements VoiceCallClient {
   }) {
     _send({
       'type': 'hello',
+      'audio': 'adpcm',
       if (owner.isNotEmpty) 'owner': owner,
       if (repo.isNotEmpty) 'repo': repo,
       if (sessionId != null && sessionId.isNotEmpty) 'sessionId': sessionId,
