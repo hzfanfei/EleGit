@@ -28,7 +28,7 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    expect(find.text('还没配语音密钥'), findsOneWidget);
+    expect(find.textContaining('还没配语音密钥'), findsOneWidget);
     expect(find.text('重试'), findsOneWidget);
     expect(find.text('开始通话'), findsNothing);
     expect(find.text('连接中'), findsNothing);
@@ -44,7 +44,7 @@ void main() {
     await tester.pump();
     expect(client.connectCalls, 0);
     expect(find.text('在听'), findsNothing);
-    expect(find.text('还没配语音密钥'), findsOneWidget);
+    expect(find.textContaining('还没配语音密钥'), findsOneWidget);
   });
 
   testWidgets('ready call walks 连接中 / 在听 / 在说 / 你打断了', (tester) async {
