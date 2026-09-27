@@ -8,7 +8,7 @@ import { createOpenAiAsr, openAiTts } from "./voice-openai.js";
 import { cosyvoiceTts } from "./cosyvoice-tts.js";
 import { createFunasrAsr } from "./funasr-asr.js";
 import { createXiaomiAsr, xiaomiTts, xiaomiTtsStream } from "./xiaomi-speech.js";
-import { createVolcAsr, volcTts } from "./voice-volc.js";
+import { createVolcAsr, volcTts, volcTtsCanStream, volcTtsStreamPcm } from "./voice-volc.js";
 import { formatLocalContext } from "./workspace.js";
 
 export function voiceKeyFromRequest(req) {
@@ -112,7 +112,11 @@ function resolveTtsFn(config) {
       );
   }
   if (config?.provider === "volc" && config.volc) {
-    return (text, signal) => volcTts(config.volc, text, signal);
+    const tts = (text, signal) => volcTts(config.volc, text, signal);
+    if (volcTtsCanStream(config.volc)) {
+      tts.stream = (text, signal, onPcm) => volcTtsStreamPcm(config.volc, text, signal, onPcm);
+    }
+    return tts;
   }
   if (config?.provider === "openai" && config.openai) {
     return (text, signal) => openAiTts(config.openai, text, signal);

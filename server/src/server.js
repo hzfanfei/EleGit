@@ -1377,6 +1377,7 @@ httpServer.timeout = 0;
 
 attachVoiceGateway(httpServer, {
   getApiKey: () => store.config.apiKey,
+  resolveConfig: () => withTtsVoice(resolveVoiceConfig(), store.config.ttsVoice),
   checkoutRepo: (owner, repo, signal) => checkoutRepo(owner, repo, signal, { fast: true }),
   prepareContext: ({ bookId, sessionId }) =>
     prepareBookTurnContext({

@@ -83,6 +83,9 @@ export function extractAsrText(json) {
     return { text: String(last.text || ""), definite: Boolean(last.definite) };
   }
   const utterances = Array.isArray(result.utterances) ? result.utterances : [];
+  // The frame that closes a sentence also opens the next, empty one after it.
+  const closed = utterances.filter((u) => u?.definite && u.text);
+  if (closed.length) return { text: String(closed[closed.length - 1].text), definite: true };
   const lastUtt = utterances[utterances.length - 1];
   return {
     text: String(result.text || lastUtt?.text || ""),
@@ -118,20 +121,54 @@ export function volcAsrHeaders(volc) {
   return headers;
 }
 
+/**
+ * 200ms of 16 kHz PCM16. With the phone's 20ms frames Volc fell seconds behind:
+ * the end of a sentence came back 5.5s late, versus 0.9s with 200ms packets.
+ */
+export const VOLC_ASR_PACKET_BYTES = 6400;
+/**
+ * While the answer plays, the call keeps speaker audio away from recognition.
+ * Volc ends a stream that goes quiet for about ten seconds, so send silence instead.
+ */
+const VOLC_ASR_IDLE_MS = 1500;
+
 export function createVolcAsr({
   volc,
   connect = (url, options) => new WebSocket(url, options),
   onPartial,
   onFinal,
   onError,
+  packetBytes = VOLC_ASR_PACKET_BYTES,
+  idleMs = VOLC_ASR_IDLE_MS,
+  now = Date.now,
 } = {}) {
   let socket = null;
   let opened = false;
   const pending = [];
+  let held = [];
+  let heldBytes = 0;
+  let lastSentAt = 0;
+  let idleTimer = null;
+
+  function release() {
+    if (!heldBytes) return;
+    pending.push(encodeVolcAudio(Buffer.concat(held)));
+    held = [];
+    heldBytes = 0;
+  }
 
   function flush() {
     if (!opened || !socket || socket.readyState !== 1) return;
-    while (pending.length) socket.send(pending.shift());
+    while (pending.length) {
+      socket.send(pending.shift());
+      lastSentAt = now();
+    }
+  }
+
+  function keepAlive() {
+    if (!opened || now() - lastSentAt < idleMs) return;
+    pending.push(encodeVolcAudio(Buffer.alloc(packetBytes)));
+    flush();
   }
 
   return {
@@ -143,7 +180,12 @@ export function createVolcAsr({
           clearTimeout(timer);
           opened = true;
           socket.send(encodeVolcClientRequest(defaultAsrConfigPayload()));
+          lastSentAt = now();
           flush();
+          if (idleMs > 0) {
+            idleTimer = setInterval(keepAlive, Math.max(100, Math.floor(idleMs / 3)));
+            idleTimer.unref?.();
+          }
           resolve();
         });
         socket.once("error", (err) => {
@@ -165,13 +207,23 @@ export function createVolcAsr({
       });
     },
     push(pcm) {
-      pending.push(encodeVolcAudio(pcm));
+      if (!pcm?.length) return;
+      held.push(Buffer.isBuffer(pcm) ? pcm : Buffer.from(pcm));
+      heldBytes += pcm.length;
+      if (heldBytes < packetBytes) return;
+      release();
       flush();
     },
     discard() {
       pending.length = 0;
+      held = [];
+      heldBytes = 0;
     },
     stop() {
+      if (idleTimer) clearInterval(idleTimer);
+      idleTimer = null;
+      release();
+      flush();
       if (socket && opened) {
         try {
           socket.send(encodeVolcAudio(Buffer.alloc(0), { last: true }));
@@ -348,6 +400,29 @@ export async function volcTtsV3StreamLatency(volc, text, signal, fetchImpl = fet
     streamChunks,
     sampleRate: 24000,
   };
+}
+
+/** Only the v3 PCM stream can be played piece by piece; MP3 and the v1 API stay whole-sentence. */
+export function volcTtsCanStream(volc) {
+  return Boolean(volc?.ttsResourceId) && volc.ttsFormat === "pcm";
+}
+
+export async function volcTtsStreamPcm(volc, text, signal, onPcm, fetchImpl = fetch) {
+  let total = 0;
+  let odd = null;
+  for await (const chunk of volcTtsV3Stream(volc, text, signal, fetchImpl)) {
+    if (signal?.aborted) break;
+    let pcm = odd ? Buffer.concat([odd, chunk]) : chunk;
+    odd = null;
+    if (pcm.length % 2) {
+      odd = pcm.subarray(pcm.length - 1);
+      pcm = pcm.subarray(0, pcm.length - 1);
+    }
+    if (!pcm.length) continue;
+    total += pcm.length;
+    await onPcm?.(pcm);
+  }
+  return total;
 }
 
 export async function volcTtsV3(volc, text, signal, fetchImpl = fetch) {

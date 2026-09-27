@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { EventEmitter } from "node:events";
 import { gzipSync } from "node:zlib";
 import {
+  VOLC_ASR_PACKET_BYTES,
+  createVolcAsr,
   decodeVolcServerFrame,
   encodeVolcAudio,
   encodeVolcClientRequest,
@@ -35,6 +38,39 @@ describe("volc binary frames", () => {
     assert.equal(extractAsrText(decoded.json).text, "你好");
     assert.equal(extractAsrText(decoded.json).definite, true);
     assert.ok(encodeVolcAudio(Buffer.alloc(8)).length > 8);
+  });
+
+  it("treats a closed sentence as final even when the next, empty one is already open", () => {
+    const got = extractAsrText({
+      result: {
+        text: "用的哪家识别？",
+        utterances: [{ text: "用的哪家识别？", definite: true }, { text: "", definite: false }],
+      },
+    });
+    assert.deepEqual(got, { text: "用的哪家识别？", definite: true });
+    assert.deepEqual(extractAsrText({ result: { text: "用的", utterances: [{ text: "用的", definite: false }] } }), {
+      text: "用的",
+      definite: false,
+    });
+  });
+
+  it("sends the phone's 20ms frames to Volc in 200ms packets", async () => {
+    const sent = [];
+    const socket = new EventEmitter();
+    socket.readyState = 1;
+    socket.send = (buf) => sent.push(buf.length);
+    socket.close = () => {};
+    const asr = createVolcAsr({ volc: { asrUrl: "wss://x" }, connect: () => socket });
+    const started = asr.start();
+    socket.emit("open");
+    await started;
+    const config = sent.length;
+    for (let i = 0; i < VOLC_ASR_PACKET_BYTES / 640; i += 1) asr.push(Buffer.alloc(640));
+    assert.equal(sent.length - config, 1);
+    for (let i = 0; i < 3; i += 1) asr.push(Buffer.alloc(640));
+    assert.equal(sent.length - config, 1);
+    asr.stop();
+    assert.equal(sent.length - config, 3);
   });
 
   it("puts app id and token on ASR headers, never a placeholder secret", () => {
