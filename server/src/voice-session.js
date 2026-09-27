@@ -24,13 +24,24 @@ export function createVoiceSession({
   let bargeHoldUntil = 0;
   let acceptInterruptFinal = false;
   let turnGen = 0;
+  let assistantUtterance = "";
+  let lastFinalText = "";
+  let lastFinalAt = 0;
 
   function emit(msg) {
     if (closed) return;
     send?.(msg);
   }
 
+  function echoOfAssistant(text) {
+    const heard = String(text || "").replace(/[\s，。！？、,.!?\n]/g, "");
+    const spoken = assistantUtterance.replace(/[\s，。！？、,.!?\n]/g, "");
+    if (heard.length < 8 || spoken.length < 8) return false;
+    return spoken.includes(heard);
+  }
+
   function pushCaption(role, text, extra = {}) {
+    if (role === "assistant" && text) assistantUtterance = text;
     const caption = { type: "caption", role, text, final: Boolean(extra.final), engine: extra.engine };
     if (caption.final && text) {
       captions.push({ role, content: text, engine: extra.engine });
@@ -60,7 +71,7 @@ export function createVoiceSession({
     machine.afterBarge();
     emit({ type: "state", state: "listening" });
     bargeHoldUntil = Date.now() + 350;
-    if (reason === "asr") acceptInterruptFinal = true;
+    if (reason !== "tap") acceptInterruptFinal = true;
     return true;
   }
 
@@ -167,16 +178,22 @@ export function createVoiceSession({
     onTranscript(text, { final = false } = {}) {
       const spoken = String(text || "").trim();
       if (!spoken || !started) return;
+      if (echoOfAssistant(spoken)) return;
       if (machine.state === "speaking") bargeIn("asr");
       pushCaption("user", spoken, { final });
-      if (final) runAsk(spoken).catch(() => {});
+      if (!final) return;
+      const now = Date.now();
+      if (spoken === lastFinalText && now - lastFinalAt < 1200) return;
+      lastFinalText = spoken;
+      lastFinalAt = now;
+      runAsk(spoken).catch(() => {});
     },
     onPcm(buf) {
       if (!started || closed) return;
       asr?.push?.(buf);
     },
-    barge() {
-      if (machine.state === "speaking") bargeIn("tap");
+    barge(reason = "tap") {
+      if (machine.state === "speaking") bargeIn(reason === "tap" ? "tap" : "speech");
     },
     hangup() {
       closed = true;

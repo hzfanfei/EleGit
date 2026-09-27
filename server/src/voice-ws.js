@@ -168,7 +168,7 @@ export function attachVoiceGateway(httpServer, {
     const providers = createProviders(config, {
       onPartial: (text) => holder.session?.onTranscript(text, { final: false }),
       onFinal: (text) => holder.session?.onTranscript(text, { final: true }),
-      onSpeechStart: () => holder.session?.barge(),
+      onSpeechStart: () => holder.session?.barge("speech"),
     });
     const session = createVoiceSession({
       config,

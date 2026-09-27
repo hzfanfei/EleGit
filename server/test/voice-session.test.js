@@ -121,4 +121,115 @@ describe("createVoiceSession", () => {
     assert.deepEqual(asked, ["最近在做什么？", "换个话题"]);
     assert.equal(session.state, "speaking");
   });
+
+  it("answers the utterance that barged in by speech, even inside the hold", async () => {
+    const asked = [];
+    const session = createVoiceSession({
+      config: { ready: true, provider: "volc" },
+      send: () => {},
+      checkout: async () => ({ dest: "/tmp/octo/demo" }),
+      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      ask: async function* (opts) {
+        asked.push(opts.question);
+        yield { type: "delta", text: "先说到这里。" };
+        yield { type: "done", engine: "acp", answer: "先说到这里。" };
+      },
+      tts: async (_text, signal) => {
+        await new Promise((resolve) => {
+          const timer = setTimeout(resolve, 400);
+          signal?.addEventListener("abort", () => {
+            clearTimeout(timer);
+            resolve();
+          }, { once: true });
+        });
+        if (signal?.aborted) return Buffer.alloc(0);
+        return Buffer.from("pcm");
+      },
+    });
+
+    await session.start({ owner: "octo", repo: "demo", sessionId: "s1" });
+    session.onTranscript("最近在做什么？", { final: true });
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(session.state, "speaking");
+
+    session.barge("speech");
+    session.onTranscript("换个话题", { final: true });
+    await new Promise((r) => setTimeout(r, 40));
+
+    assert.deepEqual(asked, ["最近在做什么？", "换个话题"]);
+  });
+
+  it("drops a tap-barge echo that arrives inside the hold", async () => {
+    const asked = [];
+    const session = createVoiceSession({
+      config: { ready: true, provider: "volc" },
+      send: () => {},
+      checkout: async () => ({ dest: "/tmp/octo/demo" }),
+      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      ask: async function* (opts) {
+        asked.push(opts.question);
+        yield { type: "delta", text: "先说到这里。" };
+        yield { type: "done", engine: "acp", answer: "先说到这里。" };
+      },
+      tts: async (_text, signal) => {
+        await new Promise((resolve) => {
+          const timer = setTimeout(resolve, 400);
+          signal?.addEventListener("abort", () => {
+            clearTimeout(timer);
+            resolve();
+          }, { once: true });
+        });
+        if (signal?.aborted) return Buffer.alloc(0);
+        return Buffer.from("pcm");
+      },
+    });
+
+    await session.start({ owner: "octo", repo: "demo", sessionId: "s1" });
+    session.onTranscript("最近在做什么？", { final: true });
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(session.state, "speaking");
+
+    session.barge();
+    session.onTranscript("喇叭回声", { final: true });
+    await new Promise((r) => setTimeout(r, 40));
+
+    assert.deepEqual(asked, ["最近在做什么？"]);
+  });
+
+  it("ignores the assistant line leaking back through the mic", async () => {
+    const asked = [];
+    const session = createVoiceSession({
+      config: { ready: true, provider: "volc" },
+      send: () => {},
+      checkout: async () => ({ dest: "/tmp/octo/demo" }),
+      sessions: { resolveForChat: () => ({ id: "s1" }), cancel: async () => {} },
+      ask: async function* (opts) {
+        asked.push(opts.question);
+        yield { type: "delta", text: "仓库最近在修登录。" };
+        yield { type: "done", engine: "acp", answer: "仓库最近在修登录。" };
+      },
+      tts: async (_text, signal) => {
+        await new Promise((resolve) => {
+          const timer = setTimeout(resolve, 400);
+          signal?.addEventListener("abort", () => {
+            clearTimeout(timer);
+            resolve();
+          }, { once: true });
+        });
+        if (signal?.aborted) return Buffer.alloc(0);
+        return Buffer.from("pcm");
+      },
+    });
+
+    await session.start({ owner: "octo", repo: "demo", sessionId: "s1" });
+    session.onTranscript("最近在做什么？", { final: true });
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(session.state, "speaking");
+
+    session.onTranscript("仓库最近在修登录", { final: true });
+    await new Promise((r) => setTimeout(r, 40));
+
+    assert.deepEqual(asked, ["最近在做什么？"]);
+    assert.equal(session.state, "speaking");
+  });
 });

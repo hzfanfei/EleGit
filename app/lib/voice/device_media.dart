@@ -231,13 +231,7 @@ class DeviceVoiceMedia implements VoiceMedia {
 
   Future<void> _exitTelephonyRoute() async {
 
-    if (Platform.isAndroid && !telephonyCapture) {
-
-      await AndroidMediaAudio.resetToMediaPlayback();
-
-    }
-
-    await _preparePlaybackAudio();
+    await _preparePlaybackAudio(leaveCall: true);
 
   }
 
@@ -260,6 +254,8 @@ class DeviceVoiceMedia implements VoiceMedia {
             contentType: AndroidContentType.speech,
 
             usageType: AndroidUsageType.voiceCommunication,
+
+            audioMode: AndroidAudioMode.inCommunication,
 
             // Leaving the app must not pause the in-app call.
             audioFocus: AndroidAudioFocus.none,
@@ -314,11 +310,19 @@ class DeviceVoiceMedia implements VoiceMedia {
 
 
 
-  Future<void> _preparePlaybackAudio() async {
+  Future<void> _preparePlaybackAudio({bool leaveCall = false}) async {
+
+    if (telephonyCapture && !leaveCall) {
+
+      await _prepareCallAudio();
+
+      return;
+
+    }
 
     try {
 
-      if (Platform.isAndroid && !telephonyCapture) {
+      if (Platform.isAndroid && (leaveCall || !telephonyCapture)) {
 
         await AndroidMediaAudio.resetToMediaPlayback();
 
@@ -330,7 +334,7 @@ class DeviceVoiceMedia implements VoiceMedia {
 
           android: AudioContextAndroid(
 
-            isSpeakerphoneOn: telephonyCapture,
+            isSpeakerphoneOn: false,
 
             audioMode: AndroidAudioMode.normal,
 
