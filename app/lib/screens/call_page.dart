@@ -11,6 +11,7 @@ import '../voice/background_work.dart';
 import '../voice/device_media.dart';
 import '../voice/voice_client.dart';
 import '../voice/voice_media.dart';
+import '../widgets/wx_chrome.dart';
 
 Future<void> openVoiceCall(
   BuildContext context, {
@@ -95,7 +96,6 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
   bool _disposing = false;
   bool _backgroundHeld = false;
   bool _playing = false;
-  bool _muted = false;
   Timer? _micRetry;
   int _listenHold = 0;
   int _micEpoch = 0;
@@ -177,7 +177,6 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
       _detailOpen = false;
       _phase = 'connecting';
       _playing = false;
-      _muted = false;
       _live = true;
     });
     final allowed = await _media.requestMic();
@@ -321,7 +320,6 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
     _micSub = _media.startMic().listen((pcm) {
       frames += 1;
       _micReopens = 0;
-      if (_muted) return;
       _client?.sendPcm(pcm);
     }, onError: (_) {
       _reviveMic(epoch, started, frames);
@@ -405,7 +403,6 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
     _live = false;
     _phase = 'idle';
     _playing = false;
-    _muted = false;
     if (!_disposing && mounted) {
       setState(() {});
     }
@@ -439,185 +436,89 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
     return widget.repo?.fullName ?? '通话';
   }
 
-  /// The line being heard or spoken, the way a call shows one subtitle.
-  String get _subtitle {
-    if (_playing) {
-      if (_assistantLive.isNotEmpty) return _assistantLive;
-      return _lastCaption('assistant');
-    }
-    if (_userLive.isNotEmpty) return _userLive;
-    if (_phase == 'thinking' || _phase == 'speaking') return _lastCaption('user');
-    return '';
-  }
-
-  String _lastCaption(String role) {
-    for (final item in _captions.reversed) {
-      if (item.role == role && item.content.isNotEmpty) return item.content;
-    }
-    return '';
-  }
-
-  void _toggleMute() {
-    if (!_live) return;
-    HapticFeedback.selectionClick();
-    setState(() => _muted = !_muted);
-  }
-
   @override
   Widget build(BuildContext context) {
     final speaking = _playing;
-    final thinking = _live && !_playing && (_phase == 'thinking' || _phase == 'speaking');
-    final listening = _live && !speaking && !thinking;
-    return PopScope(
-      canPop: !_live,
-      onPopInvokedWithResult: (didPop, _) {
-        if (didPop) return;
-        hangup(pop: true);
-      },
-      child: Scaffold(
-        backgroundColor: Wx.bg,
-        body: SafeArea(
-          child: Column(
-            children: [
-              SizedBox(
-                height: 48,
-                child: Center(
-                  child: Text(
-                    _callTitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.muted),
-                  ),
-                ),
-              ),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 28),
-                  child: Column(
-                    children: [
-                      const Spacer(),
-                      _callOrb(speaking: speaking, listening: listening, thinking: thinking),
-                      const SizedBox(height: 28),
-                      Text(
-                        statusLabel,
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Wx.muted),
-                      ),
-                      if (_live && _subtitle.isNotEmpty) ...[
-                        const SizedBox(height: 16),
-                        Text(
-                          _subtitle,
-                          textAlign: TextAlign.center,
-                          maxLines: 4,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                color: Wx.text,
-                                fontSize: 20,
-                                height: 1.45,
-                              ),
+    final listening = _live && !_playing && _phase != 'thinking' && _phase != 'speaking';
+    return Scaffold(
+      body: Column(
+        children: [
+          WxPageHeader(
+            onBack: () => hangup(pop: true),
+            backTooltip: '挂断并返回',
+            title: _callTitle,
+          ),
+          const WxHairline(),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(Wx.inset, 12, Wx.inset, 8),
+              child: Column(
+                children: [
+                  const Spacer(),
+                  AnimatedBuilder(
+                    animation: _orb,
+                    builder: (context, child) {
+                      final opacity = speaking
+                          ? 0.55 + (_orb.value * 0.45)
+                          : listening
+                              ? 0.72 + (_orb.value * 0.28)
+                              : 1.0;
+                      return Opacity(opacity: opacity, child: child);
+                    },
+                    child: Container(
+                      width: 168,
+                      height: 168,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: speaking ? const Color(0x38C9845A) : Wx.raised,
+                        border: Border.all(
+                          color: speaking ? Wx.accent : Wx.hairline,
+                          width: speaking ? 2 : 1,
                         ),
-                      ],
-                      if (!_live) _faultDetail(context),
-                      const Spacer(),
-                    ],
+                      ),
+                    ),
                   ),
+                  const SizedBox(height: 28),
+                  Text(
+                    statusLabel,
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.headlineMedium,
+                  ),
+                  if (!_live) _faultDetail(context),
+                  const Spacer(),
+                  SizedBox(
+                    height: 92,
+                    child: ListView(
+                      reverse: true,
+                      children: [
+                        if (_assistantLive.isNotEmpty) _caption('问象', _assistantLive),
+                        if (_userLive.isNotEmpty) _caption('你', _userLive),
+                        for (final item in _captions.reversed.take(2))
+                          _caption(item.role == 'user' ? '你' : '问象', item.content),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const WxHairline(),
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(Wx.inset, 12, Wx.inset, 16),
+              child: SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: _live
+                      ? () => hangup(pop: true)
+                      : (_checking ? null : (_error != null || !_voiceReady ? retry : startCall)),
+                  child: Text(mainActionLabel),
                 ),
               ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(24, 8, 24, 28),
-                child: _live ? _liveControls(context) : _idleButton(),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _callOrb({required bool speaking, required bool listening, required bool thinking}) {
-    return AnimatedBuilder(
-      animation: _orb,
-      builder: (context, _) {
-        final scale = speaking ? 0.94 + _orb.value * 0.1 : 0.97 + _orb.value * 0.04;
-        return Transform.scale(
-          scale: scale,
-          child: CustomPaint(
-            size: const Size.square(220),
-            painter: _CallOrbPainter(
-              t: _orb.value,
-              listening: listening,
-              thinking: thinking,
-              speaking: speaking,
             ),
           ),
-        );
-      },
-    );
-  }
-
-  Widget _liveControls(BuildContext context) {
-    final label = Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.muted);
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        _roundControl(
-          icon: _muted ? Icons.mic_off_outlined : Icons.mic_none,
-          label: _muted ? '取消静音' : '静音',
-          labelStyle: label,
-          onTap: _toggleMute,
-        ),
-        const SizedBox(width: 56),
-        _roundControl(
-          icon: Icons.call_end,
-          label: '挂断',
-          labelStyle: label,
-          size: 76,
-          filled: const Color(0xFFE5484D),
-          iconColor: Colors.white,
-          onTap: () => hangup(pop: true),
-        ),
-      ],
-    );
-  }
-
-  Widget _roundControl({
-    required IconData icon,
-    required String label,
-    required TextStyle? labelStyle,
-    required VoidCallback onTap,
-    double size = 64,
-    Color? filled,
-    Color? iconColor,
-  }) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Material(
-          color: filled ?? Wx.raised,
-          shape: const CircleBorder(),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            customBorder: const CircleBorder(),
-            onTap: onTap,
-            child: SizedBox(
-              width: size,
-              height: size,
-              child: Icon(icon, color: iconColor ?? Wx.text, size: size > 70 ? 32 : 26),
-            ),
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(label, style: labelStyle),
-      ],
-    );
-  }
-
-  Widget _idleButton() {
-    return SizedBox(
-      width: double.infinity,
-      child: FilledButton(
-        onPressed: _checking ? null : (_error != null || !_voiceReady ? retry : startCall),
-        child: Text(mainActionLabel),
+        ],
       ),
     );
   }
@@ -669,58 +570,15 @@ class CallPageState extends State<CallPage> with SingleTickerProviderStateMixin 
     );
   }
 
-}
-
-class _CallOrbPainter extends CustomPainter {
-  _CallOrbPainter({
-    required this.t,
-    required this.listening,
-    required this.thinking,
-    required this.speaking,
-  });
-
-  final double t;
-  final bool listening;
-  final bool thinking;
-  final bool speaking;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final core = size.width * 0.22;
-    final rings = speaking ? 3 : 2;
-    for (var i = rings; i >= 1; i--) {
-      final spread = speaking ? 16.0 : listening ? 10.0 : 6.0;
-      final radius = core + i * 22 + t * spread * i;
-      final paint = Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = speaking ? 1.6 : 1
-        ..color = Wx.accent.withValues(alpha: (0.34 - i * 0.08) * (0.45 + t * 0.55));
-      canvas.drawCircle(center, radius, paint);
-    }
-    final glow = Paint()
-      ..shader = RadialGradient(
-        colors: [
-          Wx.accent.withValues(alpha: speaking ? 0.9 : thinking ? 0.5 : 0.72),
-          Wx.accent.withValues(alpha: 0.12),
-          const Color(0x00000000),
-        ],
-        stops: const [0.18, 0.62, 1],
-      ).createShader(Rect.fromCircle(center: center, radius: core * 2.2));
-    canvas.drawCircle(center, core * 2.2, glow);
-    canvas.drawCircle(center, core, Paint()..color = const Color(0xFF2A2118));
-    canvas.drawCircle(
-      center,
-      core * (0.62 + (speaking ? t * 0.16 : t * 0.05)),
-      Paint()..color = Wx.accent.withValues(alpha: speaking ? 0.95 : 0.8),
+  Widget _caption(String who, String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Text(
+        '$who  $text',
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: Theme.of(context).textTheme.labelSmall,
+      ),
     );
-  }
-
-  @override
-  bool shouldRepaint(covariant _CallOrbPainter oldDelegate) {
-    return oldDelegate.t != t ||
-        oldDelegate.listening != listening ||
-        oldDelegate.thinking != thinking ||
-        oldDelegate.speaking != speaking;
   }
 }

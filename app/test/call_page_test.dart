@@ -99,7 +99,7 @@ void main() {
     expect(find.text('在说'), findsOneWidget);
     expect(find.text('思考中'), findsNothing);
     expect(find.text('点击打断'), findsNothing);
-    expect(find.text('静音'), findsOneWidget);
+    expect(find.text('静音'), findsNothing);
 
     client.emit(VoiceEvent(type: 'state', state: 'barge'));
     client.emit(VoiceEvent(type: 'state', state: 'listening'));
