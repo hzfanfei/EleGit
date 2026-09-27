@@ -17,10 +17,11 @@ alwaysApply: true
 
 ## 顺序
 
-1. 必要测试（轻量：相关 `node --test` / `flutter test` 子集）
-2. commit → push `main`（除非用户明确不要 push）
-3. 若动了服务端 → 重启问象
-4. 若动了客户端 → 打包到静态目录，并给出 ngrok 下载链接
+1. commit → push `main`（除非用户明确不要 push）
+2. 若动了服务端 → 重启问象
+3. 若动了客户端 → 打包到静态目录，并给出 ngrok 下载链接
+
+收尾时不跑 `node --test` / `flutter test`，除非用户明确要求。
 
 ## 例外
 
