@@ -54,6 +54,8 @@ function sleep(ms, signal) {
   });
 }
 const PLAYBACK_BARGE_BYTES = 16000 * 2 * 0.25;
+/** Xiaomi echo cancel squeezes the mic; reach ASR a bit sooner during playback. */
+const PLAYBACK_BARGE_BYTES_XIAOMI = 16000 * 2 * 0.18;
 /**
  * The squeezed interruption sits under Xiaomi's speech floor, so its gate threw the
  * words away and the call went quiet. Lift it to talking level for such recognizers,
@@ -317,15 +319,26 @@ export function createVoiceSession({
     speechBytesSinceTurn += buffered.length;
     playbackUserSpeech = true;
     asr?.push?.(buffered);
+    // Xiaomi (and other endpoint ASR) waits for silence before a final; stop playback as
+    // soon as the mic proves real speech over the speaker, then answer on the final.
+    const busy = machine.state === "speaking" || machine.state === "thinking";
+    if (playbackOpen && busy) bargeIn("speech");
   }
 
   function playbackBargeRms() {
     return callBargeRms ?? PLAYBACK_BARGE_RMS;
   }
 
+  function isXiaomiStack() {
+    return config?.asrProvider === "xiaomi" || config?.provider === "xiaomi";
+  }
+
+  function playbackBargeMinBytes() {
+    return isXiaomiStack() ? PLAYBACK_BARGE_BYTES_XIAOMI : PLAYBACK_BARGE_BYTES;
+  }
+
   function playbackEchoMargin() {
-    const xiaomi = config?.asrProvider === "xiaomi" || config?.provider === "xiaomi";
-    return xiaomi ? PLAYBACK_ECHO_MARGIN_XIAOMI : PLAYBACK_ECHO_MARGIN;
+    return isXiaomiStack() ? PLAYBACK_ECHO_MARGIN_XIAOMI : PLAYBACK_ECHO_MARGIN;
   }
 
   function learnEcho(bytes, rms) {
@@ -349,7 +362,7 @@ export function createVoiceSession({
       bargeSpeechBytes += bytes.length;
       bargeHardBytes += bytes.length;
       bargeChunks.push(bytes);
-      if (bargeHardBytes < PLAYBACK_BARGE_BYTES) return;
+      if (bargeHardBytes < playbackBargeMinBytes()) return;
       flushPlaybackSpeechToAsr();
       return;
     }

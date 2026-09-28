@@ -78,6 +78,9 @@ function resolveAsr(config, hooks) {
     return createXiaomiAsr({
       xiaomi: config.xiaomi,
       pushToTalk: hooks.pushToTalk === true,
+      // Phone call: after a barge the user already stopped the answer; shorten the
+      // endpoint so the interrupt sentence reaches Agent sooner.
+      endpointSilenceMs: hooks.pushToTalk === true ? undefined : 520,
       onFinal: hooks.onFinal,
       onSpeechStart: hooks.onSpeechStart,
       onError: (detail) => hooks.onAsrError?.({ message: detail?.message, err: detail }),

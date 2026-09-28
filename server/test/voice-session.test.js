@@ -636,7 +636,7 @@ describe("createVoiceSession", () => {
     for (let i = 0; i < 15; i += 1) session.onPcm(frame(i % 3 ? 0 : 40));
     assert.equal(session.state, "speaking");
     for (let i = 0; i < 8; i += 1) session.onPcm(frame(250));
-    assert.equal(session.state, "speaking");
+    assert.equal(session.state, "listening");
     session.onTranscript("换个话题吧", { final: true });
     await new Promise((r) => setTimeout(r, 40));
     assert.deepEqual(asked, ["最近在做什么？", "换个话题吧"]);
@@ -677,7 +677,7 @@ describe("createVoiceSession", () => {
       };
       for (let i = 0; i < 15; i += 1) session.onPcm(frame(0));
       for (let i = 0; i < 4; i += 1) session.onPcm(frame(250));
-      assert.equal(session.state, "speaking");
+      assert.equal(session.state, "listening");
       session.onPcm(frame(200));
       session.onPcm(frame(0));
       session.onPcm(frame(3000));
@@ -719,7 +719,7 @@ describe("createVoiceSession", () => {
     for (let i = 0; i < 6; i += 1) session.onPcm(frame(90));
     assert.equal(session.state, "speaking");
     for (let i = 0; i < 4; i += 1) session.onPcm(frame(160));
-    assert.equal(session.state, "speaking");
+    assert.equal(session.state, "listening");
   });
 
   it("stays a few seconds ahead of the speaker and drops what a barge cut off", async () => {
@@ -809,7 +809,7 @@ describe("createVoiceSession", () => {
     session.onPcm(loud);
     session.onPcm(hole);
     session.onPcm(loud);
-    assert.equal(session.state, "speaking");
+    assert.equal(session.state, "listening");
 
     session.onTranscript("换个话题吧", { final: true });
     await new Promise((r) => setTimeout(r, 40));
