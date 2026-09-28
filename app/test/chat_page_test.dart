@@ -327,7 +327,7 @@ void main() {
     await tester.pump(const Duration(seconds: 2));
   });
 
-  testWidgets('a dropped answer offers retry and can be asked again', (tester) async {
+  testWidgets('a dropped answer waits without a retry button', (tester) async {
     final api = FakeWenxiangApi(
       streamThrows: AcceptedChatDrop(Exception('connection closed')),
     );
@@ -346,19 +346,11 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    expect(find.textContaining('连接中断了'), findsWidgets);
-    expect(find.text('重试上一问'), findsOneWidget);
-
-    api.streamThrows = null;
-    api.streamEvents = null;
-    await tester.tap(find.text('重试上一问'));
-    await tester.pump();
-    for (var i = 0; i < 30; i++) {
-      await tester.pump(const Duration(milliseconds: 100));
-      if (find.textContaining('最近在修登录').evaluate().isNotEmpty) break;
-    }
-    expect(find.textContaining('最近在修登录'), findsOneWidget);
+    expect(find.textContaining('回答会补上'), findsOneWidget);
     expect(find.text('重试上一问'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 1));
   });
 
   testWidgets('composer stays typable while a reply is streaming', (tester) async {
