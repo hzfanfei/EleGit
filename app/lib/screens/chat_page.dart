@@ -1139,6 +1139,9 @@ class _ChatPageState extends State<ChatPage> {
         if (item['partial'] == true) {
           if (activity.trim().isNotEmpty) _liveActivity.value = activity;
           if (answer.isNotEmpty) _showHeldPreview(answer);
+          if (activity.trim().isNotEmpty || answer.isNotEmpty) {
+            _setLivePhase('generate');
+          }
         } else if (answer.isNotEmpty) {
           await _placeHeldAnswer(userIndex, answer);
         }
