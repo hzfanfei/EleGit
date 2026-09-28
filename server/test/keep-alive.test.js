@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   COMPANION_ALREADY_RUNNING,
   companionIsHealthy,
+  companionNodeArgs,
   isCompanionAlreadyRunning,
   networkLikelyUp,
   nextKeepAliveDelay,
@@ -11,6 +12,12 @@ import {
 } from "../src/keep-alive-policy.js";
 
 describe("keep-alive policy", () => {
+  it("adds --watch for dev when WENXIANG_DEV_WATCH is set", () => {
+    assert.deepEqual(companionNodeArgs({}), ["src/server.js"]);
+    assert.deepEqual(companionNodeArgs({ WENXIANG_DEV_WATCH: "1" }), ["--watch", "src/server.js"]);
+    assert.deepEqual(companionNodeArgs({ WENXIANG_DEV_WATCH: "true" }), ["--watch", "src/server.js"]);
+  });
+
   it("does not restart a clean exit", () => {
     assert.equal(shouldRestartCompanion(0, null), false);
     assert.equal(shouldRestartCompanion(1, null), true);

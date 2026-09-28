@@ -5,6 +5,7 @@ import { loadLocalEnv } from "../src/env.js";
 import { envWithNodeOnPath, resolveNodeExecutable } from "../src/which.js";
 import {
   companionIsHealthy,
+  companionNodeArgs,
   isCompanionAlreadyRunning,
   networkLikelyUp,
   nextKeepAliveDelay,
@@ -171,7 +172,7 @@ async function supervise() {
 function boot() {
   if (booting) return;
   booting = true;
-  const child = spawn(nodeExe, ["src/server.js"], {
+  const child = spawn(nodeExe, companionNodeArgs(process.env), {
     cwd: root,
     stdio: "inherit",
     windowsHide: true,
