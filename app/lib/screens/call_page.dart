@@ -785,7 +785,6 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
   Widget _callStageBody(BuildContext context) {
     final line = _assistantSubtitleLine.trim();
     final speakingNow = _assistantHeadlineCaptions;
-    final headline = Theme.of(context).textTheme.headlineMedium;
     final bodyLarge = Theme.of(context).textTheme.titleLarge?.copyWith(
           height: 1.5,
           fontWeight: FontWeight.w500,
@@ -797,12 +796,6 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
         line,
         textAlign: TextAlign.start,
         style: speakingNow ? _assistantHeadlineCaptionStyle(context) : bodyLarge,
-      );
-    } else if (_live && !_thinking && statusLabel.isNotEmpty && statusLabel != '在说') {
-      centerChild = Text(
-        statusLabel,
-        textAlign: TextAlign.center,
-        style: headline?.copyWith(color: Wx.muted, fontWeight: FontWeight.w500),
       );
     } else {
       centerChild = const SizedBox.shrink();
@@ -932,7 +925,20 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
               ],
             ),
           ),
-          if (_live && (_playing || _phase == 'speaking' || _phase == 'thinking'))
+          if (_live && listening)
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Text(
+                '在听',
+                key: const Key('call-listening-under-orb'),
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: Wx.muted,
+                      fontWeight: FontWeight.w500,
+                      letterSpacing: 0.5,
+                    ),
+              ),
+            )
+          else if (_live && (_playing || _phase == 'speaking' || _phase == 'thinking'))
             Padding(
               padding: const EdgeInsets.only(top: 8),
               child: Text(
