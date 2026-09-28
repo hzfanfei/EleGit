@@ -93,6 +93,7 @@ class _ChatPageState extends State<ChatPage> {
   bool _live = false;
   bool _busy = false;
   bool _holdForAnswer = false;
+  String? _resendAfterHold;
   bool _stopped = false;
   int? _processingUserIndex;
   final List<int> _queuedUserIndices = <int>[];
@@ -555,6 +556,7 @@ class _ChatPageState extends State<ChatPage> {
         timer.cancel();
         return;
       }
+      if (_livePhase.value == 'hold') return;
       final seconds = DateTime.now().difference(sentAt).inSeconds;
       if (seconds >= 4) {
         _setLivePhase('generate');
@@ -989,8 +991,11 @@ class _ChatPageState extends State<ChatPage> {
         final landed = await _holdForServerAnswer(userIndex);
         if (!mounted) return;
         if (landed) {
+          _resendAfterHold = null;
           _typewriter.reset();
           await _persist();
+        } else if (_resendAfterHold != null) {
+          // The finally block sends once this turn has released the composer.
         } else if (_stopped) {
           _typewriter.flushNow();
           final partial = _typewriter.fullText;
@@ -1016,6 +1021,8 @@ class _ChatPageState extends State<ChatPage> {
         _showSendError(userIndex, cause);
       }
     } finally {
+      final resend = _resendAfterHold;
+      _resendAfterHold = null;
       _holdForAnswer = false;
       _processingUserIndex = null;
       _stopLivePhaseFallback();
@@ -1026,6 +1033,9 @@ class _ChatPageState extends State<ChatPage> {
           unawaited(_runSendForUserIndex(next));
         } else {
           _finishSendQueue();
+        }
+        if (resend != null && resend.isNotEmpty) {
+          unawaited(_send(resend));
         }
       }
       _jumpToLatest();
@@ -1044,8 +1054,16 @@ class _ChatPageState extends State<ChatPage> {
   void _stop() {
     if (!_busy) return;
     _stopped = true;
+    _resendAfterHold = null;
     _holdForAnswer = false;
     widget.api.cancelChat(sessionId: _sessionId);
+  }
+
+  void _retryHeldTurn() {
+    final text = _lastUser;
+    if (!_holdForAnswer || text == null || text.isEmpty) return;
+    _resendAfterHold = text;
+    _holdForAnswer = false;
   }
 
   void _showSendError(int userIndex, Object err) {
@@ -1088,6 +1106,7 @@ class _ChatPageState extends State<ChatPage> {
   /// A failed inbox poll is the same outage, so it does not end the wait.
   Future<bool> _holdForServerAnswer(int userIndex) async {
     _holdForAnswer = true;
+    _stopLivePhaseFallback();
     _setLivePhase('hold');
     final deadline = DateTime.now().add(const Duration(minutes: 12));
     while (mounted && _holdForAnswer && DateTime.now().isBefore(deadline)) {
@@ -1096,9 +1115,19 @@ class _ChatPageState extends State<ChatPage> {
         await _pullInboxIntoChat(userIndex);
       } catch (_) {}
       if (_answerAfter(userIndex)) return true;
-      await Future<void>.delayed(const Duration(seconds: 2));
+      await _waitWhileHolding(const Duration(seconds: 2));
     }
     return _answerAfter(userIndex);
+  }
+
+  Future<void> _waitWhileHolding(Duration total) async {
+    var left = total;
+    const slice = Duration(milliseconds: 250);
+    while (left > Duration.zero && mounted && _holdForAnswer) {
+      final step = left < slice ? left : slice;
+      await Future<void>.delayed(step);
+      left -= step;
+    }
   }
 
   Future<void> _pullInboxIntoChat(int userIndex) async {
@@ -1421,6 +1450,7 @@ class _ChatPageState extends State<ChatPage> {
                         engine: _liveEngine,
                         phase: _livePhase,
                         activity: _liveActivity,
+                        onDropRetry: _retryHeldTurn,
                       );
                     },
                         ),
@@ -1826,7 +1856,7 @@ String _livePhaseLabel(String phase) {
     case 'generate':
       return '生成回答…';
     case 'hold':
-      return '连接闪了一下，回答还在生成…';
+      return '连接中断了。';
     case 'connect':
     default:
       return '正在连接…';
@@ -1839,11 +1869,13 @@ class _LiveTurn extends StatelessWidget {
     required this.engine,
     required this.phase,
     required this.activity,
+    this.onDropRetry,
   });
   final ValueNotifier<String> text;
   final ValueNotifier<String?> engine;
   final ValueNotifier<String> phase;
   final ValueNotifier<String> activity;
+  final VoidCallback? onDropRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -1888,6 +1920,22 @@ class _LiveTurn extends StatelessWidget {
                     hideWhenIdle: true,
                   ),
                 ),
+              ValueListenableBuilder<String>(
+                valueListenable: phase,
+                builder: (context, livePhase, _) {
+                  if (livePhase != 'hold' || onDropRetry == null) {
+                    return const SizedBox.shrink();
+                  }
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: WxErrorPanel(
+                      error: '连接中断了。请重试。',
+                      onRetry: onDropRetry,
+                      retryLabel: '重试上一问',
+                    ),
+                  );
+                },
+              ),
             ],
           );
         },
@@ -2001,6 +2049,9 @@ class _WorkingNote extends StatelessWidget {
           valueListenable: activity,
           builder: (context, liveActivity, _) {
             if (hideWhenIdle && liveActivity.trim().isEmpty) {
+              return const SizedBox.shrink();
+            }
+            if (livePhase == 'hold' && liveActivity.trim().isEmpty) {
               return const SizedBox.shrink();
             }
             final steps = _workSteps(liveActivity, _livePhaseLabel(livePhase));

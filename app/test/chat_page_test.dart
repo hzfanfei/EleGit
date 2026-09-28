@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:wenxiang/api/wenxiang_api.dart';
 import 'package:wenxiang/models.dart';
 import 'package:wenxiang/persist/app_memory.dart';
 import 'package:wenxiang/screens/chat_page.dart';
@@ -324,6 +325,40 @@ void main() {
     expect(find.text('1秒'), findsNothing);
 
     await tester.pump(const Duration(seconds: 2));
+  });
+
+  testWidgets('a dropped answer offers retry and can be asked again', (tester) async {
+    final api = FakeWenxiangApi(
+      streamThrows: AcceptedChatDrop(Exception('connection closed')),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: ChatPage(
+          api: api,
+          repo: sampleRepo(),
+          onBack: () {},
+        ),
+      ),
+    );
+    await _pumpUntilChatReady(tester);
+    await tester.tap(find.text('这个仓库最近在做什么？'));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.textContaining('连接中断了'), findsWidgets);
+    expect(find.text('重试上一问'), findsOneWidget);
+
+    api.streamThrows = null;
+    api.streamEvents = null;
+    await tester.tap(find.text('重试上一问'));
+    await tester.pump();
+    for (var i = 0; i < 30; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+      if (find.textContaining('最近在修登录').evaluate().isNotEmpty) break;
+    }
+    expect(find.textContaining('最近在修登录'), findsOneWidget);
+    expect(find.text('重试上一问'), findsNothing);
   });
 
   testWidgets('composer stays typable while a reply is streaming', (tester) async {

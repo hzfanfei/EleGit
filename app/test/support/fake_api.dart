@@ -385,6 +385,9 @@ class FakeWenxiangApi extends WenxiangApi {
   }
 
   @override
+  Future<Map<String, dynamic>> fetchInbox() async => {'items': <Object>[]};
+
+  @override
   void cancelBookVoiceTurn() {
     cancelBookVoiceTurnCalls += 1;
   }
