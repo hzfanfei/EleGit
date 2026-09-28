@@ -89,17 +89,22 @@ void main() {
     await tester.pump();
     expect(find.textContaining('最近在做什么'), findsOneWidget);
     expect(find.byType(WxLoading), findsOneWidget);
+    expect(find.byKey(const Key('call-thinking-mist')), findsOneWidget);
+
+    client.emit(VoiceEvent(type: 'activity', text: '读·README.md'));
+    await tester.pump();
+    expect(find.textContaining('README'), findsOneWidget);
     expect(find.text('思考中'), findsNothing);
     expect(find.text('在听'), findsNothing);
 
     client.emit(VoiceEvent(type: 'state', state: 'speaking'));
     await tester.pump();
     expect(find.byType(WxLoading), findsOneWidget);
-    expect(find.text('在说'), findsNothing);
+    expect(find.bySemanticsLabel('在说'), findsNothing);
 
     client.emit(VoiceEvent(type: 'pcm', pcm: Uint8List.fromList([1, 0, 2, 0])));
     await tester.pump();
-    expect(find.text('在说'), findsOneWidget);
+    expect(find.bySemanticsLabel('在说'), findsOneWidget);
     expect(find.byType(WxLoading), findsNothing);
     expect(find.text('点击打断'), findsNothing);
     expect(find.text('静音'), findsNothing);
@@ -109,7 +114,7 @@ void main() {
     await tester.pump();
     expect(find.text('在听'), findsOneWidget);
     expect(find.text('你打断了'), findsNothing);
-    expect(find.text('在说'), findsNothing);
+    expect(find.bySemanticsLabel('在说'), findsNothing);
     expect(media.stopPlayCalls, greaterThan(0));
   });
 
@@ -138,10 +143,10 @@ void main() {
     expect(media.played, hasLength(1));
     expect(find.text('点击打断'), findsNothing);
 
-    await tester.tap(find.text('在说'));
+    await tester.tap(find.byKey(const Key('call-status-slot')));
     await tester.pump();
     expect(client.bargeCalls, 0);
-    expect(find.text('在说'), findsOneWidget);
+    expect(find.bySemanticsLabel('在说'), findsOneWidget);
     expect(media.stopPlayCalls, 0);
 
     client.emit(VoiceEvent(type: 'pcm', pcm: Uint8List.fromList([3, 0, 4, 0])));
@@ -241,13 +246,13 @@ void main() {
     client.emit(VoiceEvent(type: 'pcm', pcm: Uint8List.fromList([1, 0, 2, 0])));
     client.emit(VoiceEvent(type: 'state', state: 'listening'));
     await tester.pump();
-    expect(find.text('在说'), findsOneWidget);
+    expect(find.bySemanticsLabel('在说'), findsOneWidget);
     expect(find.text('在听'), findsNothing);
 
     media.releasePlayback();
     await tester.pump();
     expect(find.text('在听'), findsOneWidget);
-    expect(find.text('在说'), findsNothing);
+    expect(find.bySemanticsLabel('在说'), findsNothing);
     expect(client.playedCalls, 1);
   });
 
@@ -273,18 +278,18 @@ void main() {
     client.emit(VoiceEvent(type: 'state', state: 'speaking'));
     client.emit(VoiceEvent(type: 'pcm', pcm: Uint8List.fromList([1, 0, 2, 0])));
     await tester.pump();
-    expect(find.text('在说'), findsOneWidget);
+    expect(find.bySemanticsLabel('在说'), findsOneWidget);
 
     await tester.pump(const Duration(milliseconds: 300));
-    expect(find.text('在说'), findsOneWidget);
+    expect(find.bySemanticsLabel('在说'), findsOneWidget);
 
     await tester.pump(const Duration(milliseconds: 500));
-    expect(find.text('在说'), findsNothing);
+    expect(find.bySemanticsLabel('在说'), findsNothing);
     expect(find.byType(WxLoading), findsOneWidget);
 
     client.emit(VoiceEvent(type: 'pcm', pcm: Uint8List.fromList([3, 0, 4, 0])));
     await tester.pump();
-    expect(find.text('在说'), findsOneWidget);
+    expect(find.bySemanticsLabel('在说'), findsOneWidget);
 
     client.emit(VoiceEvent(type: 'state', state: 'listening'));
     await tester.pump();

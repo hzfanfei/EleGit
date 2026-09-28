@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:typed_data';
+import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -88,6 +89,12 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
     vsync: this,
     duration: const Duration(milliseconds: 1400),
   );
+  late final AnimationController _thinkMistScroll = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 14),
+  );
+
+  final List<String> _thinkMistLines = [];
 
   String _phase = 'idle';
   String? _error;
@@ -139,6 +146,26 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
     _assistantPreview = '';
     _segmentCaption = '';
     _voiceCaption = '';
+  }
+
+  void _clearThinkMist() {
+    _thinkMistLines.clear();
+    if (_thinkMistScroll.isAnimating) _thinkMistScroll.stop();
+  }
+
+  void _pushThinkMistLine(String raw) {
+    final line = raw.trim();
+    if (line.isEmpty) return;
+    if (_thinkMistLines.isNotEmpty && _thinkMistLines.last == line) return;
+    _thinkMistLines.add(line);
+    if (_thinkMistLines.length > 20) {
+      _thinkMistLines.removeRange(0, _thinkMistLines.length - 20);
+    }
+  }
+
+  void _armThinkMist() {
+    _clearThinkMist();
+    if (!_thinkMistScroll.isAnimating) _thinkMistScroll.repeat();
   }
 
   void _onCaptionSegment(String text) {
@@ -340,6 +367,10 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
       _applyState(_mapState(event.state!));
       return;
     }
+    if (event.type == 'activity') {
+      setState(() => _pushThinkMistLine(event.text));
+      return;
+    }
     if (event.type == 'caption' && event.text.isNotEmpty) {
       setState(() {
         if (event.role == 'user') {
@@ -442,6 +473,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
   void _applyState(String next) {
     if (next == 'barge') {
       _cancelPlaybackEnd();
+      _clearThinkMist();
       setState(() {
         _phase = 'listening';
         _playing = false;
@@ -471,6 +503,10 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
         _answerAudioDone = false;
         _playbackEndPending = false;
         _clearAssistantSubtitle();
+        _armThinkMist();
+      }
+      if (next == 'listening' || next == 'barge') {
+        _clearThinkMist();
       }
       if (next == 'listening' || next == 'thinking' || next == 'audio_done') {
         _playing = false;
@@ -708,6 +744,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
     if (widget.media == null) _media.dispose();
     _orb.dispose();
     _ripple.dispose();
+    _thinkMistScroll.dispose();
     super.dispose();
   }
 
@@ -720,15 +757,47 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
 
   bool get _thinking => statusLabel == '思考中';
 
-  /// 思考中 is the breathing seal inside the orb, so the label goes blank. The slot keeps
-  /// one height during a call so 在听/在说 do not jump.
+  bool get _speakingStatus => _live && _playing;
+
+  /// 思考中 is the breathing seal inside the orb, so the label goes blank. While playing,
+  /// the assistant subtitle replaces the old「在说」headline in this slot.
   Widget _status(BuildContext context) {
-    final style = Theme.of(context).textTheme.headlineMedium;
-    final lineHeight = (style?.fontSize ?? 28) * (style?.height ?? 1.2);
+    final headline = Theme.of(context).textTheme.headlineMedium;
+    final headlineLine =
+        (headline?.fontSize ?? 28) * (headline?.height ?? 1.2);
+    if (_speakingStatus) {
+      final line = _assistantSubtitleLine.trim();
+      final subtitleStyle = Theme.of(context).textTheme.titleMedium?.copyWith(
+            height: 1.45,
+            fontWeight: FontWeight.w500,
+          );
+      final subtitleLine = (subtitleStyle?.fontSize ?? 16) * (subtitleStyle?.height ?? 1.45);
+      final slotH = line.isEmpty ? headlineLine : subtitleLine * 4;
+      return Semantics(
+        label: '在说',
+        container: true,
+        child: SizedBox(
+          key: const Key('call-status-slot'),
+          height: slotH,
+          child: Center(
+            child: line.isEmpty
+                ? null
+                : Text(
+                    line,
+                    textAlign: TextAlign.center,
+                    maxLines: 4,
+                    overflow: TextOverflow.ellipsis,
+                    style: subtitleStyle,
+                  ),
+          ),
+        ),
+      );
+    }
     return SizedBox(
-      height: _live ? lineHeight : null,
+      key: const Key('call-status-slot'),
+      height: _live ? headlineLine : null,
       child: Center(
-        child: _thinking ? null : Text(statusLabel, textAlign: TextAlign.center, style: style),
+        child: _thinking ? null : Text(statusLabel, textAlign: TextAlign.center, style: headline),
       ),
     );
   }
@@ -800,7 +869,20 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
                               ? Semantics(
                                   label: statusLabel,
                                   excludeSemantics: true,
-                                  child: const WxLoading(size: 56),
+                                  child: Stack(
+                                    alignment: Alignment.center,
+                                    clipBehavior: Clip.none,
+                                    children: [
+                                      ClipOval(
+                                        child: _CallThinkingMist(
+                                          key: const Key('call-thinking-mist'),
+                                          lines: _thinkMistLines,
+                                          scroll: _thinkMistScroll,
+                                        ),
+                                      ),
+                                      const WxLoading(size: 56),
+                                    ],
+                                  ),
                                 )
                               : null,
                         ),
@@ -906,7 +988,8 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
   Widget _subtitlePanel(BuildContext context) {
     final userLine = _userSubtitleLine;
     final assistantLine = _assistantSubtitleLine;
-    if (userLine.isEmpty && assistantLine.isEmpty) {
+    final showAssistantHere = assistantLine.isNotEmpty && !_speakingStatus;
+    if (userLine.isEmpty && !showAssistantHere) {
       return const SizedBox(height: 88);
     }
     return SizedBox(
@@ -922,7 +1005,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
               userLine,
               live: _userLive.isNotEmpty,
             ),
-          if (assistantLine.isNotEmpty)
+          if (showAssistantHere)
             _subtitleLine(
               context,
               '问象',
@@ -953,6 +1036,89 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
               color: dim ? Wx.muted : null,
               fontWeight: live ? FontWeight.w500 : FontWeight.normal,
             ),
+      ),
+    );
+  }
+}
+
+/// Soft, blurred tool/thought lines scroll behind the seal while the agent works.
+class _CallThinkingMist extends StatelessWidget {
+  const _CallThinkingMist({super.key, required this.lines, required this.scroll});
+
+  final List<String> lines;
+  final Animation<double> scroll;
+
+  static const _placeholders = [
+    '理解你的问题',
+    '检索仓库与进度',
+    '读文件 · 搜索 · 终端',
+    '整理可口语化的回答',
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final source = lines.isEmpty ? _placeholders : lines;
+    final doubled = [...source, ...source];
+    const rowH = 18.0;
+    final blockH = source.length * rowH;
+    final textStyle = Theme.of(context).textTheme.labelSmall?.copyWith(
+          fontSize: 9.5,
+          height: 1.35,
+          letterSpacing: 0.2,
+          color: Wx.muted.withValues(alpha: 0.72),
+        );
+    return SizedBox(
+      width: 168,
+      height: 168,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: RadialGradient(
+            colors: [
+              Wx.accent.withValues(alpha: 0.06),
+              Wx.surface.withValues(alpha: 0.0),
+            ],
+            radius: 0.92,
+          ),
+        ),
+        child: AnimatedBuilder(
+          animation: scroll,
+          builder: (context, _) {
+            final y = -scroll.value * blockH;
+            return ClipRect(
+              child: Transform.translate(
+                offset: Offset(0, y),
+                child: ImageFiltered(
+                  imageFilter: ImageFilter.blur(sigmaX: 2.2, sigmaY: 2.2),
+                  child: Opacity(
+                    opacity: 0.42,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 22),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          for (final line in doubled)
+                            SizedBox(
+                              height: rowH,
+                              child: Align(
+                                alignment: Alignment.centerLeft,
+                                child: Text(
+                                  line,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.fade,
+                                  softWrap: false,
+                                  style: textStyle,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
       ),
     );
   }
