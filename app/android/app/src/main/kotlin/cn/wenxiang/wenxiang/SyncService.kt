@@ -207,6 +207,7 @@ class SyncService : Service() {
             .setContentTitle("问象通知已开启")
             .setContentText("后台保持连接，确保任务完成时推送")
             .setSmallIcon(R.drawable.ic_stat_wenxiang)
+            .setLargeIcon(NotificationIcons.largeIconBitmap(this))
             .setOngoing(true)
             .setPriority(Notification.PRIORITY_LOW)
             .setCategory(Notification.CATEGORY_SERVICE)

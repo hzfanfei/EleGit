@@ -11,6 +11,11 @@ function isPng(buf) {
   return buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
 }
 
+function androidVectorPaths(rel) {
+  const xml = readFileSync(path.join(root, rel), "utf8");
+  return [...xml.matchAll(/android:pathData="([^"]+)"/g)].map((m) => m[1]);
+}
+
 describe("问象 launcher mark", () => {
   it("paints the seal in ink and ochre, not Flutter blue", () => {
     const shot = sampleMark(64);
@@ -48,5 +53,15 @@ describe("问象 launcher mark", () => {
     const web = readFileSync(path.join(root, "app/web/icons/Icon-192.png"));
     assert.equal(web.readUInt32BE(16), 192);
     assert.equal(web[25], 6, "RGBA mark, not the RGB Flutter logo");
+  });
+
+  it("keeps Android notification small icon aligned with launcher foreground", () => {
+    const launcher = androidVectorPaths(
+      "app/android/app/src/main/res/drawable/ic_launcher_foreground.xml",
+    );
+    const stat = androidVectorPaths(
+      "app/android/app/src/main/res/drawable/ic_stat_wenxiang.xml",
+    );
+    assert.deepEqual(stat, launcher);
   });
 });
