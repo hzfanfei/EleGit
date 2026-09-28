@@ -781,52 +781,159 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
         );
   }
 
-  /// Dedicated flex region so long captions scroll instead of clipping against the user panel.
-  Widget _assistantHeadlineCaption(BuildContext context) {
+  /// Bottom stage: status when idle, large scrollable caption while speaking.
+  Widget _callStageBody(BuildContext context) {
     final line = _assistantSubtitleLine.trim();
-    final style = _assistantHeadlineCaptionStyle(context);
+    final speakingNow = _assistantHeadlineCaptions;
+    final headline = Theme.of(context).textTheme.headlineMedium;
+    final bodyLarge = Theme.of(context).textTheme.titleLarge?.copyWith(
+          height: 1.5,
+          fontWeight: FontWeight.w500,
+        );
+
+    Widget centerChild;
+    if (line.isNotEmpty) {
+      centerChild = Text(
+        line,
+        textAlign: TextAlign.start,
+        style: speakingNow ? _assistantHeadlineCaptionStyle(context) : bodyLarge,
+      );
+    } else if (_live && !_thinking && statusLabel.isNotEmpty && statusLabel != '在说') {
+      centerChild = Text(
+        statusLabel,
+        textAlign: TextAlign.center,
+        style: headline?.copyWith(color: Wx.muted, fontWeight: FontWeight.w500),
+      );
+    } else {
+      centerChild = const SizedBox.shrink();
+    }
+
     return Semantics(
-      label: line.isEmpty ? '问象在说' : line,
+      label: line.isEmpty && speakingNow ? '问象在说' : (line.isEmpty ? null : line),
       container: true,
       child: KeyedSubtree(
         key: const Key('call-status-slot'),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(2, 4, 2, 16),
-          child: line.isEmpty
-              ? const SizedBox.expand()
-              : LayoutBuilder(
-                  builder: (context, constraints) {
-                    return SingleChildScrollView(
-                      physics: const ClampingScrollPhysics(),
-                      child: ConstrainedBox(
-                        constraints: BoxConstraints(minHeight: constraints.maxHeight),
-                        child: Align(
-                          alignment: Alignment.topCenter,
-                          child: Text(
-                            line,
-                            textAlign: TextAlign.center,
-                            style: style,
-                          ),
-                        ),
-                      ),
-                    );
-                  },
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              physics: const ClampingScrollPhysics(),
+              padding: const EdgeInsets.fromLTRB(2, 4, 2, 20),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight - 24),
+                child: Align(
+                  alignment: line.isNotEmpty ? Alignment.topLeft : Alignment.center,
+                  child: centerChild,
                 ),
+              ),
+            );
+          },
         ),
       ),
     );
   }
 
-  /// 在听 / 思考中 / 未接通时的单行状态；口播字幕见 [_assistantHeadlineCaption]。
-  Widget _status(BuildContext context) {
-    final headline = Theme.of(context).textTheme.headlineMedium;
-    final headlineLine =
-        (headline?.fontSize ?? 28) * (headline?.height ?? 1.2);
+  Widget _callTextStage(BuildContext context) {
+    return Expanded(
+      child: Padding(
+        padding: const EdgeInsets.only(top: 18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(child: _callStageBody(context)),
+            if (!_live) _faultDetail(context),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static const _orbSize = 168.0;
+  static const _orbBlockHeight = 196.0;
+
+  Widget _callOrbBlock(BuildContext context, {required bool speaking, required bool listening}) {
     return SizedBox(
-      key: const Key('call-status-slot'),
-      height: _live ? headlineLine : null,
-      child: Center(
-        child: _thinking ? null : Text(statusLabel, textAlign: TextAlign.center, style: headline),
+      height: _orbBlockHeight,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          GestureDetector(
+            onDoubleTap: _userTapBarge,
+            child: Stack(
+              alignment: Alignment.center,
+              clipBehavior: Clip.none,
+              children: [
+                if (_voiceLevel > 0)
+                  SizedBox(
+                    key: const Key('call-voice-ripple'),
+                    width: _orbSize,
+                    height: _orbSize,
+                    child: AnimatedBuilder(
+                      animation: _ripple,
+                      builder: (context, _) => CustomPaint(
+                        painter: _VoiceRipplePainter(
+                          t: _ripple.value,
+                          level: _voiceLevel,
+                          color: Wx.accent,
+                        ),
+                      ),
+                    ),
+                  ),
+                AnimatedBuilder(
+                  animation: _orb,
+                  builder: (context, child) {
+                    final opacity = speaking
+                        ? 0.55 + (_orb.value * 0.45)
+                        : listening
+                            ? 0.72 + (_orb.value * 0.45)
+                            : 1.0;
+                    return Opacity(opacity: opacity, child: child);
+                  },
+                  child: Container(
+                    width: _orbSize,
+                    height: _orbSize,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: speaking ? const Color(0x32C9845A) : Wx.raised.withValues(alpha: 0.85),
+                      border: Border.all(
+                        color: speaking ? Wx.accent.withValues(alpha: 0.85) : Wx.hairline.withValues(alpha: 0.65),
+                        width: 1,
+                      ),
+                    ),
+                    alignment: Alignment.center,
+                    child: _thinking
+                        ? Semantics(
+                            label: statusLabel,
+                            excludeSemantics: true,
+                            child: Stack(
+                              alignment: Alignment.center,
+                              clipBehavior: Clip.none,
+                              children: [
+                                ClipOval(
+                                  child: _CallThinkingMist(
+                                    key: const Key('call-thinking-mist'),
+                                    lines: _thinkMistLines,
+                                    scroll: _thinkMistScroll,
+                                  ),
+                                ),
+                                const WxLoading(size: 56),
+                              ],
+                            ),
+                          )
+                        : null,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (_live && (_playing || _phase == 'speaking' || _phase == 'thinking'))
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                '双击球打断',
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.faint),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -846,106 +953,14 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
           const WxHairline(),
           Expanded(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(Wx.inset, 8, Wx.inset, 4),
+              padding: const EdgeInsets.fromLTRB(Wx.inset, 10, Wx.inset, 6),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  _userTypingCorner(context),
-                  Expanded(
-                    flex: 7,
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.start,
-                      children: [
-                        const SizedBox(height: 6),
-                        GestureDetector(
-                          onDoubleTap: _userTapBarge,
-                          child: Stack(
-                    alignment: Alignment.center,
-                    clipBehavior: Clip.none,
-                    children: [
-                      if (_voiceLevel > 0)
-                        SizedBox(
-                          key: const Key('call-voice-ripple'),
-                          width: 168,
-                          height: 168,
-                          child: AnimatedBuilder(
-                            animation: _ripple,
-                            builder: (context, _) => CustomPaint(
-                              painter: _VoiceRipplePainter(
-                                t: _ripple.value,
-                                level: _voiceLevel,
-                                color: Wx.accent,
-                              ),
-                            ),
-                          ),
-                        ),
-                      AnimatedBuilder(
-                        animation: _orb,
-                        builder: (context, child) {
-                          final opacity = speaking
-                              ? 0.55 + (_orb.value * 0.45)
-                              : listening
-                                  ? 0.72 + (_orb.value * 0.28)
-                                  : 1.0;
-                          return Opacity(opacity: opacity, child: child);
-                        },
-                        child: Container(
-                          width: 168,
-                          height: 168,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: speaking ? const Color(0x38C9845A) : Wx.raised,
-                            border: Border.all(
-                              color: speaking ? Wx.accent : Wx.hairline,
-                              width: speaking ? 2 : 1,
-                            ),
-                          ),
-                          alignment: Alignment.center,
-                          child: _thinking
-                              ? Semantics(
-                                  label: statusLabel,
-                                  excludeSemantics: true,
-                                  child: Stack(
-                                    alignment: Alignment.center,
-                                    clipBehavior: Clip.none,
-                                    children: [
-                                      ClipOval(
-                                        child: _CallThinkingMist(
-                                          key: const Key('call-thinking-mist'),
-                                          lines: _thinkMistLines,
-                                          scroll: _thinkMistScroll,
-                                        ),
-                                      ),
-                                      const WxLoading(size: 56),
-                                    ],
-                                  ),
-                                )
-                              : null,
-                        ),
-                      ),
-                    ],
-                  ),
-                        ),
-                        if (_live && (_playing || _phase == 'speaking' || _phase == 'thinking'))
-                          Padding(
-                            padding: const EdgeInsets.only(top: 10),
-                            child: Text(
-                              '双击球打断',
-                              style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.muted),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                  if (_assistantHeadlineCaptions)
-                    Expanded(flex: 8, child: _assistantHeadlineCaption(context))
-                  else ...[
-                    const SizedBox(height: 16),
-                    _status(context),
-                  ],
-                  if (!_live) _faultDetail(context),
-                  _subtitlePanel(context),
-                  const Spacer(flex: 5),
+                  _userSpeechStrip(context),
+                  const SizedBox(height: 12),
+                  _callOrbBlock(context, speaking: speaking, listening: listening),
+                  _callTextStage(context),
                 ],
               ),
             ),
@@ -1036,11 +1051,12 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
     return raw;
   }
 
-  Widget _userTypingCorner(BuildContext context) {
+  Widget _userSpeechStrip(BuildContext context) {
     final line = _userCornerLine();
-    if (line.isEmpty) return const SizedBox(height: 4);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+    final liveStt = _userLive.isNotEmpty;
+    final body = Theme.of(context).textTheme.bodyMedium;
+    return SizedBox(
+      height: 38,
       child: Align(
         alignment: Alignment.centerLeft,
         child: Text(
@@ -1049,11 +1065,13 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           textAlign: TextAlign.left,
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                height: 1.4,
-                color: Wx.muted,
-                fontWeight: _userLive.isNotEmpty ? FontWeight.w500 : FontWeight.normal,
-              ),
+          style: body?.copyWith(
+            height: 1.35,
+            color: line.isEmpty
+                ? Wx.faint.withValues(alpha: _live ? 0.45 : 0.25)
+                : (liveStt ? Wx.text : Wx.muted),
+            fontWeight: liveStt ? FontWeight.w600 : FontWeight.normal,
+          ),
         ),
       ),
     );
@@ -1065,52 +1083,6 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
     return _assistantPreview;
   }
 
-  Widget _subtitlePanel(BuildContext context) {
-    final assistantLine = _assistantSubtitleLine;
-    final showAssistantHere = assistantLine.isNotEmpty && !_assistantHeadlineCaptions;
-    if (!showAssistantHere) {
-      return SizedBox(height: _assistantHeadlineCaptions ? 8 : 36);
-    }
-    return SizedBox(
-      height: 132,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.end,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _subtitleLine(
-            context,
-            '问象',
-            assistantLine,
-            live: true,
-            dim: _voiceCaption.isEmpty && _assistantPreview.isNotEmpty,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _subtitleLine(
-    BuildContext context,
-    String who,
-    String text, {
-    bool live = false,
-    bool dim = false,
-    int maxLines = 4,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Text(
-        '$who  $text',
-        maxLines: maxLines,
-        overflow: TextOverflow.ellipsis,
-        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              height: 1.45,
-              color: dim ? Wx.muted : null,
-              fontWeight: live ? FontWeight.w500 : FontWeight.normal,
-            ),
-      ),
-    );
-  }
 }
 
 /// Soft, blurred tool/thought lines scroll behind the seal while the agent works.
