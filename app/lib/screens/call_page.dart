@@ -791,7 +791,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
       child: KeyedSubtree(
         key: const Key('call-status-slot'),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(2, 8, 2, 28),
+          padding: const EdgeInsets.fromLTRB(2, 4, 2, 16),
           child: line.isEmpty
               ? const SizedBox.expand()
               : LayoutBuilder(
@@ -801,7 +801,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
                       child: ConstrainedBox(
                         constraints: BoxConstraints(minHeight: constraints.maxHeight),
                         child: Align(
-                          alignment: Alignment.center,
+                          alignment: Alignment.topCenter,
                           child: Text(
                             line,
                             textAlign: TextAlign.center,
@@ -846,16 +846,17 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
           const WxHairline(),
           Expanded(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(Wx.inset, 12, Wx.inset, 8),
+              padding: const EdgeInsets.fromLTRB(Wx.inset, 8, Wx.inset, 4),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   _userTypingCorner(context),
                   Expanded(
-                    flex: 8,
+                    flex: 7,
                     child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisAlignment: MainAxisAlignment.start,
                       children: [
+                        const SizedBox(height: 6),
                         GestureDetector(
                           onDoubleTap: _userTapBarge,
                           child: Stack(
@@ -937,13 +938,14 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
                     ),
                   ),
                   if (_assistantHeadlineCaptions)
-                    Expanded(flex: 10, child: _assistantHeadlineCaption(context))
+                    Expanded(flex: 8, child: _assistantHeadlineCaption(context))
                   else ...[
-                    const SizedBox(height: 28),
+                    const SizedBox(height: 16),
                     _status(context),
                   ],
                   if (!_live) _faultDetail(context),
                   _subtitlePanel(context),
+                  const Spacer(flex: 5),
                 ],
               ),
             ),
@@ -1067,7 +1069,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
     final assistantLine = _assistantSubtitleLine;
     final showAssistantHere = assistantLine.isNotEmpty && !_assistantHeadlineCaptions;
     if (!showAssistantHere) {
-      return SizedBox(height: _assistantHeadlineCaptions ? 12 : 88);
+      return SizedBox(height: _assistantHeadlineCaptions ? 8 : 36);
     }
     return SizedBox(
       height: 132,
