@@ -759,22 +759,25 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
 
   bool get _speakingStatus => _live && _playing;
 
-  /// 思考中 is the breathing seal inside the orb, so the label goes blank. While playing,
-  /// the assistant subtitle replaces the old「在说」headline in this slot.
+  /// Whole assistant reply (including short gaps between TTS chunks): headline shows captions, not「在说」.
+  bool get _assistantHeadlineCaptions => _live && (_playing || _phase == 'speaking');
+
+  /// 思考中 is the breathing seal inside the orb, so the label goes blank. While the assistant
+  /// is speaking, her live caption replaces the old「在说」headline in this slot.
   Widget _status(BuildContext context) {
     final headline = Theme.of(context).textTheme.headlineMedium;
     final headlineLine =
         (headline?.fontSize ?? 28) * (headline?.height ?? 1.2);
-    if (_speakingStatus) {
+    if (_assistantHeadlineCaptions) {
       final line = _assistantSubtitleLine.trim();
-      final subtitleStyle = Theme.of(context).textTheme.titleMedium?.copyWith(
+      final subtitleStyle = headline?.copyWith(
             height: 1.45,
             fontWeight: FontWeight.w500,
           );
-      final subtitleLine = (subtitleStyle?.fontSize ?? 16) * (subtitleStyle?.height ?? 1.45);
+      final subtitleLine = (subtitleStyle?.fontSize ?? 22) * (subtitleStyle?.height ?? 1.45);
       final slotH = line.isEmpty ? headlineLine : subtitleLine * 4;
       return Semantics(
-        label: '在说',
+        label: line.isEmpty ? '问象在说' : line,
         container: true,
         child: SizedBox(
           key: const Key('call-status-slot'),
@@ -982,13 +985,14 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
 
   String get _assistantSubtitleLine {
     if (_voiceCaption.isNotEmpty) return _voiceCaption;
+    if (_segmentCaption.isNotEmpty) return _segmentCaption;
     return _assistantPreview;
   }
 
   Widget _subtitlePanel(BuildContext context) {
     final userLine = _userSubtitleLine;
     final assistantLine = _assistantSubtitleLine;
-    final showAssistantHere = assistantLine.isNotEmpty && !_speakingStatus;
+    final showAssistantHere = assistantLine.isNotEmpty && !_assistantHeadlineCaptions;
     if (userLine.isEmpty && !showAssistantHere) {
       return const SizedBox(height: 88);
     }
