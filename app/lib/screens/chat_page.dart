@@ -1838,7 +1838,7 @@ String _livePhaseLabel(String phase) {
     case 'generate':
       return '生成回答…';
     case 'hold':
-      return '连接断了，回答会补上。';
+      return '';
     case 'connect':
     default:
       return '正在连接…';

@@ -346,8 +346,9 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    expect(find.textContaining('回答会补上'), findsOneWidget);
+    expect(find.textContaining('连接断了'), findsNothing);
     expect(find.text('重试上一问'), findsNothing);
+    expect(find.byKey(const Key('wx-working-mark')), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 1));
