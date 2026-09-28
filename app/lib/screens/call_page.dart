@@ -893,11 +893,18 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
                     height: _orbSize,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: speaking ? const Color(0x32C9845A) : Wx.raised.withValues(alpha: 0.85),
+                      color: speaking ? const Color(0x38C9845A) : Wx.raised,
                       border: Border.all(
-                        color: speaking ? Wx.accent.withValues(alpha: 0.85) : Wx.hairline.withValues(alpha: 0.65),
-                        width: 1,
+                        color: speaking ? Wx.accent : Wx.hairline,
+                        width: speaking ? 2 : 1,
                       ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Wx.accent.withValues(alpha: speaking ? 0.12 : 0.04),
+                          blurRadius: speaking ? 28 : 16,
+                          spreadRadius: 0,
+                        ),
+                      ],
                     ),
                     alignment: Alignment.center,
                     child: _thinking
