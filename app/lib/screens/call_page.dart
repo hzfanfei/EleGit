@@ -774,40 +774,54 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
   /// Whole assistant reply (including short gaps between TTS chunks): headline shows captions, not「在说」.
   bool get _assistantHeadlineCaptions => _live && (_playing || _phase == 'speaking');
 
-  /// 思考中 is the breathing seal inside the orb, so the label goes blank. While the assistant
-  /// is speaking, her live caption replaces the old「在说」headline in this slot.
+  TextStyle? _assistantHeadlineCaptionStyle(BuildContext context) {
+    return Theme.of(context).textTheme.headlineMedium?.copyWith(
+          height: 1.45,
+          fontWeight: FontWeight.w500,
+        );
+  }
+
+  /// Dedicated flex region so long captions scroll instead of clipping against the user panel.
+  Widget _assistantHeadlineCaption(BuildContext context) {
+    final line = _assistantSubtitleLine.trim();
+    final style = _assistantHeadlineCaptionStyle(context);
+    return Semantics(
+      label: line.isEmpty ? '问象在说' : line,
+      container: true,
+      child: KeyedSubtree(
+        key: const Key('call-status-slot'),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(2, 12, 2, 6),
+          child: line.isEmpty
+              ? const SizedBox.expand()
+              : LayoutBuilder(
+                  builder: (context, constraints) {
+                    return SingleChildScrollView(
+                      physics: const ClampingScrollPhysics(),
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                        child: Align(
+                          alignment: Alignment.center,
+                          child: Text(
+                            line,
+                            textAlign: TextAlign.center,
+                            style: style,
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ),
+    );
+  }
+
+  /// 在听 / 思考中 / 未接通时的单行状态；口播字幕见 [_assistantHeadlineCaption]。
   Widget _status(BuildContext context) {
     final headline = Theme.of(context).textTheme.headlineMedium;
     final headlineLine =
         (headline?.fontSize ?? 28) * (headline?.height ?? 1.2);
-    if (_assistantHeadlineCaptions) {
-      final line = _assistantSubtitleLine.trim();
-      final subtitleStyle = headline?.copyWith(
-            height: 1.45,
-            fontWeight: FontWeight.w500,
-          );
-      final subtitleLine = (subtitleStyle?.fontSize ?? 22) * (subtitleStyle?.height ?? 1.45);
-      final slotH = line.isEmpty ? headlineLine : subtitleLine * 4;
-      return Semantics(
-        label: line.isEmpty ? '问象在说' : line,
-        container: true,
-        child: SizedBox(
-          key: const Key('call-status-slot'),
-          height: slotH,
-          child: Center(
-            child: line.isEmpty
-                ? null
-                : Text(
-                    line,
-                    textAlign: TextAlign.center,
-                    maxLines: 4,
-                    overflow: TextOverflow.ellipsis,
-                    style: subtitleStyle,
-                  ),
-          ),
-        ),
-      );
-    }
     return SizedBox(
       key: const Key('call-status-slot'),
       height: _live ? headlineLine : null,
@@ -835,10 +849,14 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
               padding: const EdgeInsets.fromLTRB(Wx.inset, 12, Wx.inset, 8),
               child: Column(
                 children: [
-                  const Spacer(),
-                  GestureDetector(
-                    onDoubleTap: _userTapBarge,
-                    child: Stack(
+                  Expanded(
+                    flex: 11,
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        GestureDetector(
+                          onDoubleTap: _userTapBarge,
+                          child: Stack(
                     alignment: Alignment.center,
                     clipBehavior: Clip.none,
                     children: [
@@ -904,20 +922,26 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
                       ),
                     ],
                   ),
-                  ),
-                  if (_live && (_playing || _phase == 'speaking' || _phase == 'thinking'))
-                    Padding(
-                      padding: const EdgeInsets.only(top: 10),
-                      child: Text(
-                        '双击球打断',
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.muted),
-                      ),
+                        ),
+                        if (_live && (_playing || _phase == 'speaking' || _phase == 'thinking'))
+                          Padding(
+                            padding: const EdgeInsets.only(top: 10),
+                            child: Text(
+                              '双击球打断',
+                              style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.muted),
+                            ),
+                          ),
+                      ],
                     ),
-                  const SizedBox(height: 28),
-                  _status(context),
+                  ),
+                  if (_assistantHeadlineCaptions)
+                    Expanded(flex: 6, child: _assistantHeadlineCaption(context))
+                  else ...[
+                    const SizedBox(height: 28),
+                    _status(context),
+                  ],
                   if (!_live) _faultDetail(context),
-                  const Spacer(),
-                  _subtitlePanel(context),
+                  _subtitlePanel(context, compact: _assistantHeadlineCaptions),
                 ],
               ),
             ),
@@ -1001,25 +1025,34 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
     return _assistantPreview;
   }
 
-  Widget _subtitlePanel(BuildContext context) {
+  Widget _subtitlePanel(BuildContext context, {bool compact = false}) {
     final userLine = _userSubtitleLine;
     final assistantLine = _assistantSubtitleLine;
     final showAssistantHere = assistantLine.isNotEmpty && !_assistantHeadlineCaptions;
+    final emptyReserve = compact ? 56.0 : 88.0;
+    final panelH = compact && !showAssistantHere ? 80.0 : 132.0;
     if (userLine.isEmpty && !showAssistantHere) {
-      return const SizedBox(height: 88);
+      return SizedBox(height: emptyReserve);
     }
     return SizedBox(
-      height: 132,
+      height: panelH,
       child: Column(
         mainAxisAlignment: MainAxisAlignment.end,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (userLine.isNotEmpty)
-            _subtitleLine(
-              context,
-              '你',
-              userLine,
-              live: _userLive.isNotEmpty,
+            Flexible(
+              child: SingleChildScrollView(
+                physics: const ClampingScrollPhysics(),
+                reverse: true,
+                child: _subtitleLine(
+                  context,
+                  '你',
+                  userLine,
+                  live: _userLive.isNotEmpty,
+                  maxLines: compact ? 3 : 4,
+                ),
+              ),
             ),
           if (showAssistantHere)
             _subtitleLine(
@@ -1040,12 +1073,13 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
     String text, {
     bool live = false,
     bool dim = false,
+    int maxLines = 4,
   }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Text(
         '$who  $text',
-        maxLines: 4,
+        maxLines: maxLines,
         overflow: TextOverflow.ellipsis,
         style: Theme.of(context).textTheme.bodySmall?.copyWith(
               height: 1.45,
