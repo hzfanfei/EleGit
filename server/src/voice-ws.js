@@ -81,6 +81,8 @@ function resolveAsr(config, hooks) {
       // Phone call: after a barge the user already stopped the answer; shorten the
       // endpoint so the interrupt sentence reaches Agent sooner.
       endpointSilenceMs: hooks.pushToTalk === true ? undefined : 520,
+      // Clicks are short; need a longer utterance before a call turn fires.
+      minEndpointBytes: hooks.pushToTalk === true ? undefined : 16000 * 2 * 0.55,
       onFinal: hooks.onFinal,
       onSpeechStart: hooks.onSpeechStart,
       onError: (detail) => hooks.onAsrError?.({ message: detail?.message, err: detail }),

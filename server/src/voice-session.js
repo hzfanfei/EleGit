@@ -78,7 +78,6 @@ function liftQuietSpeech(buf, floorRms) {
 }
 // A breath or an echo-cancel hole must not wipe the sentence being spoken over the answer.
 const PLAYBACK_BARGE_GAP_MS = 1100;
-
 export function createVoiceSession({
   config,
   send,
@@ -131,6 +130,7 @@ export function createVoiceSession({
   let bargeChunks = [];
   let bargeSpeechBytes = 0;
   let bargeHardBytes = 0;
+  let bargeHardStreakBytes = 0;
   let echoBytes = 0;
   let echoLevels = [];
   let callBargeRms = null;
@@ -299,6 +299,7 @@ export function createVoiceSession({
     bargeChunks = [];
     bargeSpeechBytes = 0;
     bargeHardBytes = 0;
+    bargeHardStreakBytes = 0;
     echoBytes = 0;
     echoLevels = [];
     playbackUserSpeech = false;
@@ -315,6 +316,7 @@ export function createVoiceSession({
     bargeChunks = [];
     bargeSpeechBytes = 0;
     bargeHardBytes = 0;
+    bargeHardStreakBytes = 0;
     const buffered = Buffer.concat(floor ? chunks.map((c) => liftQuietSpeech(c, floor)) : chunks);
     speechBytesSinceTurn += buffered.length;
     playbackUserSpeech = true;
@@ -361,11 +363,13 @@ export function createVoiceSession({
       }
       bargeSpeechBytes += bytes.length;
       bargeHardBytes += bytes.length;
+      bargeHardStreakBytes += bytes.length;
       bargeChunks.push(bytes);
-      if (bargeHardBytes < playbackBargeMinBytes()) return;
+      if (bargeHardStreakBytes < playbackBargeMinBytes()) return;
       flushPlaybackSpeechToAsr();
       return;
     }
+    bargeHardStreakBytes = 0;
     if (!bargeSpeechBytes) return;
     bargeChunks.push(bytes);
     if (bargeGapTimer) return;
@@ -374,6 +378,7 @@ export function createVoiceSession({
       bargeChunks = [];
       bargeSpeechBytes = 0;
       bargeHardBytes = 0;
+      bargeHardStreakBytes = 0;
     }, PLAYBACK_BARGE_GAP_MS);
     bargeGapTimer.unref?.();
   }

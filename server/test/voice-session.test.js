@@ -691,6 +691,39 @@ describe("createVoiceSession", () => {
     }
   });
 
+  it("keyboard-like taps over the speaker do not barge in", async () => {
+    const session = createVoiceSession({
+      config: { ready: true, provider: "xiaomi" },
+      send: () => {},
+      sendAudio: () => {},
+      asr: { async start() {}, push() {} },
+      checkout: async () => ({ dest: "/tmp/octo/demo" }),
+      sessions: voiceCallSessions(),
+      ask: async function* () {
+        yield { type: "delta", text: "仓库最近在修登录。" };
+        yield { type: "done", engine: "acp", answer: "仓库最近在修登录。" };
+      },
+      tts: async () => Buffer.from("pcm-audio-bytes"),
+    });
+
+    await session.start({ owner: "octo", repo: "demo", sessionId: "s1" });
+    session.onTranscript("最近在做什么？", { final: true });
+    await new Promise((r) => setTimeout(r, 40));
+
+    const frame = (level) => {
+      const buf = Buffer.alloc(2560);
+      for (let i = 0; i < buf.length; i += 2) buf.writeInt16LE(i % 4 ? -level : level, i);
+      return buf;
+    };
+    for (let i = 0; i < 15; i += 1) session.onPcm(frame(i % 3 ? 0 : 40));
+    assert.equal(session.state, "speaking");
+    for (let t = 0; t < 8; t += 1) {
+      session.onPcm(frame(3200));
+      session.onPcm(frame(0));
+    }
+    assert.equal(session.state, "speaking");
+  });
+
   it("the user's own quiet voice does not raise the bar out of reach", async () => {
     const session = createVoiceSession({
       config: { ready: true, provider: "volc" },
@@ -803,11 +836,8 @@ describe("createVoiceSession", () => {
     await new Promise((r) => setTimeout(r, 40));
     assert.equal(session.state, "speaking");
 
-    const loud = Buffer.alloc(16000 * 2 * 0.2);
+    const loud = Buffer.alloc(16000 * 2 * 0.28);
     for (let i = 0; i < loud.length; i += 2) loud.writeInt16LE(2500, i);
-    const hole = Buffer.alloc(16000 * 2 * 0.4);
-    session.onPcm(loud);
-    session.onPcm(hole);
     session.onPcm(loud);
     assert.equal(session.state, "listening");
 
