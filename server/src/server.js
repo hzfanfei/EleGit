@@ -1309,9 +1309,6 @@ app.get("/v1/inbox", async (_req, res) => {
   try {
     const items = await listInbox(store.config.workspaceRoot, { unreadOnly: false });
     res.json({ items });
-    for (const it of items) {
-      if (it && it.id && !it.read) await markInboxRead(store.config.workspaceRoot, it.id);
-    }
   } catch (err) {
     sendError(res, err);
   }

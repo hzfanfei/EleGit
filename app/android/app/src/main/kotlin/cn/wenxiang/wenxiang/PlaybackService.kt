@@ -80,7 +80,8 @@ class PlaybackService : Service() {
         builder
             .setContentTitle("问象")
             .setContentText("正在继续")
-            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setSmallIcon(R.drawable.ic_stat_wenxiang)
+            .setLargeIcon(NotificationIcons.largeIconBitmap(this))
             .setOngoing(true)
             .setCategory(Notification.CATEGORY_SERVICE)
             .setVisibility(Notification.VISIBILITY_PUBLIC)

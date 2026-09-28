@@ -6,7 +6,7 @@
 // are pushed as `{type:"inbox", item}` messages. Heartbeats every 25s
 // to keep intermediate proxies (ngrok etc.) from idling the socket.
 
-import { appendInboxItem } from "./inbox.js";
+import { appendInboxItem, listInbox } from "./inbox.js";
 import { WebSocketServer } from "ws";
 
 const HEARTBEAT_MS = 25_000;
@@ -54,9 +54,21 @@ export function attachNotifications(httpServer, { getStore }) {
 
   wss.on("connection", (ws) => {
     subscribers.add(ws);
-    try {
-      ws.send(JSON.stringify({ type: "snapshot", items: recentBuffer }));
-    } catch {}
+    void (async () => {
+      let items = recentBuffer;
+      try {
+        const root = getStore().config.workspaceRoot;
+        const unread = await listInbox(root, { unreadOnly: true });
+        const ids = new Set(unread.map((it) => it.id));
+        items = recentBuffer.filter((it) => it?.id && ids.has(it.id));
+      } catch {
+        /* snapshot is best-effort */
+      }
+      if (ws.readyState !== ws.OPEN) return;
+      try {
+        ws.send(JSON.stringify({ type: "snapshot", items }));
+      } catch {}
+    })();
     const timer = setInterval(() => {
       if (ws.readyState !== ws.OPEN) return;
       try {

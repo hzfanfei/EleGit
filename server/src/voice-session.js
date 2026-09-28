@@ -264,6 +264,8 @@ export function createVoiceSession({
   function pushCaption(role, text, extra = {}) {
     if (role === "assistant" && text) assistantUtterance = text;
     const caption = { type: "caption", role, text, final: Boolean(extra.final), engine: extra.engine };
+    if (extra.preview) caption.preview = true;
+    if (extra.segment) caption.segment = true;
     if (caption.final && text) {
       captions.push({ role, content: text, engine: extra.engine });
     }
@@ -490,9 +492,12 @@ export function createVoiceSession({
             },
             askSignal,
           ),
-        onDelta: ({ text, engine, final }) => {
+        onDelta: ({ text, engine }) => {
+          pushCaption("assistant", text, { engine, preview: true, final: false });
+        },
+        onCaption: (speak) => {
           beginSpeaking();
-          pushCaption("assistant", text, { engine, final });
+          pushCaption("assistant", speak, { segment: true, final: false });
         },
         onAudio: async (buf) => {
           if (signal.aborted) return;

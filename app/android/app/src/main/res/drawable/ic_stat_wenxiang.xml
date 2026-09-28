@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Thick monochrome mark for status-bar small icon (alpha-only at draw time). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M26,26 H82 A10,10 0 0 1 92,36 V72 A10,10 0 0 1 82,82 H26 A10,10 0 0 1 16,72 V36 A10,10 0 0 1 26,26 Z M38,38 H70 A6,6 0 0 1 76,44 V64 A6,6 0 0 1 70,70 H38 A6,6 0 0 1 32,64 V44 A6,6 0 0 1 38,38 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M49,42 H59 V66 H49 Z" />
+</vector>

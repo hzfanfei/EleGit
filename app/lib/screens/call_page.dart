@@ -99,7 +99,10 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
   String _setupHint = '还没配语音密钥';
   final List<ChatMessage> _captions = [];
   String _userLive = '';
-  String _assistantLive = '';
+  String _currentUserLine = '';
+  String _assistantPreview = '';
+  String _segmentCaption = '';
+  String _voiceCaption = '';
   bool _disposing = false;
   bool _backgroundHeld = false;
   bool _playing = false;
@@ -128,6 +131,38 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
   bool get isLive => _live;
 
   int get linkResets => _linkResets;
+
+  bool get _assistantSubtitleActive =>
+      _assistantPreview.isNotEmpty || _voiceCaption.isNotEmpty || _segmentCaption.isNotEmpty;
+
+  void _clearAssistantSubtitle() {
+    _assistantPreview = '';
+    _segmentCaption = '';
+    _voiceCaption = '';
+  }
+
+  void _onCaptionSegment(String text) {
+    final chunk = text.trim();
+    if (chunk.isEmpty) return;
+    _segmentCaption = chunk;
+  }
+
+  void Function()? _playbackStartForCaption(String captionAtEnqueue) {
+    if (captionAtEnqueue.isEmpty) return null;
+    return () {
+      if (!mounted || _disposing) return;
+      setState(() {
+        _voiceCaption = captionAtEnqueue;
+        _assistantPreview = '';
+      });
+    };
+  }
+
+  void _finalizeAssistantCaption(String text, {String? engine}) {
+    _clearAssistantSubtitle();
+    if (text.trim().isEmpty) return;
+    _captions.add(ChatMessage(role: 'assistant', content: text.trim(), engine: engine));
+  }
 
   @override
   void initState() {
@@ -286,7 +321,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
     setState(() {
       _phase = 'listening';
       _playing = false;
-      _assistantLive = '';
+      _clearAssistantSubtitle();
     });
     _openSocket(_newClient());
   }
@@ -311,13 +346,19 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
           _userLive = event.text;
           if (event.finalCaption) {
             _captions.add(ChatMessage(role: 'user', content: event.text));
+            _currentUserLine = event.text.trim();
             _userLive = '';
+            _clearAssistantSubtitle();
           }
         } else {
-          _assistantLive = event.text;
           if (event.finalCaption) {
-            _captions.add(ChatMessage(role: 'assistant', content: event.text, engine: event.engine));
-            _assistantLive = '';
+            _finalizeAssistantCaption(event.text, engine: event.engine);
+          } else if (event.segmentCaption) {
+            _onCaptionSegment(event.text);
+          } else if (event.previewCaption || _phase == 'thinking') {
+            _assistantPreview = event.text;
+          } else {
+            _onCaptionSegment(event.text);
           }
         }
       });
@@ -332,7 +373,15 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
           _playing = true;
         });
       }
-      unawaited(_media.playPcm(event.pcm!, sampleRate: event.outputRate));
+      final captionAtEnqueue = _segmentCaption;
+      unawaited(
+        _media.playPcm(
+          event.pcm!,
+          sampleRate: event.outputRate,
+          segmentCaption: captionAtEnqueue,
+          onPlaybackStart: _playbackStartForCaption(captionAtEnqueue),
+        ),
+      );
       _watchSpeakerIdle();
       if (_answerAudioDone) {
         _schedulePlaybackEnd();
@@ -345,7 +394,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
     if (pcm.isEmpty || !_live) return false;
     if (_phase == 'speaking' || _phase == 'thinking') return true;
     if (_phase == 'listening' &&
-        (_answerAudioDone || _playbackEndPending || _assistantLive.isNotEmpty || _playing)) {
+        (_answerAudioDone || _playbackEndPending || _assistantSubtitleActive || _playing)) {
       return true;
     }
     return false;
@@ -396,7 +445,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
       setState(() {
         _phase = 'listening';
         _playing = false;
-        _assistantLive = '';
+        _clearAssistantSubtitle();
       });
       unawaited(_media.stopPlayback());
       _checkMicAfterBarge();
@@ -421,10 +470,10 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
       if (next == 'thinking') {
         _answerAudioDone = false;
         _playbackEndPending = false;
+        _clearAssistantSubtitle();
       }
       if (next == 'listening' || next == 'thinking' || next == 'audio_done') {
         _playing = false;
-        _assistantLive = '';
       }
     });
   }
@@ -444,7 +493,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
     setState(() {
       _phase = 'listening';
       _playing = false;
-      _assistantLive = '';
+      _clearAssistantSubtitle();
     });
     unawaited(_maybeReopenMicAfterPlayback(hold));
   }
@@ -468,7 +517,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
     setState(() {
       _phase = 'listening';
       _playing = false;
-      _assistantLive = '';
+      _clearAssistantSubtitle();
     });
     unawaited(_media.stopPlayback());
     _client?.barge();
@@ -771,18 +820,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
                   _status(context),
                   if (!_live) _faultDetail(context),
                   const Spacer(),
-                  SizedBox(
-                    height: 92,
-                    child: ListView(
-                      reverse: true,
-                      children: [
-                        if (_assistantLive.isNotEmpty) _caption('问象', _assistantLive),
-                        if (_userLive.isNotEmpty) _caption('你', _userLive),
-                        for (final item in _captions.reversed.take(2))
-                          _caption(item.role == 'user' ? '你' : '问象', item.content),
-                      ],
-                    ),
-                  ),
+                  _subtitlePanel(context),
                 ],
               ),
             ),
@@ -855,14 +893,66 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
     );
   }
 
-  Widget _caption(String who, String text) {
+  String get _userSubtitleLine {
+    if (_userLive.isNotEmpty) return _userLive;
+    return _currentUserLine;
+  }
+
+  String get _assistantSubtitleLine {
+    if (_voiceCaption.isNotEmpty) return _voiceCaption;
+    return _assistantPreview;
+  }
+
+  Widget _subtitlePanel(BuildContext context) {
+    final userLine = _userSubtitleLine;
+    final assistantLine = _assistantSubtitleLine;
+    if (userLine.isEmpty && assistantLine.isEmpty) {
+      return const SizedBox(height: 88);
+    }
+    return SizedBox(
+      height: 132,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.end,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (userLine.isNotEmpty)
+            _subtitleLine(
+              context,
+              '你',
+              userLine,
+              live: _userLive.isNotEmpty,
+            ),
+          if (assistantLine.isNotEmpty)
+            _subtitleLine(
+              context,
+              '问象',
+              assistantLine,
+              live: true,
+              dim: _voiceCaption.isEmpty && _assistantPreview.isNotEmpty,
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _subtitleLine(
+    BuildContext context,
+    String who,
+    String text, {
+    bool live = false,
+    bool dim = false,
+  }) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: 10),
       child: Text(
         '$who  $text',
-        maxLines: 2,
+        maxLines: 4,
         overflow: TextOverflow.ellipsis,
-        style: Theme.of(context).textTheme.labelSmall,
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              height: 1.45,
+              color: dim ? Wx.muted : null,
+              fontWeight: live ? FontWeight.w500 : FontWeight.normal,
+            ),
       ),
     );
   }

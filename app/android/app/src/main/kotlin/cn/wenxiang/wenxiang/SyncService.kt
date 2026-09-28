@@ -13,6 +13,7 @@ import android.os.Looper
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 import java.util.concurrent.atomic.AtomicBoolean
 
 /// Keeps the process alive and, while the activity is not visible, pulls
@@ -121,12 +122,24 @@ class SyncService : Service() {
             .setContentTitle(title)
             .setContentText(text)
             .setStyle(Notification.BigTextStyle().bigText(text))
-            .setSmallIcon(android.R.drawable.stat_notify_chat)
+            .setSmallIcon(R.drawable.ic_stat_wenxiang)
+            .setLargeIcon(NotificationIcons.largeIconBitmap(this))
             .setAutoCancel(true)
             .setPriority(Notification.PRIORITY_HIGH)
             .setCategory(Notification.CATEGORY_MESSAGE)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
         manager.notify(noteId(id), builder.build())
+        if (id.isNotBlank()) {
+            markInboxRead(id)
+        }
+    }
+
+    private fun markInboxRead(id: String) {
+        val root = baseUrl.trimEnd('/')
+        val key = apiKey
+        if (root.isEmpty() || key.isEmpty()) return
+        val enc = URLEncoder.encode(id, Charsets.UTF_8.name())
+        http(root, key, "POST", "/v1/inbox/$enc/read", null)
     }
 
     private fun http(
@@ -193,7 +206,7 @@ class SyncService : Service() {
         builder
             .setContentTitle("问象通知已开启")
             .setContentText("后台保持连接，确保任务完成时推送")
-            .setSmallIcon(android.R.drawable.stat_notify_sync_noanim)
+            .setSmallIcon(R.drawable.ic_stat_wenxiang)
             .setOngoing(true)
             .setPriority(Notification.PRIORITY_LOW)
             .setCategory(Notification.CATEGORY_SERVICE)

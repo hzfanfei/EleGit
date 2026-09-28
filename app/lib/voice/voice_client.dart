@@ -16,6 +16,8 @@ class VoiceEvent {
     this.role,
     this.text = '',
     this.finalCaption = false,
+    this.previewCaption = false,
+    this.segmentCaption = false,
     this.engine,
     this.pcm,
     this.outputRate = 24000,
@@ -30,6 +32,8 @@ class VoiceEvent {
   final String? role;
   final String text;
   final bool finalCaption;
+  final bool previewCaption;
+  final bool segmentCaption;
   final String? engine;
   final Uint8List? pcm;
   final int outputRate;
@@ -43,6 +47,8 @@ class VoiceEvent {
       role: json['role']?.toString(),
       text: (json['text'] ?? '').toString(),
       finalCaption: json['final'] == true,
+      previewCaption: json['preview'] == true,
+      segmentCaption: json['segment'] == true,
       engine: json['engine']?.toString(),
       outputRate: (json['outputRate'] as num?)?.toInt() ?? 24000,
       detail: json['detail']?.toString(),

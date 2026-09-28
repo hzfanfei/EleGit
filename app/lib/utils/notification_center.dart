@@ -100,9 +100,21 @@ class NotificationCenter {
     if (!Platform.isAndroid) return;
     try {
       const settings = InitializationSettings(
-        android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+        android: AndroidInitializationSettings('ic_stat_wenxiang'),
       );
-      await FlutterLocalNotificationsPlugin().initialize(settings);
+      final plugin = FlutterLocalNotificationsPlugin();
+      await plugin.initialize(settings);
+      await plugin
+          .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin>()
+          ?.createNotificationChannel(
+            const AndroidNotificationChannel(
+              _channelId,
+              _channelName,
+              description: _channelDesc,
+              importance: Importance.high,
+            ),
+          );
     } catch (err) {
       debugPrint('NotificationCenter init failed: $err');
     }
@@ -308,6 +320,8 @@ class NotificationCenter {
       _channelId,
       _channelName,
       channelDescription: _channelDesc,
+      icon: 'ic_stat_wenxiang',
+      largeIcon: const DrawableResourceAndroidBitmap('ic_notification_large'),
       importance: Importance.high,
       priority: Priority.high,
       category: AndroidNotificationCategory.message,

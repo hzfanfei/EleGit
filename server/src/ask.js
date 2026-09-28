@@ -249,6 +249,21 @@ export async function* streamAnswer({
     let full = "";
     let settleTimer = null;
     let hintCleared = false;
+    let taskNotified = false;
+    function maybePublishTaskNotice() {
+      if (taskNotified || !workspaceRoot) return;
+      const notice = taskCompletionNotice(full, { session, question, bookId });
+      if (!notice) return;
+      taskNotified = true;
+      publishInboxNotice(workspaceRoot, notice)
+        .then((item) => {
+          if (item) {
+            queue.push({ kind: "notification", item });
+            notify?.();
+          }
+        })
+        .catch(() => {});
+    }
     function clearSettle() {
       if (!settleTimer) return;
       clearTimeout(settleTimer);
@@ -288,6 +303,7 @@ export async function* streamAnswer({
           full += chunk;
           queue.push({ kind: "delta", text: chunk });
           notify?.();
+          maybePublishTaskNotice();
           armSettle();
         },
         onActivity: (detail) => {
@@ -341,12 +357,14 @@ export async function* streamAnswer({
           todos: event.todos,
           questions: event.questions,
         };
+      } else if (piece.kind === "notification") {
+        yield { type: "notification", item: piece.item };
       } else if (piece.text) {
         yield { type: "delta", text: piece.text };
       }
     }
     if (!fail && full) {
-      if (workspaceRoot) {
+      if (workspaceRoot && !taskNotified) {
         const notice = taskCompletionNotice(full, { session, question, bookId });
         if (notice) {
           try {

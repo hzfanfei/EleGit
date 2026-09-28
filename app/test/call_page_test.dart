@@ -527,6 +527,42 @@ void main() {
     expect(media.startCalls, 2);
   });
 
+  testWidgets('assistant subtitle switches per TTS segment at playback start', (tester) async {
+    final media = FakeVoiceMedia();
+    final client = FakeVoiceClient();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: CallPage(
+          api: FakeWenxiangApi(voiceReady: true),
+          repo: sampleRepo(),
+          onBack: () {},
+          media: media,
+          client: client,
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    await tester.tap(find.text('开始通话'));
+    await tester.pump();
+
+    client.emit(VoiceEvent(type: 'caption', role: 'user', text: '你好', finalCaption: true));
+    client.emit(VoiceEvent(type: 'state', state: 'thinking'));
+    client.emit(VoiceEvent(type: 'caption', role: 'assistant', text: '第一段。', segmentCaption: true));
+    client.emit(VoiceEvent(type: 'state', state: 'speaking'));
+    client.emit(VoiceEvent(type: 'pcm', pcm: Uint8List.fromList([1, 0, 2, 0])));
+    await tester.pump();
+    expect(find.textContaining('第一段。'), findsOneWidget);
+    expect(find.textContaining('第二段。'), findsNothing);
+
+    client.emit(VoiceEvent(type: 'caption', role: 'assistant', text: '第二段。', segmentCaption: true));
+    client.emit(VoiceEvent(type: 'pcm', pcm: Uint8List.fromList([3, 0, 4, 0])));
+    await tester.pump();
+    expect(find.textContaining('第二段。'), findsOneWidget);
+    expect(find.textContaining('第一段。'), findsNothing);
+  });
+
   testWidgets('microphone denial stays on a short Chinese retry', (tester) async {
     final media = FakeVoiceMedia(micGranted: false);
     await tester.pumpWidget(

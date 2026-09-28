@@ -158,6 +158,7 @@ class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
       if (status.githubLogin.isNotEmpty) {
         await memory?.saveGithubLogin(status.githubLogin);
       }
+      unawaited(_api.reportPresence('foreground'));
       if (NotificationCenter.instance.enabled.value) {
         // user opted in previously — restart the inbox socket now that api/key are known.
         unawaited(NotificationCenter.instance.setEnabled(_api, want: true));
