@@ -791,7 +791,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
       child: KeyedSubtree(
         key: const Key('call-status-slot'),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(2, 12, 2, 6),
+          padding: const EdgeInsets.fromLTRB(2, 8, 2, 28),
           child: line.isEmpty
               ? const SizedBox.expand()
               : LayoutBuilder(
@@ -848,9 +848,11 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
             child: Padding(
               padding: const EdgeInsets.fromLTRB(Wx.inset, 12, Wx.inset, 8),
               child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  _userTypingCorner(context),
                   Expanded(
-                    flex: 11,
+                    flex: 8,
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
@@ -935,13 +937,13 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
                     ),
                   ),
                   if (_assistantHeadlineCaptions)
-                    Expanded(flex: 6, child: _assistantHeadlineCaption(context))
+                    Expanded(flex: 10, child: _assistantHeadlineCaption(context))
                   else ...[
                     const SizedBox(height: 28),
                     _status(context),
                   ],
                   if (!_live) _faultDetail(context),
-                  _subtitlePanel(context, compact: _assistantHeadlineCaptions),
+                  _subtitlePanel(context),
                 ],
               ),
             ),
@@ -1019,49 +1021,67 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
     return _currentUserLine;
   }
 
+  /// Live STT / last user utterance: one tail line, top-left under the header.
+  String _userCornerLine() {
+    if (!_live) return '';
+    final raw = _userSubtitleLine.trim();
+    if (raw.isEmpty) return '';
+    final parts = raw.split(RegExp(r'[\r\n]+'));
+    for (var i = parts.length - 1; i >= 0; i--) {
+      final line = parts[i].trim();
+      if (line.isNotEmpty) return line;
+    }
+    return raw;
+  }
+
+  Widget _userTypingCorner(BuildContext context) {
+    final line = _userCornerLine();
+    if (line.isEmpty) return const SizedBox(height: 4);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Text(
+          line,
+          key: const Key('call-user-typing-corner'),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.left,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                height: 1.4,
+                color: Wx.muted,
+                fontWeight: _userLive.isNotEmpty ? FontWeight.w500 : FontWeight.normal,
+              ),
+        ),
+      ),
+    );
+  }
+
   String get _assistantSubtitleLine {
     if (_voiceCaption.isNotEmpty) return _voiceCaption;
     if (_segmentCaption.isNotEmpty) return _segmentCaption;
     return _assistantPreview;
   }
 
-  Widget _subtitlePanel(BuildContext context, {bool compact = false}) {
-    final userLine = _userSubtitleLine;
+  Widget _subtitlePanel(BuildContext context) {
     final assistantLine = _assistantSubtitleLine;
     final showAssistantHere = assistantLine.isNotEmpty && !_assistantHeadlineCaptions;
-    final emptyReserve = compact ? 56.0 : 88.0;
-    final panelH = compact && !showAssistantHere ? 80.0 : 132.0;
-    if (userLine.isEmpty && !showAssistantHere) {
-      return SizedBox(height: emptyReserve);
+    if (!showAssistantHere) {
+      return SizedBox(height: _assistantHeadlineCaptions ? 12 : 88);
     }
     return SizedBox(
-      height: panelH,
+      height: 132,
       child: Column(
         mainAxisAlignment: MainAxisAlignment.end,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (userLine.isNotEmpty)
-            Flexible(
-              child: SingleChildScrollView(
-                physics: const ClampingScrollPhysics(),
-                reverse: true,
-                child: _subtitleLine(
-                  context,
-                  '你',
-                  userLine,
-                  live: _userLive.isNotEmpty,
-                  maxLines: compact ? 3 : 4,
-                ),
-              ),
-            ),
-          if (showAssistantHere)
-            _subtitleLine(
-              context,
-              '问象',
-              assistantLine,
-              live: true,
-              dim: _voiceCaption.isEmpty && _assistantPreview.isNotEmpty,
-            ),
+          _subtitleLine(
+            context,
+            '问象',
+            assistantLine,
+            live: true,
+            dim: _voiceCaption.isEmpty && _assistantPreview.isNotEmpty,
+          ),
         ],
       ),
     );
