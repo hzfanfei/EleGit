@@ -106,12 +106,14 @@ export function startTurnRelay({
   function maybePublish(turn) {
     if (turn.clients.size > 0 || turn.acked || turn.publishedFinal) return;
     const answer = String(turn.state.answer || "").trim();
-    const activity = String(turn.state.activity || "").trim();
+    const activity = String(turn.activity || "").trim();
     const workspaceRoot = turn.meta?.workspaceRoot;
+    const exposeAnswer = Boolean(turn.state.done) || Boolean(turn.meta?.partial);
     if ((!answer && !activity) || !workspaceRoot) return;
     const final = Boolean(turn.state.done);
-    if (!final && !turn.meta?.partial) return;
-    if (!final && answer === turn.publishedAnswer && activity === turn.publishedActivity) return;
+    if (!final && !exposeAnswer && !activity) return;
+    if (!final && !exposeAnswer && activity === turn.publishedActivity) return;
+    if (!final && exposeAnswer && answer === turn.publishedAnswer && activity === turn.publishedActivity) return;
     const now = Date.now();
     if (!final && turn.lastPublishAt && now - turn.lastPublishAt < partialMs) {
       if (!turn.publishTimer) {
@@ -124,10 +126,10 @@ export function startTurnRelay({
     }
     clearPartialTimer(turn);
     turn.lastPublishAt = now;
-    turn.publishedAnswer = answer;
     turn.publishedActivity = activity;
+    if (exposeAnswer) turn.publishedAnswer = answer;
     if (final) turn.publishedFinal = true;
-    const notice = answerReadyNotice(answer, {
+    const notice = answerReadyNotice(exposeAnswer ? answer : "", {
       session: turn.meta.session,
       question: turn.meta.question,
       bookId: turn.meta.bookId,
@@ -147,7 +149,7 @@ export function startTurnRelay({
     rl.on("line", (line) => {
       turn.state = noteRelayTraffic(turn.state, "out", line);
       const traced = noteRelayActivity(turn.toolLog, line);
-      if (traced) turn.state = { ...turn.state, activity: traced };
+      if (traced) turn.activity = traced;
       for (const socket of turn.clients) send(socket, { op: "stdout", key: turn.key, line });
       maybePublish(turn);
     });
@@ -191,7 +193,8 @@ export function startTurnRelay({
       key,
       child,
       clients: new Set([socket]),
-      state: { answer: "", promptId: null, done: false, activity: "" },
+      state: { answer: "", promptId: null, done: false },
+      activity: "",
       toolLog: { items: [] },
       pendingIn: "",
       meta: null,

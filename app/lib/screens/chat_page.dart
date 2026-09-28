@@ -1125,7 +1125,7 @@ class _ChatPageState extends State<ChatPage> {
       if (answer.isEmpty && activity.trim().isEmpty) continue;
       final sessionId = (item['sessionId'] ?? '').toString();
       final question = (item['question'] ?? '').toString();
-      if (answer.isNotEmpty) {
+      if (answer.isNotEmpty && item['partial'] != true) {
         await backfillChatFromNotice(
           sessionId: sessionId,
           answer: answer,

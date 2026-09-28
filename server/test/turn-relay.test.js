@@ -300,6 +300,59 @@ describe("turn relay", () => {
       relay.close();
     }
   });
+
+  it("keeps the tool step on later answer text", async () => {
+    const agent = fakeAgent();
+    const published = [];
+    const relay = await startTurnRelay({
+      port: 0,
+      spawnImpl: () => agent,
+      publish: async (_workspaceRoot, notice) => {
+        published.push(notice);
+      },
+    });
+    try {
+      const socket = net.connect(relay.port, "127.0.0.1");
+      await once(socket, "connect");
+      socket.write(`${JSON.stringify({ op: "spawn", key: "s1:5", file: "agent", args: [] })}\n`);
+      socket.write(`${JSON.stringify({
+        op: "meta",
+        key: "s1:5",
+        meta: {
+          workspaceRoot: "C:/问象",
+          session: { id: "s1", owner: "octo", repo: "demo" },
+          question: "进度如何",
+          partial: true,
+        },
+      })}\n`);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      socket.on("error", () => {});
+      socket.resetAndDestroy();
+      await once(socket, "close");
+      const step = (update) => `${JSON.stringify({ method: "session/update", params: { update } })}\n`;
+      agent.stdout.write(step({
+        sessionUpdate: "tool_call",
+        toolCallId: "t1",
+        title: "Read",
+        kind: "read",
+        locations: [{ path: "server/src/ask.js" }],
+      }));
+      agent.stdout.write(step({
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "先说到这" },
+      }));
+      const deadline = Date.now() + 1500;
+      const ready = () => published.some((notice) =>
+        String(notice.activity || "").includes("读·ask.js") &&
+        String(notice.answer || "").includes("先说到这"));
+      while (!ready() && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      assert.equal(ready(), true);
+    } finally {
+      relay.close();
+    }
+  });
 });
 
 function readlineLines(socket) {
