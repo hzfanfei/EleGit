@@ -97,6 +97,7 @@ export function startTurnRelay({
     const workspaceRoot = turn.meta?.workspaceRoot;
     if (!answer || !workspaceRoot) return;
     const final = Boolean(turn.state.done);
+    if (!final && !turn.meta?.partial) return;
     if (!final && answer === turn.publishedAnswer) return;
     const now = Date.now();
     if (!final && turn.lastPublishAt && now - turn.lastPublishAt < partialMs) {

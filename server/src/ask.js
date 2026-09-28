@@ -242,6 +242,7 @@ export async function* streamAnswer({
   workspaceRoot,
   bookId,
   taskSettleMs = 1500,
+  partialBackfill = false,
 }) {
   const opts = { ...streamOpts, signal };
   const engine = detectEngine();
@@ -307,6 +308,7 @@ export async function* streamAnswer({
         staticFiles,
         workspaceRoot,
         bookId,
+        partialBackfill,
         onDelta: (chunk) => {
           full += chunk;
           queue.push({ kind: "delta", text: chunk });

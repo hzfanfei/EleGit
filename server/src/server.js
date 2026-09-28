@@ -1232,6 +1232,7 @@ app.post("/v1/chat", async (req, res) => {
       staticFiles: staticFilesPrompt(store.config),
       workspaceRoot: store.config.workspaceRoot,
       detectEngine: () => detectCursorEngine("repo"),
+      partialBackfill: String(req.headers["x-wenxiang-backfill"] || "") === "partial",
     })) {
       if (event.type === "notification") notified = true;
       if (event.type === "done") {

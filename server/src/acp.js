@@ -1671,6 +1671,7 @@ export function createSessionStore({
     staticFiles,
     workspaceRoot,
     bookId,
+    partialBackfill = false,
   }) {
     const command = resolveCommand();
     if (!command) {
@@ -1741,6 +1742,7 @@ export function createSessionStore({
           session: { id: session.id, owner: session.owner, repo: session.repo },
           question,
           bookId,
+          partial: Boolean(partialBackfill),
         });
         await channel.applySessionMode();
         await channel.prompt(text, { onDelta, onActivity });

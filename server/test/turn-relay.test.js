@@ -206,6 +206,7 @@ describe("turn relay", () => {
           workspaceRoot: "C:/问象",
           session: { id: "s1", owner: "octo", repo: "demo" },
           question: "进度如何",
+          partial: true,
         },
       })}\n`);
       socket.write(`${JSON.stringify({

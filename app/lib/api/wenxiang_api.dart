@@ -1099,6 +1099,7 @@ class WenxiangApi {
         ..headers.addAll({
           ..._headers,
           'Accept': 'text/event-stream',
+          'X-Wenxiang-Backfill': 'partial',
         })
         ..body = jsonEncode({
           'owner': owner,
