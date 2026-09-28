@@ -12,7 +12,7 @@ alwaysApply: true
 | 动作 | 触发条件 |
 |------|----------|
 | **git commit + push** | 有 intentional 代码改动且任务已做完；commit message 写清 why；不提交 `.env` 和密钥 |
-| **重启本机问象服务** | 改了 `server/`、根目录 `.env` 示例以外的服务配置、或 SSE/API 行为；目标是 `http://127.0.0.1:8787/health` 恢复 200 |
+| **重启本机问象服务** | 改了 `server/`、根目录 `.env` 示例以外的服务配置、或 SSE/API 行为；用 `node scripts/restart-companion.mjs [原因]`（先推 inbox 通知，默认约 1.5s 后再杀进程，keep-alive 会拉起）；目标是 `http://127.0.0.1:8787/health` 恢复 200 |
 | **Android 打包** | 改了 `app/` 客户端且用户会装 APK，或用户刚说过要包/已约定「改完就包」；只跑 `node scripts/build-android.mjs` |
 
 ## 顺序
