@@ -56,8 +56,33 @@ function stampItem(item) {
   };
 }
 
+function sameOpenTurn(existing, item) {
+  return existing?.partial === true
+    && existing.kind === item?.kind
+    && existing.sessionId
+    && existing.sessionId === item?.sessionId
+    && existing.question === item?.question;
+}
+
 export async function appendInboxItem(workspaceRoot, item) {
   const items = await readInbox(workspaceRoot);
+  const openIndex = items.findIndex((it) => sameOpenTurn(it, item));
+  if (openIndex >= 0) {
+    const prev = items[openIndex];
+    const next = {
+      ...prev,
+      ...item,
+      id: prev.id,
+      createdAt: new Date().toISOString(),
+      read: false,
+      partial: item.partial === true,
+    };
+    items.splice(openIndex, 1);
+    items.unshift(next);
+    if (items.length > INBOX_CAP) items.length = INBOX_CAP;
+    await writeInbox(workspaceRoot, items);
+    return next;
+  }
   const stamped = stampItem(item);
   items.unshift(stamped);
   if (items.length > INBOX_CAP) items.length = INBOX_CAP;

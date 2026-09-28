@@ -1099,7 +1099,7 @@ class _ChatPageState extends State<ChatPage> {
         await _pullInboxIntoChat(userIndex);
       } catch (_) {}
       if (_answerAfter(userIndex)) return true;
-      await _waitWhileHolding(const Duration(seconds: 2));
+      await _waitWhileHolding(const Duration(seconds: 1));
     }
     return _answerAfter(userIndex);
   }
@@ -1133,7 +1133,11 @@ class _ChatPageState extends State<ChatPage> {
         bookId: (item['bookId'] ?? '').toString(),
       );
       if (_messagesMatchNotice(userIndex, sessionId: sessionId, question: question)) {
-        await _placeHeldAnswer(userIndex, answer);
+        if (item['partial'] == true) {
+          _showHeldPreview(answer);
+        } else {
+          await _placeHeldAnswer(userIndex, answer);
+        }
       }
     }
     _mergeBackfill();
@@ -1147,6 +1151,12 @@ class _ChatPageState extends State<ChatPage> {
       question: question,
       asked: _messages[userIndex].content,
     );
+  }
+
+  void _showHeldPreview(String answer) {
+    final text = stripTaskMarker(answer);
+    if (text.isEmpty || text.length <= _typewriter.fullText.length) return;
+    _typewriter.replacePending(text);
   }
 
   Future<void> _placeHeldAnswer(int userIndex, String answer) async {

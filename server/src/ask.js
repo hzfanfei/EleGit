@@ -50,22 +50,28 @@ export function shouldPublishFinishedAnswer({ notified, aborted, unwatched, deli
 /** Inbox payload for a finished answer, with or without the task marker. */
 export function answerReadyNotice(full, ctx = {}) {
   const marked = taskCompletionNotice(full, ctx);
-  if (marked) return marked;
-  const answer = String(full || "").trim().slice(0, CHAT_ANSWER_CAP);
-  if (!answer) return null;
-  const notice = {
-    kind: "agent-notification",
-    title: "回答已就绪",
-    body: answer.slice(0, 280),
-    answer,
-    sessionId: ctx.session?.id,
-    question: String(ctx.question || "").slice(0, 200),
-  };
-  if (ctx.bookId) {
-    notice.bookId = String(ctx.bookId);
-  } else if (ctx.session?.owner && ctx.session?.repo) {
-    notice.owner = ctx.session.owner;
-    notice.repo = ctx.session.repo;
+  let notice = marked;
+  if (!notice) {
+    const answer = String(full || "").trim().slice(0, CHAT_ANSWER_CAP);
+    if (!answer) return null;
+    notice = {
+      kind: "agent-notification",
+      title: "回答已就绪",
+      body: answer.slice(0, 280),
+      answer,
+      sessionId: ctx.session?.id,
+      question: String(ctx.question || "").slice(0, 200),
+    };
+    if (ctx.bookId) {
+      notice.bookId = String(ctx.bookId);
+    } else if (ctx.session?.owner && ctx.session?.repo) {
+      notice.owner = ctx.session.owner;
+      notice.repo = ctx.session.repo;
+    }
+  }
+  if (ctx.partial) {
+    notice.partial = true;
+    notice.title = "回答编写中";
   }
   return notice;
 }

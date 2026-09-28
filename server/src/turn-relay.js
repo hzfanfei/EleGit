@@ -55,8 +55,8 @@ function consumeLines(buffer, chunk, onLine) {
 
 /**
  * Owns Cursor/Claude ACP children outside the watched companion process.
- * When the companion socket drops, the agent keeps writing; the finished
- * answer is published to the inbox so the phone can pick it up.
+ * When the companion socket drops, the agent keeps writing. Text already
+ * produced is published about once a second; the finished answer replaces it.
  */
 export function startTurnRelay({
   port = 0,
@@ -74,6 +74,7 @@ export function startTurnRelay({
   function endOrphan(turn, { force = false } = {}) {
     if (turn.ended) return;
     if (!force && turn.clients.size > 0) return;
+    clearPartialTimer(turn);
     turn.ended = true;
     try {
       turn.child.kill?.();
@@ -82,20 +83,47 @@ export function startTurnRelay({
     }
   }
 
+  const partialMs = 800;
+
+  function clearPartialTimer(turn) {
+    if (!turn.publishTimer) return;
+    clearTimeout(turn.publishTimer);
+    turn.publishTimer = null;
+  }
+
   function maybePublish(turn) {
-    if (!turn.state.done || turn.clients.size > 0 || turn.acked || turn.published) return;
+    if (turn.clients.size > 0 || turn.acked || turn.publishedFinal) return;
     const answer = String(turn.state.answer || "").trim();
     const workspaceRoot = turn.meta?.workspaceRoot;
-    turn.published = true;
-    const notice = answer && workspaceRoot
-      ? answerReadyNotice(answer, {
-          session: turn.meta.session,
-          question: turn.meta.question,
-          bookId: turn.meta.bookId,
-        })
-      : null;
-    const done = notice ? Promise.resolve(publish(workspaceRoot, notice)) : Promise.resolve();
-    done.finally(() => endOrphan(turn));
+    if (!answer || !workspaceRoot) return;
+    const final = Boolean(turn.state.done);
+    if (!final && answer === turn.publishedAnswer) return;
+    const now = Date.now();
+    if (!final && turn.lastPublishAt && now - turn.lastPublishAt < partialMs) {
+      if (!turn.publishTimer) {
+        turn.publishTimer = setTimeout(() => {
+          turn.publishTimer = null;
+          maybePublish(turn);
+        }, partialMs - (now - turn.lastPublishAt));
+      }
+      return;
+    }
+    clearPartialTimer(turn);
+    turn.lastPublishAt = now;
+    turn.publishedAnswer = answer;
+    if (final) turn.publishedFinal = true;
+    const notice = answerReadyNotice(answer, {
+      session: turn.meta.session,
+      question: turn.meta.question,
+      bookId: turn.meta.bookId,
+      partial: !final,
+    });
+    if (!notice) {
+      if (final) endOrphan(turn);
+      return;
+    }
+    const job = Promise.resolve(publish(workspaceRoot, notice));
+    if (final) job.finally(() => endOrphan(turn));
   }
 
   function attachChild(turn) {

@@ -27,6 +27,7 @@ class InboxItem {
     this.owner,
     this.repo,
     this.bookId,
+    this.partial = false,
   });
 
   final String id;
@@ -41,6 +42,7 @@ class InboxItem {
   final String? owner;
   final String? repo;
   final String? bookId;
+  final bool partial;
 
   factory InboxItem.fromJson(Map<String, dynamic> json) {
     DateTime parseCreated() {
@@ -62,6 +64,7 @@ class InboxItem {
       owner: json['owner']?.toString(),
       repo: json['repo']?.toString(),
       bookId: json['bookId']?.toString(),
+      partial: json['partial'] == true,
     );
   }
 }
@@ -270,6 +273,7 @@ class NotificationCenter {
       for (final entry in list) {
         if (entry is! Map) continue;
         final item = InboxItem.fromJson(Map<String, dynamic>.from(entry));
+        if (item.partial) continue;
         if (!item.read) {
           unread++;
           await _showItem(item);
@@ -301,6 +305,7 @@ class NotificationCenter {
   }
 
   Future<void> _showItem(InboxItem item) async {
+    if (item.partial) return;
     try {
       await backfillChatFromNotice(
         sessionId: item.sessionId ?? '',
