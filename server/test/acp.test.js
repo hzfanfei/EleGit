@@ -262,9 +262,9 @@ describe("pushAcpToolActivity", () => {
       rawOutput: { exitCode: 0, stdout: "3 passed\nsecond line\nthird line should drop" },
     });
     assert.match(done, /npm test/);
-    assert.match(done, /3 passed/);
     assert.match(done, /second line/);
-    assert.doesNotMatch(done, /third line/);
+    assert.match(done, /third line/);
+    assert.doesNotMatch(done, /3 passed/);
     assert.equal(log.items.length, 1);
     assert.equal(log.items[0].running, false);
     assert.equal(toolLogSettled(log), true);

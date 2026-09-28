@@ -1939,13 +1939,13 @@ const _workRowHeight = 22.0;
 const _workRows = 3;
 const _workPanelHeight = _workRowHeight * _workRows;
 
-/// One visible step. Thought keeps only the latest line so the row stays put.
+/// One visible step. The row stays a single line and always shows that step's newest text.
 ({String text, bool thought}) _workStep(String block) {
   final lines = block.split('\n').map((line) => line.trim()).where((line) => line.isNotEmpty).toList();
   if (lines.isEmpty) return (text: '', thought: false);
   final head = lines.first;
   final thought = head == '思考' || head.startsWith('思考·') || head.startsWith('思考 ');
-  if (!thought) return (text: head, thought: false);
+  if (!thought) return (text: _toolLiveLine(lines), thought: false);
   final inline = head.replaceFirst(RegExp(r'^思考[·\s]*'), '').trim();
   final body = lines.skip(1).join('\n').trim();
   final source = body.isNotEmpty ? body : inline;
@@ -1954,6 +1954,19 @@ const _workPanelHeight = _workRowHeight * _workRows;
   const max = 42;
   final text = latest.length <= max ? latest : '…${latest.substring(latest.length - max)}';
   return (text: text, thought: true);
+}
+
+/// Title until a newer command or output line arrives, then that newest line.
+/// A long title must not push the new line off the row.
+String _toolLiveLine(List<String> lines) {
+  final head = lines.first;
+  final latest = lines.last;
+  if (latest == head || head.contains(latest)) return head;
+  const sep = ' · ';
+  const budget = 28;
+  final combined = '$head$sep$latest';
+  if (combined.length <= budget) return combined;
+  return latest;
 }
 
 List<({String text, bool thought})> _workSteps(String activity, String fallback) {
@@ -1993,23 +2006,20 @@ class _WorkingNote extends StatelessWidget {
             final steps = _workSteps(liveActivity, _livePhaseLabel(livePhase));
             final visible = steps.length <= _workRows ? steps : steps.sublist(steps.length - _workRows);
             final pad = _workRows - visible.length;
-            return Semantics(
-              liveRegion: true,
-              child: SizedBox(
-                key: const Key('wx-work-log'),
-                height: _workPanelHeight,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    for (var i = 0; i < pad; i++) const SizedBox(height: _workRowHeight),
-                    for (var i = 0; i < visible.length; i++)
-                      _WorkRow(
-                        text: visible[i].text,
-                        thought: visible[i].thought,
-                        active: i == visible.length - 1,
-                      ),
-                  ],
-                ),
+            return SizedBox(
+              key: const Key('wx-work-log'),
+              height: _workPanelHeight,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (var i = 0; i < pad; i++) const SizedBox(height: _workRowHeight),
+                  for (var i = 0; i < visible.length; i++)
+                    _WorkRow(
+                      text: visible[i].text,
+                      thought: visible[i].thought,
+                      active: i == visible.length - 1,
+                    ),
+                ],
               ),
             );
           },
@@ -2032,6 +2042,11 @@ class _WorkRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final style = TextStyle(
+      color: active ? Wx.text : Wx.muted,
+      fontSize: 12,
+      height: 1.2,
+    );
     return SizedBox(
       height: _workRowHeight,
       child: Row(
@@ -2052,18 +2067,119 @@ class _WorkRow extends StatelessWidget {
             const SizedBox(width: 6),
           ],
           Expanded(
-            child: Text(
-              text,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: active ? Wx.text : Wx.muted,
-                fontSize: 12,
-                height: 1.2,
-              ),
+            child: Semantics(
+              liveRegion: active,
+              child: thought
+                  ? _TailLine(text: text, style: style)
+                  : Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: style),
             ),
           ),
+          if (active)
+            ExcludeSemantics(
+              child: _StepAge(token: text),
+            ),
         ],
+      ),
+    );
+  }
+}
+
+/// One line, left-aligned when it fits. When it doesn't, the start clips so the newest characters stay visible.
+class _TailLine extends StatelessWidget {
+  const _TailLine({required this.text, required this.style});
+
+  final String text;
+  final TextStyle style;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final painter = TextPainter(
+          text: TextSpan(text: text, style: style),
+          maxLines: 1,
+          textDirection: TextDirection.ltr,
+        )..layout(maxWidth: double.infinity);
+        final fits = painter.width <= constraints.maxWidth;
+        painter.dispose();
+        if (fits) {
+          return Text(text, maxLines: 1, softWrap: false, style: style);
+        }
+        return ClipRect(
+          child: OverflowBox(
+            alignment: Alignment.centerRight,
+            minWidth: 0,
+            maxWidth: double.infinity,
+            child: Text(text, maxLines: 1, softWrap: false, style: style),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Seconds since this row's text last changed. A climbing number means the step has gone quiet.
+class _StepAge extends StatefulWidget {
+  const _StepAge({required this.token});
+
+  final String token;
+
+  @override
+  State<_StepAge> createState() => _StepAgeState();
+}
+
+class _StepAgeState extends State<_StepAge> {
+  Timer? _timer;
+  int _seconds = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _arm();
+  }
+
+  @override
+  void didUpdateWidget(covariant _StepAge oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.token == widget.token) return;
+    _seconds = 0;
+    _arm();
+  }
+
+  void _arm() {
+    _timer?.cancel();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(() => _seconds += 1);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final seconds = _seconds;
+    final quiet = seconds >= 8;
+    final label = seconds < 1
+        ? ''
+        : (seconds < 60 ? '$seconds秒' : '${seconds ~/ 60}分${(seconds % 60).toString().padLeft(2, '0')}');
+    return SizedBox(
+      width: 40,
+      child: Text(
+        label,
+        key: const Key('wx-work-age'),
+        textAlign: TextAlign.right,
+        maxLines: 1,
+        style: TextStyle(
+          color: quiet ? Wx.accent : Wx.faint,
+          fontSize: 11,
+          height: 1,
+          fontFeatures: const [FontFeature.tabularFigures()],
+        ),
       ),
     );
   }

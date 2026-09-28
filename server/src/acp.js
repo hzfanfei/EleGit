@@ -711,10 +711,10 @@ function clipToolOutput(text) {
     .split(/\r?\n/)
     .map((line) => line.replace(/[ \t]+/g, " ").trim())
     .filter(Boolean)
-    .slice(0, 2);
+    .slice(-2);
   const joined = lines.join("\n");
   if (joined.length <= 180) return joined;
-  return `${joined.slice(0, 179)}…`;
+  return `…${joined.slice(-(179))}`;
 }
 
 function textFromToolContent(content) {
@@ -773,7 +773,7 @@ function toolCommandFromUpdate(update) {
   return "";
 }
 
-/** One or two lines of tool result. Never the whole file, diff, or reasoning. */
+/** Newest one or two lines of tool result. Never the whole file, diff, or reasoning. */
 function toolOutputFromUpdate(update) {
   const raw = update?.rawOutput ?? update?.toolCall?.rawOutput;
   let text = "";

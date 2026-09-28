@@ -285,6 +285,47 @@ void main() {
     }
   });
 
+  testWidgets('each progress row stays one line and shows the newest update', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: ChatPage(
+          api: FakeWenxiangApi(
+            streamPace: const Duration(milliseconds: 1200),
+            streamEvents: [
+              ChatStreamEvent(type: 'status', phase: 'activity', detail: '终端·npm test'),
+              ChatStreamEvent(
+                type: 'status',
+                phase: 'activity',
+                detail: '终端·npm test\nnpm test\n12 passed',
+              ),
+              ChatStreamEvent(type: 'done', engine: 'local-progress', sessionId: 's1'),
+            ],
+          ),
+          repo: sampleRepo(),
+          onBack: () {},
+        ),
+      ),
+    );
+    await _pumpUntilChatReady(tester);
+    await tester.tap(find.text('这个仓库最近在做什么？'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1300));
+
+    expect(find.text('终端·npm test'), findsOneWidget);
+    expect(find.textContaining('12 passed'), findsNothing);
+    expect(find.byKey(const Key('wx-work-age')), findsOneWidget);
+
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text('1秒'), findsOneWidget);
+
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('终端·npm test · 12 passed'), findsOneWidget);
+    expect(find.text('1秒'), findsNothing);
+
+    await tester.pump(const Duration(seconds: 2));
+  });
+
   testWidgets('composer stays typable while a reply is streaming', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
