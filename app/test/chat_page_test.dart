@@ -6,6 +6,7 @@ import 'package:wenxiang/models.dart';
 import 'package:wenxiang/persist/app_memory.dart';
 import 'package:wenxiang/screens/chat_page.dart';
 import 'package:wenxiang/theme.dart';
+import 'package:wenxiang/widgets/wx_chrome.dart';
 import 'package:wenxiang/voice/voice_client.dart';
 import 'package:wenxiang/voice/voice_media.dart';
 import 'package:wenxiang/voice/voice_stt_client.dart';
@@ -348,7 +349,8 @@ void main() {
 
     expect(find.textContaining('连接断了'), findsNothing);
     expect(find.text('重试上一问'), findsNothing);
-    expect(find.byKey(const Key('wx-working-mark')), findsOneWidget);
+    final mark = tester.widget<WxLoading>(find.byKey(const Key('wx-working-mark')));
+    expect(mark.color, Wx.danger);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 1));

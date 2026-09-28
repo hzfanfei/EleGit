@@ -93,6 +93,7 @@ class _ChatPageState extends State<ChatPage> {
   bool _live = false;
   bool _busy = false;
   bool _holdForAnswer = false;
+  bool _releasingHold = false;
   bool _stopped = false;
   int? _processingUserIndex;
   final List<int> _queuedUserIndices = <int>[];
@@ -1132,7 +1133,7 @@ class _ChatPageState extends State<ChatPage> {
         bookId: (item['bookId'] ?? '').toString(),
       );
       if (_messagesMatchNotice(userIndex, sessionId: sessionId, question: question)) {
-        _placeHeldAnswer(userIndex, answer);
+        await _placeHeldAnswer(userIndex, answer);
       }
     }
     _mergeBackfill();
@@ -1148,22 +1149,32 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
-  void _placeHeldAnswer(int userIndex, String answer) {
-    if (!mounted) return;
+  Future<void> _placeHeldAnswer(int userIndex, String answer) async {
+    if (!mounted || _releasingHold) return;
     final text = stripTaskMarker(answer);
     if (text.isEmpty || _answerAfter(userIndex)) return;
     if (userIndex < 0 || userIndex >= _messages.length) return;
-    setState(() {
-      _insertMessageAfterUser(
-        userIndex,
-        ChatMessage(
-          role: 'assistant',
-          content: text,
-          engine: _liveEngine.value ?? 'acp',
-        ),
-      );
-      _live = false;
-    });
+    _releasingHold = true;
+    try {
+      if (_livePhase.value == 'hold') {
+        _setLivePhase('generate');
+        await Future<void>.delayed(const Duration(milliseconds: 280));
+        if (!mounted || _answerAfter(userIndex)) return;
+      }
+      setState(() {
+        _insertMessageAfterUser(
+          userIndex,
+          ChatMessage(
+            role: 'assistant',
+            content: text,
+            engine: _liveEngine.value ?? 'acp',
+          ),
+        );
+        _live = false;
+      });
+    } finally {
+      _releasingHold = false;
+    }
   }
 
   void _onChatBackfill() {
@@ -2030,6 +2041,7 @@ class _WorkingNote extends StatelessWidget {
                       text: visible[i].text,
                       thought: visible[i].thought,
                       active: i == visible.length - 1,
+                      dropped: livePhase == 'hold' && i == visible.length - 1,
                     ),
                 ],
               ),
@@ -2046,11 +2058,13 @@ class _WorkRow extends StatelessWidget {
     required this.text,
     required this.thought,
     required this.active,
+    this.dropped = false,
   });
 
   final String text;
   final bool thought;
   final bool active;
+  final bool dropped;
 
   @override
   Widget build(BuildContext context) {
@@ -2067,7 +2081,11 @@ class _WorkRow extends StatelessWidget {
             width: 18,
             child: Center(
               child: active
-                  ? const WxLoading(key: Key('wx-working-mark'), size: 14)
+                  ? WxLoading(
+                      key: const Key('wx-working-mark'),
+                      size: 14,
+                      color: dropped ? Wx.danger : null,
+                    )
                   : const _StepDot(),
             ),
           ),
