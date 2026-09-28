@@ -568,6 +568,40 @@ void main() {
     expect(find.textContaining('第一段。'), findsNothing);
   });
 
+  testWidgets('assistant headline caption stays after server final while still speaking', (tester) async {
+    final media = FakeVoiceMedia();
+    final client = FakeVoiceClient();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: CallPage(
+          api: FakeWenxiangApi(voiceReady: true),
+          repo: sampleRepo(),
+          onBack: () {},
+          media: media,
+          client: client,
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    await tester.tap(find.text('开始通话'));
+    await tester.pump();
+
+    client.emit(VoiceEvent(type: 'caption', role: 'assistant', text: '还在念这句。', segmentCaption: true));
+    client.emit(VoiceEvent(type: 'state', state: 'speaking'));
+    client.emit(VoiceEvent(type: 'pcm', pcm: Uint8List.fromList([1, 0, 2, 0])));
+    await tester.pump();
+    client.emit(VoiceEvent(
+      type: 'caption',
+      role: 'assistant',
+      text: '还在念这句。后面还有。',
+      finalCaption: true,
+    ));
+    await tester.pump();
+    expect(find.textContaining('还在念这句'), findsOneWidget);
+  });
+
   testWidgets('microphone denial stays on a short Chinese retry', (tester) async {
     final media = FakeVoiceMedia(micGranted: false);
     await tester.pumpWidget(

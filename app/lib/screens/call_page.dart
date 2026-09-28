@@ -142,6 +142,14 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
   bool get _assistantSubtitleActive =>
       _assistantPreview.isNotEmpty || _voiceCaption.isNotEmpty || _segmentCaption.isNotEmpty;
 
+  /// Server final caption often lands before the phone finishes TTS; keep the live line until drain.
+  bool get _holdAssistantCaptionForPlayback =>
+      _live &&
+      (_playing ||
+          _phase == 'speaking' ||
+          _answerAudioDone ||
+          _playbackEndPending);
+
   void _clearAssistantSubtitle() {
     _assistantPreview = '';
     _segmentCaption = '';
@@ -186,9 +194,13 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
   }
 
   void _finalizeAssistantCaption(String text, {String? engine}) {
-    _clearAssistantSubtitle();
     if (text.trim().isEmpty) return;
     _captions.add(ChatMessage(role: 'assistant', content: text.trim(), engine: engine));
+    if (_holdAssistantCaptionForPlayback) {
+      _assistantPreview = '';
+      return;
+    }
+    _clearAssistantSubtitle();
   }
 
   @override
