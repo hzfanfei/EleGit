@@ -1,15 +1,5 @@
 export const COMPANION_ALREADY_RUNNING = 75;
 
-/** Node CLI args to run the companion (optional --watch when WENXIANG_DEV_WATCH=1). */
-export function companionNodeArgs(env = process.env) {
-  const script = "src/server.js";
-  const watch = String(env.WENXIANG_DEV_WATCH || "").trim().toLowerCase();
-  if (watch === "1" || watch === "true" || watch === "yes") {
-    return ["--watch", script];
-  }
-  return [script];
-}
-
 export function isCompanionAlreadyRunning(code) {
   return code === COMPANION_ALREADY_RUNNING;
 }
