@@ -1121,21 +1121,25 @@ class _ChatPageState extends State<ChatPage> {
       if (entry is! Map) continue;
       final item = Map<String, dynamic>.from(entry);
       final answer = (item['answer'] ?? '').toString().trim();
-      if (answer.isEmpty) continue;
+      final activity = (item['activity'] ?? '').toString();
+      if (answer.isEmpty && activity.trim().isEmpty) continue;
       final sessionId = (item['sessionId'] ?? '').toString();
       final question = (item['question'] ?? '').toString();
-      await backfillChatFromNotice(
-        sessionId: sessionId,
-        answer: answer,
-        question: question,
-        owner: (item['owner'] ?? '').toString(),
-        repo: (item['repo'] ?? '').toString(),
-        bookId: (item['bookId'] ?? '').toString(),
-      );
+      if (answer.isNotEmpty) {
+        await backfillChatFromNotice(
+          sessionId: sessionId,
+          answer: answer,
+          question: question,
+          owner: (item['owner'] ?? '').toString(),
+          repo: (item['repo'] ?? '').toString(),
+          bookId: (item['bookId'] ?? '').toString(),
+        );
+      }
       if (_messagesMatchNotice(userIndex, sessionId: sessionId, question: question)) {
         if (item['partial'] == true) {
-          _showHeldPreview(answer);
-        } else {
+          if (activity.trim().isNotEmpty) _liveActivity.value = activity;
+          if (answer.isNotEmpty) _showHeldPreview(answer);
+        } else if (answer.isNotEmpty) {
           await _placeHeldAnswer(userIndex, answer);
         }
       }

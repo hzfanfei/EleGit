@@ -1,7 +1,7 @@
 import net from "node:net";
 import readline from "node:readline";
 import { spawn } from "node:child_process";
-import { acpVisibleTextFromUpdate } from "./acp.js";
+import { acpVisibleTextFromUpdate, pushAcpToolActivity } from "./acp.js";
 import { answerReadyNotice } from "./ask.js";
 
 /**
@@ -40,6 +40,18 @@ export function noteRelayTraffic(state, direction, line) {
     next.done = true;
   }
   return next;
+}
+
+/** Work-row text for one agent stdout line. Empty when the line is not a step. */
+export function noteRelayActivity(toolLog, line) {
+  let msg;
+  try {
+    msg = JSON.parse(String(line || ""));
+  } catch {
+    return "";
+  }
+  if (!msg || msg.method !== "session/update") return "";
+  return pushAcpToolActivity(toolLog, msg.params?.update || {}) || "";
 }
 
 function consumeLines(buffer, chunk, onLine) {
@@ -94,11 +106,12 @@ export function startTurnRelay({
   function maybePublish(turn) {
     if (turn.clients.size > 0 || turn.acked || turn.publishedFinal) return;
     const answer = String(turn.state.answer || "").trim();
+    const activity = String(turn.state.activity || "").trim();
     const workspaceRoot = turn.meta?.workspaceRoot;
-    if (!answer || !workspaceRoot) return;
+    if ((!answer && !activity) || !workspaceRoot) return;
     const final = Boolean(turn.state.done);
     if (!final && !turn.meta?.partial) return;
-    if (!final && answer === turn.publishedAnswer) return;
+    if (!final && answer === turn.publishedAnswer && activity === turn.publishedActivity) return;
     const now = Date.now();
     if (!final && turn.lastPublishAt && now - turn.lastPublishAt < partialMs) {
       if (!turn.publishTimer) {
@@ -112,12 +125,14 @@ export function startTurnRelay({
     clearPartialTimer(turn);
     turn.lastPublishAt = now;
     turn.publishedAnswer = answer;
+    turn.publishedActivity = activity;
     if (final) turn.publishedFinal = true;
     const notice = answerReadyNotice(answer, {
       session: turn.meta.session,
       question: turn.meta.question,
       bookId: turn.meta.bookId,
       partial: !final,
+      activity,
     });
     if (!notice) {
       if (final) endOrphan(turn);
@@ -131,6 +146,8 @@ export function startTurnRelay({
     const rl = readline.createInterface({ input: turn.child.stdout });
     rl.on("line", (line) => {
       turn.state = noteRelayTraffic(turn.state, "out", line);
+      const traced = noteRelayActivity(turn.toolLog, line);
+      if (traced) turn.state = { ...turn.state, activity: traced };
       for (const socket of turn.clients) send(socket, { op: "stdout", key: turn.key, line });
       maybePublish(turn);
     });
@@ -174,7 +191,8 @@ export function startTurnRelay({
       key,
       child,
       clients: new Set([socket]),
-      state: { answer: "", promptId: null, done: false },
+      state: { answer: "", promptId: null, done: false, activity: "" },
+      toolLog: { items: [] },
       pendingIn: "",
       meta: null,
       acked: false,

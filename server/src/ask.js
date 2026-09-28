@@ -53,11 +53,12 @@ export function answerReadyNotice(full, ctx = {}) {
   let notice = marked;
   if (!notice) {
     const answer = String(full || "").trim().slice(0, CHAT_ANSWER_CAP);
-    if (!answer) return null;
+    const activity = String(ctx.activity || "").trim();
+    if (!answer && !(ctx.partial && activity)) return null;
     notice = {
       kind: "agent-notification",
       title: "回答已就绪",
-      body: answer.slice(0, 280),
+      body: (answer || activity).slice(0, 280),
       answer,
       sessionId: ctx.session?.id,
       question: String(ctx.question || "").slice(0, 200),
@@ -73,6 +74,7 @@ export function answerReadyNotice(full, ctx = {}) {
     notice.partial = true;
     notice.title = "回答编写中";
   }
+  if (ctx.activity) notice.activity = String(ctx.activity).slice(0, 4000);
   return notice;
 }
 

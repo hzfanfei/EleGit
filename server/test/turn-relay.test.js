@@ -239,6 +239,67 @@ describe("turn relay", () => {
       relay.close();
     }
   });
+
+  it("publishes thought and tool steps before any answer text", async () => {
+    const agent = fakeAgent();
+    const published = [];
+    const relay = await startTurnRelay({
+      port: 0,
+      spawnImpl: () => agent,
+      publish: async (_workspaceRoot, notice) => {
+        published.push({ notice });
+      },
+    });
+    try {
+      const socket = net.connect(relay.port, "127.0.0.1");
+      await once(socket, "connect");
+      socket.write(`${JSON.stringify({
+        op: "spawn",
+        key: "s1:4",
+        file: "agent",
+        args: [],
+      })}\n`);
+      socket.write(`${JSON.stringify({
+        op: "meta",
+        key: "s1:4",
+        meta: {
+          workspaceRoot: "C:/问象",
+          session: { id: "s1", owner: "octo", repo: "demo" },
+          question: "进度如何",
+          partial: true,
+        },
+      })}\n`);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      socket.on("error", () => {});
+      socket.resetAndDestroy();
+      await once(socket, "close");
+      const step = (update) => `${JSON.stringify({ method: "session/update", params: { update } })}\n`;
+      agent.stdout.write(step({
+        sessionUpdate: "agent_thought_chunk",
+        content: { type: "text", text: "先看回补" },
+      }));
+      agent.stdout.write(step({
+        sessionUpdate: "tool_call",
+        toolCallId: "t1",
+        title: "Read",
+        kind: "read",
+        locations: [{ path: "server/src/ask.js" }],
+      }));
+      const deadline = Date.now() + 1500;
+      const ready = () => published.some((row) => {
+        const activity = String(row.notice.activity || "");
+        return activity.includes("思考") && activity.includes("读·ask.js");
+      });
+      while (!ready() && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      assert.equal(ready(), true);
+      assert.equal(published.at(-1).notice.partial, true);
+      assert.equal(agent.killed, false);
+    } finally {
+      relay.close();
+    }
+  });
 });
 
 function readlineLines(socket) {
