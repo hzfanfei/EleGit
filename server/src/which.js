@@ -63,12 +63,16 @@ function prependPathDir(env, dir) {
   const folder = String(dir || "").trim();
   if (!folder) return next;
   const key = process.platform === "win32" ? "Path" : "PATH";
-  const cur = String(next[key] || "");
+  const cur = String(next.PATH || next.Path || "");
   const parts = cur.split(path.delimiter).filter(Boolean);
   const norm = (p) => path.normalize(p).toLowerCase();
-  if (!parts.some((p) => norm(p) === norm(folder))) {
-    next[key] = cur ? `${folder}${path.delimiter}${cur}` : folder;
-  }
+  const value = !parts.some((p) => norm(p) === norm(folder))
+    ? cur
+      ? `${folder}${path.delimiter}${cur}`
+      : folder
+    : cur;
+  next[key] = value;
+  if (process.platform === "win32") next.PATH = value;
   return next;
 }
 
@@ -104,7 +108,7 @@ export function whichSync(bin) {
         ]
       : [];
   const dirs = [
-    ...(process.env.PATH || "").split(path.delimiter),
+    ...(process.env.PATH || process.env.Path || "").split(path.delimiter),
     nodeDir,
     ...gitDirs,
     path.join(process.env.APPDATA || "", "npm"),

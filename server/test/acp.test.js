@@ -30,7 +30,7 @@ import {
   preferredAcpModeIds,
   selectPermissionOption,
 } from "../src/acp.js";
-import { whichSync } from "../src/which.js";
+import { envWithNodeOnPath, whichSync } from "../src/which.js";
 
 const fakeAcp = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures", "fake-acp.js");
 
@@ -140,6 +140,12 @@ describe("whichSync", () => {
     const found = whichSync("node");
     assert.ok(found);
     assert.match(found, /node/i);
+  });
+
+  it("keeps PATH aligned when the environment was copied from Windows Path", () => {
+    const next = envWithNodeOnPath({ Path: "C:\\custom-bin" });
+    assert.match(String(next.PATH || ""), /custom-bin/i);
+    if (process.platform === "win32") assert.equal(next.PATH, next.Path);
   });
 });
 
