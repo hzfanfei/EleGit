@@ -955,11 +955,12 @@ function claudeClaudeCodeExecutable() {
 }
 
 export class AcpChannel {
-  constructor({ command, cwd, spawnImpl = spawn, idleMs = 30 * 60 * 1000 } = {}) {
+  constructor({ command, cwd, spawnImpl = spawn, idleMs = 30 * 60 * 1000, relayKey = "" } = {}) {
     this.command = command;
     this.cwd = cwd;
     this.spawnImpl = spawnImpl;
     this.idleMs = idleMs;
+    this.relayKey = relayKey;
     this.agentMode = false;
     this.availableModes = [];
     this.child = null;
@@ -996,13 +997,17 @@ export class AcpChannel {
         env.npm_node_execpath = nodeExe;
       }
     }
-    this.child = this.spawnImpl(file, args, {
+    const spawnOpts = {
       cwd: this.cwd,
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
       shell: useShell,
       env,
-    });
+    };
+    if (this.relayKey) spawnOpts.relayKey = this.relayKey;
+    this.child = this.spawnImpl(file, args, spawnOpts);
+    this.noteTurn = (meta) => this.child?.noteTurn?.(meta);
+    this.ackTurn = () => this.child?.ackTurn?.();
     this.child.on("error", (err) => this._failAll(err));
     this.child.on("exit", () => this._dead());
     const rl = readline.createInterface({ input: this.child.stdout });
@@ -1429,6 +1434,7 @@ export function createSessionStore({
   idleMs = 30 * 60 * 1000,
   now = () => new Date().toISOString(),
   resolveCommand = resolveAgentCommand,
+  relay = false,
 } = {}) {
   const sessions = new Map();
   const activeByRepo = new Map();
@@ -1584,7 +1590,13 @@ export function createSessionStore({
       let channel = null;
       try {
         if (entry.channel) await entry.channel.close().catch(() => {});
-        channel = new AcpChannel({ command: resolved, cwd: root, spawnImpl, idleMs });
+        channel = new AcpChannel({
+          command: resolved,
+          cwd: root,
+          spawnImpl,
+          idleMs,
+          relayKey: relay ? `${session.id}:${randomUUID()}` : "",
+        });
         await channel.start();
         if (epoch !== channelEpoch) {
           await channel.close().catch(() => {});
@@ -1657,6 +1669,8 @@ export function createSessionStore({
     agentMode = false,
     turnNote = "",
     staticFiles,
+    workspaceRoot,
+    bookId,
   }) {
     const command = resolveCommand();
     if (!command) {
@@ -1722,6 +1736,12 @@ export function createSessionStore({
           }
         : null;
       try {
+        channel.noteTurn?.({
+          workspaceRoot,
+          session: { id: session.id, owner: session.owner, repo: session.repo },
+          question,
+          bookId,
+        });
         await channel.applySessionMode();
         await channel.prompt(text, { onDelta, onActivity });
         entry.primed = true;
@@ -1764,6 +1784,10 @@ export function createSessionStore({
     return warmSession(session, cwd);
   }
 
+  function ackTurn(session) {
+    channels.get(session?.id)?.channel?.ackTurn?.();
+  }
+
   async function resetAllChannels() {
     channelEpoch += 1;
     const pending = [];
@@ -1786,6 +1810,7 @@ export function createSessionStore({
     close,
     resolveForChat,
     prompt,
+    ackTurn,
     cancel,
     cancelById,
     interrupt,

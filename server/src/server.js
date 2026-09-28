@@ -18,6 +18,7 @@ import {
 import { askBookOnCall, handleBookVoiceTurn, prepareBookTurnContext } from "./book-voice-turn.js";
 import { handleRepoVoiceTurn } from "./repo-voice-turn.js";
 import { streamAnswer, synthesizeBookAnswer, answerReadyNotice, shouldPublishFinishedAnswer } from "./ask.js";
+import { ensureTurnRelay, relaySpawn, turnRelayEnabled } from "./turn-relay-client.js";
 import { setPhoneForeground, phoneInForeground } from "./phone-presence.js";
 import { openSse, sseClientGone, writeSse, writeSseSafe } from "./sse.js";
 import {
@@ -129,11 +130,16 @@ syncAcpEngineConfig(store.config);
 setCursorModelPreference(store.config.cursorModel);
 setPreferredVoiceStack(store.config.voiceStack);
 
+const turnRelay = turnRelayEnabled();
 const sessions = createSessionStore({
   resolveCommand: () => resolveAgentCommand("repo"),
+  relay: turnRelay,
+  spawnImpl: turnRelay ? relaySpawn : undefined,
 });
 const bookSessions = createSessionStore({
   resolveCommand: () => resolveAgentCommand("book"),
+  relay: turnRelay,
+  spawnImpl: turnRelay ? relaySpawn : undefined,
 });
 const chatCancels = new Map();
 
@@ -1073,6 +1079,7 @@ app.post("/v1/books/chat", async (req, res) => {
       question: message,
       bookId: book.id,
     });
+    bookSessions.ackTurn?.(session);
     if (signal.aborted) {
       try { res.end(); } catch { /* already gone */ }
       return;
@@ -1252,6 +1259,7 @@ app.post("/v1/chat", async (req, res) => {
       session,
       question: message,
     });
+    sessions.ackTurn?.(session);
     if (signal.aborted) {
       try { res.end(); } catch { /* already gone */ }
       return;
@@ -1472,6 +1480,13 @@ async function preloadVoiceWorkers() {
 }
 
 async function startCompanion() {
+  if (turnRelay) {
+    try {
+      await ensureTurnRelay();
+    } catch (err) {
+      console.error(`[turn-relay] ${err.message || err}`);
+    }
+  }
   await ensureStaticDir(store.config.workspaceRoot);
   const bound = await bindCompanion(httpServer, PORT, BIND);
   if (bound === "busy") {

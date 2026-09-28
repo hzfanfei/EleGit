@@ -1929,7 +1929,7 @@ class _LiveTurn extends StatelessWidget {
                   return Padding(
                     padding: const EdgeInsets.only(top: 8),
                     child: WxErrorPanel(
-                      error: '连接中断了。请重试。',
+                      error: '连接中断了。本机还在写的话，回答会自己补上。也可以重试。',
                       onRetry: onDropRetry,
                       retryLabel: '重试上一问',
                     ),

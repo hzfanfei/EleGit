@@ -299,6 +299,8 @@ export async function* streamAnswer({
         agentMode,
         turnNote,
         staticFiles,
+        workspaceRoot,
+        bookId,
         onDelta: (chunk) => {
           full += chunk;
           queue.push({ kind: "delta", text: chunk });
