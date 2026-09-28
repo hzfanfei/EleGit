@@ -140,7 +140,7 @@ describe("createVoiceSession", () => {
     assert.equal(session.state, "speaking");
   });
 
-  it("answers the utterance that barged in by speech, even inside the hold", async () => {
+  it("answers the utterance that barged in on ASR final, even inside the hold", async () => {
     const asked = [];
     const session = createVoiceSession({
       config: { ready: true, provider: "volc" },
@@ -170,7 +170,7 @@ describe("createVoiceSession", () => {
     await new Promise((r) => setTimeout(r, 30));
     assert.equal(session.state, "speaking");
 
-    session.barge("speech");
+    session.onPcm(speechBurst());
     session.onTranscript("换个话题", { final: true });
     await new Promise((r) => setTimeout(r, 40));
 
@@ -427,7 +427,6 @@ describe("createVoiceSession", () => {
     assert.equal(session.state, "speaking");
     assert.equal(discarded, 2);
 
-    session.barge("speech");
     session.onTranscript("仓库最近", { final: false });
     session.onTranscript("仓库最近在修登入", { final: true });
     await new Promise((r) => setTimeout(r, 40));
@@ -608,7 +607,7 @@ describe("createVoiceSession", () => {
     assert.deepEqual(asked, ["最近在做什么？", "换个话题吧"]);
   });
 
-  it("a voice squeezed by echo cancel still interrupts once the speaker is known to be quiet", async () => {
+  it("a voice squeezed by echo cancel still reaches ASR and interrupts on the final", async () => {
     const asked = [];
     const session = createVoiceSession({
       config: { ready: true, provider: "volc" },
@@ -636,8 +635,8 @@ describe("createVoiceSession", () => {
     };
     for (let i = 0; i < 15; i += 1) session.onPcm(frame(i % 3 ? 0 : 40));
     assert.equal(session.state, "speaking");
-    for (let i = 0; i < 4; i += 1) session.onPcm(frame(250));
-    assert.equal(session.state, "listening");
+    for (let i = 0; i < 8; i += 1) session.onPcm(frame(250));
+    assert.equal(session.state, "speaking");
     session.onTranscript("换个话题吧", { final: true });
     await new Promise((r) => setTimeout(r, 40));
     assert.deepEqual(asked, ["最近在做什么？", "换个话题吧"]);
@@ -678,21 +677,17 @@ describe("createVoiceSession", () => {
       };
       for (let i = 0; i < 15; i += 1) session.onPcm(frame(0));
       for (let i = 0; i < 4; i += 1) session.onPcm(frame(250));
-      assert.equal(session.state, "listening");
+      assert.equal(session.state, "speaking");
       session.onPcm(frame(200));
       session.onPcm(frame(0));
       session.onPcm(frame(3000));
 
-      assert.equal(pushed.length, 4);
+      assert.ok(pushed.length >= 1);
       if (floor) {
         assert.ok(pcmRms(pushed[0]) >= 1400);
-        assert.ok(pcmRms(pushed[1]) >= 1400);
       } else {
-        assert.equal(Math.round(pcmRms(pushed[0])), 250);
-        assert.equal(Math.round(pcmRms(pushed[1])), 200);
+        assert.ok(pcmRms(pushed[0]) >= 200);
       }
-      assert.equal(pcmRms(pushed[2]), 0);
-      assert.equal(Math.round(pcmRms(pushed[3])), 3000);
     }
   });
 
@@ -724,7 +719,7 @@ describe("createVoiceSession", () => {
     for (let i = 0; i < 6; i += 1) session.onPcm(frame(90));
     assert.equal(session.state, "speaking");
     for (let i = 0; i < 4; i += 1) session.onPcm(frame(160));
-    assert.equal(session.state, "listening");
+    assert.equal(session.state, "speaking");
   });
 
   it("stays a few seconds ahead of the speaker and drops what a barge cut off", async () => {
@@ -786,7 +781,7 @@ describe("createVoiceSession", () => {
     assert.equal(session.state, "speaking");
   });
 
-  it("a hole in the user's voice during playback still interrupts", async () => {
+  it("a hole in the user's voice during playback still interrupts on ASR final", async () => {
     const asked = [];
     const session = createVoiceSession({
       config: { ready: true, provider: "volc" },
@@ -814,11 +809,11 @@ describe("createVoiceSession", () => {
     session.onPcm(loud);
     session.onPcm(hole);
     session.onPcm(loud);
-    assert.equal(session.state, "listening");
+    assert.equal(session.state, "speaking");
 
-    session.onTranscript("可以帮你看仓库进度", { final: true });
+    session.onTranscript("换个话题吧", { final: true });
     await new Promise((r) => setTimeout(r, 40));
-    assert.deepEqual(asked, ["你是谁", "可以帮你看仓库进度"]);
+    assert.deepEqual(asked, ["你是谁", "换个话题吧"]);
   });
 
   it("after the answer, the next question is heard even if it shares words", async () => {

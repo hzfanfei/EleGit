@@ -201,7 +201,7 @@ export function attachVoiceGateway(httpServer, {
     const providers = createProviders(config, {
       onPartial: (text) => holder.session?.onTranscript(text, { final: false }),
       onFinal: (text) => holder.session?.onTranscript(text, { final: true }),
-      onSpeechStart: () => holder.session?.barge("speech"),
+      // Interruption is driven by ASR finals in voice-session, not VAD speech_start.
       onAsrError: (detail) => holder.session?.onAsrFailure?.(detail?.message),
     });
     const session = createVoiceSession({

@@ -140,6 +140,8 @@ export function createVoiceSession({
     sendAudio?.(downlinkAdpcm && buf?.length && !looksLikeMp3(buf) ? encodeAdpcm(buf, 24000) : buf);
   }
   let bargeGapTimer = null;
+  /** User speech fed to ASR over the speaker during this playback stretch. */
+  let playbackUserSpeech = false;
   let checkoutPromise = null;
   const callAbort = new AbortController();
 
@@ -297,8 +299,24 @@ export function createVoiceSession({
     bargeHardBytes = 0;
     echoBytes = 0;
     echoLevels = [];
+    playbackUserSpeech = false;
     if (bargeGapTimer) clearTimeout(bargeGapTimer);
     bargeGapTimer = null;
+  }
+
+  function flushPlaybackSpeechToAsr() {
+    if (!bargeChunks.length) return;
+    heardPcmSinceTurn = true;
+    const floor = asr?.speechFloorRms;
+    if (floor) bargeLiftUntil = Date.now() + BARGE_LIFT_MS;
+    const chunks = bargeChunks;
+    bargeChunks = [];
+    bargeSpeechBytes = 0;
+    bargeHardBytes = 0;
+    const buffered = Buffer.concat(floor ? chunks.map((c) => liftQuietSpeech(c, floor)) : chunks);
+    speechBytesSinceTurn += buffered.length;
+    playbackUserSpeech = true;
+    asr?.push?.(buffered);
   }
 
   function playbackBargeRms() {
@@ -332,14 +350,7 @@ export function createVoiceSession({
       bargeHardBytes += bytes.length;
       bargeChunks.push(bytes);
       if (bargeHardBytes < PLAYBACK_BARGE_BYTES) return;
-      const chunks = bargeChunks;
-      if (!bargeIn("speech")) return;
-      heardPcmSinceTurn = true;
-      const floor = asr?.speechFloorRms;
-      if (floor) bargeLiftUntil = Date.now() + BARGE_LIFT_MS;
-      const buffered = Buffer.concat(floor ? chunks.map((c) => liftQuietSpeech(c, floor)) : chunks);
-      speechBytesSinceTurn += buffered.length;
-      asr?.push?.(buffered);
+      flushPlaybackSpeechToAsr();
       return;
     }
     if (!bargeSpeechBytes) return;
@@ -611,24 +622,23 @@ export function createVoiceSession({
     onTranscript(text, { final = false } = {}) {
       const spoken = String(text || "").trim();
       if (!spoken || !started) return;
-      // Speaker audio is still in the room until the phone finishes this clip.
-      // A final that does not match the line used to become the next question.
-      if (playbackOpen) return;
+      if (playbackOpen && !final) return;
       const busy = machine.state === "speaking" || machine.state === "thinking";
-      if (echoOfAssistant(spoken, { loose: busy || Date.now() < echoLooseUntil })) return;
-      if (busy && compact(spoken).length < 4) return;
-      if (busy && revisionOfAsk(spoken)) return;
+      const interrupting = busy || playbackOpen;
+      if (echoOfAssistant(spoken, { loose: interrupting || Date.now() < echoLooseUntil })) return;
+      if (interrupting && compact(spoken).length < 4) return;
+      if (interrupting && revisionOfAsk(spoken)) return;
       if (final && spoken === lastFinalText) {
         const now = Date.now();
         // Recognition often repeats the line it just accepted. Cutting the
         // answer on that repeat makes the call stutter a few seconds in.
-        if (busy || now - lastFinalAt < 1200) return;
+        if (interrupting || now - lastFinalAt < 1200) return;
       }
-      // Partials keep arriving while the answer is still being written.
-      // Cancelling on one of them drops the question and nothing is said.
-      if (busy && !final) return;
-      if (busy && !interruptHasSpeech()) return;
-      if (machine.state === "speaking" || machine.state === "thinking") bargeIn("asr");
+      // Only a final transcript stops the answer; VAD or loud PCM alone does not.
+      if (interrupting && !final) return;
+      if (interrupting && playbackOpen && !playbackUserSpeech) return;
+      if (interrupting && !playbackUserSpeech && !interruptHasSpeech()) return;
+      if (interrupting && final) bargeIn("asr");
       pushCaption("user", spoken, { final });
       if (!final) return;
       lastFinalText = spoken;
@@ -681,9 +691,9 @@ export function createVoiceSession({
         });
     },
     barge(reason = "tap") {
-      if (reason !== "tap" && playbackOpen) return;
+      if (reason !== "tap") return;
       if (machine.state === "speaking" || machine.state === "thinking") {
-        bargeIn(reason === "tap" ? "tap" : "speech");
+        bargeIn("tap");
       }
     },
     playbackDone() {
