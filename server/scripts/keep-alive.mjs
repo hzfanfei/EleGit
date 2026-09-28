@@ -6,10 +6,20 @@ import { envWithNodeOnPath, resolveNodeExecutable } from "../src/which.js";
 import {
   companionIsHealthy,
   isCompanionAlreadyRunning,
+  networkLikelyUp,
   nextKeepAliveDelay,
   shouldRestartCompanion,
+  shouldRestartStaleTunnel,
 } from "../src/keep-alive-policy.js";
-import { ensureNgrok } from "../src/ngrok.js";
+import {
+  ensureNgrok,
+  fetchNgrokTunnels,
+  killWenxiangNgrok,
+  ngrokTunnelReady,
+  probePublicHealth,
+  recoverNgrok,
+  shouldAutostartNgrok,
+} from "../src/ngrok.js";
 
 loadLocalEnv();
 process.env = envWithNodeOnPath(process.env);
@@ -19,6 +29,11 @@ const nodeExe = resolveNodeExecutable();
 const delayMs = Number(process.env.WENXIANG_KEEPALIVE_DELAY_MS || 2000);
 const pollMs = Number(process.env.WENXIANG_KEEPALIVE_POLL_MS || 5000);
 const port = Number(process.env.WENXIANG_PORT || 8787);
+const publicUrl = process.env.WENXIANG_PUBLIC_URL;
+const tunnelFailThreshold = Math.max(
+  2,
+  Number(process.env.WENXIANG_TUNNEL_FAIL_THRESHOLD || 3),
+);
 const healthUrl = `http://127.0.0.1:${port}/health`;
 let attempt = 0;
 let ngrokChild = null;
@@ -27,21 +42,91 @@ let booting = false;
 let supervising = false;
 let superviseAgain = false;
 let lastTunnelError = "";
+let publicTunnelFailStreak = 0;
+let lastPublicTunnelReason = "";
+let lastNetworkDownLog = 0;
 
 async function ensureTunnel() {
-  const ngrok = await ensureNgrok();
-  if (ngrok.child && ngrok.child !== ngrokChild) {
-    ngrokChild = ngrok.child;
-    ngrokChild.on("exit", () => {
-      ngrokChild = null;
-      console.error("[keep-alive] ngrok exited — starting it again");
-      supervise();
-    });
+  if (!shouldAutostartNgrok(process.env)) return;
+  const tunnels = await fetchNgrokTunnels();
+  if (tunnels !== null && !ngrokTunnelReady(tunnels, { publicUrl, port })) {
+    await killWenxiangNgrok({ child: ngrokChild, env: process.env });
+    ngrokChild = null;
   }
+  const ngrok = await ensureNgrok({ port, publicUrl, env: process.env });
+  attachNgrokChild(ngrok.child);
   if (ngrok.reason === "already") {
     if (!announcedHolding) console.log("ngrok already running.");
   } else if (ngrok.started) console.log("ngrok started.");
   lastTunnelError = "";
+}
+
+function attachNgrokChild(child) {
+  if (!child || child === ngrokChild) return;
+  ngrokChild = child;
+  ngrokChild.on("exit", () => {
+    ngrokChild = null;
+    console.error("[keep-alive] ngrok exited — starting it again");
+    publicTunnelFailStreak = 0;
+    supervise();
+  });
+}
+
+async function maintainPublicTunnel(localHealthy) {
+  if (!shouldAutostartNgrok(process.env) || !localHealthy || !publicUrl) return;
+
+  const probe = await probePublicHealth(publicUrl);
+  if (probe.ok) {
+    publicTunnelFailStreak = 0;
+    lastPublicTunnelReason = "";
+    return;
+  }
+
+  publicTunnelFailStreak += 1;
+  if (probe.reason && probe.reason !== lastPublicTunnelReason) {
+    lastPublicTunnelReason = probe.reason;
+    console.error(
+      `[keep-alive] public tunnel probe failed (${probe.reason}), streak=${publicTunnelFailStreak}/${tunnelFailThreshold}`,
+    );
+  }
+
+  const online = await networkLikelyUp();
+  if (!online) {
+    const now = Date.now();
+    if (now - lastNetworkDownLog > 60_000) {
+      lastNetworkDownLog = now;
+      console.error("[keep-alive] outbound network down — waiting (not restarting ngrok yet)");
+    }
+    return;
+  }
+
+  if (
+    !shouldRestartStaleTunnel({
+      localHealthy,
+      publicHealthy: false,
+      failStreak: publicTunnelFailStreak,
+      threshold: tunnelFailThreshold,
+      networkUp: online,
+    })
+  ) {
+    return;
+  }
+
+  console.error("[keep-alive] public tunnel stale while companion is up — restarting ngrok");
+  publicTunnelFailStreak = 0;
+  lastPublicTunnelReason = "";
+  try {
+    const ngrok = await recoverNgrok({ child: ngrokChild, port, publicUrl, env: process.env });
+    attachNgrokChild(ngrok.child);
+    if (ngrok.started) console.log("ngrok started.");
+    else if (ngrok.reason === "already") console.log("ngrok already running.");
+  } catch (err) {
+    const message = err.message || String(err);
+    if (message !== lastTunnelError) {
+      lastTunnelError = message;
+      console.error(`[keep-alive] ${message}`);
+    }
+  }
 }
 
 async function supervise() {
@@ -67,9 +152,11 @@ async function supervise() {
         console.log("[keep-alive] companion already listening, waiting until it stops");
         announcedHolding = true;
       }
+      await maintainPublicTunnel(true);
       return;
     }
     announcedHolding = false;
+    publicTunnelFailStreak = 0;
     if (tunnelError) return;
     boot();
   } finally {

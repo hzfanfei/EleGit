@@ -4,8 +4,10 @@ import {
   COMPANION_ALREADY_RUNNING,
   companionIsHealthy,
   isCompanionAlreadyRunning,
+  networkLikelyUp,
   nextKeepAliveDelay,
   shouldRestartCompanion,
+  shouldRestartStaleTunnel,
 } from "../src/keep-alive-policy.js";
 
 describe("keep-alive policy", () => {
@@ -48,5 +50,51 @@ describe("keep-alive policy", () => {
     assert.equal(nextKeepAliveDelay(1, 2000), 4000);
     assert.equal(nextKeepAliveDelay(2, 2000), 8000);
     assert.equal(nextKeepAliveDelay(8, 2000), 30000);
+  });
+
+  it("restarts stale tunnels only when local is up, public is down, and network is up", () => {
+    assert.equal(
+      shouldRestartStaleTunnel({
+        localHealthy: true,
+        publicHealthy: false,
+        failStreak: 3,
+        threshold: 3,
+        networkUp: true,
+      }),
+      true,
+    );
+    assert.equal(
+      shouldRestartStaleTunnel({
+        localHealthy: true,
+        publicHealthy: false,
+        failStreak: 3,
+        threshold: 3,
+        networkUp: false,
+      }),
+      false,
+    );
+    assert.equal(
+      shouldRestartStaleTunnel({
+        localHealthy: true,
+        publicHealthy: true,
+        failStreak: 9,
+        threshold: 3,
+        networkUp: true,
+      }),
+      false,
+    );
+  });
+
+  it("detects outbound network with a lightweight probe", async () => {
+    const up = await networkLikelyUp({
+      fetchImpl: async () => ({ ok: true, status: 204 }),
+    });
+    const down = await networkLikelyUp({
+      fetchImpl: async () => {
+        throw new Error("offline");
+      },
+    });
+    assert.equal(up, true);
+    assert.equal(down, false);
   });
 });
