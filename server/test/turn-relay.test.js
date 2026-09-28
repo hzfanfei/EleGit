@@ -118,6 +118,64 @@ describe("turn relay", () => {
       relay.close();
     }
   });
+
+  it("still publishes after the companion socket resets", async () => {
+    const agent = fakeAgent();
+    const published = [];
+    const relay = await startTurnRelay({
+      port: 0,
+      spawnImpl: () => agent,
+      publish: async (workspaceRoot, notice) => {
+        published.push({ workspaceRoot, notice });
+      },
+    });
+    try {
+      const socket = net.connect(relay.port, "127.0.0.1");
+      await once(socket, "connect");
+      socket.write(`${JSON.stringify({
+        op: "spawn",
+        key: "s1:2",
+        file: "agent",
+        args: [],
+      })}\n`);
+      socket.write(`${JSON.stringify({
+        op: "meta",
+        key: "s1:2",
+        meta: {
+          workspaceRoot: "C:/问象",
+          session: { id: "s1", owner: "octo", repo: "demo" },
+          question: "进度如何",
+        },
+      })}\n`);
+      socket.write(`${JSON.stringify({
+        op: "stdin",
+        key: "s1:2",
+        data: `${JSON.stringify({ jsonrpc: "2.0", id: 7, method: "session/prompt", params: {} })}\n`,
+      })}\n`);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      socket.on("error", () => {});
+      socket.resetAndDestroy();
+      await once(socket, "close");
+      agent.stdout.write(`${JSON.stringify({
+        method: "session/update",
+        params: {
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "断线后的全文" },
+          },
+        },
+      })}\n`);
+      agent.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: 7, result: { stopReason: "end_turn" } })}\n`);
+      const deadline = Date.now() + 1000;
+      while (!published.length && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.equal(published.length, 1);
+      assert.equal(published[0].notice.answer, "断线后的全文");
+    } finally {
+      relay.close();
+    }
+  });
 });
 
 function readlineLines(socket) {

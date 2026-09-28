@@ -203,6 +203,10 @@ export function startTurnRelay({
     socket.setEncoding("utf8");
     const rl = readline.createInterface({ input: socket });
     rl.on("line", (line) => onClientLine(socket, line));
+    // A companion kill resets this socket. Without a listener, Node exits
+    // the relay and the in-flight agent dies before the answer is published.
+    socket.on("error", () => {});
+    rl.on("error", () => {});
     socket.on("close", () => {
       const turn = turns.get(socket.turnKey || "");
       if (!turn) return;
