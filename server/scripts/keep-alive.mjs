@@ -21,6 +21,7 @@ import {
   shouldAutostartNgrok,
 } from "../src/ngrok.js";
 import { queueRestartNoticeFile } from "../src/restart-notice.js";
+import { ensureTurnRelay, turnRelayEnabled } from "../src/turn-relay-client.js";
 import { defaultWorkspaceRoot } from "../src/workspace.js";
 
 loadLocalEnv();
@@ -47,6 +48,21 @@ let lastTunnelError = "";
 let publicTunnelFailStreak = 0;
 let lastPublicTunnelReason = "";
 let lastNetworkDownLog = 0;
+let lastRelayError = "";
+
+async function ensureTurnRelayProcess() {
+  if (!turnRelayEnabled(process.env)) return;
+  try {
+    await ensureTurnRelay();
+    lastRelayError = "";
+  } catch (err) {
+    const message = err.message || String(err);
+    if (message !== lastRelayError) {
+      lastRelayError = message;
+      console.error(`[keep-alive] turn relay: ${message}`);
+    }
+  }
+}
 
 async function ensureTunnel() {
   if (!shouldAutostartNgrok(process.env)) return;
@@ -140,6 +156,7 @@ async function supervise() {
   let tunnelError = null;
   try {
     try {
+      await ensureTurnRelayProcess();
       await ensureTunnel();
     } catch (err) {
       tunnelError = err;

@@ -25,9 +25,23 @@ function pidAlive(pid) {
 
 let ensuring = null;
 
+function envFlagOn(value) {
+  const v = String(value ?? "").trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes" || v === "on";
+}
+
+function envFlagOff(value) {
+  const v = String(value ?? "").trim().toLowerCase();
+  return v === "0" || v === "false" || v === "no" || v === "off";
+}
+
+/** Default on so Cursor agent survives planned companion restarts (8791). Set WENXIANG_TURN_RELAY=0 to disable. */
 export function turnRelayEnabled(env = process.env) {
-  const watch = String(env.WENXIANG_DEV_WATCH || "").trim().toLowerCase();
-  return watch === "1" || watch === "true" || watch === "yes";
+  const relay = env.WENXIANG_TURN_RELAY;
+  if (envFlagOff(relay)) return false;
+  if (envFlagOn(relay)) return true;
+  if (envFlagOn(env.WENXIANG_DEV_WATCH)) return true;
+  return true;
 }
 
 /** Start the detached relay once. Later companion reloads attach to it. */
