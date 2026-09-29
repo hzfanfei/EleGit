@@ -71,7 +71,7 @@ class _LogCenterPageState extends State<LogCenterPage> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('清空日志'),
-        content: const Text('将删除本机保存的错误记录；问象服务上的日志不受影响。'),
+        content: const Text('将清空本机与服务端已保存的错误日志（含语音识别、合成等记录）。'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
           FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('清空')),
@@ -80,6 +80,18 @@ class _LogCenterPageState extends State<LogCenterPage> {
     );
     if (ok != true || !mounted) return;
     await ClientErrorLog.instance.clear();
+    final api = widget.api;
+    if (api != null) {
+      try {
+        await api.clearErrorLogs();
+      } catch (_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('本机已清空，但服务端日志清空失败，刷新后可能仍会出现。')),
+          );
+        }
+      }
+    }
     await _reload();
   }
 

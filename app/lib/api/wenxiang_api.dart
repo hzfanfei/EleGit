@@ -355,6 +355,13 @@ class WenxiangApi {
     ];
   }
 
+  Future<void> clearErrorLogs() async {
+    final res = await http
+        .delete(_uri('/v1/error-logs'), headers: _headers)
+        .timeout(const Duration(seconds: 15));
+    await _json(res, fallback: '清空错误日志失败');
+  }
+
   Future<List<String>> uploadClientLogs(
     List<Map<String, dynamic>> entries, {
     String app = 'wenxiang',

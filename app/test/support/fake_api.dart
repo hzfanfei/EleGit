@@ -106,6 +106,11 @@ class FakeWenxiangApi extends WenxiangApi {
   }
 
   @override
+  Future<void> clearErrorLogs() async {
+    errorLogs = const [];
+  }
+
+  @override
   Future<List<String>> uploadClientLogs(
     List<Map<String, dynamic>> entries, {
     String app = 'wenxiang',

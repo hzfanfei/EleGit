@@ -59,7 +59,7 @@ import { bindCompanion } from "./listen.js";
 import { attachSttGateway } from "./voice-stt-ws.js";
 import { attachVoiceGateway, isVoiceCallEnabled } from "./voice-ws.js";
 import { appendClientLogs } from "./client-logs.js";
-import { configureServerLogs, listErrorLogs, noteServerLog } from "./server-logs.js";
+import { clearErrorLogs, configureServerLogs, listErrorLogs, noteServerLog } from "./server-logs.js";
 import { runDiagnosticsProbe, synthesizeVoicePreview } from "./diagnostics.js";
 import {
   checkoutPath,
@@ -842,6 +842,15 @@ app.get("/v1/error-logs", async (req, res) => {
     const limit = Number.parseInt(String(req.query?.limit ?? "200"), 10);
     const entries = await listErrorLogs(store.config.workspaceRoot, { limit });
     res.json({ entries });
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.delete("/v1/error-logs", async (_req, res) => {
+  try {
+    await clearErrorLogs(store.config.workspaceRoot);
+    res.json({ ok: true });
   } catch (err) {
     sendError(res, err);
   }

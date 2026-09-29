@@ -83,8 +83,8 @@ class ClientErrorLog {
   Future<void> clear() {
     return _enqueue(() async {
       await _load();
-      if (_entries.isEmpty) return;
       _entries.clear();
+      _seen.clear();
       await _save();
     });
   }

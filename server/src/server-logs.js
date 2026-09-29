@@ -117,3 +117,16 @@ export async function listErrorLogs(root, { limit = 200 } = {}) {
   rows.sort((a, b) => String(b.at).localeCompare(String(a.at)));
   return rows.slice(0, cap);
 }
+
+export async function clearErrorLogs(root) {
+  const base = String(root || "").trim();
+  if (!base) return;
+  for (const file of [serverLogFile(base), clientLogFile(base)]) {
+    try {
+      await mkdir(path.dirname(file), { recursive: true });
+      await writeFile(file, "", "utf8");
+    } catch {
+      /* best effort */
+    }
+  }
+}
