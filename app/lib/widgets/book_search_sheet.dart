@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../api/wenxiang_api.dart';
 import '../models.dart';
+import '../screens/annas_browser_page.dart';
 import '../theme.dart';
 import 'wx_chrome.dart';
 
@@ -98,6 +99,22 @@ class _BookSearchSheetState extends State<BookSearchSheet> {
     return r.detailUrl ?? r.title;
   }
 
+  Future<void> _openAnnasBrowser() async {
+    final query = _controller.text.trim();
+    final outcome = await Navigator.of(context).push<AnnasBrowserOutcome>(
+      MaterialPageRoute(
+        builder: (_) => AnnasBrowserPage(
+          api: widget.api,
+          initialQuery: query.isEmpty ? null : query,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if ((outcome?.savedCount ?? 0) > 0) {
+      setState(() => _doneCount += outcome!.savedCount);
+    }
+  }
+
   Future<void> _openExternal(BookSearchResult r) async {
     final url = r.detailUrl;
     if (url == null || url.isEmpty) return;
@@ -160,7 +177,7 @@ class _BookSearchSheetState extends State<BookSearchSheet> {
                       child: Text(
                         _doneCount > 0
                             ? '已下载 $_doneCount 本，回到书单查看'
-                            : 'Open Library / 安娜的档案 可直下 epub；鸠摩多为网盘',
+                            : '可搜 Open Library；或点左侧地球在安娜的档案里下载',
                         style: theme.textTheme.bodySmall?.copyWith(color: Wx.faint),
                       ),
                     ),
@@ -198,6 +215,11 @@ class _BookSearchSheetState extends State<BookSearchSheet> {
       padding: const EdgeInsets.fromLTRB(Wx.inset, 4, Wx.inset, 12),
       child: Row(
         children: [
+          IconButton(
+            tooltip: '安娜的档案（内置浏览器）',
+            onPressed: _openAnnasBrowser,
+            icon: const Icon(Icons.travel_explore_outlined, size: 22),
+          ),
           Expanded(
             child: TextField(
               controller: _controller,
@@ -243,7 +265,7 @@ class _BookSearchSheetState extends State<BookSearchSheet> {
     if (_activeQuery.isEmpty) {
       return const WxEmpty(
         title: '输入书名搜索',
-        detail: '已聚合 Open Library、安娜的档案与鸠摩。前两源可直下 epub。',
+        detail: '聚合搜索或点左上角地球，在安娜的档案网页里点下载会自动入库。',
       );
     }
     if (_results.isEmpty) {
@@ -251,8 +273,8 @@ class _BookSearchSheetState extends State<BookSearchSheet> {
         title: '没有匹配结果',
         detail: '换关键词试试；鸠摩需在服务端 .env 配置 WENXIANG_JIUMO_COOKIE。',
         action: TextButton(
-          onPressed: () => _runSearch(_activeQuery),
-          child: const Text('重新搜索'),
+          onPressed: _openAnnasBrowser,
+          child: const Text('用浏览器打开安娜的档案'),
         ),
       );
     }
