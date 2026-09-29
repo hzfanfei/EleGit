@@ -35,6 +35,7 @@ export function startBookDownloadJob(opts) {
     createdAt: Date.now(),
     url: String(opts.url || "").trim(),
     title: String(opts.title || "").trim(),
+    progress: { phase: "queued", bytesReceived: 0, bytesTotal: null },
   };
   jobs.set(id, job);
   void runBookDownloadJob(job, opts.workspaceRoot);
@@ -54,6 +55,14 @@ async function runBookDownloadJob(job, workspaceRoot) {
       workspaceRoot,
       suggestedTitle: job.title,
       signal: AbortSignal.timeout(BOOK_DOWNLOAD_TIMEOUT_MS),
+      onProgress: (p) => {
+        job.progress = {
+          phase: p.phase || job.progress?.phase || "downloading",
+          bytesReceived: p.bytesReceived ?? job.progress?.bytesReceived ?? 0,
+          bytesTotal:
+            p.bytesTotal !== undefined ? p.bytesTotal : job.progress?.bytesTotal ?? null,
+        };
+      },
     });
     job.status = "done";
     job.result = result;
@@ -79,4 +88,5 @@ async function runBookDownloadJob(job, workspaceRoot) {
  * @property {string} [error]
  * @property {string} [code]
  * @property {number} [httpStatus]
+ * @property {{ phase: string, bytesReceived: number, bytesTotal: number|null }} [progress]
  */

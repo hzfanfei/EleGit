@@ -844,7 +844,12 @@ app.get("/v1/books/download/jobs/:jobId", (req, res) => {
     return;
   }
   if (job.status === "pending") {
-    res.json({ ok: true, status: "pending", jobId: job.id });
+    res.json({
+      ok: true,
+      status: "pending",
+      jobId: job.id,
+      progress: job.progress ?? null,
+    });
     return;
   }
   if (job.status === "failed") {

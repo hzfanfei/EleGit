@@ -525,6 +525,27 @@ class BookSearchResult {
   }
 }
 
+class BookDownloadProgress {
+  BookDownloadProgress({
+    required this.phase,
+    required this.bytesReceived,
+    this.bytesTotal,
+  });
+
+  final String phase;
+  final int bytesReceived;
+  final int? bytesTotal;
+
+  factory BookDownloadProgress.fromJson(Map<String, dynamic> json) {
+    final total = json['bytesTotal'];
+    return BookDownloadProgress(
+      phase: (json['phase'] ?? 'downloading').toString(),
+      bytesReceived: (json['bytesReceived'] as num?)?.toInt() ?? 0,
+      bytesTotal: total == null ? null : (total as num).toInt(),
+    );
+  }
+}
+
 class BookDownloadResult {
   BookDownloadResult({
     required this.filename,

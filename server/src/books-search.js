@@ -684,6 +684,7 @@ export async function downloadBookFromUrl(rawUrl, opts = {}) {
 
   let parsed = await assertSafeExternalUrl(rawUrl);
   if (parsed.pathname.endsWith("/ads.php") && parsed.searchParams.get("md5")) {
+    opts.onProgress?.({ phase: "resolving", bytesReceived: 0, bytesTotal: null });
     parsed = await resolveLibgenDownloadUrl(String(parsed), { fetchImpl, signal });
   }
 
@@ -738,6 +739,9 @@ export async function downloadBookFromUrl(rawUrl, opts = {}) {
 
   const writeStream = createWriteStream(tempPath);
   let totalBytes = 0;
+  const bytesTotal =
+    Number.isFinite(declaredLength) && declaredLength > 0 ? declaredLength : null;
+  opts.onProgress?.({ phase: "downloading", bytesReceived: 0, bytesTotal });
   const cleanup = async () => {
     try {
       writeStream.destroy();
@@ -758,8 +762,13 @@ export async function downloadBookFromUrl(rawUrl, opts = {}) {
         code: "download_no_body",
       });
     }
+    let lastProgressAt = 0;
     for await (const chunk of res.body) {
       totalBytes += chunk.length;
+      if (lastProgressAt === 0 || totalBytes - lastProgressAt >= 256 * 1024) {
+        lastProgressAt = totalBytes;
+        opts.onProgress?.({ phase: "downloading", bytesReceived: totalBytes, bytesTotal });
+      }
       if (totalBytes > MAX_DOWNLOAD_BYTES) {
         await cleanup();
         const e = new Error("文件过大，已超过 200MB 限制");

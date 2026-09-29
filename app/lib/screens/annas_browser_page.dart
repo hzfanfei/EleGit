@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../api/wenxiang_api.dart';
+import '../models.dart';
 import '../theme.dart';
 import '../utils/book_download_capture.dart';
 import '../widgets/wx_chrome.dart';
@@ -38,6 +39,7 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
   bool _pageLoading = true;
   int _savedCount = 0;
   String? _capturingLabel;
+  BookDownloadProgress? _captureProgress;
   final Set<String> _inFlightUrls = {};
   String _currentUrl = '';
 
@@ -94,10 +96,20 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
     _inFlightUrls.add(url);
     final title = suggestedTitleFromDownloadUrl(uri);
     if (mounted) {
-      setState(() => _capturingLabel = title ?? '电子书');
+      setState(() {
+        _capturingLabel = title ?? '电子书';
+        _captureProgress = null;
+      });
     }
     try {
-      await widget.api.downloadBook(url: url, title: title);
+      await widget.api.downloadBook(
+        url: url,
+        title: title,
+        onProgress: (p) {
+          if (!mounted) return;
+          setState(() => _captureProgress = p);
+        },
+      );
       if (!mounted) return;
       setState(() => _savedCount += 1);
       ScaffoldMessenger.of(context).showSnackBar(
@@ -114,8 +126,41 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
       );
     } finally {
       _inFlightUrls.remove(url);
-      if (mounted) setState(() => _capturingLabel = null);
+      if (mounted) {
+        setState(() {
+          _capturingLabel = null;
+          _captureProgress = null;
+        });
+      }
     }
+  }
+
+  String _formatBytes(int bytes) {
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(0)} KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
+  String _captureStatusLine() {
+    final label = _capturingLabel ?? '电子书';
+    final p = _captureProgress;
+    if (p == null) return '正在保存「$label」…';
+    if (p.phase == 'resolving') return '正在解析 LibGen 链接…';
+    final received = p.bytesReceived;
+    final total = p.bytesTotal;
+    if (total != null && total > 0) {
+      final pct = (received / total * 100).clamp(0, 100).toStringAsFixed(0);
+      return '正在保存「$label」 $pct%（${_formatBytes(received)} / ${_formatBytes(total)}）';
+    }
+    if (received > 0) return '正在保存「$label」… 已下载 ${_formatBytes(received)}';
+    return '正在保存「$label」…';
+  }
+
+  double? _captureProgressValue() {
+    final p = _captureProgress;
+    if (p == null) return null;
+    final total = p.bytesTotal;
+    if (total == null || total <= 0) return null;
+    return (p.bytesReceived / total).clamp(0.0, 1.0);
   }
 
   void _close() {
@@ -156,19 +201,17 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
             if (busy)
               Padding(
                 padding: const EdgeInsets.fromLTRB(Wx.inset, 8, Wx.inset, 0),
-                child: Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
+                    LinearProgressIndicator(
+                      minHeight: 3,
+                      value: _captureProgressValue(),
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        '正在保存「$_capturingLabel」…',
-                        style: theme.textTheme.bodySmall,
-                      ),
+                    const SizedBox(height: 6),
+                    Text(
+                      _captureStatusLine(),
+                      style: theme.textTheme.bodySmall,
                     ),
                   ],
                 ),

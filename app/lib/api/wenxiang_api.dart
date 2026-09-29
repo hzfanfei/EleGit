@@ -731,6 +731,7 @@ class WenxiangApi {
   Future<BookDownloadResult> downloadBook({
     required String url,
     String? title,
+    void Function(BookDownloadProgress progress)? onProgress,
   }) async {
     final res = await http
         .post(
@@ -745,12 +746,15 @@ class WenxiangApi {
     final body = await _json(res, fallback: '下载失败');
     final jobId = (body['jobId'] ?? '').toString();
     if (jobId.isNotEmpty && body['status'] == 'pending') {
-      return _pollBookDownloadJob(jobId);
+      return _pollBookDownloadJob(jobId, onProgress: onProgress);
     }
     return BookDownloadResult.fromJson(Map<String, dynamic>.from(body));
   }
 
-  Future<BookDownloadResult> _pollBookDownloadJob(String jobId) async {
+  Future<BookDownloadResult> _pollBookDownloadJob(
+    String jobId, {
+    void Function(BookDownloadProgress progress)? onProgress,
+  }) async {
     const pollEvery = Duration(seconds: 2);
     final deadline = DateTime.now().add(const Duration(minutes: 22));
     while (DateTime.now().isBefore(deadline)) {
@@ -760,6 +764,12 @@ class WenxiangApi {
           .timeout(const Duration(seconds: 20));
       final body = await _json(res, fallback: '查询下载进度失败');
       final status = (body['status'] ?? '').toString();
+      final progressRaw = body['progress'];
+      if (progressRaw is Map && onProgress != null) {
+        onProgress(
+          BookDownloadProgress.fromJson(Map<String, dynamic>.from(progressRaw)),
+        );
+      }
       if (status == 'done') {
         return BookDownloadResult.fromJson(Map<String, dynamic>.from(body));
       }

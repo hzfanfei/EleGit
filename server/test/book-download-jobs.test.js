@@ -10,7 +10,13 @@ describe("book-download-jobs", () => {
     const orig = globalThis.fetch;
     globalThis.fetch = async () => ({
       ok: true,
-      headers: { get: () => "application/epub+zip" },
+      headers: {
+        get: (name) => {
+          if (String(name).toLowerCase() === "content-type") return "application/epub+zip";
+          if (String(name).toLowerCase() === "content-length") return "12";
+          return null;
+        },
+      },
       body: (async function* () {
         yield Buffer.from("PK\x03\x04\x00\x00");
         yield Buffer.alloc(0);
@@ -35,6 +41,7 @@ describe("book-download-jobs", () => {
       }
       assert.equal(job.status, "done");
       assert.ok(job.result?.filename?.endsWith(".epub"));
+      assert.ok((job.progress?.bytesReceived ?? 0) >= 6);
     } finally {
       globalThis.fetch = orig;
     }
