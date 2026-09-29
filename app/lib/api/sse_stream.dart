@@ -108,3 +108,21 @@ Stream<ChatStreamEvent> streamWenxiangSseEvents({
     watch.cancel();
   }
 }
+
+/// Like [streamWenxiangSseEvents], but throws if the body ends without a terminal `done` event.
+Stream<ChatStreamEvent> streamWenxiangSseEventsRequireDone({
+  required Stream<List<int>> byteStream,
+  required http.Client client,
+  required void Function() throwIfCancelled,
+}) async* {
+  var sawDone = false;
+  await for (final event in streamWenxiangSseEvents(
+    byteStream: byteStream,
+    client: client,
+    throwIfCancelled: throwIfCancelled,
+  )) {
+    if (event.type == 'done') sawDone = true;
+    yield event;
+  }
+  if (!sawDone) throw Exception('stream ended');
+}

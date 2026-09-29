@@ -517,12 +517,14 @@ class FakeWenxiangApi extends WenxiangApi {
           ),
           ChatStreamEvent(type: 'done', engine: 'local-progress', sessionId: sessionId ?? 's1'),
         ];
+    var sawDone = false;
     for (final event in events) {
       if (streamPace > Duration.zero) {
         await Future<void>.delayed(streamPace);
       }
       yield event;
       if (event.type == 'done') {
+        sawDone = true;
         final id = event.sessionId ?? sessionId ?? (sessions.isEmpty ? null : sessions.first.id);
         if (id == null) continue;
         final index = sessions.indexWhere((s) => s.id == id);
@@ -539,6 +541,7 @@ class FakeWenxiangApi extends WenxiangApi {
         );
       }
     }
+    if (!sawDone) throw AcceptedChatDrop(Exception('stream ended'));
   }
 }
 

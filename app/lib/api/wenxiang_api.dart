@@ -1114,7 +1114,7 @@ class WenxiangApi {
         throw ApiException(error);
       }
       headersAccepted = true;
-      yield* streamWenxiangSseEvents(
+      yield* streamWenxiangSseEventsRequireDone(
         byteStream: res.stream,
         client: client,
         throwIfCancelled: () {
@@ -1128,6 +1128,7 @@ class WenxiangApi {
       if (headersAccepted && err is SseHeartbeatStale) {
         throw AcceptedChatDrop(Exception(err.toString()));
       }
+      if (headersAccepted) throw AcceptedChatDrop(err);
       rethrow;
     } finally {
       if (identical(_chatClient, client)) _chatClient = null;
@@ -1264,7 +1265,7 @@ class WenxiangApi {
         throw ApiException(error);
       }
       headersAccepted = true;
-      yield* streamWenxiangSseEvents(
+      yield* streamWenxiangSseEventsRequireDone(
         byteStream: res.stream,
         client: client,
         throwIfCancelled: () {

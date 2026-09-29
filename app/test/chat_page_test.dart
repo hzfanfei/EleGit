@@ -328,6 +328,35 @@ void main() {
     await tester.pump(const Duration(seconds: 2));
   });
 
+  testWidgets('a quiet stream end enters hold like a transport drop', (tester) async {
+    final api = FakeWenxiangApi(
+      streamEvents: [
+        ChatStreamEvent(type: 'start', engine: 'local-progress', sessionId: 's1'),
+        ChatStreamEvent(type: 'status', phase: 'activity', detail: '思考·继续'),
+      ],
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: ChatPage(
+          api: api,
+          repo: sampleRepo(),
+          onBack: () {},
+        ),
+      ),
+    );
+    await _pumpUntilChatReady(tester);
+    await tester.tap(find.text('这个仓库最近在做什么？'));
+    await tester.pump();
+    await tester.pump();
+
+    final mark = tester.widget<WxLoading>(find.byKey(const Key('wx-working-mark')));
+    expect(mark.color, Wx.holdPoll);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 1));
+  });
+
   testWidgets('a dropped answer waits without a retry button', (tester) async {
     final api = FakeWenxiangApi(
       streamThrows: AcceptedChatDrop(Exception('connection closed')),
