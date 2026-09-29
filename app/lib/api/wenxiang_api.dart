@@ -11,6 +11,7 @@ import '../models/diagnostics.dart';
 import '../utils/async_gate.dart';
 import '../voice/background_work.dart';
 import 'link_route.dart';
+import 'sse_stream.dart';
 
 bool chatEventHasVisibleText(ChatStreamEvent event) {
   if (event.pcm != null && event.pcm!.isNotEmpty) return true;
@@ -902,24 +903,19 @@ class WenxiangApi {
         } catch (_) {}
         throw ApiException(error);
       }
-      var buffer = '';
-      await for (final chunk in res.stream.transform(utf8.decoder)) {
-        if (_bookVoiceCancelled) throw const OperationCancelled();
-        buffer += chunk;
-        final parts = buffer.split('\n\n');
-        buffer = parts.removeLast();
-        for (final part in parts) {
-          final event = ChatStreamEvent.fromSse(part);
-          if (event != null) yield event;
-        }
-      }
-      if (buffer.trim().isNotEmpty) {
-        final event = ChatStreamEvent.fromSse(buffer);
-        if (event != null) yield event;
-      }
+      yield* streamWenxiangSseEvents(
+        byteStream: res.stream,
+        client: client,
+        throwIfCancelled: () {
+          if (_bookVoiceCancelled) throw const OperationCancelled();
+        },
+      );
     } catch (err) {
       if (_bookVoiceCancelled || err is OperationCancelled) {
         throw const OperationCancelled();
+      }
+      if (err is SseHeartbeatStale) {
+        throw AcceptedChatDrop(Exception(err.toString()));
       }
       rethrow;
     } finally {
@@ -989,24 +985,19 @@ class WenxiangApi {
         } catch (_) {}
         throw ApiException(error);
       }
-      var buffer = '';
-      await for (final chunk in res.stream.transform(utf8.decoder)) {
-        if (_repoVoiceCancelled) throw const OperationCancelled();
-        buffer += chunk;
-        final parts = buffer.split('\n\n');
-        buffer = parts.removeLast();
-        for (final part in parts) {
-          final event = ChatStreamEvent.fromSse(part);
-          if (event != null) yield event;
-        }
-      }
-      if (buffer.trim().isNotEmpty) {
-        final event = ChatStreamEvent.fromSse(buffer);
-        if (event != null) yield event;
-      }
+      yield* streamWenxiangSseEvents(
+        byteStream: res.stream,
+        client: client,
+        throwIfCancelled: () {
+          if (_repoVoiceCancelled) throw const OperationCancelled();
+        },
+      );
     } catch (err) {
       if (_repoVoiceCancelled || err is OperationCancelled) {
         throw const OperationCancelled();
+      }
+      if (err is SseHeartbeatStale) {
+        throw AcceptedChatDrop(Exception(err.toString()));
       }
       rethrow;
     } finally {
@@ -1044,6 +1035,7 @@ class WenxiangApi {
   }) async* {
     final client = http.Client();
     _chatClient = client;
+    var headersAccepted = false;
     try {
       final request = http.Request('POST', _uri('/v1/books/chat'))
         ..headers.addAll({
@@ -1068,24 +1060,20 @@ class WenxiangApi {
         } catch (_) {}
         throw ApiException(error);
       }
-      var buffer = '';
-      await for (final chunk in res.stream.transform(utf8.decoder)) {
-        if (_chatCancelled) throw const OperationCancelled();
-        buffer += chunk;
-        final parts = buffer.split('\n\n');
-        buffer = parts.removeLast();
-        for (final part in parts) {
-          final event = ChatStreamEvent.fromSse(part);
-          if (event != null) yield event;
-        }
-      }
-      if (buffer.trim().isNotEmpty) {
-        final event = ChatStreamEvent.fromSse(buffer);
-        if (event != null) yield event;
-      }
+      headersAccepted = true;
+      yield* streamWenxiangSseEvents(
+        byteStream: res.stream,
+        client: client,
+        throwIfCancelled: () {
+          if (_chatCancelled) throw const OperationCancelled();
+        },
+      );
     } catch (err) {
       if (_chatCancelled || err is OperationCancelled) {
         throw const OperationCancelled();
+      }
+      if (headersAccepted && err is SseHeartbeatStale) {
+        throw AcceptedChatDrop(Exception(err.toString()));
       }
       rethrow;
     } finally {
@@ -1223,24 +1211,19 @@ class WenxiangApi {
         throw ApiException(error);
       }
       headersAccepted = true;
-      var buffer = '';
-      await for (final chunk in res.stream.transform(utf8.decoder)) {
-        if (_chatCancelled) throw const OperationCancelled();
-        buffer += chunk;
-        final parts = buffer.split('\n\n');
-        buffer = parts.removeLast();
-        for (final part in parts) {
-          final event = ChatStreamEvent.fromSse(part);
-          if (event != null) yield event;
-        }
-      }
-      if (buffer.trim().isNotEmpty) {
-        final event = ChatStreamEvent.fromSse(buffer);
-        if (event != null) yield event;
-      }
+      yield* streamWenxiangSseEvents(
+        byteStream: res.stream,
+        client: client,
+        throwIfCancelled: () {
+          if (_chatCancelled) throw const OperationCancelled();
+        },
+      );
     } catch (err) {
       if (_chatCancelled || err is OperationCancelled) {
         throw const OperationCancelled();
+      }
+      if (headersAccepted && err is SseHeartbeatStale) {
+        throw AcceptedChatDrop(Exception(err.toString()));
       }
       if (headersAccepted) throw AcceptedChatDrop(err);
       rethrow;

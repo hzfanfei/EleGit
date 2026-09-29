@@ -138,5 +138,6 @@ bool _isSseDrop(String lower) {
           (lower.contains('connection') ||
               lower.contains('socket') ||
               lower.contains('failed host lookup'))) ||
-      (lower.contains('sse') && (lower.contains('drop') || lower.contains('interrupt')));
+      (lower.contains('sse') && (lower.contains('drop') || lower.contains('interrupt'))) ||
+      lower.contains('heartbeat stale');
 }
