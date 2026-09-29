@@ -32,7 +32,8 @@ bool shouldCaptureBookDownloadUrl(Uri uri, {String? mimeType}) {
     return true;
   }
 
-  if (host.contains('annas-archive') && path.contains('/fast_download/')) {
+  if (host.contains('annas-archive') &&
+      (path.contains('/fast_download/') || path.contains('/slow_download/'))) {
     return true;
   }
 

@@ -103,6 +103,7 @@ import {
 } from "./static-files.js";
 import { clearInbox, listInbox, markInboxRead } from "./inbox.js";
 import { downloadBookFromUrl, searchBooks } from "./books-search.js";
+import { getBookDownloadJob, startBookDownloadJob } from "./book-download-jobs.js";
 import { beginHandoff, handoffActive, publishLiveTurnSnapshots } from "./live-turns.js";
 import { attachNotifications, publishInboxNotice } from "./notifications.js";
 import { stat } from "node:fs/promises";
@@ -815,15 +816,48 @@ app.post("/v1/books/download", async (req, res) => {
       return;
     }
     const title = req.body?.title ? String(req.body.title) : "";
-    const result = await downloadBookFromUrl(url, {
+    const sync = req.body?.sync === true || req.query?.sync === "1";
+    if (sync) {
+      const result = await downloadBookFromUrl(url, {
+        workspaceRoot: store.config.workspaceRoot,
+        signal: req.signal,
+        suggestedTitle: title,
+      });
+      res.json({ ok: true, status: "done", ...result });
+      return;
+    }
+    const jobId = startBookDownloadJob({
+      url,
+      title,
       workspaceRoot: store.config.workspaceRoot,
-      signal: req.signal,
-      suggestedTitle: title,
     });
-    res.json({ ok: true, ...result });
+    res.json({ ok: true, status: "pending", jobId });
   } catch (err) {
     sendError(res, err);
   }
+});
+
+app.get("/v1/books/download/jobs/:jobId", (req, res) => {
+  const job = getBookDownloadJob(String(req.params.jobId || "").trim());
+  if (!job) {
+    res.status(404).json({ error: "下载任务不存在或已过期" });
+    return;
+  }
+  if (job.status === "pending") {
+    res.json({ ok: true, status: "pending", jobId: job.id });
+    return;
+  }
+  if (job.status === "failed") {
+    res.status(job.httpStatus || 502).json({
+      ok: false,
+      status: "failed",
+      jobId: job.id,
+      error: job.error,
+      code: job.code,
+    });
+    return;
+  }
+  res.json({ ok: true, status: "done", jobId: job.id, ...job.result });
 });
 
 app.put("/v1/voice/tts-voice", async (req, res) => {

@@ -741,9 +741,34 @@ class WenxiangApi {
             if (title != null && title.isNotEmpty) 'title': title,
           }),
         )
-        .timeout(const Duration(seconds: 90));
+        .timeout(const Duration(seconds: 30));
     final body = await _json(res, fallback: '下载失败');
+    final jobId = (body['jobId'] ?? '').toString();
+    if (jobId.isNotEmpty && body['status'] == 'pending') {
+      return _pollBookDownloadJob(jobId);
+    }
     return BookDownloadResult.fromJson(Map<String, dynamic>.from(body));
+  }
+
+  Future<BookDownloadResult> _pollBookDownloadJob(String jobId) async {
+    const pollEvery = Duration(seconds: 2);
+    final deadline = DateTime.now().add(const Duration(minutes: 22));
+    while (DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(pollEvery);
+      final res = await http
+          .get(_uri('/v1/books/download/jobs/$jobId'), headers: _headers)
+          .timeout(const Duration(seconds: 20));
+      final body = await _json(res, fallback: '查询下载进度失败');
+      final status = (body['status'] ?? '').toString();
+      if (status == 'done') {
+        return BookDownloadResult.fromJson(Map<String, dynamic>.from(body));
+      }
+      if (status == 'failed') {
+        final msg = (body['error'] ?? '下载失败').toString();
+        throw ApiException(msg);
+      }
+    }
+    throw ApiException('下载超时：文件较大或镜像较慢，请返回问书库查看是否已入库');
   }
 
   Future<List<ChatSession>> listBookSessions(String bookId) async {
