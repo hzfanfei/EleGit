@@ -110,12 +110,12 @@ export function startTurnRelay({
     if (liveCompanion) {
       // Phone may lose SSE during a planned companion restart while the agent
       // keeps running on this relay — mirror partial progress into inbox early.
-      if (!turn.meta?.partial || turn.state.done) return;
+      if ((!turn.meta?.partial && !turn.forceExpose) || turn.state.done) return;
     }
     const answer = String(turn.state.answer || "").trim();
     const activity = String(turn.activity || "").trim();
     const workspaceRoot = turn.meta?.workspaceRoot;
-    const exposeAnswer = Boolean(turn.state.done) || Boolean(turn.meta?.partial);
+    const exposeAnswer = Boolean(turn.state.done) || Boolean(turn.meta?.partial) || Boolean(turn.forceExpose);
     if ((!answer && !activity) || !workspaceRoot) return;
     const final = Boolean(turn.state.done);
     if (!final && !exposeAnswer && !activity) return;
@@ -248,6 +248,14 @@ export function startTurnRelay({
     }
     if (msg.op === "ack") {
       turn.acked = true;
+      return;
+    }
+    if (msg.op === "drop") {
+      // Companion is leaving on purpose. Keep the agent and publish now.
+      turn.clients.delete(socket);
+      if (turn.meta) turn.meta = { ...turn.meta, partial: true };
+      turn.forceExpose = true;
+      maybePublish(turn);
       return;
     }
     if (msg.op === "kill") {

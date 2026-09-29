@@ -102,6 +102,7 @@ import {
   contentTypeForStatic,
 } from "./static-files.js";
 import { clearInbox, listInbox, markInboxRead } from "./inbox.js";
+import { beginHandoff, handoffActive, publishLiveTurnSnapshots } from "./live-turns.js";
 import { attachNotifications, publishInboxNotice } from "./notifications.js";
 import { stat } from "node:fs/promises";
 
@@ -1095,17 +1096,19 @@ app.post("/v1/books/chat", async (req, res) => {
       }
     }
     await new Promise((resolve) => setImmediate(resolve));
-    await notifyFinishedAnswer({
-      notified,
-      aborted: signal.aborted,
-      unwatched: unwatched(),
-      delivered: deliveredDone,
-      answer: finalAnswer,
-      session,
-      question: message,
-      bookId: book.id,
-    });
-    bookSessions.ackTurn?.(session);
+    if (!handoffActive()) {
+      await notifyFinishedAnswer({
+        notified,
+        aborted: signal.aborted,
+        unwatched: unwatched(),
+        delivered: deliveredDone,
+        answer: finalAnswer,
+        session,
+        question: message,
+        bookId: book.id,
+      });
+      bookSessions.ackTurn?.(session);
+    }
     if (signal.aborted) {
       try { res.end(); } catch { /* already gone */ }
       return;
@@ -1277,16 +1280,18 @@ app.post("/v1/chat", async (req, res) => {
       }
     }
     await new Promise((resolve) => setImmediate(resolve));
-    await notifyFinishedAnswer({
-      notified,
-      aborted: signal.aborted,
-      unwatched: unwatched(),
-      delivered: deliveredDone,
-      answer: finalAnswer,
-      session,
-      question: message,
-    });
-    sessions.ackTurn?.(session);
+    if (!handoffActive()) {
+      await notifyFinishedAnswer({
+        notified,
+        aborted: signal.aborted,
+        unwatched: unwatched(),
+        delivered: deliveredDone,
+        answer: finalAnswer,
+        session,
+        question: message,
+      });
+      sessions.ackTurn?.(session);
+    }
     if (signal.aborted) {
       try { res.end(); } catch { /* already gone */ }
       return;
@@ -1338,6 +1343,26 @@ app.post("/v1/presence", (req, res) => {
   }
   setPhoneForeground(state === "foreground");
   res.json({ ok: true, foreground: state === "foreground" });
+});
+
+app.post("/v1/system/handoff-turns", async (req, res) => {
+  try {
+    const detach = req.body?.detach === true;
+    const published = await publishLiveTurnSnapshots(store.config.workspaceRoot, {
+      noticeFor: answerReadyNotice,
+      publish: publishInboxNotice,
+    });
+    if (detach) {
+      beginHandoff();
+      await Promise.all([
+        sessions.detachRelayChannels?.(),
+        bookSessions.detachRelayChannels?.(),
+      ]);
+    }
+    res.json({ ok: true, published, detach });
+  } catch (err) {
+    sendError(res, err);
+  }
 });
 
 app.get("/v1/inbox", async (_req, res) => {
@@ -1513,6 +1538,10 @@ async function startCompanion() {
     } catch (err) {
       console.error(`[turn-relay] ${err.message || err}`);
     }
+    const relayRefresh = setInterval(() => {
+      ensureTurnRelay().catch(() => {});
+    }, 15_000);
+    relayRefresh.unref?.();
   }
   await ensureStaticDir(store.config.workspaceRoot);
   const bound = await bindCompanion(httpServer, PORT, BIND);

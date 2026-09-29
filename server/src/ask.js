@@ -1,4 +1,5 @@
 import { detectCursorEngine } from "./acp.js";
+import { clearLiveTurn, handoffActive, noteLiveTurn } from "./live-turns.js";
 import { publishInboxNotice } from "./notifications.js";
 
 export { detectCursorEngine } from "./acp.js";
@@ -256,6 +257,7 @@ export async function* streamAnswer({
     let finished = false;
     let fail = null;
     let full = "";
+    let lastActivity = "";
     let settleTimer = null;
     let hintCleared = false;
     let taskNotified = false;
@@ -313,6 +315,7 @@ export async function* streamAnswer({
         partialBackfill,
         onDelta: (chunk) => {
           full += chunk;
+          noteLiveTurn({ session, question, bookId, answer: full, activity: lastActivity });
           queue.push({ kind: "delta", text: chunk });
           notify?.();
           maybePublishTaskNotice();
@@ -320,6 +323,10 @@ export async function* streamAnswer({
         },
         onActivity: (detail) => {
           const label = String(detail ?? "").trim();
+          if (label) {
+            lastActivity = label;
+            noteLiveTurn({ session, question, bookId, answer: full, activity: lastActivity });
+          }
           if (hintCleared) return;
           queue.push({ kind: "status", phase: "activity", detail: label });
           notify?.();
@@ -375,7 +382,9 @@ export async function* streamAnswer({
         yield { type: "delta", text: piece.text };
       }
     }
+    if (handoffActive()) return;
     if (!fail && full) {
+      clearLiveTurn(session?.id);
       if (workspaceRoot && !taskNotified) {
         const notice = taskCompletionNotice(full, { session, question, bookId });
         if (notice) {

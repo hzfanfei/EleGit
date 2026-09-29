@@ -410,6 +410,63 @@ describe("turn relay", () => {
       relay.close();
     }
   });
+
+  it("publishes the written answer when the companion drops the socket", async () => {
+    const agent = fakeAgent();
+    const published = [];
+    const relay = await startTurnRelay({
+      port: 0,
+      spawnImpl: () => agent,
+      publish: async (_workspaceRoot, notice) => {
+        published.push(notice);
+      },
+    });
+    let socket;
+    try {
+      socket = net.connect(relay.port, "127.0.0.1");
+      await once(socket, "connect");
+      socket.write(`${JSON.stringify({ op: "spawn", key: "s1:drop", file: "agent", args: [] })}\n`);
+      socket.write(`${JSON.stringify({
+        op: "meta",
+        key: "s1:drop",
+        meta: {
+          workspaceRoot: "C:/问象",
+          session: { id: "s1", owner: "octo", repo: "demo" },
+          question: "清空日志",
+          partial: false,
+        },
+      })}\n`);
+      socket.write(`${JSON.stringify({
+        op: "stdin",
+        key: "s1:drop",
+        data: `${JSON.stringify({ jsonrpc: "2.0", id: 7, method: "session/prompt", params: {} })}\n`,
+      })}\n`);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      agent.stdout.write(`${JSON.stringify({
+        method: "session/update",
+        params: {
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "已经写到这里" },
+          },
+        },
+      })}\n`);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.equal(published.length, 0);
+      socket.write(`${JSON.stringify({ op: "drop", key: "s1:drop" })}\n`);
+      const deadline = Date.now() + 1000;
+      while (!published.length && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      assert.equal(published.length, 1);
+      assert.equal(published[0].partial, true);
+      assert.equal(published[0].answer, "已经写到这里");
+      assert.equal(agent.killed, false);
+    } finally {
+      socket?.destroy();
+      relay.close();
+    }
+  });
 });
 
 function readlineLines(socket) {

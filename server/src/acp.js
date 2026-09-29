@@ -1008,6 +1008,7 @@ export class AcpChannel {
     this.child = this.spawnImpl(file, args, spawnOpts);
     this.noteTurn = (meta) => this.child?.noteTurn?.(meta);
     this.ackTurn = () => this.child?.ackTurn?.();
+    this.detachRelay = () => this.child?.detach?.();
     this.child.on("error", (err) => this._failAll(err));
     this.child.on("exit", () => this._dead());
     const rl = readline.createInterface({ input: this.child.stdout });
@@ -1790,6 +1791,15 @@ export function createSessionStore({
     channels.get(session?.id)?.channel?.ackTurn?.();
   }
 
+  async function detachRelayChannels() {
+    const pending = [];
+    for (const entry of channels.values()) {
+      const job = entry.channel?.detachRelay?.();
+      if (job) pending.push(Promise.resolve(job));
+    }
+    await Promise.all(pending);
+  }
+
   async function resetAllChannels() {
     channelEpoch += 1;
     const pending = [];
@@ -1813,6 +1823,7 @@ export function createSessionStore({
     resolveForChat,
     prompt,
     ackTurn,
+    detachRelayChannels,
     cancel,
     cancelById,
     interrupt,

@@ -1,7 +1,7 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import net from "node:net";
 import readline from "node:readline";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,6 +24,7 @@ function pidAlive(pid) {
 }
 
 let ensuring = null;
+let busyRelayUntil = 0;
 
 function envFlagOn(value) {
   const v = String(value ?? "").trim().toLowerCase();
@@ -44,15 +45,83 @@ export function turnRelayEnabled(env = process.env) {
   return true;
 }
 
+export function relaySourceStamp() {
+  const script = path.join(path.dirname(fileURLToPath(import.meta.url)), "turn-relay.js");
+  try {
+    return String(Math.round(statSync(script).mtimeMs));
+  } catch {
+    return "";
+  }
+}
+
+/** Idle relay running old code should be replaced. Never replace one that still owns an agent. */
+export function relayNeedsRecycle({ alive, runningStamp, sourceStamp, busy }) {
+  if (!alive) return false;
+  if (runningStamp && runningStamp === sourceStamp) return false;
+  return !busy;
+}
+
+function relayProcessBusy(pid) {
+  const id = Number(pid);
+  if (!id) return false;
+  try {
+    if (process.platform === "win32") {
+      const out = execFileSync(
+        "powershell",
+        [
+          "-NoProfile",
+          "-Command",
+          `(Get-CimInstance Win32_Process -Filter "ParentProcessId=${id}").ProcessId`,
+        ],
+        { encoding: "utf8", windowsHide: true, timeout: 4000 },
+      );
+      return out.split(/\s+/).some((part) => /^\d+$/.test(part));
+    }
+    const out = execFileSync("ps", ["-o", "pid=", "--ppid", String(id)], {
+      encoding: "utf8",
+      timeout: 4000,
+    });
+    return out.split(/\s+/).some((part) => /^\d+$/.test(part));
+  } catch {
+    return true;
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /** Start the detached relay once. Later companion reloads attach to it. */
 export async function ensureTurnRelay() {
   if (ensuring) return ensuring;
   ensuring = (async () => {
     const file = relayInfoFile();
+    const sourceStamp = relaySourceStamp();
+    let replacedPid = 0;
     if (existsSync(file)) {
       try {
         const info = JSON.parse(readFileSync(file, "utf8"));
-        if (pidAlive(info.pid) && info.port) return info.port;
+        if (pidAlive(info.pid) && info.port) {
+          if (Date.now() < busyRelayUntil) return info.port;
+          const busy = relayProcessBusy(info.pid);
+          if (busy) busyRelayUntil = Date.now() + 60_000;
+          const recycle = relayNeedsRecycle({
+            alive: true,
+            runningStamp: String(info.sourceStamp || ""),
+            sourceStamp,
+            busy,
+          });
+          if (!recycle) return info.port;
+          replacedPid = info.pid;
+          try {
+            process.kill(info.pid);
+          } catch {
+            // Already gone.
+          }
+          const deadline = Date.now() + 3000;
+          while (pidAlive(info.pid) && Date.now() < deadline) await sleep(50);
+          if (pidAlive(info.pid)) return info.port;
+        }
       } catch {
         // Stale file. Start a new relay.
       }
@@ -70,7 +139,7 @@ export async function ensureTurnRelay() {
       if (existsSync(file)) {
         try {
           const info = JSON.parse(readFileSync(file, "utf8"));
-          if (info.port && pidAlive(info.pid)) return info.port;
+          if (info.port && info.pid !== replacedPid && pidAlive(info.pid)) return info.port;
         } catch {
           // File is still being written.
         }
@@ -98,6 +167,7 @@ export function relaySpawn(file, args, opts = {}) {
   const stderr = new PassThrough();
   const handlers = { error: [], exit: [] };
   let opened = false;
+  let lastMeta = null;
   const pending = [];
   function send(msg) {
     const line = `${JSON.stringify(msg)}\n`;
@@ -124,10 +194,33 @@ export function relaySpawn(file, args, opts = {}) {
       send({ op: "kill", key });
     },
     noteTurn(meta) {
+      lastMeta = meta || null;
       send({ op: "meta", key, meta });
     },
     ackTurn() {
       send({ op: "ack", key });
+    },
+    detach() {
+      return new Promise((resolve) => {
+        let done = false;
+        const finish = () => {
+          if (done) return;
+          done = true;
+          resolve();
+        };
+        if (lastMeta?.workspaceRoot) {
+          send({ op: "meta", key, meta: { ...lastMeta, partial: true } });
+        }
+        send({ op: "drop", key });
+        socket.once("close", finish);
+        socket.once("error", finish);
+        try {
+          socket.end();
+        } catch {
+          finish();
+        }
+        setTimeout(finish, 500);
+      });
     },
   };
   socket.on("connect", () => {
@@ -168,8 +261,10 @@ export function relaySpawn(file, args, opts = {}) {
   return child;
 }
 
-export function writeRelayInfo(pid, port) {
+export function writeRelayInfo(pid, port, sourceStamp = "") {
   const file = relayInfoFile();
   mkdirSync(path.dirname(file), { recursive: true });
-  writeFileSync(file, JSON.stringify({ pid, port }));
+  const payload = { pid, port };
+  if (sourceStamp) payload.sourceStamp = sourceStamp;
+  writeFileSync(file, JSON.stringify(payload));
 }

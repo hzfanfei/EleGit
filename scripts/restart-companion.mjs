@@ -43,7 +43,24 @@ function killListenerOnPort(p) {
   return out.status === 0;
 }
 
+async function handoffTurns(detach) {
+  if (!apiKey) return;
+  try {
+    await fetch(`${baseUrl}/v1/system/handoff-turns`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Wenxiang-Key": apiKey,
+      },
+      body: JSON.stringify({ detach }),
+    });
+  } catch {
+    // Older companion builds have no handoff route.
+  }
+}
+
 async function main() {
+  await handoffTurns(false);
   const notice = await publishRestartNoticeLive({
     baseUrl,
     apiKey,
@@ -54,6 +71,7 @@ async function main() {
   });
   console.log(`[restart-companion] notice via ${notice.via}`);
   if (leadMs > 0) await sleep(leadMs);
+  await handoffTurns(true);
   const killed = killListenerOnPort(port);
   if (!killed) {
     console.warn(`[restart-companion] no listener on port ${port} (keep-alive may still boot it)`);
