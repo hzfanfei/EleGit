@@ -74,7 +74,22 @@ function isGithubGitPermissionDenied(text) {
 }
 
 export function defaultWorkspaceRoot() {
-  return process.env.WENXIANG_WORKSPACE || path.join(os.homedir(), "问象");
+  return process.env.WENXIANG_WORKSPACE || path.join(os.homedir(), "wenxiang");
+}
+
+/** Same root the running companion uses: env, then ~/.wenxiang/config.json, then ~/wenxiang. */
+export async function configuredWorkspaceRoot() {
+  const fromEnv = String(process.env.WENXIANG_WORKSPACE || "").trim();
+  if (fromEnv) return fromEnv;
+  const home = process.env.WENXIANG_HOME || path.join(os.homedir(), ".wenxiang");
+  try {
+    const raw = await readFile(path.join(home, "config.json"), "utf8");
+    const root = String(JSON.parse(raw).workspaceRoot || "").trim();
+    if (root) return root;
+  } catch {
+    // Missing or unreadable config falls through to the default directory.
+  }
+  return defaultWorkspaceRoot();
 }
 
 export function safeSegment(name, label) {

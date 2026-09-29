@@ -10,7 +10,7 @@ const cfg = JSON.parse(await readFile(path.join(home, "config.json"), "utf8"));
 const owner = "hzfanfei";
 const repo = "fwechat";
 const token = cfg.githubToken;
-const workspaceRoot = cfg.workspaceRoot || path.join(os.homedir(), "问象");
+const workspaceRoot = cfg.workspaceRoot || path.join(os.homedir(), "wenxiang");
 
 async function time(label, fn) {
   const t0 = performance.now();

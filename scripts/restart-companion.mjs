@@ -9,7 +9,7 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { loadLocalEnv, repoRoot } from "../server/src/env.js";
 import { publishRestartNoticeLive } from "../server/src/restart-notice.js";
-import { defaultWorkspaceRoot } from "../server/src/workspace.js";
+import { configuredWorkspaceRoot } from "../server/src/workspace.js";
 
 const repo = repoRoot();
 loadLocalEnv(path.join(repo, ".env"));
@@ -64,7 +64,7 @@ async function main() {
   const notice = await publishRestartNoticeLive({
     baseUrl,
     apiKey,
-    workspaceRoot: defaultWorkspaceRoot(),
+    workspaceRoot: await configuredWorkspaceRoot(),
     reason,
     source: "计划内重启",
     delayMs: leadMs,

@@ -22,7 +22,7 @@ import {
 } from "../src/ngrok.js";
 import { queueRestartNoticeFile } from "../src/restart-notice.js";
 import { ensureTurnRelay, turnRelayEnabled } from "../src/turn-relay-client.js";
-import { defaultWorkspaceRoot } from "../src/workspace.js";
+import { configuredWorkspaceRoot } from "../src/workspace.js";
 
 loadLocalEnv();
 process.env = envWithNodeOnPath(process.env);
@@ -222,11 +222,15 @@ function boot() {
     }
     if (Date.now() - started > 60_000) attempt = 0;
     const wait = nextKeepAliveDelay(attempt, delayMs);
-    void queueRestartNoticeFile(defaultWorkspaceRoot(), {
-      reason: `companion 异常退出 (code=${code ?? "null"} signal=${signal || "-"})`,
-      source: "保活自动重启",
-      delayMs: wait,
-    }).catch(() => {});
+    void configuredWorkspaceRoot()
+      .then((root) =>
+        queueRestartNoticeFile(root, {
+          reason: `companion 异常退出 (code=${code ?? "null"} signal=${signal || "-"})`,
+          source: "保活自动重启",
+          delayMs: wait,
+        }),
+      )
+      .catch(() => {});
     console.error(
       `[keep-alive] companion exited code=${code ?? "null"} signal=${signal || "-"} — restart in ${wait}ms`,
     );

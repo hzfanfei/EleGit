@@ -201,7 +201,7 @@ export function synthesizeLocalAnswer({ question, progress, context, local }) {
 
   sections.push(
     local?.present
-      ? "以上内容来自本机 GitHub API 与 ~/问象 目录，不是编造的演示数据。"
+      ? "以上内容来自本机 GitHub API 与 ~/wenxiang 目录，不是编造的演示数据。"
       : "以上内容全部来自本机调用的 GitHub API，不是编造的演示数据。",
   );
   return sections.join("\n\n");
