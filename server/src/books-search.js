@@ -410,20 +410,82 @@ function annasHostsFromEnv() {
   }
 }
 
-function downloadFetchHeaders(parsed, cookieHeader) {
+function downloadFetchHeaders(parsed, cookieHeader, referer = "") {
   const host = parsed.hostname.toLowerCase();
   const headers = {
     Accept: "*/*",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
     "User-Agent": BOOK_DOWNLOAD_USER_AGENT,
   };
   if (host.includes("archive.org")) {
     headers.Referer = "https://archive.org/";
   } else if (host.includes("annas-archive")) {
-    headers.Referer = `${parsed.origin}/`;
+    const ref = String(referer || "").trim();
+    headers.Referer = ref || `${parsed.origin}/`;
   }
   const cookie = String(cookieHeader || "").trim();
   if (cookie) headers.Cookie = cookie;
   return headers;
+}
+
+/** For client log center — never include cookie values. */
+export function cookieHeaderDiagnostics(cookieHeader) {
+  const raw = String(cookieHeader || "").trim();
+  if (!raw) return { present: false, count: 0, names: [] };
+  const names = raw
+    .split(";")
+    .map((part) => part.split("=")[0]?.trim())
+    .filter(Boolean);
+  return { present: true, count: names.length, names: [...new Set(names)].slice(0, 24) };
+}
+
+export function annasDownloadPathKind(parsed) {
+  const path = String(parsed?.pathname || "").toLowerCase();
+  if (path.includes("/slow_download/")) return "slow_download";
+  if (path.includes("/fast_download/")) return "fast_download";
+  if (path.includes("/dyn/")) return "dyn";
+  return "other";
+}
+
+function defaultAnnaReferer(parsed) {
+  const md5 = extractBookMd5FromUrl(parsed);
+  if (!md5 || !parsed.hostname.toLowerCase().includes("annas-archive")) return "";
+  return `${parsed.origin}/md5/${md5}`;
+}
+
+async function readResponseSnippet(res, limit = 200) {
+  try {
+    const text = await res.text();
+    return String(text || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, limit);
+  } catch {
+    return "";
+  }
+}
+
+async function warmAnnaMd5Page(parsed, { fetchImpl, signal, cookieHeader, referer }) {
+  const md5 = extractBookMd5FromUrl(parsed);
+  if (!md5) return false;
+  const host = parsed.hostname.toLowerCase();
+  if (!host.includes("annas-archive")) return false;
+  const md5Url = `${parsed.origin}/md5/${md5}`;
+  const md5Parsed = new URL(md5Url);
+  const res = await fetchImpl(md5Url, {
+    signal,
+    redirect: "follow",
+    headers: downloadFetchHeaders(md5Parsed, cookieHeader, referer || md5Url),
+  });
+  return res.ok || res.status === 304;
+}
+
+function logBookDownloadDiag(label, diag) {
+  try {
+    console.error(`[book-download] ${label} ${JSON.stringify(diag)}`);
+  } catch {
+    console.error(`[book-download] ${label}`);
+  }
 }
 
 function md5Hex32(raw) {
@@ -668,6 +730,14 @@ async function findFreeFilename(dir, baseName) {
   }
 }
 
+async function fetchAnnaBookResponse(parsed, { fetchImpl, signal, cookieHeader, referer }) {
+  return fetchImpl(parsed, {
+    signal,
+    redirect: "follow",
+    headers: downloadFetchHeaders(parsed, cookieHeader, referer),
+  });
+}
+
 export async function downloadBookFromUrl(rawUrl, opts = {}) {
   const fetchImpl = opts.fetchImpl || globalThis.fetch;
   const signal = ensureSignal(opts.signal);
@@ -682,24 +752,79 @@ export async function downloadBookFromUrl(rawUrl, opts = {}) {
   let parsed = await assertSafeExternalUrl(rawUrl);
   parsed = normalizeBookDownloadUrl(parsed);
   const cookieHeader = String(opts.cookieHeader || "").trim();
+  let referer = String(opts.referer || "").trim();
+  if (!referer) referer = defaultAnnaReferer(parsed);
+  const cookieDiag = cookieHeaderDiagnostics(cookieHeader);
+  const pathKind = annasDownloadPathKind(parsed);
+  const isAnna = parsed.hostname.toLowerCase().includes("annas-archive");
+
+  if (isAnna && (pathKind === "slow_download" || pathKind === "fast_download")) {
+    opts.onProgress?.({ phase: "resolving", bytesReceived: 0, bytesTotal: null });
+    try {
+      await warmAnnaMd5Page(parsed, { fetchImpl, signal, cookieHeader, referer });
+    } catch (warmErr) {
+      logBookDownloadDiag("warm-md5-failed", {
+        url: parsed.href,
+        pathKind,
+        cookie: cookieDiag,
+        referer,
+        error: warmErr?.message || String(warmErr),
+      });
+    }
+  }
 
   let res;
-  try {
-    res = await fetchImpl(parsed, {
-      signal,
-      redirect: "follow",
-      headers: downloadFetchHeaders(parsed, cookieHeader),
-    });
-  } catch (err) {
-    const e = new Error(`下载请求失败: ${err?.message || "network"}`);
-    e.status = 502;
-    e.code = "download_network";
-    throw e;
-  }
-  if (!res.ok) {
+  let attempt = 0;
+  let lastDiag = null;
+  while (attempt < 2) {
+    attempt += 1;
+    try {
+      res = await fetchAnnaBookResponse(parsed, {
+        fetchImpl,
+        signal,
+        cookieHeader,
+        referer,
+      });
+    } catch (err) {
+      const e = new Error(`下载请求失败: ${err?.message || "network"}`);
+      e.status = 502;
+      e.code = "download_network";
+      e.debug = { url: parsed.href, pathKind, cookie: cookieDiag, referer, attempt };
+      logBookDownloadDiag("network", e.debug);
+      throw e;
+    }
+    if (res.ok) break;
+    const snippet = await readResponseSnippet(res);
+    lastDiag = {
+      url: parsed.href,
+      host: parsed.hostname,
+      pathKind,
+      httpStatus: res.status,
+      attempt,
+      cookie: cookieDiag,
+      referer,
+      bodySnippet: snippet,
+    };
+    logBookDownloadDiag("http-fail", lastDiag);
+    if (res.status === 403 && isAnna && attempt === 1) {
+      try {
+        await warmAnnaMd5Page(parsed, { fetchImpl, signal, cookieHeader, referer });
+      } catch {
+        // retry fetch anyway
+      }
+      continue;
+    }
     const e = new Error(`下载失败 (${res.status})`);
     e.status = res.status === 401 || res.status === 403 ? 415 : 502;
     e.code = "download_failed";
+    e.debug = lastDiag;
+    throw e;
+  }
+  if (!res?.ok) {
+    const e = new Error(`下载失败 (${res?.status || 0})`);
+    e.status = res?.status === 401 || res?.status === 403 ? 415 : 502;
+    e.code = "download_failed";
+    e.debug = lastDiag;
     throw e;
   }
   const contentType = String(res.headers.get("content-type") || "").toLowerCase();

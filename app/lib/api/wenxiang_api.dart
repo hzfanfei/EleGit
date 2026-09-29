@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../copy/ask_engine.dart';
+import '../copy/errors.dart';
 import '../models.dart';
 import '../models/diagnostics.dart';
 import '../utils/async_gate.dart';
@@ -733,6 +734,7 @@ class WenxiangApi {
     required String url,
     String? title,
     String? cookieHeader,
+    String? referer,
     void Function(BookDownloadProgress progress)? onProgress,
   }) async {
     final res = await http
@@ -744,6 +746,7 @@ class WenxiangApi {
             if (title != null && title.isNotEmpty) 'title': title,
             if (cookieHeader != null && cookieHeader.isNotEmpty)
               'cookieHeader': cookieHeader,
+            if (referer != null && referer.isNotEmpty) 'referer': referer,
           }),
         )
         .timeout(const Duration(seconds: 30));
@@ -779,6 +782,13 @@ class WenxiangApi {
       }
       if (status == 'failed') {
         final msg = (body['error'] ?? '下载失败').toString();
+        final debug = body['debug'];
+        if (debug is Map) {
+          recordBookDownloadDiag(
+            msg,
+            summary: _bookDownloadDebugSummary(debug),
+          );
+        }
         throw ApiException(msg);
       }
     }
@@ -1274,6 +1284,33 @@ class WenxiangApi {
       await _json(res, fallback: '标记通知已读失败');
     }
   }
+}
+
+String _bookDownloadDebugSummary(Map<dynamic, dynamic> debug) {
+  final parts = <String>[];
+  void add(String key) {
+    final v = debug[key];
+    if (v == null) return;
+    final text = v.toString().trim();
+    if (text.isNotEmpty) parts.add('$key=$text');
+  }
+
+  add('httpStatus');
+  add('pathKind');
+  add('attempt');
+  add('referer');
+  final cookie = debug['cookie'];
+  if (cookie is Map) {
+    final names = cookie['names'];
+    final count = cookie['count'];
+    if (names is List && names.isNotEmpty) {
+      parts.add('cookieNames=${names.take(8).join(",")}');
+    } else if (count != null) {
+      parts.add('cookieCount=$count');
+    }
+  }
+  add('bodySnippet');
+  return parts.join(' · ');
 }
 
 class TtsVoicePreview {

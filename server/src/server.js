@@ -817,6 +817,7 @@ app.post("/v1/books/download", async (req, res) => {
     }
     const title = req.body?.title ? String(req.body.title) : "";
     const cookieHeader = req.body?.cookieHeader ? String(req.body.cookieHeader) : "";
+    const referer = req.body?.referer ? String(req.body.referer) : "";
     const sync = req.body?.sync === true || req.query?.sync === "1";
     if (sync) {
       const result = await downloadBookFromUrl(url, {
@@ -824,6 +825,7 @@ app.post("/v1/books/download", async (req, res) => {
         signal: req.signal,
         suggestedTitle: title,
         cookieHeader,
+        referer,
       });
       res.json({ ok: true, status: "done", ...result });
       return;
@@ -832,6 +834,7 @@ app.post("/v1/books/download", async (req, res) => {
       url,
       title,
       cookieHeader,
+      referer,
       workspaceRoot: store.config.workspaceRoot,
     });
     res.json({ ok: true, status: "pending", jobId });
@@ -862,6 +865,7 @@ app.get("/v1/books/download/jobs/:jobId", (req, res) => {
       jobId: job.id,
       error: job.error,
       code: job.code,
+      debug: job.debug ?? null,
     });
     return;
   }

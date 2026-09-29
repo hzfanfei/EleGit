@@ -7,6 +7,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 import '../api/wenxiang_api.dart';
 import '../models.dart';
 import '../theme.dart';
+import '../copy/errors.dart';
 import '../utils/book_download_capture.dart';
 import '../widgets/wx_chrome.dart';
 
@@ -93,15 +94,47 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
       ..loadRequest(Uri.parse(startUrl));
   }
 
-  Future<String?> _cookieHeaderFor(Uri uri) async {
-    final origin = '${uri.scheme}://${uri.host}';
-    try {
-      final cookies = await _cookieManager.getCookies(origin);
-      if (cookies.isEmpty) return null;
-      return cookies.map((c) => '${c.name}=${c.value}').join('; ');
-    } catch (_) {
-      return null;
+  Future<String?> _cookieHeaderFor(Uri downloadUri) async {
+    final byName = <String, String>{};
+    final candidates = <Uri>{
+      downloadUri,
+      Uri.parse('${downloadUri.scheme}://${downloadUri.host}/'),
+      if (_currentUrl.isNotEmpty) ...{
+        if (Uri.tryParse(_currentUrl) case final Uri u) u,
+      },
+    };
+    for (final uri in candidates) {
+      try {
+        for (final c in await _cookieManager.getCookies(domain: uri)) {
+          byName[c.name] = c.value;
+        }
+      } catch (_) {}
     }
+    try {
+      final raw = await _controller.runJavaScriptReturningResult('document.cookie');
+      final js = raw?.toString().trim() ?? '';
+      if (js.isNotEmpty && js != 'null') {
+        for (final part in js.split(';')) {
+          final eq = part.indexOf('=');
+          if (eq <= 0) continue;
+          final name = part.substring(0, eq).trim();
+          final value = part.substring(eq + 1).trim();
+          if (name.isNotEmpty) byName.putIfAbsent(name, () => value);
+        }
+      }
+    } catch (_) {}
+    if (byName.isEmpty) return null;
+    return byName.entries.map((e) => '${e.key}=${e.value}').join('; ');
+  }
+
+  String _cookieNamesForLog(String? cookieHeader) {
+    if (cookieHeader == null || cookieHeader.isEmpty) return '(none)';
+    return cookieHeader
+        .split(';')
+        .map((p) => p.split('=').first.trim())
+        .where((n) => n.isNotEmpty)
+        .take(12)
+        .join(', ');
   }
 
   Future<void> _copyText(String text, {String doneHint = '已复制'}) async {
@@ -118,6 +151,12 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
     _inFlightUrls.add(url);
     final title = suggestedTitleFromDownloadUrl(uri);
     final cookieHeader = await _cookieHeaderFor(uri);
+    final referer = _currentUrl.trim().isNotEmpty ? _currentUrl.trim() : null;
+    recordBookDownloadDiag(
+      '安娜入库开始',
+      summary:
+          'url=$url · referer=${referer ?? "-"} · cookies=${_cookieNamesForLog(cookieHeader)}',
+    );
     if (mounted) {
       setState(() {
         _capturingLabel = title ?? '电子书';
@@ -130,6 +169,7 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
         url: url,
         title: title,
         cookieHeader: cookieHeader,
+        referer: referer,
         onProgress: (p) {
           if (!mounted) return;
           setState(() => _captureProgress = p);
@@ -146,6 +186,10 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
       );
     } catch (err) {
       if (!mounted) return;
+      recordBookDownloadDiag(
+        '安娜入库失败：${err.toString()}',
+        summary: 'url=$url · referer=${referer ?? "-"} · cookies=${_cookieNamesForLog(cookieHeader)}',
+      );
       showWxFailureSnackBar(context, err, prefix: '保存失败：');
     } finally {
       _inFlightUrls.remove(url);

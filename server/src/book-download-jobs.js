@@ -17,7 +17,7 @@ function pruneOldJobs() {
 }
 
 /**
- * @param {{ url: string, title?: string, cookieHeader?: string, workspaceRoot: string }} opts
+ * @param {{ url: string, title?: string, cookieHeader?: string, referer?: string, workspaceRoot: string }} opts
  * @returns {string} jobId
  */
 export function startBookDownloadJob(opts) {
@@ -36,6 +36,7 @@ export function startBookDownloadJob(opts) {
     url: String(opts.url || "").trim(),
     title: String(opts.title || "").trim(),
     cookieHeader: String(opts.cookieHeader || "").trim(),
+    referer: String(opts.referer || "").trim(),
     progress: { phase: "queued", bytesReceived: 0, bytesTotal: null },
   };
   jobs.set(id, job);
@@ -56,6 +57,7 @@ async function runBookDownloadJob(job, workspaceRoot) {
       workspaceRoot,
       suggestedTitle: job.title,
       cookieHeader: job.cookieHeader,
+      referer: job.referer,
       signal: AbortSignal.timeout(BOOK_DOWNLOAD_TIMEOUT_MS),
       onProgress: (p) => {
         job.progress = {
@@ -74,6 +76,7 @@ async function runBookDownloadJob(job, workspaceRoot) {
     job.error = err?.message || String(err);
     job.code = err?.code || "download_failed";
     job.httpStatus = err?.status || 502;
+    job.debug = err?.debug || null;
     job.finishedAt = Date.now();
   }
 }
@@ -92,4 +95,6 @@ async function runBookDownloadJob(job, workspaceRoot) {
  * @property {string} [code]
  * @property {number} [httpStatus]
  * @property {{ phase: string, bytesReceived: number, bytesTotal: number|null }} [progress]
+ * @property {string} [referer]
+ * @property {object} [debug]
  */

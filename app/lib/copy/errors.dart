@@ -16,6 +16,11 @@ void recordClientMessage(String message, {String summary = '', String kind = 'er
   );
 }
 
+/// Anna / 问书入库诊断（不含 Cookie 值），可在「日志中心」查看。
+void recordBookDownloadDiag(String message, {String summary = ''}) {
+  recordClientMessage(message, summary: summary, kind: 'book-dl');
+}
+
 String humanizeError(Object error) {
   final text = _explain(error);
   recordClientError(error, kind: 'shown');
