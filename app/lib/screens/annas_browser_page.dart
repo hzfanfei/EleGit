@@ -20,7 +20,7 @@ class AnnasBrowserOutcome {
   final int savedCount;
 }
 
-/// 内置浏览器打开安娜的档案；拦截安娜下载链，由服务端写入 workspace/books。
+/// 内置浏览器打开安娜的档案；监听剪切板中的下载链，由本机拉取后写入问书库。
 class AnnasBrowserPage extends StatefulWidget {
   const AnnasBrowserPage({
     super.key,
@@ -36,6 +36,8 @@ class AnnasBrowserPage extends StatefulWidget {
 }
 
 class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
+  static const _clipboardPollInterval = Duration(milliseconds: 450);
+
   late final WebViewController _controller;
   int _progress = 0;
   bool _pageLoading = true;
@@ -44,12 +46,14 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
   BookDownloadProgress? _captureProgress;
   final Set<String> _inFlightUrls = {};
   final Set<String> _inFlightMd5 = {};
-  final Set<String> _slowGateWaiting = {};
   String _currentUrl = '';
   String? _activeDownloadUrl;
   final WebViewCookieManager _cookieManager = WebViewCookieManager();
   Completer<void>? _pageLoadCompleter;
   String? _pageLoadTarget;
+  Timer? _clipboardTimer;
+  String? _lastSeenClipboard;
+  String? _ignoreClipboardUntil;
 
   @override
   void initState() {
@@ -79,34 +83,64 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
               _currentUrl = url;
             });
             _completePageLoadWait(url);
-            final uri = Uri.tryParse(url);
-            if (uri != null && isAnnaSlowDownloadGateUri(uri)) {
-              unawaited(_captureAfterSlowGatePage(uri));
-            } else {
-              _maybeCaptureFromUrl(url);
-            }
-          },
-          onNavigationRequest: (request) {
-            final uri = Uri.tryParse(request.url);
-            if (uri != null && isAnnaSlowDownloadGateUri(uri)) {
-              return NavigationDecision.navigate;
-            }
-            if (uri != null && shouldCaptureBookDownloadUrl(uri)) {
-              unawaited(_captureAndDownload(uri));
-              return NavigationDecision.prevent;
-            }
-            return NavigationDecision.navigate;
           },
           onUrlChange: (change) {
             final url = change.url;
             if (url != null && url.isNotEmpty && mounted) {
               setState(() => _currentUrl = url);
-              _maybeCaptureFromUrl(url);
             }
           },
         ),
       )
       ..loadRequest(Uri.parse(startUrl));
+    unawaited(_seedClipboardBaseline());
+    _clipboardTimer = Timer.periodic(_clipboardPollInterval, (_) {
+      unawaited(_pollClipboardForDownload());
+    });
+  }
+
+  @override
+  void dispose() {
+    _clipboardTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _seedClipboardBaseline() async {
+    try {
+      final data = await Clipboard.getData(Clipboard.kTextPlain);
+      _lastSeenClipboard = data?.text?.trim();
+    } catch (_) {}
+  }
+
+  Future<void> _pollClipboardForDownload() async {
+    if (!mounted) return;
+    try {
+      final data = await Clipboard.getData(Clipboard.kTextPlain);
+      final text = data?.text?.trim();
+      if (text == null || text.isEmpty) return;
+      if (text == _lastSeenClipboard) return;
+      _lastSeenClipboard = text;
+      final ignore = _ignoreClipboardUntil;
+      if (ignore != null && text == ignore) {
+        _ignoreClipboardUntil = null;
+        return;
+      }
+      final uri = annaDownloadUriFromClipboard(text);
+      if (uri == null) return;
+      recordBookDownloadDiag(
+        '剪切板检测到下载链',
+        summary: 'url=${uri.toString()}',
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('已检测到下载链接，开始入库…'),
+          duration: Duration(milliseconds: 1600),
+        ),
+      );
+      final isSlow = isAnnaSlowDownloadGateUri(uri);
+      await _captureAndDownload(uri, preferWebViewFirst: isSlow);
+    } catch (_) {}
   }
 
   void _completePageLoadWait(String url) {
@@ -164,62 +198,13 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
   }
 
   Future<void> _copyText(String text, {String doneHint = '已复制'}) async {
+    _ignoreClipboardUntil = text.trim();
+    _lastSeenClipboard = text.trim();
     await Clipboard.setData(ClipboardData(text: text));
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(doneHint), duration: const Duration(milliseconds: 1200)),
     );
-  }
-
-  void _maybeCaptureFromUrl(String? url) {
-    if (url == null || url.isEmpty) return;
-    final uri = Uri.tryParse(url);
-    if (uri == null || !shouldCaptureBookDownloadUrl(uri)) return;
-    unawaited(_captureAndDownload(uri));
-  }
-
-  Future<void> _captureAfterSlowGatePage(Uri gateUri) async {
-    final url = bookDownloadUrlForServer(gateUri);
-    final md5 = annaMd5FromDownloadUrl(gateUri);
-    if (_inFlightUrls.contains(url)) return;
-    if (md5 != null &&
-        (_inFlightMd5.contains(md5) || _slowGateWaiting.contains(md5))) {
-      return;
-    }
-    if (md5 != null) _slowGateWaiting.add(md5);
-    recordBookDownloadDiag(
-      '慢速下载页已打开',
-      summary: 'url=$url · 等待跳转或倒计时…',
-    );
-    try {
-    for (var i = 0; i < 90; i++) {
-      if (!mounted) return;
-      String cur = _currentUrl;
-      try {
-        final fromWebView = await _controller.currentUrl();
-        if (fromWebView != null && fromWebView.isNotEmpty) cur = fromWebView;
-      } catch (_) {}
-      final curUri = Uri.tryParse(cur);
-      if (curUri != null &&
-          shouldCaptureBookDownloadUrl(curUri) &&
-          curUri.toString() != gateUri.toString()) {
-        recordBookDownloadDiag(
-          '慢速页已跳转到文件链',
-          summary: 'from=$url · to=$cur',
-        );
-        await _captureAndDownload(curUri);
-        return;
-      }
-      await Future<void>.delayed(const Duration(seconds: 1));
-    }
-    recordBookDownloadDiag(
-      '慢速页等待结束，开始 WebView 直载',
-      summary: 'url=$url',
-    );
-    await _captureAndDownload(gateUri, preferWebViewFirst: true);
-    } finally {
-      if (md5 != null) _slowGateWaiting.remove(md5);
-    }
   }
 
   Future<void> _captureAndDownload(
@@ -423,7 +408,7 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
             WxPageHeader(
               showMark: false,
               title: '安娜的档案',
-              subtitle: _savedCount > 0 ? '已保存 $_savedCount 本' : '站内点下载，问象自动入库',
+              subtitle: _savedCount > 0 ? '已保存 $_savedCount 本' : '复制下载链即可入库',
               onBack: _close,
               backTooltip: '返回',
               trailing: [
@@ -512,7 +497,7 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
             Padding(
               padding: const EdgeInsets.fromLTRB(Wx.inset, 8, Wx.inset, 12),
               child: Text(
-                '在网页里正常搜索、点下载即可；检测到安娜下载链时会写入本机 workspace 的 books 目录，无需再点「下载到手机」。',
+                '网页内正常浏览、点下载；把 slow / fast 下载链接复制到剪切板，问象会自动检测并写入问书库（约每 0.45 秒检查一次）。',
                 style: theme.textTheme.bodySmall?.copyWith(color: Wx.faint),
               ),
             ),

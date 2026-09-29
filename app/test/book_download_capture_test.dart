@@ -10,6 +10,17 @@ void main() {
     );
     expect(isAnnaSlowDownloadGateUri(slow), isTrue);
     expect(shouldCaptureBookDownloadUrl(slow), isFalse);
+    expect(shouldCaptureBookDownloadFromClipboard(slow), isTrue);
+  });
+
+  test('annaDownloadUriFromClipboard parses slow link', () {
+    final url =
+        'https://annas-archive.gl/slow_download/86eb03dc6a6956f90f5e4d51574c99e4/0/1';
+    expect(annaDownloadUriFromClipboard(url)?.toString(), url);
+    expect(
+      annaDownloadUriFromClipboard('链接 $url 请下载')?.toString(),
+      url,
+    );
   });
 
   test('captures annas fast_download only on annas host', () {
