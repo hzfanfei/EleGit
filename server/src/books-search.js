@@ -394,6 +394,10 @@ async function fetchJiumoHubs(query, opts) {
 const DEFAULT_ANNAS_HOSTS = ["annas-archive.gl", "annas-archive.pk", "annas-archive.gd"];
 const DEFAULT_LIBGEN_HOST = "libgen.li";
 const LIBGEN_GET_KEY_RE = /get\.php\?md5=([0-9a-f]{32})&key=([A-Z0-9]+)/i;
+const BOOK_DOWNLOAD_USER_AGENT =
+  "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";
+const ANNAS_MIRROR_DOWNLOAD_MD5_RE =
+  /\/(?:fast_download|slow_download)\/\d+\/([a-f0-9]{32})(?:\/|$)/i;
 
 function annasHostsFromEnv() {
   const raw = String(process.env.WENXIANG_ANNAS_BASE_URL || "").trim();
@@ -409,6 +413,45 @@ function annasHostsFromEnv() {
 function libgenHostFromEnv() {
   const raw = String(process.env.WENXIANG_LIBGEN_HOST || DEFAULT_LIBGEN_HOST).trim();
   return raw.replace(/^https?:\/\//i, "").replace(/\/.*$/, "") || DEFAULT_LIBGEN_HOST;
+}
+
+function libgenAdsUrlForMd5(md5) {
+  const host = libgenHostFromEnv();
+  const out = new URL(`https://${host}/ads.php`);
+  out.searchParams.set("md5", String(md5 || "").toLowerCase());
+  return out;
+}
+
+function downloadFetchHeaders(parsed) {
+  const host = parsed.hostname.toLowerCase();
+  const headers = {
+    Accept: "*/*",
+    "User-Agent": BOOK_DOWNLOAD_USER_AGENT,
+  };
+  if (host.includes("libgen")) {
+    headers.Referer = `${parsed.origin}/`;
+  } else if (host.includes("archive.org")) {
+    headers.Referer = "https://archive.org/";
+  } else if (host.includes("annas-archive")) {
+    headers.Referer = `${parsed.origin}/`;
+  }
+  return headers;
+}
+
+/**
+ * Anna 站内 fast/slow_download 需浏览器 Cookie，服务端直拉常 403；改走 LibGen ads.php。
+ */
+export function rewriteAnnaDownloadToLibgen(parsed) {
+  const host = parsed.hostname.toLowerCase();
+  if (!host.includes("annas-archive")) return parsed;
+  const match = parsed.pathname.match(ANNAS_MIRROR_DOWNLOAD_MD5_RE);
+  if (!match) return parsed;
+  return libgenAdsUrlForMd5(match[1]);
+}
+
+function md5FromLibgenUrl(parsed) {
+  const md5 = String(parsed.searchParams.get("md5") || "").toLowerCase();
+  return /^[a-f0-9]{32}$/.test(md5) ? md5 : "";
 }
 
 function isAnnasBlockedHtml(html) {
@@ -551,7 +594,7 @@ export async function resolveLibgenDownloadUrl(rawUrl, opts = {}) {
       redirect: "follow",
       headers: {
         Accept: "text/html",
-        "User-Agent": "Wenxiang/1.0 (+book-download)",
+        ...downloadFetchHeaders(parsed),
       },
     });
   } catch (err) {
@@ -683,6 +726,7 @@ export async function downloadBookFromUrl(rawUrl, opts = {}) {
   }
 
   let parsed = await assertSafeExternalUrl(rawUrl);
+  parsed = rewriteAnnaDownloadToLibgen(parsed);
   if (parsed.pathname.endsWith("/ads.php") && parsed.searchParams.get("md5")) {
     opts.onProgress?.({ phase: "resolving", bytesReceived: 0, bytesTotal: null });
     parsed = await resolveLibgenDownloadUrl(String(parsed), { fetchImpl, signal });
@@ -693,13 +737,29 @@ export async function downloadBookFromUrl(rawUrl, opts = {}) {
     res = await fetchImpl(parsed, {
       signal,
       redirect: "follow",
-      headers: { "User-Agent": "Wenxiang/1.0 (+book-download)" },
+      headers: downloadFetchHeaders(parsed),
     });
   } catch (err) {
     const e = new Error(`下载请求失败: ${err?.message || "network"}`);
     e.status = 502;
     e.code = "download_network";
     throw e;
+  }
+  if (!res.ok && (res.status === 401 || res.status === 403)) {
+    const md5 = md5FromLibgenUrl(parsed);
+    const host = parsed.hostname.toLowerCase();
+    if (md5 && host.includes("libgen") && !parsed.pathname.endsWith("/ads.php")) {
+      opts.onProgress?.({ phase: "resolving", bytesReceived: 0, bytesTotal: null });
+      parsed = await resolveLibgenDownloadUrl(String(libgenAdsUrlForMd5(md5)), {
+        fetchImpl,
+        signal,
+      });
+      res = await fetchImpl(parsed, {
+        signal,
+        redirect: "follow",
+        headers: downloadFetchHeaders(parsed),
+      });
+    }
   }
   if (!res.ok) {
     const e = new Error(`下载失败 (${res.status})`);

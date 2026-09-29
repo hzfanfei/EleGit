@@ -9,6 +9,7 @@ import { describe, it } from "node:test";
 import {
   assertSafeExternalUrl,
   downloadBookFromUrl,
+  rewriteAnnaDownloadToLibgen,
   parseAnnasSearchHtml,
   resolveLibgenDownloadUrl,
   searchAnnasArchive,
@@ -532,6 +533,48 @@ describe("books-search", () => {
         suggestedTitle: "Hello",
       });
       assert.ok(result.path.startsWith(path.join(dir, "books")));
+    });
+
+    it("rewrites annas slow_download to libgen ads.php", () => {
+      const parsed = rewriteAnnaDownloadToLibgen(
+        new URL(
+          "https://annas-archive.gl/slow_download/0/f87448722f0072549206b63999ec39e1/0/0",
+        ),
+      );
+      assert.equal(parsed.hostname, "libgen.li");
+      assert.equal(parsed.pathname, "/ads.php");
+      assert.equal(parsed.searchParams.get("md5"), "f87448722f0072549206b63999ec39e1");
+    });
+
+    it("resolves annas slow_download via libgen then downloads epub", async () => {
+      await withWorkspace(async (workspaceRoot) => {
+        const buf = makeFakeEpubBuffer();
+        const fetchImpl = async (url) => {
+          const u = typeof url === "string" ? new URL(url) : url;
+          if (u.pathname.endsWith("/ads.php")) {
+            return new Response(
+              "get.php?md5=f87448722f0072549206b63999ec39e1&key=ZZ99",
+              { status: 200, headers: { "Content-Type": "text/html" } },
+            );
+          }
+          if (u.pathname.endsWith("/get.php")) {
+            return new Response(buf, {
+              status: 200,
+              headers: { "Content-Type": "application/octet-stream" },
+            });
+          }
+          if (u.pathname.includes("slow_download")) {
+            return new Response("forbidden", { status: 403 });
+          }
+          return new Response("nope", { status: 404 });
+        };
+        const result = await downloadBookFromUrl(
+          "https://annas-archive.gl/slow_download/0/f87448722f0072549206b63999ec39e1/0/0",
+          { workspaceRoot, fetchImpl, suggestedTitle: "Anna Mirror" },
+        );
+        assert.equal(result.source, "annas");
+        assert.ok(result.filename.endsWith(".epub"));
+      });
     });
 
     it("resolves libgen ads.php then downloads epub", async () => {
