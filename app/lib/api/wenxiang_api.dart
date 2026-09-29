@@ -705,6 +705,13 @@ class WenxiangApi {
         .toList();
   }
 
+  Future<void> deleteBook(String bookId) async {
+    final res = await http
+        .delete(_uri('/v1/books/$bookId'), headers: _headers)
+        .timeout(const Duration(seconds: 30));
+    await _json(res, fallback: '删除书籍失败');
+  }
+
   /// 服务端搜书（仅安娜的档案 HTML 源；App 找书默认走内置浏览器）。
   Future<List<BookSearchResult>> searchBooks(
     String query, {

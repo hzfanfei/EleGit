@@ -182,6 +182,15 @@ class FakeWenxiangApi extends WenxiangApi {
   @override
   Future<List<BookItem>> listBooks() async => booksResult;
 
+  int deleteBookCalls = 0;
+  String? lastDeleteBookId;
+
+  @override
+  Future<void> deleteBook(String bookId) async {
+    deleteBookCalls += 1;
+    lastDeleteBookId = bookId;
+  }
+
   @override
   Future<List<ChatSession>> listBookSessions(String bookId) async => List<ChatSession>.from(sessions);
 

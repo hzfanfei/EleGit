@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -6,8 +7,10 @@ import AdmZip from "adm-zip";
 import { describe, it } from "node:test";
 import {
   bookIdFromFilename,
+  bookCacheDir,
   booksDir,
   clearBookAssetIndex,
+  deleteBook,
   ensureBookMaterialized,
   listBooks,
   parseEpubBuffer,
@@ -179,6 +182,22 @@ describe("books", () => {
     const reading = JSON.parse(readingRaw);
     assert.equal(reading.chapters.length, 1);
     assert.equal(reading.chapters[0].file, "001-chapter1.md");
+  });
+
+  it("deleteBook removes epub and materialized cache", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "wx-books-del-"));
+    const dir = booksDir(root);
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, "gone.epub"), makeSampleEpub("待删"));
+    const listed = await listBooks(root);
+    const book = await resolveBook(root, listed.books[0].id);
+    await ensureBookMaterialized(root, book);
+    const out = await deleteBook(root, book.id);
+    assert.equal(out.deleted, true);
+    assert.ok(!existsSync(book.path));
+    assert.ok(!existsSync(bookCacheDir(root, book.id)));
+    const again = await listBooks(root);
+    assert.equal(again.books.length, 0);
   });
 
   it("rejects unsafe book asset paths", () => {

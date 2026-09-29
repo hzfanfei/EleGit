@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createReadStream, existsSync, readdirSync, statSync } from "node:fs";
-import { mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import AdmZip from "adm-zip";
 import { findPandoc, htmlToMarkdown } from "./pandoc.js";
@@ -1157,6 +1157,13 @@ export function bookLocalView(materialized, book) {
     files,
     readme: "",
   };
+}
+
+export async function deleteBook(workspaceRoot, bookId) {
+  const book = await resolveBook(workspaceRoot, bookId);
+  await unlink(book.path);
+  await rm(bookCacheDir(workspaceRoot, book.id), { recursive: true, force: true });
+  return { deleted: true, id: book.id, filename: book.filename };
 }
 
 export function bookSessionOwner() {

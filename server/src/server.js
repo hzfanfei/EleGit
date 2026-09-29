@@ -87,6 +87,7 @@ import {
   readCachedCover,
   resolveBook,
   resolveBookCacheAssetPath,
+  deleteBook,
 } from "./books.js";
 import { envWithNodeOnPath, resolveGitExecutable, resolveNodeExecutable } from "./which.js";
 import {
@@ -644,6 +645,20 @@ app.get("/v1/books", async (_req, res) => {
   try {
     const out = await listBooks(store.config.workspaceRoot);
     res.json({ booksDir: out.dir, books: out.books });
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.delete("/v1/books/:bookId", async (req, res) => {
+  try {
+    const bookId = req.params.bookId;
+    const owner = bookSessionOwner();
+    const listed = bookSessions.list(owner, bookId);
+    for (const session of listed.sessions || []) {
+      await bookSessions.close(owner, bookId, session.id);
+    }
+    res.json(await deleteBook(store.config.workspaceRoot, bookId));
   } catch (err) {
     sendError(res, err);
   }

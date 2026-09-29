@@ -58,6 +58,35 @@ class _BooksPageState extends State<BooksPage> {
     await widget.onRead(book, expandAsk: expandAsk);
   }
 
+  Future<void> _confirmDelete(BookItem book) async {
+    if (widget.opening) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('从问书库删除这本书？'),
+        content: Text('${book.title}\n\n将删除本机 EPUB 与缓存，无法恢复。'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('删除')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await widget.api.deleteBook(book.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('已删除《${book.title}》')),
+      );
+      await _load();
+    } catch (err) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(err.toString())),
+      );
+    }
+  }
+
   Future<void> _openAnnasBrowser() async {
     final outcome = await Navigator.of(context).push<AnnasBrowserOutcome>(
       MaterialPageRoute(
@@ -136,6 +165,7 @@ class _BooksPageState extends State<BooksPage> {
             book: book,
             onRead: () => _read(book),
             onAsk: () => _read(book, expandAsk: true),
+            onDelete: () => _confirmDelete(book),
           );
         },
       ),
@@ -149,12 +179,14 @@ class _BookCard extends StatelessWidget {
     required this.book,
     required this.onRead,
     required this.onAsk,
+    required this.onDelete,
   });
 
   final WenxiangApi api;
   final BookItem book;
   final VoidCallback onRead;
   final VoidCallback onAsk;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -167,45 +199,60 @@ class _BookCard extends StatelessWidget {
         onTap: onRead,
         child: Padding(
           padding: const EdgeInsets.all(10),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+          child: Stack(
+            clipBehavior: Clip.none,
             children: [
-              Expanded(
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: _cover(),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                book.title,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.titleSmall,
-              ),
-              if (book.author.isNotEmpty)
-                Text(
-                  book.author,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall?.copyWith(color: Wx.faint),
-                ),
-              const SizedBox(height: 8),
-              Row(
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  IconButton(
-                    tooltip: '阅读',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: onRead,
-                    icon: const Icon(Icons.menu_book_outlined, size: 18),
+                  Expanded(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: _cover(),
+                    ),
                   ),
-                  IconButton(
-                    tooltip: '边读边问',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: onAsk,
-                    icon: const Icon(Icons.chat_bubble_outline, size: 18),
+                  const SizedBox(height: 8),
+                  Text(
+                    book.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleSmall,
+                  ),
+                  if (book.author.isNotEmpty)
+                    Text(
+                      book.author,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(color: Wx.faint),
+                    ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      IconButton(
+                        tooltip: '阅读',
+                        visualDensity: VisualDensity.compact,
+                        onPressed: onRead,
+                        icon: const Icon(Icons.menu_book_outlined, size: 18),
+                      ),
+                      IconButton(
+                        tooltip: '边读边问',
+                        visualDensity: VisualDensity.compact,
+                        onPressed: onAsk,
+                        icon: const Icon(Icons.chat_bubble_outline, size: 18),
+                      ),
+                    ],
                   ),
                 ],
+              ),
+              Positioned(
+                top: -6,
+                right: -6,
+                child: IconButton(
+                  tooltip: '删除',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: onDelete,
+                  icon: Icon(Icons.delete_outline, size: 18, color: Wx.danger),
+                ),
               ),
             ],
           ),

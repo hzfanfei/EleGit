@@ -41,5 +41,6 @@ void main() {
     expect(find.text('问书'), findsOneWidget);
     expect(find.text('演示书'), findsOneWidget);
     expect(find.text('作者'), findsOneWidget);
+    expect(find.byTooltip('删除'), findsOneWidget);
   });
 }
