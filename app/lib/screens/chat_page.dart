@@ -1147,7 +1147,8 @@ class _ChatPageState extends State<ChatPage> {
         if (item['partial'] == true) {
           if (activity.trim().isNotEmpty) _liveActivity.value = activity;
           if (answer.isNotEmpty) _showHeldPreview(answer);
-          if (activity.trim().isNotEmpty || answer.isNotEmpty) {
+          if (!_holdForAnswer &&
+              (activity.trim().isNotEmpty || answer.isNotEmpty)) {
             _setLivePhase('generate');
           }
         } else if (answer.isNotEmpty) {
@@ -1225,7 +1226,7 @@ class _ChatPageState extends State<ChatPage> {
     final answer = hint.answer.trim();
     if (activity.isNotEmpty) _liveActivity.value = activity;
     if (answer.isNotEmpty) _showHeldPreview(answer);
-    if (activity.isNotEmpty || answer.isNotEmpty) {
+    if (!_holdForAnswer && (activity.isNotEmpty || answer.isNotEmpty)) {
       _setLivePhase('generate');
     }
   }
@@ -1899,7 +1900,7 @@ String _livePhaseLabel(String phase) {
     case 'generate':
       return '生成回答…';
     case 'hold':
-      return '';
+      return '等待本机继续…';
     case 'connect':
     default:
       return '正在连接…';
@@ -2081,7 +2082,9 @@ class _WorkingNote extends StatelessWidget {
             return ValueListenableBuilder<String>(
               valueListenable: activity,
               builder: (context, liveActivity, _) {
-                if (hideWhenIdle && liveActivity.trim().isEmpty && livePhase != 'hold') {
+                if (hideWhenIdle &&
+                    liveActivity.trim().isEmpty &&
+                    livePhase != 'hold') {
                   return const SizedBox.shrink();
                 }
                 final steps = _workSteps(liveActivity, _livePhaseLabel(livePhase));
