@@ -1,4 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:wenxiang/utils/anna_cookie.dart';
+import 'package:wenxiang/utils/anna_device_download.dart';
 import 'package:wenxiang/utils/book_download_capture.dart';
 
 void main() {
@@ -43,6 +45,33 @@ void main() {
       'https://annas-archive.gl/fast_download/f87448722f0072549206b63999ec39e1/0/0',
     );
     expect(bookDownloadUrlForServer(uri), uri.toString());
+  });
+
+  test('annaMd5FromDownloadUrl reads slow and fast paths', () {
+    expect(
+      annaMd5FromDownloadUrl(
+        Uri.parse(
+          'https://annas-archive.gl/slow_download/0/f87448722f0072549206b63999ec39e1/0/0',
+        ),
+      ),
+      'f87448722f0072549206b63999ec39e1',
+    );
+    expect(
+      annaMd5FromDownloadUrl(
+        Uri.parse(
+          'https://annas-archive.gl/fast_download/f87448722f0072549206b63999ec39e1/0/0',
+        ),
+      ),
+      'f87448722f0072549206b63999ec39e1',
+    );
+  });
+
+  test('mergeAnnaCookieHeader merges set-cookie without dropping prior', () {
+    const base = 'a=1; b=2';
+    final merged = mergeAnnaCookieHeader(base, ['c=3; Path=/', 'b=9']);
+    expect(merged.contains('a=1'), isTrue);
+    expect(merged.contains('b=9'), isTrue);
+    expect(merged.contains('c=3'), isTrue);
   });
 
   test('annas search url builder', () {

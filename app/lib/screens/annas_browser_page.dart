@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -8,6 +9,9 @@ import '../api/wenxiang_api.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../copy/errors.dart';
+import '../utils/anna_cookie.dart';
+import '../utils/anna_device_download.dart';
+import '../utils/anna_webview_download.dart';
 import '../utils/book_download_capture.dart';
 import '../widgets/wx_chrome.dart';
 
@@ -32,10 +36,6 @@ class AnnasBrowserPage extends StatefulWidget {
 }
 
 class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
-  static const _mobileChromeUa =
-      'Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 '
-      '(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
-
   late final WebViewController _controller;
   int _progress = 0;
   bool _pageLoading = true;
@@ -54,7 +54,7 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
     _currentUrl = startUrl;
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setUserAgent(_mobileChromeUa)
+      ..setUserAgent(annaMobileChromeUa)
       ..setNavigationDelegate(
         NavigationDelegate(
           onProgress: (p) {
@@ -96,13 +96,17 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
 
   Future<String?> _cookieHeaderFor(Uri downloadUri) async {
     final byName = <String, String>{};
-    final candidates = <Uri>{
-      downloadUri,
-      Uri.parse('${downloadUri.scheme}://${downloadUri.host}/'),
-      if (_currentUrl.isNotEmpty) ...{
-        if (Uri.tryParse(_currentUrl) case final Uri u) u,
-      },
-    };
+    final candidates = <Uri>{downloadUri};
+    candidates.add(Uri.parse('${downloadUri.scheme}://${downloadUri.host}/'));
+    try {
+      final cur = await _controller.currentUrl();
+      if (cur != null && cur.isNotEmpty) {
+        if (Uri.tryParse(cur) case final Uri u) candidates.add(u);
+      }
+    } catch (_) {}
+    if (_currentUrl.isNotEmpty) {
+      if (Uri.tryParse(_currentUrl) case final Uri u) candidates.add(u);
+    }
     for (final uri in candidates) {
       try {
         for (final c in await _cookieManager.getCookies(domain: uri)) {
@@ -127,16 +131,6 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
     return byName.entries.map((e) => '${e.key}=${e.value}').join('; ');
   }
 
-  String _cookieNamesForLog(String? cookieHeader) {
-    if (cookieHeader == null || cookieHeader.isEmpty) return '(none)';
-    return cookieHeader
-        .split(';')
-        .map((p) => p.split('=').first.trim())
-        .where((n) => n.isNotEmpty)
-        .take(12)
-        .join(', ');
-  }
-
   Future<void> _copyText(String text, {String doneHint = '已复制'}) async {
     await Clipboard.setData(ClipboardData(text: text));
     if (!mounted) return;
@@ -153,9 +147,9 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
     final cookieHeader = await _cookieHeaderFor(uri);
     final referer = _currentUrl.trim().isNotEmpty ? _currentUrl.trim() : null;
     recordBookDownloadDiag(
-      '安娜入库开始',
+      '安娜本机下载开始',
       summary:
-          'url=$url · referer=${referer ?? "-"} · cookies=${_cookieNamesForLog(cookieHeader)}',
+          'url=$url · referer=${referer ?? "-"} · cookies=${cookieNamesForLog(cookieHeader)}',
     );
     if (mounted) {
       setState(() {
@@ -165,11 +159,42 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
       });
     }
     try {
-      await widget.api.downloadBook(
-        url: url,
+      Uint8List bytes;
+      try {
+        bytes = await downloadAnnaEpubOnDevice(
+          downloadUri: uri,
+          userAgent: annaMobileChromeUa,
+          cookieHeader: cookieHeader,
+          referer: referer,
+          onProgress: (p) {
+            if (!mounted) return;
+            setState(() => _captureProgress = p);
+          },
+        );
+      } on AnnaHttpDownloadException catch (httpErr) {
+        if (httpErr.statusCode != 403) rethrow;
+        recordBookDownloadDiag(
+          'HTTP 403，改 WebView 直载',
+          summary:
+              'url=$url · referer=${httpErr.referer} · cookies=${cookieNamesForLog(httpErr.cookieHeader)} · snippet=${httpErr.bodySnippet.isEmpty ? "-" : httpErr.bodySnippet}',
+        );
+        bytes = await downloadAnnaEpubViaWebView(
+          controller: _controller,
+          downloadUri: uri,
+          onProgress: (p) {
+            if (!mounted) return;
+            setState(() => _captureProgress = p);
+          },
+        );
+      }
+      recordBookDownloadDiag(
+        '安娜上传问象',
+        summary: 'url=$url · bytes=${bytes.length}',
+      );
+      await widget.api.importBookEpub(
+        bytes,
         title: title,
-        cookieHeader: cookieHeader,
-        referer: referer,
+        sourceUrl: url,
         onProgress: (p) {
           if (!mounted) return;
           setState(() => _captureProgress = p);
@@ -188,7 +213,7 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
       if (!mounted) return;
       recordBookDownloadDiag(
         '安娜入库失败：${err.toString()}',
-        summary: 'url=$url · referer=${referer ?? "-"} · cookies=${_cookieNamesForLog(cookieHeader)}',
+        summary: 'url=$url · referer=${referer ?? "-"} · cookies=${cookieNamesForLog(cookieHeader)}',
       );
       showWxFailureSnackBar(context, err, prefix: '保存失败：');
     } finally {
@@ -213,6 +238,7 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
     final p = _captureProgress;
     if (p == null) return '正在保存「$label」…';
     if (p.phase == 'resolving') return '正在准备下载…';
+    if (p.phase == 'uploading') return '正在上传到问书库…';
     final received = p.bytesReceived;
     final total = p.bytesTotal;
     if (total != null && total > 0) {

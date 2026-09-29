@@ -9,6 +9,7 @@ import { describe, it } from "node:test";
 import {
   assertSafeExternalUrl,
   downloadBookFromUrl,
+  importEpubBuffer,
   extractBookMd5FromUrl,
   normalizeBookDownloadUrl,
   rewriteAnnaDownloadToLibgen,
@@ -573,6 +574,22 @@ describe("books-search", () => {
         });
         assert.ok(seen.some((p) => p.startsWith("/md5/")));
         assert.ok(seen.some((p) => p.includes("slow_download")));
+      });
+    });
+
+    it("importEpubBuffer writes phone-captured bytes into books dir", async () => {
+      await withWorkspace(async (workspaceRoot) => {
+        const buf = makeFakeEpubBuffer();
+        const result = await importEpubBuffer(buf, {
+          workspaceRoot,
+          suggestedTitle: "Phone Import",
+          sourceUrl:
+            "https://annas-archive.gl/slow_download/0/f87448722f0072549206b63999ec39e1/0/0",
+        });
+        assert.equal(result.source, "annas");
+        assert.ok(result.filename.endsWith(".epub"));
+        const onDisk = await readFile(path.join(workspaceRoot, "books", result.filename));
+        assert.equal(onDisk.length, buf.length);
       });
     });
 

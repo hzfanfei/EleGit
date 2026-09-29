@@ -1,5 +1,5 @@
 import { createWriteStream } from "node:fs";
-import { access, mkdir, open, rename, unlink } from "node:fs/promises";
+import { access, mkdir, open, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
@@ -730,6 +730,91 @@ async function findFreeFilename(dir, baseName) {
   }
 }
 
+function assertEpubZipMagic(buffer) {
+  if (
+    !buffer ||
+    buffer.length < 4 ||
+    buffer[0] !== 0x50 ||
+    buffer[1] !== 0x4b ||
+    buffer[2] !== 0x03 ||
+    buffer[3] !== 0x04
+  ) {
+    const e = new Error("下载内容不是合法的 epub (zip) 文件");
+    e.status = 415;
+    e.code = "not_epub";
+    throw e;
+  }
+}
+
+/** Save epub bytes from the phone (Anna cookies are bound to the handset IP). */
+export async function importEpubBuffer(rawBuffer, opts = {}) {
+  const workspaceRoot = opts.workspaceRoot;
+  if (!workspaceRoot) {
+    const err = new Error("缺少 workspaceRoot");
+    err.status = 500;
+    err.code = "no_workspace";
+    throw err;
+  }
+  const buffer = Buffer.isBuffer(rawBuffer) ? rawBuffer : Buffer.from(rawBuffer);
+  if (buffer.length > MAX_DOWNLOAD_BYTES) {
+    const e = new Error("文件过大，已超过 200MB 限制");
+    e.status = 413;
+    e.code = "too_large";
+    throw e;
+  }
+  assertEpubZipMagic(buffer);
+
+  const dir = booksDir(workspaceRoot);
+  await mkdir(dir, { recursive: true });
+
+  const hint = String(opts.suggestedTitle || "").trim();
+  let urlBaseName = "downloaded-book";
+  if (opts.sourceUrl) {
+    try {
+      const parsed = new URL(String(opts.sourceUrl));
+      urlBaseName = decodeEntities(
+        String(parsed.pathname.split("/").pop() || "downloaded-book"),
+      ).replace(/\.epub$/i, "");
+    } catch {
+      // ignore
+    }
+  }
+  const baseRaw = hint || urlBaseName || "downloaded-book";
+  const safeBase = bookIdFromFilename(`${baseRaw}.epub`).replace(/\.epub$/i, "");
+  const finalName = await findFreeFilename(dir, safeBase);
+  const finalPath = path.join(dir, finalName);
+  const tempPath = `${finalPath}.part`;
+  try {
+    await writeFile(tempPath, buffer);
+    await rename(tempPath, finalPath);
+  } catch (err) {
+    try {
+      await unlink(tempPath);
+    } catch {
+      // ignore
+    }
+    throw err;
+  }
+
+  let source = String(opts.source || "").trim() || "annas";
+  if (opts.sourceUrl) {
+    try {
+      const host = new URL(String(opts.sourceUrl)).hostname.toLowerCase();
+      if (host.includes("annas-archive")) source = "annas";
+      else if (host.includes("archive.org")) source = "openlibrary";
+    } catch {
+      // keep source
+    }
+  }
+
+  return {
+    filename: finalName,
+    path: finalPath,
+    size: buffer.length,
+    source,
+  };
+}
+
 async function fetchAnnaBookResponse(parsed, { fetchImpl, signal, cookieHeader, referer }) {
   return fetchImpl(parsed, {
     signal,
@@ -908,25 +993,16 @@ export async function downloadBookFromUrl(rawUrl, opts = {}) {
     throw err;
   }
 
-  // 校验 zip magic PK\x03\x04
   let handle;
   try {
     handle = await open(tempPath, "r");
     const buf = Buffer.alloc(4);
     const { bytesRead } = await handle.read(buf, 0, 4, 0);
-    if (
-      bytesRead < 4 ||
-      buf[0] !== 0x50 ||
-      buf[1] !== 0x4b ||
-      buf[2] !== 0x03 ||
-      buf[3] !== 0x04
-    ) {
+    if (bytesRead < 4) {
       await cleanup();
-      const e = new Error("下载内容不是合法的 epub (zip) 文件");
-      e.status = 415;
-      e.code = "not_epub";
-      throw e;
+      assertEpubZipMagic(null);
     }
+    assertEpubZipMagic(buf);
   } catch (err) {
     await cleanup();
     if (err?.status) throw err;

@@ -729,6 +729,46 @@ class WenxiangApi {
         .toList();
   }
 
+  /// Upload epub bytes captured on the phone (Anna anti-bot cookies stay on-device).
+  Future<BookDownloadResult> importBookEpub(
+    Uint8List bytes, {
+    String? title,
+    String? sourceUrl,
+    String source = 'annas',
+    void Function(BookDownloadProgress progress)? onProgress,
+  }) async {
+    onProgress?.call(
+      BookDownloadProgress(
+        phase: 'uploading',
+        bytesReceived: 0,
+        bytesTotal: bytes.length,
+      ),
+    );
+    final headers = Map<String, String>.from(_headers);
+    headers['Content-Type'] = 'application/octet-stream';
+    if (title != null && title.isNotEmpty) headers['X-Book-Title'] = title;
+    if (sourceUrl != null && sourceUrl.isNotEmpty) {
+      headers['X-Book-Source-Url'] = sourceUrl;
+    }
+    headers['X-Book-Source'] = source;
+    final res = await http
+        .post(
+          _uri('/v1/books/import'),
+          headers: headers,
+          body: bytes,
+        )
+        .timeout(const Duration(minutes: 25));
+    onProgress?.call(
+      BookDownloadProgress(
+        phase: 'uploading',
+        bytesReceived: bytes.length,
+        bytesTotal: bytes.length,
+      ),
+    );
+    final body = await _json(res, fallback: '上传电子书失败');
+    return BookDownloadResult.fromJson(Map<String, dynamic>.from(body));
+  }
+
   /// 把搜索结果里的 epub 下载到本机 books 目录。
   Future<BookDownloadResult> downloadBook({
     required String url,

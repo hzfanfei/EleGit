@@ -102,7 +102,7 @@ import {
   contentTypeForStatic,
 } from "./static-files.js";
 import { clearInbox, listInbox, markInboxRead } from "./inbox.js";
-import { downloadBookFromUrl, searchBooks } from "./books-search.js";
+import { downloadBookFromUrl, importEpubBuffer, searchBooks } from "./books-search.js";
 import { getBookDownloadJob, startBookDownloadJob } from "./book-download-jobs.js";
 import { beginHandoff, handoffActive, publishLiveTurnSnapshots } from "./live-turns.js";
 import { attachNotifications, publishInboxNotice } from "./notifications.js";
@@ -807,6 +807,32 @@ app.get("/v1/books/search", async (req, res) => {
     sendError(res, err);
   }
 });
+
+app.post(
+  "/v1/books/import",
+  express.raw({ type: () => true, limit: 210 * 1024 * 1024 }),
+  async (req, res) => {
+    try {
+      const body = req.body;
+      if (!Buffer.isBuffer(body) || body.length === 0) {
+        res.status(400).json({ error: "缺少 epub 文件内容" });
+        return;
+      }
+      const title = String(req.get("X-Book-Title") || req.query.title || "").trim();
+      const sourceUrl = String(req.get("X-Book-Source-Url") || req.query.sourceUrl || "").trim();
+      const source = String(req.get("X-Book-Source") || req.query.source || "annas").trim();
+      const result = await importEpubBuffer(body, {
+        workspaceRoot: store.config.workspaceRoot,
+        suggestedTitle: title,
+        sourceUrl: sourceUrl || undefined,
+        source,
+      });
+      res.json({ ok: true, status: "done", ...result });
+    } catch (err) {
+      sendError(res, err);
+    }
+  },
+);
 
 app.post("/v1/books/download", async (req, res) => {
   try {
