@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../api/wenxiang_api.dart';
 import '../models.dart';
 import '../theme.dart';
-import '../widgets/book_search_sheet.dart';
+import 'annas_browser_page.dart';
 import '../widgets/wx_chrome.dart';
 
 class BooksPage extends StatefulWidget {
@@ -58,19 +58,14 @@ class _BooksPageState extends State<BooksPage> {
     await widget.onRead(book, expandAsk: expandAsk);
   }
 
-  Future<void> _openSearch() async {
-    final outcome = await showModalBottomSheet<BookSearchOutcome>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      backgroundColor: Wx.bg,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+  Future<void> _openAnnasBrowser() async {
+    final outcome = await Navigator.of(context).push<AnnasBrowserOutcome>(
+      MaterialPageRoute(
+        builder: (_) => AnnasBrowserPage(api: widget.api),
       ),
-      builder: (ctx) => BookSearchSheet(api: widget.api),
     );
     if (!mounted) return;
-    if (outcome?.downloaded == true) {
+    if ((outcome?.savedCount ?? 0) > 0) {
       await _load();
     }
   }
@@ -89,7 +84,7 @@ class _BooksPageState extends State<BooksPage> {
             trailing: [
               IconButton(
                 tooltip: '安娜的档案',
-                onPressed: _openSearch,
+                onPressed: _openAnnasBrowser,
                 icon: const Icon(Icons.travel_explore_outlined, size: 20),
               ),
               IconButton(
