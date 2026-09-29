@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -7,7 +8,7 @@ import '../api/link_route.dart';
 import '../api/wenxiang_api.dart';
 import '../theme.dart';
 
-/// Game-style ping: route icon + signal bars + ms, probed via [WenxiangApi.probeHealth].
+/// LAN: wifi arcs only. Tunnel: cloud on top + short signal bars at bottom.
 class WxLinkQualityMark extends StatefulWidget {
   const WxLinkQualityMark({
     super.key,
@@ -110,90 +111,156 @@ class _WxLinkQualityMarkState extends State<WxLinkQualityMark> {
     return '$route · ${_rttMs}ms · $quality';
   }
 
-  String _msLabel() {
-    if (_tier == LinkQualityTier.offline) return '断连';
-    if (_tier == LinkQualityTier.unknown) return '--';
-    return '${_rttMs ?? '--'}ms';
-  }
-
   @override
   Widget build(BuildContext context) {
     final lan = isLanBaseUrl(widget.api.baseUrl);
-    final routeIcon = lan ? Icons.wifi : Icons.cloud_outlined;
     final routeKey = lan ? 'wx-link-lan' : 'wx-link-tunnel';
-    final color = _tierColor(_tier);
-    final filled = linkQualityFilledBars(_tier);
-    final msStyle = Theme.of(context).textTheme.labelSmall?.copyWith(
-          fontSize: widget.compact ? 11 : 12,
-          fontFeatures: const [FontFeature.tabularFigures()],
-          color: color,
-          height: 1.1,
-        );
+    final w = widget.compact ? 20.0 : 22.0;
+    final h = lan ? w : (widget.compact ? 22.0 : 24.0);
 
     return Tooltip(
       message: _tooltip(),
       child: Semantics(
         label: _tooltip().replaceAll('\n', ' '),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Icon(
-              routeIcon,
-              key: Key(routeKey),
-              size: widget.compact ? 14 : 16,
-              color: Wx.muted,
-            ),
-            const SizedBox(width: 4),
-            _PingBars(filled: filled, activeColor: color, height: widget.compact ? 11 : 13),
-            const SizedBox(width: 5),
-            Text(
-              _msLabel(),
-              key: const Key('wx-link-ping-ms'),
-              style: msStyle,
-            ),
-          ],
+        child: CustomPaint(
+          key: Key(routeKey),
+          size: Size(w, h),
+          painter: _LinkQualityGlyphPainter(
+            tunnel: !lan,
+            filledBars: linkQualityFilledBars(_tier),
+            activeColor: _tierColor(_tier),
+            idleColor: Wx.hairline,
+            routeColor: _tier == LinkQualityTier.offline
+                ? Wx.danger
+                : (_tier == LinkQualityTier.unknown ? Wx.faint : Wx.muted),
+            offline: _tier == LinkQualityTier.offline,
+          ),
         ),
       ),
     );
   }
 }
 
-class _PingBars extends StatelessWidget {
-  const _PingBars({
-    required this.filled,
+class _LinkQualityGlyphPainter extends CustomPainter {
+  _LinkQualityGlyphPainter({
+    required this.tunnel,
+    required this.filledBars,
     required this.activeColor,
-    required this.height,
+    required this.idleColor,
+    required this.routeColor,
+    required this.offline,
   });
 
-  final int filled;
+  final bool tunnel;
+  final int filledBars;
   final Color activeColor;
-  final double height;
+  final Color idleColor;
+  final Color routeColor;
+  final bool offline;
+
+  static const _arcCount = 4;
+  static const _start = -math.pi * 0.75;
+  static const _sweep = math.pi * 0.5;
 
   @override
-  Widget build(BuildContext context) {
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+    final stroke = w * 0.11;
+
+    if (tunnel) {
+      _paintCloud(canvas, w, h, stroke);
+      _paintShortBars(canvas, w, h);
+      if (offline) _paintSlash(canvas, w, h, stroke);
+      return;
+    }
+
+    final arcPaint = (Color c) => Paint()
+      ..color = c
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..strokeCap = StrokeCap.round;
+
+    final origin = Offset(w * 0.5, h * 0.88);
+    final maxR = w * 0.46;
+    for (var i = 0; i < _arcCount; i++) {
+      final t = (i + 1) / _arcCount;
+      final r = maxR * t;
+      final lit = !offline && i < filledBars;
+      final color = offline ? idleColor : (lit ? activeColor : idleColor);
+      canvas.drawArc(
+        Rect.fromCircle(center: origin, radius: r),
+        _start,
+        _sweep,
+        false,
+        arcPaint(color),
+      );
+    }
+    if (offline) _paintSlash(canvas, w, h, stroke);
+  }
+
+  void _paintCloud(Canvas canvas, double w, double h, double stroke) {
+    final fill = Paint()
+      ..color = routeColor.withValues(alpha: 0.2)
+      ..style = PaintingStyle.fill;
+    final outline = Paint()
+      ..color = routeColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke * 0.8
+      ..strokeJoin = StrokeJoin.round;
+
+    final top = h * 0.06;
+    final bottom = h * 0.58;
+    final path = Path()
+      ..moveTo(w * 0.2, bottom)
+      ..cubicTo(w * 0.06, bottom, w * 0.04, top + h * 0.18, w * 0.18, top + h * 0.12)
+      ..cubicTo(w * 0.16, top, w * 0.34, top - h * 0.02, w * 0.44, top + h * 0.1)
+      ..cubicTo(w * 0.52, top - h * 0.04, w * 0.72, top - h * 0.02, w * 0.78, top + h * 0.14)
+      ..cubicTo(w * 0.94, top + h * 0.12, w * 0.98, bottom - h * 0.06, w * 0.84, bottom)
+      ..close();
+    canvas.drawPath(path, fill);
+    canvas.drawPath(path, outline);
+  }
+
+  void _paintShortBars(Canvas canvas, double w, double h) {
     const count = 4;
     const gap = 2.0;
-    const barW = 3.0;
-    final heights = [0.35, 0.55, 0.75, 1.0];
-    return SizedBox(
-      height: height,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          for (var i = 0; i < count; i++) ...[
-            if (i > 0) const SizedBox(width: gap),
-            Container(
-              width: barW,
-              height: height * heights[i],
-              decoration: BoxDecoration(
-                color: i < filled ? activeColor : Wx.hairline,
-                borderRadius: BorderRadius.circular(1),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
+    final barW = w * 0.14;
+    final maxBarH = h * 0.22;
+    final baseY = h * 0.96;
+    final heights = [0.45, 0.65, 0.85, 1.0];
+    final totalW = count * barW + (count - 1) * gap;
+    var x = (w - totalW) / 2;
+
+    for (var i = 0; i < count; i++) {
+      final barH = maxBarH * heights[i];
+      final lit = !offline && i < filledBars;
+      final paint = Paint()
+        ..color = offline ? idleColor : (lit ? activeColor : idleColor);
+      final r = RRect.fromRectAndRadius(
+        Rect.fromLTWH(x, baseY - barH, barW, barH),
+        const Radius.circular(1),
+      );
+      canvas.drawRRect(r, paint);
+      x += barW + gap;
+    }
+  }
+
+  void _paintSlash(Canvas canvas, double w, double h, double stroke) {
+    final slash = Paint()
+      ..color = Wx.danger
+      ..strokeWidth = stroke
+      ..strokeCap = StrokeCap.round;
+    canvas.drawLine(Offset(w * 0.2, h * 0.15), Offset(w * 0.8, h * 0.85), slash);
+  }
+
+  @override
+  bool shouldRepaint(covariant _LinkQualityGlyphPainter old) {
+    return old.tunnel != tunnel ||
+        old.filledBars != filledBars ||
+        old.activeColor != activeColor ||
+        old.idleColor != idleColor ||
+        old.routeColor != routeColor ||
+        old.offline != offline;
   }
 }

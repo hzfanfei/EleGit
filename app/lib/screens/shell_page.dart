@@ -15,7 +15,6 @@ import '../theme.dart';
 import '../utils/background_sync.dart';
 import '../utils/notification_center.dart';
 import '../widgets/wx_chrome.dart';
-import '../widgets/wx_edge_back.dart';
 import '../widgets/wx_motion.dart';
 import 'book_reader_page.dart';
 import 'books_page.dart';
@@ -397,12 +396,8 @@ class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
         if (didPop) return;
         _handlePop();
       },
-      child: WxEdgeBack(
-        onBack: () {
-          _handlePop();
-        },
-        child: SizedBox.expand(
-          child: Navigator(
+      child: SizedBox.expand(
+        child: Navigator(
             pages: _pages(),
             onDidRemovePage: (page) {
               final name = page.name;
@@ -418,7 +413,6 @@ class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
             },
           ),
         ),
-      ),
     );
   }
 }

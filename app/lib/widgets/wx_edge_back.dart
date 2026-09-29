@@ -2,17 +2,21 @@ import 'package:flutter/material.dart';
 
 /// Left-edge swipe right or right-edge swipe left → [onBack].
 /// Taps still reach children. Does not pop the route by itself.
+///
+/// Disabled by default — use the header back button instead (avoids accidental exits).
 class WxEdgeBack extends StatefulWidget {
   const WxEdgeBack({
     super.key,
     required this.onBack,
     required this.child,
+    this.enabled = false,
     this.edgeWidth = 28,
     this.minDistance = 48,
   });
 
   final VoidCallback onBack;
   final Widget child;
+  final bool enabled;
   final double edgeWidth;
   final double minDistance;
 
@@ -48,6 +52,7 @@ class _WxEdgeBackState extends State<WxEdgeBack> {
 
   @override
   Widget build(BuildContext context) {
+    if (!widget.enabled) return widget.child;
     return Listener(
       behavior: HitTestBehavior.translucent,
       onPointerDown: (e) {
