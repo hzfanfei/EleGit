@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../copy/ask_engine.dart';
+import '../copy/errors.dart';
 import '../models.dart';
 import '../models/diagnostics.dart';
 import '../utils/async_gate.dart';
@@ -54,8 +55,17 @@ bool shouldRetryChatStreamBeforeText({
 }
 
 class ApiException implements Exception {
-  ApiException(this.message);
+  ApiException(this.message, {this.recordLog = true}) {
+    if (recordLog) {
+      final text = message.trim();
+      if (text.isNotEmpty && text != 'cancelled') {
+        recordClientError(this, kind: 'api', summary: explainError(this));
+      }
+    }
+  }
+
   final String message;
+  final bool recordLog;
 
   @override
   String toString() => message;
@@ -642,6 +652,7 @@ class WenxiangApi {
     final res = await http
         .delete(_uri('/v1/repos/$owner/$repo/sessions/$id'), headers: _headers)
         .timeout(const Duration(seconds: 15));
+    if (res.statusCode == 404) return;
     await _json(res, fallback: '关闭会话失败');
   }
 
@@ -706,6 +717,7 @@ class WenxiangApi {
     final res = await http
         .delete(_uri('/v1/books/$bookId/sessions/$id'), headers: _headers)
         .timeout(const Duration(seconds: 15));
+    if (res.statusCode == 404) return;
     await _json(res, fallback: '关闭书籍会话失败');
   }
 

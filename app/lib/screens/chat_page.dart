@@ -604,6 +604,11 @@ class _ChatPageState extends State<ChatPage> {
       }
       if (!mounted) return;
       setState(() {
+        final remoteIds = {for (final session in list) session.id};
+        _sessions.removeWhere((session) => !remoteIds.contains(session.id));
+        for (final id in _transcripts.keys.toList()) {
+          if (!remoteIds.contains(id)) _transcripts.remove(id);
+        }
         final known = {for (final session in _sessions) session.id: session};
         for (final session in list) {
           final prior = known[session.id];
@@ -616,6 +621,7 @@ class _ChatPageState extends State<ChatPage> {
             if (index >= 0) _sessions[index] = session;
           }
         }
+        _sessions.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
         final keep = _sessionId;
         final keepHasTurns = keep != null && (_transcripts[keep]?.isNotEmpty ?? false);
         if (!keepHasTurns && (keep == null || !_sessions.any((session) => session.id == keep))) {
@@ -623,6 +629,8 @@ class _ChatPageState extends State<ChatPage> {
             _sessionId = list.firstWhere((s) => s.active, orElse: () => list.first).id;
           } else if (_sessions.isNotEmpty) {
             _sessionId = _sessions.first.id;
+          } else {
+            _sessionId = null;
           }
         }
       });
@@ -1305,7 +1313,7 @@ class _ChatPageState extends State<ChatPage> {
                         Navigator.pop(context);
                         _switchSession(session);
                       },
-                      onClose: _busy
+                      onClose: _busy && session.id == _sessionId
                           ? null
                           : () async {
                               await _closeSession(session);

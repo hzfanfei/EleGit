@@ -16,6 +16,7 @@ import 'package:record/record.dart';
 
 
 
+import '../copy/errors.dart';
 import 'android_media_audio.dart';
 import 'background_work.dart';
 import 'voice_media.dart';
@@ -439,7 +440,13 @@ class DeviceVoiceMedia implements VoiceMedia {
       bytes = amplifyPcm16(bytes);
     }
 
-    if (epoch != _playbackEpoch) return;
+    if (epoch != _playbackEpoch) {
+      recordVoiceTrace(
+        '口播入队已取消',
+        detail: 'epoch=$epoch 当前=$_playbackEpoch telephony=$telephonyCapture',
+      );
+      return;
+    }
 
     _queue.add(
       _PlayJob(
@@ -448,6 +455,12 @@ class DeviceVoiceMedia implements VoiceMedia {
         segmentCaption: segmentCaption,
         onPlaybackStart: onPlaybackStart,
       ),
+    );
+    recordVoiceTrace(
+      '口播入队',
+      detail:
+          'bytes=${bytes.length} fmt=$outFormat rate=$sampleRate 队列=${_queue.length} '
+          'caption=${voiceLogClip(segmentCaption)} telephony=$telephonyCapture',
     );
 
     await _drain();
@@ -474,6 +487,10 @@ class DeviceVoiceMedia implements VoiceMedia {
       mergedJobs.add(_queue.removeAt(0));
     }
     if (mergedJobs.length == 1) return first;
+    recordVoiceTrace(
+      '口播合并段',
+      detail: 'parts=${mergedJobs.length} caption=${voiceLogClip(first.segmentCaption)}',
+    );
     final total = mergedJobs.fold<int>(0, (sum, j) => sum + j.bytes.length);
     final merged = Uint8List(total);
     var offset = 0;
@@ -500,6 +517,12 @@ class DeviceVoiceMedia implements VoiceMedia {
   }) async {
     if (epoch != _playbackEpoch) return;
     job.onPlaybackStart?.call();
+    recordVoiceTrace(
+      '口播段开始',
+      detail:
+          'bytes=${job.bytes.length} fmt=${job.format} rate=$_outRate leadingStop=$leadingStop '
+          'caption=${voiceLogClip(job.segmentCaption)}',
+    );
 
     final cancel = Completer<void>();
     _currentPlay = cancel;
@@ -508,12 +531,15 @@ class DeviceVoiceMedia implements VoiceMedia {
       if (!done.isCompleted) done.complete();
     });
 
+    File? tempAudio;
     try {
       if (epoch != _playbackEpoch) return;
       if (job.format == 'mp3') {
         if (job.bytes.isEmpty) return;
-        await _playSourceWithRetry(
+        tempAudio = await _playSourceWithRetry(
           BytesSource(job.bytes, mimeType: 'audio/mpeg'),
+          fileFallbackBytes: Platform.isAndroid ? job.bytes : null,
+          fileFallbackExtension: 'mp3',
           leadingStop: leadingStop,
           epoch: epoch,
         );
@@ -523,23 +549,38 @@ class DeviceVoiceMedia implements VoiceMedia {
         final wav = pcm16ToWav(pcm, sampleRate: _outRate);
         if (wav.isEmpty) return;
         if (epoch != _playbackEpoch) return;
-        await _playSourceWithRetry(
+        tempAudio = await _playSourceWithRetry(
           BytesSource(wav, mimeType: 'audio/wav'),
           fileFallbackBytes: Platform.isAndroid ? wav : null,
           leadingStop: leadingStop,
           epoch: epoch,
         );
       }
-      await Future.any([
-        done.future,
-        cancel.future,
-      ]).timeout(playbackCompleteBudget(
+      final budget = playbackCompleteBudget(
         byteLength: job.bytes.length,
         sampleRate: _outRate,
         format: job.format,
-      ));
+      );
+      await Future.any([
+        done.future,
+        cancel.future,
+      ]).timeout(budget);
+      if (!cancel.isCompleted) {
+        recordVoiceTrace(
+          '口播段播完',
+          detail:
+              'bytes=${job.bytes.length} fmt=${job.format} budgetMs=${budget.inMilliseconds} '
+              'caption=${voiceLogClip(job.segmentCaption)}',
+        );
+      }
     } on TimeoutException {
       if (cancel.isCompleted) return;
+      recordVoiceTrace(
+        '口播段超时截断',
+        detail:
+            'bytes=${job.bytes.length} fmt=${job.format} rate=$_outRate '
+            'caption=${voiceLogClip(job.segmentCaption)}',
+      );
       try {
         await _player.stop();
       } on PlatformException {
@@ -551,44 +592,74 @@ class DeviceVoiceMedia implements VoiceMedia {
     } finally {
       await completeSub.cancel();
       if (identical(_currentPlay, cancel)) _currentPlay = null;
+      final stale = tempAudio;
+      if (stale != null) {
+        unawaited(_deleteTempQuietly(stale));
+      }
     }
   }
 
-  /// Android MediaPlayer sometimes rejects back-to-back [BytesSource] after [stop].
-  Future<void> _playSourceWithRetry(
+  Future<void> _deleteTempQuietly(File file) async {
+    try {
+      await file.delete();
+    } on FileSystemException {
+      // temp cleanup best-effort
+    }
+  }
+
+  Future<File> _writeTempAudio(Uint8List bytes, String extension) async {
+    final dir = await getTemporaryDirectory();
+    final file = File(
+      '${dir.path}/wx_tts_${DateTime.now().microsecondsSinceEpoch}.$extension',
+    );
+    await file.writeAsBytes(bytes, flush: true);
+    return file;
+  }
+
+  /// Android MediaPlayer often rejects in-memory [BytesSource] after [stop].
+  /// Returns a temp file when playback used one (delete after the segment finishes).
+  Future<File?> _playSourceWithRetry(
     Source source, {
     Uint8List? fileFallbackBytes,
+    String fileFallbackExtension = 'wav',
     required bool leadingStop,
     required int epoch,
   }) async {
     Object? lastError;
-    for (var attempt = 0; attempt < 3; attempt++) {
-      if (epoch != _playbackEpoch) return;
+    for (var attempt = 0; attempt < 4; attempt++) {
+      if (epoch != _playbackEpoch) return null;
+      File? tempFile;
       try {
         if (leadingStop || attempt > 0) {
           await _player.stop();
           if (Platform.isAndroid) {
-            await Future<void>.delayed(Duration(milliseconds: 40 * (attempt + 1)));
+            await Future<void>.delayed(Duration(milliseconds: 50 * (attempt + 1)));
           }
         }
         await _player.setVolume(1);
         await _player.setPlayerMode(PlayerMode.mediaPlayer);
         Source active = source;
-        if (attempt > 0 && fileFallbackBytes != null && fileFallbackBytes.isNotEmpty) {
-          final dir = await getTemporaryDirectory();
-          final file = File(
-            '${dir.path}/wx_tts_${DateTime.now().microsecondsSinceEpoch}.wav',
-          );
-          await file.writeAsBytes(fileFallbackBytes, flush: true);
-          active = DeviceFileSource(file.path);
+        final fallback = fileFallbackBytes;
+        if (fallback != null && fallback.isNotEmpty) {
+          final useFile = Platform.isAndroid || attempt > 0;
+          if (useFile) {
+            tempFile = await _writeTempAudio(fallback, fileFallbackExtension);
+            active = DeviceFileSource(tempFile.path);
+          }
         }
-        if (epoch != _playbackEpoch) return;
+        if (epoch != _playbackEpoch) return null;
         await _player.play(active);
-        return;
+        return tempFile;
       } on PlatformException catch (err) {
         lastError = err;
+        if (tempFile != null) {
+          unawaited(_deleteTempQuietly(tempFile));
+        }
       } catch (err) {
         lastError = err;
+        if (tempFile != null) {
+          unawaited(_deleteTempQuietly(tempFile));
+        }
       }
     }
     if (lastError != null) throw lastError!;
@@ -615,7 +686,12 @@ class DeviceVoiceMedia implements VoiceMedia {
 
       var leadingStop = true;
       while (_queue.isNotEmpty && epoch == _playbackEpoch) {
-        await _playJob(_takeNextJob(), leadingStop: leadingStop, epoch: epoch);
+        try {
+          await _playJob(_takeNextJob(), leadingStop: leadingStop, epoch: epoch);
+        } catch (err) {
+          if (epoch != _playbackEpoch) break;
+          recordClientFault('口播播放失败', cause: err, kind: 'voice');
+        }
         leadingStop = false;
       }
 
@@ -650,6 +726,15 @@ class DeviceVoiceMedia implements VoiceMedia {
   @override
 
   Future<void> stopPlayback() async {
+
+    final queued = _queue.length;
+    final epoch = _playbackEpoch + 1;
+    recordVoiceTrace(
+      '口播停止',
+      detail:
+          'epoch→$epoch 清队列=$queued pending=$_pendingPlayCalls playing=$_playing '
+          'telephony=$telephonyCapture',
+    );
 
     _playbackEpoch += 1;
 

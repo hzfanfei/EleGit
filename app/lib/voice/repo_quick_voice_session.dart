@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../api/wenxiang_api.dart';
+import '../copy/errors.dart';
 import '../copy/voice_stt_copy.dart';
 import '../models.dart';
 import 'book_quick_voice_session.dart';
@@ -74,6 +75,8 @@ class RepoQuickVoiceSession implements QuickVoiceFabHost {
   String _voiceCodec = 'raw';
   String _segmentCaption = '';
   String _voiceCaption = '';
+  int _turnAudioChunks = 0;
+  int _turnAudioBytes = 0;
 
   @override
   HoldToSpeakSession get hold => _hold;
@@ -207,6 +210,12 @@ class RepoQuickVoiceSession implements QuickVoiceFabHost {
   @override
   Future<void> cancelActiveFlow() async {
     if (_disposed) return;
+    recordVoiceTrace(
+      '快问快答取消口播',
+      detail:
+          'repo=$owner/$repo phase=$phase chunks=$_turnAudioChunks bytes=$_turnAudioBytes '
+          'caption=${voiceLogClip(_voiceCaption)}',
+    );
     _replyActive = false;
     api.cancelRepoVoiceTurn();
     _resetVoiceFormat();
@@ -230,6 +239,8 @@ class RepoQuickVoiceSession implements QuickVoiceFabHost {
     }
     _replyActive = true;
     _clearCaption();
+    _turnAudioChunks = 0;
+    _turnAudioBytes = 0;
     phase = BookQuickVoicePhase.thinking;
     _thinkStatusLabel = '思考中…';
     onChanged();
@@ -273,6 +284,14 @@ class RepoQuickVoiceSession implements QuickVoiceFabHost {
             event.pcm != null &&
             event.pcm!.isNotEmpty) {
           final captionAtEnqueue = _segmentCaption;
+          _turnAudioChunks += 1;
+          _turnAudioBytes += event.pcm!.length;
+          recordVoiceTrace(
+            '快问快答下行音频',
+            detail:
+                'repo=$owner/$repo bytes=${event.pcm!.length} rate=${event.sampleRate ?? _voiceRate} '
+                'chunks=$_turnAudioChunks caption=${voiceLogClip(captionAtEnqueue)}',
+          );
           _voiceRate = event.sampleRate ?? _voiceRate;
           _voiceFormat = event.audioFormat ?? _voiceFormat;
           _voiceCodec = event.codec ?? _voiceCodec;
@@ -292,6 +311,12 @@ class RepoQuickVoiceSession implements QuickVoiceFabHost {
           );
         } else if (event.type == 'done') {
           final answer = event.text.trim();
+          recordVoiceTrace(
+            '快问快答服务端回合结束',
+            detail:
+                'repo=$owner/$repo chunks=$_turnAudioChunks bytes=$_turnAudioBytes '
+                'answerLen=${answer.length} engine=${event.engine ?? ''}',
+          );
           _sessionId = event.sessionId ?? _sessionId;
           onSessionId?.call(_sessionId);
           if (answer.isNotEmpty) {
@@ -303,14 +328,15 @@ class RepoQuickVoiceSession implements QuickVoiceFabHost {
             );
           }
         } else if (event.type == 'error') {
-          onError?.call(
-            humanizeSttEvent(code: event.code, hint: event.hint ?? event.error),
-          );
+          final msg = humanizeSttEvent(code: event.code, hint: event.hint ?? event.error);
+          recordClientFault(msg, cause: event.detail ?? event.error, kind: 'voice');
+          onError?.call(msg);
         }
       }
     } on OperationCancelled {
       // user interrupted
     } catch (err) {
+      recordClientError(err, kind: 'voice');
       onError?.call(err.toString());
     } finally {
       if (_replyActive && !_disposed) {
@@ -318,8 +344,15 @@ class RepoQuickVoiceSession implements QuickVoiceFabHost {
         onChanged();
         try {
           await _media?.waitForPlaybackQueue();
+          recordVoiceTrace(
+            '快问快答本机口播队列播完',
+            detail: 'repo=$owner/$repo chunks=$_turnAudioChunks bytes=$_turnAudioBytes',
+          );
         } catch (err) {
-          if (!_disposed) onError?.call('播放失败：$err');
+          if (!_disposed) {
+            recordClientFault('播放失败', cause: err, kind: 'voice');
+            onError?.call('播放失败：$err');
+          }
         }
       }
       _replyActive = false;

@@ -62,6 +62,56 @@ class ClientErrorLog {
     });
   }
 
+  /// Newest first, for the in-app log center.
+  Future<List<Map<String, dynamic>>> listNewest(int limit) {
+    return _enqueue(() async {
+      await _load();
+      final take = limit < 0 ? 0 : limit;
+      final slice = _entries.length <= take ? _entries : _entries.sublist(_entries.length - take);
+      return [
+        for (final entry in slice.reversed) Map<String, dynamic>.from(entry),
+      ];
+    });
+  }
+
+  /// Entries not yet acknowledged by the server upload.
+  Future<List<Map<String, dynamic>>> peekPending(int limit) {
+    return _enqueue(() async {
+      await _load();
+      final pending = <Map<String, dynamic>>[];
+      for (final entry in _entries) {
+        if (entry['synced'] == true) continue;
+        pending.add(Map<String, dynamic>.from(entry));
+        if (pending.length >= limit) break;
+      }
+      return pending;
+    });
+  }
+
+  Future<void> markSynced(Iterable<String> ids) {
+    return _enqueue(() async {
+      await _load();
+      final remove = ids.toSet();
+      var touched = false;
+      for (final entry in _entries) {
+        if (remove.contains(entry['id'])) {
+          entry['synced'] = true;
+          touched = true;
+        }
+      }
+      if (touched) await _save();
+    });
+  }
+
+  Future<void> clear() {
+    return _enqueue(() async {
+      await _load();
+      _entries.clear();
+      _seen.clear();
+      await _save();
+    });
+  }
+
   Future<void> drop(Iterable<String> ids) {
     return _enqueue(() async {
       await _load();
@@ -171,4 +221,40 @@ String redactSecrets(String text) {
 String _clip(String value, int max) {
   if (value.length <= max) return value;
   return value.substring(0, max);
+}
+
+String clientLogKindLabel(String? kind) {
+  switch (kind) {
+    case 'flutter':
+      return 'Flutter';
+    case 'platform':
+      return '平台';
+    case 'shown':
+      return '界面';
+    case 'api':
+      return 'API';
+    case 'voice':
+      return '语音';
+    default:
+      return kind == null || kind.isEmpty ? '其他' : kind;
+  }
+}
+
+String formatClientLogEntry(Map<String, dynamic> entry) {
+  final at = entry['at']?.toString() ?? '';
+  final kind = clientLogKindLabel(entry['kind']?.toString());
+  final summary = entry['summary']?.toString().trim() ?? '';
+  final message = entry['message']?.toString().trim() ?? '';
+  final stack = entry['stack']?.toString().trim() ?? '';
+  final buf = StringBuffer()
+    ..writeln('[$at] $kind');
+  if (summary.isNotEmpty) buf.writeln('摘要：$summary');
+  if (message.isNotEmpty) buf.writeln('详情：$message');
+  if (stack.isNotEmpty) buf.writeln('堆栈：$stack');
+  return buf.toString().trimRight();
+}
+
+String formatClientLogExport(Iterable<Map<String, dynamic>> entries) {
+  final blocks = [for (final entry in entries) formatClientLogEntry(entry)];
+  return blocks.join('\n\n---\n\n');
 }

@@ -223,6 +223,7 @@ export async function runVoiceTurn({
   ttsStream,
   signal,
   onDelta,
+  onActivity,
   onCaption,
   onAudio,
   onDone,
@@ -332,6 +333,9 @@ export async function runVoiceTurn({
   for await (const event of ask(question, signal)) {
     if (signal?.aborted) break;
     if (event.type === "start" && event.engine) engine = event.engine;
+    if (event.type === "status" && event.phase === "activity") {
+      onActivity?.(event.detail ?? "");
+    }
     if (event.type === "delta" && event.text) {
       full += event.text;
       pending += event.text;

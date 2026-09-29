@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api/wenxiang_api.dart';
 import '../copy/ask_engine.dart';
+import '../copy/errors.dart';
 import '../copy/cursor_model.dart';
 import '../models/diagnostics.dart';
 import '../persist/app_memory.dart';
@@ -19,6 +20,7 @@ import '../voice/xiaomi_tts_voices.dart';
 import '../widgets/wx_chrome.dart';
 import '../widgets/wx_edge_back.dart';
 import '../widgets/wx_link_route.dart';
+import 'log_center_page.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key, this.api, this.memory, this.onBack});
@@ -265,7 +267,7 @@ class _SettingsPageState extends State<SettingsPage> {
       setState(() => _probeResult = result);
     } catch (err) {
       if (!mounted) return;
-      setState(() => _probeError = err.toString());
+      setState(() => _probeError = humanizeError(err));
     } finally {
       if (mounted) setState(() => _probing = false);
     }
@@ -653,6 +655,36 @@ class _SettingsPageState extends State<SettingsPage> {
                       ),
                     );
                   },
+                ),
+                const SizedBox(height: 28),
+                Text('日志中心', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 6),
+                Text(
+                  '查看并复制 API、语音、界面报错与异常记录（含服务端第三方调用失败信息）。',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.muted),
+                ),
+                const SizedBox(height: 12),
+                Material(
+                  color: Wx.surface,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(Wx.radius),
+                    side: const BorderSide(color: Wx.hairline),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: ListTile(
+                    key: const Key('settings-log-center'),
+                    title: const Text('打开日志中心'),
+                    subtitle: Text(
+                      '点击条目或「复制全部」可复制日志',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.muted),
+                    ),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute<void>(builder: (_) => const LogCenterPage()),
+                      );
+                    },
+                  ),
                 ),
                 const SizedBox(height: 28),
                 Text('关于', style: Theme.of(context).textTheme.titleMedium),

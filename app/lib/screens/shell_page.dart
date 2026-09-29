@@ -100,14 +100,14 @@ class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
     _uploadingClientErrors = true;
     try {
       for (var round = 0; round < 5; round += 1) {
-        final batch = await ClientErrorLog.instance.peek(40);
+        final batch = await ClientErrorLog.instance.peekPending(40);
         if (batch.isEmpty) return;
         final accepted = await _api.uploadClientLogs(
           batch,
           platform: Platform.operatingSystem,
         );
         if (accepted.isEmpty) return;
-        await ClientErrorLog.instance.drop(accepted);
+        await ClientErrorLog.instance.markSynced(accepted);
         final sent = batch.map((entry) => entry['id']?.toString()).toSet();
         if (!sent.every(accepted.toSet().contains)) return;
       }
