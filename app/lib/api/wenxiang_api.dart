@@ -802,10 +802,9 @@ class WenxiangApi {
     String jobId, {
     void Function(BookDownloadProgress progress)? onProgress,
   }) async {
-    const pollEvery = Duration(seconds: 2);
+    const pollEvery = Duration(milliseconds: 800);
     final deadline = DateTime.now().add(const Duration(minutes: 22));
     while (DateTime.now().isBefore(deadline)) {
-      await Future<void>.delayed(pollEvery);
       final res = await http
           .get(_uri('/v1/books/download/jobs/$jobId'), headers: _headers)
           .timeout(const Duration(seconds: 20));
@@ -831,6 +830,7 @@ class WenxiangApi {
         }
         throw ApiException(msg);
       }
+      await Future<void>.delayed(pollEvery);
     }
     throw ApiException('下载超时：文件较大或镜像较慢，请返回问书库查看是否已入库');
   }

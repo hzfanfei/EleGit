@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -11,7 +10,6 @@ import '../theme.dart';
 import '../copy/errors.dart';
 import '../utils/anna_cookie.dart';
 import '../utils/anna_device_download.dart';
-import '../utils/anna_webview_download.dart';
 import '../utils/book_download_capture.dart';
 import '../widgets/wx_chrome.dart';
 
@@ -20,7 +18,7 @@ class AnnasBrowserOutcome {
   final int savedCount;
 }
 
-/// 内置浏览器打开安娜的档案；监听剪切板中的下载链，由本机拉取后写入问书库。
+/// 内置浏览器打开安娜的档案；剪切板中的 .epub 链交给问象服务端下载并写入问书目录。
 class AnnasBrowserPage extends StatefulWidget {
   const AnnasBrowserPage({
     super.key,
@@ -45,12 +43,9 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
   String? _capturingLabel;
   BookDownloadProgress? _captureProgress;
   final Set<String> _inFlightUrls = {};
-  final Set<String> _inFlightMd5 = {};
   String _currentUrl = '';
   String? _activeDownloadUrl;
   final WebViewCookieManager _cookieManager = WebViewCookieManager();
-  Completer<void>? _pageLoadCompleter;
-  String? _pageLoadTarget;
   Timer? _clipboardTimer;
   String? _lastSeenClipboard;
   String? _ignoreClipboardUntil;
@@ -82,7 +77,6 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
               _pageLoading = false;
               _currentUrl = url;
             });
-            _completePageLoadWait(url);
           },
           onUrlChange: (change) {
             final url = change.url;
@@ -134,34 +128,12 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('已检测到下载链接，开始入库…'),
+          content: Text('已检测到 .epub 链接，问象开始下载…'),
           duration: Duration(milliseconds: 1600),
         ),
       );
-      await _captureAndDownload(uri);
+      await _requestServerDownload(uri);
     } catch (_) {}
-  }
-
-  void _completePageLoadWait(String url) {
-    final target = _pageLoadTarget;
-    final pending = _pageLoadCompleter;
-    if (target == null || pending == null || pending.isCompleted) return;
-    if (url.startsWith(target) || url.contains('/md5/')) {
-      pending.complete();
-    }
-  }
-
-  Future<void> _waitForWebViewPage(Uri target) async {
-    _pageLoadTarget = target.toString();
-    _pageLoadCompleter = Completer<void>();
-    try {
-      await _pageLoadCompleter!.future.timeout(const Duration(seconds: 45));
-    } on TimeoutException {
-      // continue with best-effort cookies
-    } finally {
-      _pageLoadTarget = null;
-      _pageLoadCompleter = null;
-    }
   }
 
   Future<String?> _cookieHeaderFor(Uri downloadUri) async {
@@ -206,149 +178,65 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
     );
   }
 
-  Future<void> _captureAndDownload(
-    Uri uri, {
-    bool preferWebViewFirst = false,
-  }) async {
+  Future<void> _requestServerDownload(Uri uri) async {
     final url = bookDownloadUrlForServer(uri);
     if (_inFlightUrls.contains(url)) return;
-    final md5 = annaMd5FromDownloadUrl(uri);
-    if (md5 != null && _inFlightMd5.contains(md5)) return;
     _inFlightUrls.add(url);
-    if (md5 != null) _inFlightMd5.add(md5);
     final title = suggestedTitleFromDownloadUrl(uri);
     final cookieHeader = await _cookieHeaderFor(uri);
-    final referer = _currentUrl.trim().isNotEmpty ? _currentUrl.trim() : null;
+    var referer = _currentUrl.trim();
+    try {
+      final cur = await _controller.currentUrl();
+      if (cur != null && cur.isNotEmpty) referer = cur;
+    } catch (_) {}
+    if (referer.isEmpty) referer = uri.origin;
+
     recordBookDownloadDiag(
-      '安娜本机下载开始',
+      '问象服务端下载开始',
       summary:
-          'url=$url · referer=${referer ?? "-"} · cookies=${cookieNamesForLog(cookieHeader)}',
+          'url=$url · referer=$referer · cookies=${cookieNamesForLog(cookieHeader)}',
     );
     if (mounted) {
       setState(() {
         _capturingLabel = title ?? '电子书';
-        _captureProgress = null;
+        _captureProgress = BookDownloadProgress(
+          phase: 'queued',
+          bytesReceived: 0,
+          bytesTotal: null,
+        );
         _activeDownloadUrl = url;
       });
     }
     try {
-      Uint8List bytes;
-      if (preferWebViewFirst) {
-        try {
-          bytes = await downloadAnnaEpubViaWebView(
-            controller: _controller,
-            downloadUri: uri,
-            onProgress: (p) {
-              if (!mounted) return;
-              setState(() => _captureProgress = p);
-            },
-          );
-        } catch (wvErr) {
-          recordBookDownloadDiag(
-            'WebView 直载失败，改 HTTP',
-            summary: 'url=$url · err=$wvErr',
-          );
-          bytes = await downloadAnnaEpubOnDevice(
-            downloadUri: uri,
-            userAgent: annaMobileChromeUa,
-            cookieHeader: cookieHeader,
-            referer: referer ?? uri.toString(),
-            onProgress: (p) {
-              if (!mounted) return;
-              setState(() => _captureProgress = p);
-            },
-          );
-        }
-      } else
-      try {
-        bytes = await downloadAnnaEpubOnDevice(
-          downloadUri: uri,
-          userAgent: annaMobileChromeUa,
-          cookieHeader: cookieHeader,
-          referer: referer,
-          onProgress: (p) {
-            if (!mounted) return;
-            setState(() => _captureProgress = p);
-          },
-        );
-      } on AnnaHttpDownloadException catch (httpErr) {
-        if (httpErr.statusCode != 403) rethrow;
-        recordBookDownloadDiag(
-          'HTTP 403，WebView 预热 md5 后重试',
-          summary:
-              'url=$url · referer=${httpErr.referer} · cookies=${cookieNamesForLog(httpErr.cookieHeader)} · snippet=${httpErr.bodySnippet.isEmpty ? "-" : httpErr.bodySnippet}',
-        );
-        await warmAnnaMd5PageInWebView(
-          controller: _controller,
-          downloadUri: uri,
-          waitForPage: _waitForWebViewPage,
-        );
-        final warmedCookies = await _cookieHeaderFor(uri);
-        recordBookDownloadDiag(
-          'WebView 预热完成',
-          summary:
-              'url=$url · cookies=${cookieNamesForLog(warmedCookies)}',
-        );
-        try {
-          bytes = await downloadAnnaEpubOnDevice(
-            downloadUri: uri,
-            userAgent: annaMobileChromeUa,
-            cookieHeader: warmedCookies ?? httpErr.cookieHeader,
-            referer: httpErr.referer,
-            onProgress: (p) {
-              if (!mounted) return;
-              setState(() => _captureProgress = p);
-            },
-          );
-        } on AnnaHttpDownloadException catch (retryErr) {
-          if (retryErr.statusCode != 403) rethrow;
-          recordBookDownloadDiag(
-            'HTTP 仍 403，改 WebView 直载',
-            summary:
-                'url=$url · cookies=${cookieNamesForLog(retryErr.cookieHeader)} · snippet=${retryErr.bodySnippet.isEmpty ? "-" : retryErr.bodySnippet}',
-          );
-          bytes = await downloadAnnaEpubViaWebView(
-            controller: _controller,
-            downloadUri: uri,
-            onProgress: (p) {
-              if (!mounted) return;
-              setState(() => _captureProgress = p);
-            },
-          );
-        }
-      }
-      recordBookDownloadDiag(
-        '安娜上传问象',
-        summary: 'url=$url · bytes=${bytes.length}',
-      );
-      await widget.api.importBookEpub(
-        bytes,
+      final result = await widget.api.downloadBook(
+        url: url,
         title: title,
-        sourceUrl: url,
+        cookieHeader: cookieHeader,
+        referer: referer,
         onProgress: (p) {
           if (!mounted) return;
           setState(() => _captureProgress = p);
         },
       );
+      recordBookDownloadDiag(
+        '问象已写入问书目录',
+        summary: 'file=${result.filename} · path=${result.path} · bytes=${result.size}',
+      );
       if (!mounted) return;
       setState(() => _savedCount += 1);
+      final label = title != null && title.isNotEmpty ? title! : result.filename;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            title != null && title.isNotEmpty ? '已保存《$title》到问书库' : '已保存到问书库',
-          ),
-        ),
+        SnackBar(content: Text('已保存《$label》到问书库')),
       );
     } catch (err) {
       if (!mounted) return;
       recordBookDownloadDiag(
-        '安娜入库失败：${err.toString()}',
-        summary: 'url=$url · referer=${referer ?? "-"} · cookies=${cookieNamesForLog(cookieHeader)}',
+        '问象下载入库失败：${err.toString()}',
+        summary: 'url=$url · referer=$referer · cookies=${cookieNamesForLog(cookieHeader)}',
       );
       showWxFailureSnackBar(context, err, prefix: '保存失败：');
     } finally {
       _inFlightUrls.remove(url);
-      if (md5 != null) _inFlightMd5.remove(md5);
       if (mounted) {
         setState(() {
           _capturingLabel = null;
@@ -367,22 +255,24 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
   String _captureStatusLine() {
     final label = _capturingLabel ?? '电子书';
     final p = _captureProgress;
-    if (p == null) return '正在保存「$label」…';
+    if (p == null) return '正在下载「$label」…';
+    if (p.phase == 'queued') return '已提交问象，排队下载…';
     if (p.phase == 'resolving') return '正在准备下载…';
-    if (p.phase == 'uploading') return '正在上传到问书库…';
+    if (p.phase == 'uploading') return '正在写入问书库…';
     final received = p.bytesReceived;
     final total = p.bytesTotal;
     if (total != null && total > 0) {
       final pct = (received / total * 100).clamp(0, 100).toStringAsFixed(0);
-      return '正在保存「$label」 $pct%（${_formatBytes(received)} / ${_formatBytes(total)}）';
+      return '正在下载「$label」 $pct%（${_formatBytes(received)} / ${_formatBytes(total)}）';
     }
-    if (received > 0) return '正在保存「$label」… 已下载 ${_formatBytes(received)}';
-    return '正在保存「$label」…';
+    if (received > 0) return '正在下载「$label」… 已接收 ${_formatBytes(received)}';
+    return '正在下载「$label」…';
   }
 
   double? _captureProgressValue() {
     final p = _captureProgress;
     if (p == null) return null;
+    if (p.phase == 'queued' || p.phase == 'resolving') return null;
     final total = p.bytesTotal;
     if (total == null || total <= 0) return null;
     return (p.bytesReceived / total).clamp(0.0, 1.0);
@@ -407,7 +297,7 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
             WxPageHeader(
               showMark: false,
               title: '安娜的档案',
-              subtitle: _savedCount > 0 ? '已保存 $_savedCount 本' : '复制下载链即可入库',
+              subtitle: _savedCount > 0 ? '已保存 $_savedCount 本' : '复制 .epub 链即可入库',
               onBack: _close,
               backTooltip: '返回',
               trailing: [
@@ -496,7 +386,7 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
             Padding(
               padding: const EdgeInsets.fromLTRB(Wx.inset, 8, Wx.inset, 12),
               child: Text(
-                '网页内正常浏览、点下载；复制以 .epub 结尾的文件链接到剪切板，问象会自动检测并写入问书库（约每 0.45 秒检查一次）。',
+                '网页内正常浏览；复制以 .epub 结尾的链接到剪切板，问象在本机服务端下载并写入问书目录（约每 0.45 秒检测，进度见上方）。',
                 style: theme.textTheme.bodySmall?.copyWith(color: Wx.faint),
               ),
             ),
