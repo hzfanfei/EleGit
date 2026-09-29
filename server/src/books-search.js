@@ -391,7 +391,7 @@ async function fetchJiumoHubs(query, opts) {
  * 鸠摩搜索 (jiumodiary.com)。站点需微信公众号验证码 Cookie（dyh1_wx6_code），
  * 可通过环境变量 WENXIANG_JIUMO_COOKIE 配置；未配置时静默跳过该源。
  */
-const DEFAULT_ANNAS_HOSTS = ["annas-archive.org", "annas-archive.se", "annas-archive.gl"];
+const DEFAULT_ANNAS_HOSTS = ["annas-archive.gl", "annas-archive.pk", "annas-archive.gd"];
 const DEFAULT_LIBGEN_HOST = "libgen.li";
 const LIBGEN_GET_KEY_RE = /get\.php\?md5=([0-9a-f]{32})&key=([A-Z0-9]+)/i;
 
@@ -438,7 +438,7 @@ function parseAnnasMetaLine(line) {
  * Parse Anna's Archive search HTML (ext=epub results). Pure function for tests.
  */
 export function parseAnnasSearchHtml(html, opts = {}) {
-  const origin = String(opts.origin || "https://annas-archive.org").replace(/\/$/, "");
+  const origin = String(opts.origin || "https://annas-archive.gl").replace(/\/$/, "");
   const libgenHost = libgenHostFromEnv();
   const limit = Math.max(1, Math.min(20, opts.limit || DEFAULT_LIMIT));
   const chunks = String(html || "").split(

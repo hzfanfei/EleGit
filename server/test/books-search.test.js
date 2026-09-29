@@ -225,7 +225,7 @@ describe("books-search", () => {
   describe("parseAnnasSearchHtml", () => {
     it("keeps epub rows with libgen ads downloadUrl, skips pdf", () => {
       const results = parseAnnasSearchHtml(annasFixture, {
-        origin: "https://annas-archive.org",
+        origin: "https://annas-archive.gl",
         limit: 10,
       });
       assert.equal(results.length, 2);
@@ -241,7 +241,7 @@ describe("books-search", () => {
       );
       assert.equal(
         results[0].detailUrl,
-        "https://annas-archive.org/md5/f87448722f0072549206b63999ec39e1",
+        "https://annas-archive.gl/md5/f87448722f0072549206b63999ec39e1",
       );
       assert.equal(results[1].title, "Intermediate Python");
     });

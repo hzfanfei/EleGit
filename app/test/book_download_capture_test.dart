@@ -25,10 +25,10 @@ void main() {
   });
 
   test('annas search url builder', () {
-    expect(annasArchiveStartUrl(), 'https://annas-archive.org');
+    expect(annasArchiveStartUrl(), 'https://annas-archive.gl');
     expect(
       annasArchiveStartUrl(query: '三体'),
-      'https://annas-archive.org/search?q=%E4%B8%89%E4%BD%93&ext=epub',
+      'https://annas-archive.gl/search?q=%E4%B8%89%E4%BD%93&ext=epub',
     );
   });
 }

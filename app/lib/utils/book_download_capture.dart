@@ -40,7 +40,7 @@ bool shouldCaptureBookDownloadUrl(Uri uri, {String? mimeType}) {
 }
 
 String annasArchiveStartUrl({String? query}) {
-  const base = 'https://annas-archive.org';
+  const base = 'https://annas-archive.gl';
   final q = query?.trim() ?? '';
   if (q.isEmpty) return base;
   return '$base/search?q=${Uri.encodeComponent(q)}&ext=epub';
