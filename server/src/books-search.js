@@ -615,7 +615,7 @@ export async function searchJiumo(query, opts = {}) {
 export async function searchBooks(query, opts = {}) {
   const sources = Array.isArray(opts.sources) && opts.sources.length
     ? opts.sources
-    : ["openlibrary", "annas", "jiumo"];
+    : ["annas"];
   const limit = Math.max(1, Math.min(20, opts.limit || DEFAULT_LIMIT));
   const signal = ensureSignal(opts.signal);
   const fetchImpl = opts.fetchImpl || globalThis.fetch;

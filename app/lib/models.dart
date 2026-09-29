@@ -494,9 +494,9 @@ class BookSearchResult {
     this.detailUrl,
   });
 
-  /// `openlibrary` / `annas` / `jiumo` — 标识搜索源
+  /// 搜书源标识（当前产品仅用 `annas` / 内置浏览器）
   final String source;
-  /// 给用户看的来源名称（如 "Open Library" / "安娜的档案" / "鸠摩搜索"）
+  /// 给用户看的来源名称（如「安娜的档案」）
   final String sourceLabel;
   final String title;
   final String author;
