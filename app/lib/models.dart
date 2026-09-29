@@ -481,6 +481,73 @@ class BookItem {
   }
 }
 
+class BookSearchResult {
+  BookSearchResult({
+    required this.source,
+    required this.sourceLabel,
+    required this.title,
+    required this.author,
+    required this.year,
+    required this.format,
+    required this.downloadUrl,
+    this.size = '',
+    this.detailUrl,
+  });
+
+  /// `openlibrary` / `jiumo` — 标识搜索源
+  final String source;
+  /// 给用户看的来源名称（"Open Library" / "鸠摩搜索"）
+  final String sourceLabel;
+  final String title;
+  final String author;
+  final String year;
+  /// 固定为 "epub"
+  final String format;
+  final String size;
+  /// 后端下载端点所需的 URL
+  final String downloadUrl;
+  /// 详情页链接（可选，给"在浏览器查看"用）
+  final String? detailUrl;
+
+  factory BookSearchResult.fromJson(Map<String, dynamic> json) {
+    final rawDetail = (json['detailUrl'] as String?)?.trim() ?? '';
+    return BookSearchResult(
+      source: (json['source'] ?? '').toString(),
+      sourceLabel: (json['sourceLabel'] ?? '').toString(),
+      title: (json['title'] ?? '').toString(),
+      author: (json['author'] ?? '').toString(),
+      year: (json['year'] ?? '').toString(),
+      format: (json['format'] ?? '').toString(),
+      size: (json['size'] ?? '').toString(),
+      downloadUrl: (json['downloadUrl'] ?? '').toString(),
+      detailUrl: rawDetail.isEmpty ? null : rawDetail,
+    );
+  }
+}
+
+class BookDownloadResult {
+  BookDownloadResult({
+    required this.filename,
+    required this.path,
+    required this.size,
+    required this.source,
+  });
+
+  final String filename;
+  final String path;
+  final int size;
+  final String source;
+
+  factory BookDownloadResult.fromJson(Map<String, dynamic> json) {
+    return BookDownloadResult(
+      filename: (json['filename'] ?? '').toString(),
+      path: (json['path'] ?? '').toString(),
+      size: (json['size'] as num?)?.toInt() ?? 0,
+      source: (json['source'] ?? '').toString(),
+    );
+  }
+}
+
 class CheckoutSyncStatus {
   CheckoutSyncStatus({
     required this.present,

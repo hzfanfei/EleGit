@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../api/wenxiang_api.dart';
 import '../models.dart';
 import '../theme.dart';
+import '../widgets/book_search_sheet.dart';
 import '../widgets/wx_chrome.dart';
 
 class BooksPage extends StatefulWidget {
@@ -57,6 +58,23 @@ class _BooksPageState extends State<BooksPage> {
     await widget.onRead(book, expandAsk: expandAsk);
   }
 
+  Future<void> _openSearch() async {
+    final outcome = await showModalBottomSheet<BookSearchOutcome>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Wx.bg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => BookSearchSheet(api: widget.api),
+    );
+    if (!mounted) return;
+    if (outcome?.downloaded == true) {
+      await _load();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -69,6 +87,11 @@ class _BooksPageState extends State<BooksPage> {
             onBack: widget.onBack,
             backTooltip: '返回问仓',
             trailing: [
+              IconButton(
+                tooltip: '搜索',
+                onPressed: _openSearch,
+                icon: const Icon(Icons.search, size: 20),
+              ),
               IconButton(
                 tooltip: '刷新',
                 onPressed: _loading ? null : _load,

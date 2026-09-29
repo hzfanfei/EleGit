@@ -703,6 +703,50 @@ class WenxiangApi {
         .toList();
   }
 
+  /// 搜书：聚合 Open Library 等源，返回可直接下载的 epub 候选。
+  /// V1 默认只搜 openlibrary；中文书大多仅 `borrowable`（需借阅登录），暂不下发。
+  Future<List<BookSearchResult>> searchBooks(
+    String query, {
+    List<String>? sources,
+    int? limit,
+  }) async {
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) return [];
+    final qp = <String, String>{'q': trimmed};
+    if (sources != null && sources.isNotEmpty) {
+      qp['sources'] = sources.join(',');
+    }
+    if (limit != null) qp['limit'] = limit.toString();
+    final res = await http
+        .get(_uri('/v1/books/search', qp), headers: _headers)
+        .timeout(const Duration(seconds: 20));
+    final body = await _json(res, fallback: '搜索失败');
+    final list = (body['results'] as List?) ?? [];
+    return list
+        .whereType<Map>()
+        .map((e) => BookSearchResult.fromJson(Map<String, dynamic>.from(e)))
+        .toList();
+  }
+
+  /// 把搜索结果里的 epub 下载到本机 books 目录。
+  Future<BookDownloadResult> downloadBook({
+    required String url,
+    String? title,
+  }) async {
+    final res = await http
+        .post(
+          _uri('/v1/books/download'),
+          headers: _headers,
+          body: jsonEncode({
+            'url': url,
+            if (title != null && title.isNotEmpty) 'title': title,
+          }),
+        )
+        .timeout(const Duration(seconds: 90));
+    final body = await _json(res, fallback: '下载失败');
+    return BookDownloadResult.fromJson(Map<String, dynamic>.from(body));
+  }
+
   Future<List<ChatSession>> listBookSessions(String bookId) async {
     final res = await http
         .get(_uri('/v1/books/$bookId/sessions'), headers: _headers)

@@ -102,6 +102,7 @@ import {
   contentTypeForStatic,
 } from "./static-files.js";
 import { clearInbox, listInbox, markInboxRead } from "./inbox.js";
+import { downloadBookFromUrl, searchBooks } from "./books-search.js";
 import { beginHandoff, handoffActive, publishLiveTurnSnapshots } from "./live-turns.js";
 import { attachNotifications, publishInboxNotice } from "./notifications.js";
 import { stat } from "node:fs/promises";
@@ -777,6 +778,49 @@ app.delete("/v1/books/:bookId/sessions/:id", async (req, res) => {
   try {
     const owner = bookSessionOwner();
     res.json(await bookSessions.close(owner, req.params.bookId, req.params.id));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.get("/v1/books/search", async (req, res) => {
+  try {
+    const q = String(req.query.q || "").trim();
+    if (!q) {
+      res.status(400).json({ error: "搜索关键词不能为空" });
+      return;
+    }
+    const sourcesParam = String(req.query.sources || "openlibrary");
+    const sources = sourcesParam
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const limit = Math.max(1, Math.min(20, Number(req.query.limit) || 10));
+    const results = await searchBooks(q, {
+      sources,
+      limit,
+      signal: req.signal,
+    });
+    res.json({ query: q, count: results.length, results });
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.post("/v1/books/download", async (req, res) => {
+  try {
+    const url = String(req.body?.url || "").trim();
+    if (!url) {
+      res.status(400).json({ error: "下载链接不能为空" });
+      return;
+    }
+    const title = req.body?.title ? String(req.body.title) : "";
+    const result = await downloadBookFromUrl(url, {
+      workspaceRoot: store.config.workspaceRoot,
+      signal: req.signal,
+      suggestedTitle: title,
+    });
+    res.json({ ok: true, ...result });
   } catch (err) {
     sendError(res, err);
   }
