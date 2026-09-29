@@ -256,7 +256,7 @@ class ReposPageState extends State<ReposPage> {
             showMark: true,
             title: '问象',
             subtitle: subtitle,
-            status: WxLinkRouteMark(baseUrl: widget.api.baseUrl),
+            status: WxLinkQualityMark(api: widget.api),
             onBrandTap: blocked ? null : widget.onOpenSettings,
             trailing: [
               if (widget.onOpenFiles != null)

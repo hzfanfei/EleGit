@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:wenxiang/api/link_quality.dart';
 import 'package:wenxiang/api/wenxiang_api.dart';
 import 'package:wenxiang/copy/ask_engine.dart';
 import 'package:wenxiang/models.dart';
@@ -91,6 +92,13 @@ class FakeWenxiangApi extends WenxiangApi {
 
   @override
   Future<void> ping() async {}
+
+  HealthProbeResult healthProbe = const HealthProbeResult(ok: true, rttMs: 32);
+
+  @override
+  Future<HealthProbeResult> probeHealth({Duration timeout = const Duration(seconds: 5)}) async {
+    return healthProbe;
+  }
 
   @override
   Future<void> preferLan(List<String> lanUrls) async {}

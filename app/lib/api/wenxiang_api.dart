@@ -11,6 +11,7 @@ import '../models.dart';
 import '../models/diagnostics.dart';
 import '../utils/async_gate.dart';
 import '../voice/background_work.dart';
+import 'link_quality.dart';
 import 'link_route.dart';
 import 'sse_stream.dart';
 
@@ -148,20 +149,15 @@ class WenxiangApi {
   }
 
   Future<bool> _healthOk(String root, Duration timeout) async {
-    try {
-      final res = await http
-          .get(
-            Uri.parse('$root/health'),
-            headers: {
-              'X-Wenxiang-Key': apiKey,
-              'ngrok-skip-browser-warning': 'true',
-            },
-          )
-          .timeout(timeout);
-      return res.statusCode == 200;
-    } catch (_) {
-      return false;
-    }
+    final probe = await probeHealthAt(root, timeout: timeout, apiKey: apiKey);
+    return probe.ok;
+  }
+
+  /// Round-trip to `/health` on the current [baseUrl]. Used for the header ping UI.
+  Future<HealthProbeResult> probeHealth({
+    Duration timeout = const Duration(seconds: 5),
+  }) {
+    return probeHealthAt(baseUrl, timeout: timeout, apiKey: apiKey);
   }
 
   Uri _uri(String path, [Map<String, String>? query]) {

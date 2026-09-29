@@ -1399,7 +1399,7 @@ class _ChatPageState extends State<ChatPage> {
             backTooltip: '返回仓库',
             title: widget.repo.fullName,
             subtitle: subtitle,
-            status: WxLinkRouteMark(baseUrl: widget.api.baseUrl),
+            status: WxLinkQualityMark(api: widget.api),
             trailing: [
               _AgentModeChip(
                 agentMode: _agentMode,

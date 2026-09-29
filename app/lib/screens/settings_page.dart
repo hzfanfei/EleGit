@@ -377,16 +377,7 @@ class _SettingsPageState extends State<SettingsPage> {
               padding: const EdgeInsets.fromLTRB(Wx.inset, 18, Wx.inset, 32),
               children: [
                 if (widget.api != null) ...[
-                  Row(
-                    children: [
-                      WxLinkRouteMark(baseUrl: widget.api!.baseUrl),
-                      const SizedBox(width: 8),
-                      Text(
-                        widget.api!.linkLabel,
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      ),
-                    ],
-                  ),
+                  WxLinkQualityMark(api: widget.api!, compact: false),
                   const SizedBox(height: 22),
                 ],
                 Text('智能问答', style: Theme.of(context).textTheme.titleMedium),
