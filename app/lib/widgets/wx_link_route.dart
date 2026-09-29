@@ -26,6 +26,8 @@ class WxLinkQualityMark extends StatefulWidget {
 class _WxLinkQualityMarkState extends State<WxLinkQualityMark> {
   static const _probeEvery = Duration(seconds: 4);
 
+  final _anchorKey = GlobalKey();
+
   LinkQualityTier _tier = LinkQualityTier.unknown;
   int? _rttMs;
   bool _probing = false;
@@ -111,6 +113,43 @@ class _WxLinkQualityMarkState extends State<WxLinkQualityMark> {
     return '$route · ${_rttMs}ms · $quality';
   }
 
+  Future<void> _showDetailPopover() async {
+    final anchor = _anchorKey.currentContext;
+    if (anchor == null || !mounted) return;
+    final box = anchor.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return;
+    final overlayBox =
+        Overlay.of(anchor).context.findRenderObject() as RenderBox;
+    final bottomRight =
+        box.localToGlobal(box.size.bottomRight(Offset.zero), ancestor: overlayBox);
+    final screenW = overlayBox.size.width;
+    const panelW = 248.0;
+    var left = bottomRight.dx - panelW + 8;
+    if (left < 8) left = 8;
+    if (left + panelW > screenW - 8) left = screenW - panelW - 8;
+    final top = bottomRight.dy + 6;
+
+    await showGeneralDialog<void>(
+      context: anchor,
+      barrierDismissible: true,
+      barrierLabel: '关闭连通详情',
+      barrierColor: Colors.transparent,
+      transitionDuration: Duration.zero,
+      pageBuilder: (dialogContext, _, __) {
+        return _LinkQualityPopoverLayer(
+          left: left,
+          top: top,
+          width: panelW,
+          api: widget.api,
+          initialTier: _tier,
+          initialRttMs: _rttMs,
+          tierColorOf: _tierColor,
+          onClose: () => Navigator.of(dialogContext).pop(),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final lan = isLanBaseUrl(widget.api.baseUrl);
@@ -119,23 +158,221 @@ class _WxLinkQualityMarkState extends State<WxLinkQualityMark> {
     final h = lan ? w : (widget.compact ? 22.0 : 24.0);
 
     return Tooltip(
-      message: _tooltip(),
+      message: '${_tooltip()}\n点击查看详情',
       child: Semantics(
-        label: _tooltip().replaceAll('\n', ' '),
-        child: CustomPaint(
-          key: Key(routeKey),
-          size: Size(w, h),
-          painter: _LinkQualityGlyphPainter(
-            tunnel: !lan,
-            filledBars: linkQualityFilledBars(_tier),
-            activeColor: _tierColor(_tier),
-            idleColor: Wx.hairline,
-            routeColor: _tier == LinkQualityTier.offline
-                ? Wx.danger
-                : (_tier == LinkQualityTier.unknown ? Wx.faint : Wx.muted),
-            offline: _tier == LinkQualityTier.offline,
+        button: true,
+        label: '${_tooltip().replaceAll('\n', ' ')}，点击查看详情',
+        child: Material(
+          type: MaterialType.transparency,
+          child: InkWell(
+            key: _anchorKey,
+            onTap: _showDetailPopover,
+            customBorder: const CircleBorder(),
+            child: Padding(
+              padding: const EdgeInsets.all(6),
+              child: CustomPaint(
+                key: Key(routeKey),
+                size: Size(w, h),
+                painter: _LinkQualityGlyphPainter(
+                  tunnel: !lan,
+                  filledBars: linkQualityFilledBars(_tier),
+                  activeColor: _tierColor(_tier),
+                  idleColor: Wx.hairline,
+                  routeColor: _tier == LinkQualityTier.offline
+                      ? Wx.danger
+                      : (_tier == LinkQualityTier.unknown ? Wx.faint : Wx.muted),
+                  offline: _tier == LinkQualityTier.offline,
+                ),
+              ),
+            ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _LinkQualityPopoverLayer extends StatefulWidget {
+  const _LinkQualityPopoverLayer({
+    required this.left,
+    required this.top,
+    required this.width,
+    required this.api,
+    required this.initialTier,
+    required this.initialRttMs,
+    required this.tierColorOf,
+    required this.onClose,
+  });
+
+  final double left;
+  final double top;
+  final double width;
+  final WenxiangApi api;
+  final LinkQualityTier initialTier;
+  final int? initialRttMs;
+  final Color Function(LinkQualityTier tier) tierColorOf;
+  final VoidCallback onClose;
+
+  @override
+  State<_LinkQualityPopoverLayer> createState() => _LinkQualityPopoverLayerState();
+}
+
+class _LinkQualityPopoverLayerState extends State<_LinkQualityPopoverLayer> {
+  late LinkQualityTier _tier;
+  int? _rttMs;
+  bool _probing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _tier = widget.initialTier;
+    _rttMs = widget.initialRttMs;
+    widget.api.linkEpoch.addListener(_onLinkChanged);
+    unawaited(_probe());
+  }
+
+  @override
+  void dispose() {
+    widget.api.linkEpoch.removeListener(_onLinkChanged);
+    super.dispose();
+  }
+
+  void _onLinkChanged() {
+    if (!mounted) return;
+    setState(() {
+      _tier = LinkQualityTier.unknown;
+      _rttMs = null;
+    });
+    unawaited(_probe());
+  }
+
+  Future<void> _probe() async {
+    if (_probing) return;
+    setState(() => _probing = true);
+    try {
+      final result = await widget.api.probeHealth();
+      if (!mounted) return;
+      setState(() {
+        _tier = linkQualityTier(ok: result.ok, rttMs: result.rttMs);
+        _rttMs = result.ok ? result.rttMs : null;
+      });
+    } finally {
+      if (mounted) setState(() => _probing = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: widget.onClose,
+          ),
+        ),
+        Positioned(
+          left: widget.left,
+          top: widget.top,
+          width: widget.width,
+          child: Material(
+            elevation: 8,
+            color: Wx.raised,
+            shadowColor: Colors.black54,
+            borderRadius: BorderRadius.circular(Wx.radius),
+            child: GestureDetector(
+              onTap: () {},
+              child: _LinkQualityDetailPanel(
+                key: const Key('wx-link-quality-popover'),
+                api: widget.api,
+                tier: _tier,
+                rttMs: _rttMs,
+                probing: _probing,
+                tierColor: widget.tierColorOf(_tier),
+                onRetest: _probe,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _LinkQualityDetailPanel extends StatelessWidget {
+  const _LinkQualityDetailPanel({
+    super.key,
+    required this.api,
+    required this.tier,
+    required this.rttMs,
+    required this.probing,
+    required this.tierColor,
+    required this.onRetest,
+  });
+
+  final WenxiangApi api;
+  final LinkQualityTier tier;
+  final int? rttMs;
+  final bool probing;
+  final Color tierColor;
+  final Future<void> Function() onRetest;
+
+  @override
+  Widget build(BuildContext context) {
+    final route = linkRouteLabel(api.baseUrl);
+    final quality = linkQualityTierLabel(tier);
+    final latency = tier == LinkQualityTier.offline
+        ? '无法连通'
+        : (tier == LinkQualityTier.unknown
+            ? (probing ? '测量中…' : '—')
+            : '${rttMs ?? '—'} ms');
+
+    TextStyle labelStyle = Theme.of(context).textTheme.labelSmall!.copyWith(color: Wx.muted);
+    TextStyle valueStyle = Theme.of(context).textTheme.bodySmall!;
+
+    Widget row(String label, String value, {Color? valueColor}) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(width: 52, child: Text(label, style: labelStyle)),
+            Expanded(
+              child: Text(
+                value,
+                style: valueStyle.copyWith(color: valueColor ?? Wx.text),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text('连通详情', style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 10),
+          row('路由', route),
+          row('地址', api.baseUrl),
+          row('延迟', latency, valueColor: tierColor),
+          row('质量', quality, valueColor: tierColor),
+          Text(
+            '每 4 秒探测 GET /health',
+            style: labelStyle.copyWith(fontSize: 10),
+          ),
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: probing ? null : () => unawaited(onRetest()),
+              child: Text(probing ? '检测中…' : '立即检测'),
+            ),
+          ),
+        ],
       ),
     );
   }
