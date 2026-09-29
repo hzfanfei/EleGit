@@ -350,7 +350,7 @@ void main() {
     expect(find.textContaining('连接断了'), findsNothing);
     expect(find.text('重试上一问'), findsNothing);
     final mark = tester.widget<WxLoading>(find.byKey(const Key('wx-working-mark')));
-    expect(mark.color, Wx.danger);
+    expect(mark.color, Wx.holdPoll);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 1));

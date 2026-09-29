@@ -86,6 +86,8 @@ class _ChatPageState extends State<ChatPage> {
   final ValueNotifier<String?> _liveEngine = ValueNotifier(null);
   final ValueNotifier<String> _livePhase = ValueNotifier('connect');
   final ValueNotifier<String> _liveActivity = ValueNotifier('');
+  /// Hold inbox poll: yellow = last poll ok, red = last poll failed.
+  final ValueNotifier<bool> _holdPollOk = ValueNotifier(true);
   Timer? _livePhaseTimer;
   Timer? _streamScrollTimer;
   double _lastFollowExtent = -1;
@@ -1093,13 +1095,17 @@ class _ChatPageState extends State<ChatPage> {
   Future<bool> _holdForServerAnswer(int userIndex) async {
     _holdForAnswer = true;
     _stopLivePhaseFallback();
+    _holdPollOk.value = true;
     _setLivePhase('hold');
     final deadline = DateTime.now().add(const Duration(minutes: 12));
     while (mounted && _holdForAnswer && DateTime.now().isBefore(deadline)) {
       if (_answerAfter(userIndex)) return true;
       try {
         await _pullInboxIntoChat(userIndex);
-      } catch (_) {}
+        if (mounted && _holdForAnswer) _holdPollOk.value = true;
+      } catch (_) {
+        if (mounted && _holdForAnswer) _holdPollOk.value = false;
+      }
       if (_answerAfter(userIndex)) return true;
       await _waitWhileHolding(const Duration(milliseconds: 400));
     }
@@ -1368,6 +1374,7 @@ class _ChatPageState extends State<ChatPage> {
     _liveEngine.dispose();
     _livePhase.dispose();
     _liveActivity.dispose();
+    _holdPollOk.dispose();
     super.dispose();
   }
 
@@ -1486,6 +1493,7 @@ class _ChatPageState extends State<ChatPage> {
                         engine: _liveEngine,
                         phase: _livePhase,
                         activity: _liveActivity,
+                        holdPollOk: _holdPollOk,
                       );
                     },
                         ),
@@ -1904,11 +1912,13 @@ class _LiveTurn extends StatelessWidget {
     required this.engine,
     required this.phase,
     required this.activity,
+    required this.holdPollOk,
   });
   final ValueNotifier<String> text;
   final ValueNotifier<String?> engine;
   final ValueNotifier<String> phase;
   final ValueNotifier<String> activity;
+  final ValueNotifier<bool> holdPollOk;
 
   @override
   Widget build(BuildContext context) {
@@ -1933,7 +1943,7 @@ class _LiveTurn extends StatelessWidget {
         valueListenable: text,
         builder: (context, value, _) {
           final body = value.isEmpty
-              ? _WorkingNote(phase: phase, activity: activity)
+              ? _WorkingNote(phase: phase, activity: activity, holdPollOk: holdPollOk)
               : WxChatMarkdownStream(
                   source: text,
                   styleSheet: chatMarkdownStyle(Theme.of(context)),
@@ -1950,6 +1960,7 @@ class _LiveTurn extends StatelessWidget {
                   child: _WorkingNote(
                     phase: phase,
                     activity: activity,
+                    holdPollOk: holdPollOk,
                     hideWhenIdle: true,
                   ),
                 ),
@@ -2050,11 +2061,13 @@ class _WorkingNote extends StatelessWidget {
   const _WorkingNote({
     required this.phase,
     required this.activity,
+    required this.holdPollOk,
     this.hideWhenIdle = false,
   });
 
   final ValueNotifier<String> phase;
   final ValueNotifier<String> activity;
+  final ValueNotifier<bool> holdPollOk;
   final bool hideWhenIdle;
 
   @override
@@ -2062,31 +2075,39 @@ class _WorkingNote extends StatelessWidget {
     return ValueListenableBuilder<String>(
       valueListenable: phase,
       builder: (context, livePhase, _) {
-        return ValueListenableBuilder<String>(
-          valueListenable: activity,
-          builder: (context, liveActivity, _) {
-            if (hideWhenIdle && liveActivity.trim().isEmpty && livePhase != 'hold') {
-              return const SizedBox.shrink();
-            }
-            final steps = _workSteps(liveActivity, _livePhaseLabel(livePhase));
-            final visible = steps.length <= _workRows ? steps : steps.sublist(steps.length - _workRows);
-            final pad = _workRows - visible.length;
-            return SizedBox(
-              key: const Key('wx-work-log'),
-              height: _workPanelHeight,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  for (var i = 0; i < pad; i++) const SizedBox(height: _workRowHeight),
-                  for (var i = 0; i < visible.length; i++)
-                    _WorkRow(
-                      text: visible[i].text,
-                      thought: visible[i].thought,
-                      active: i == visible.length - 1,
-                      dropped: livePhase == 'hold' && i == visible.length - 1,
-                    ),
-                ],
-              ),
+        return ValueListenableBuilder<bool>(
+          valueListenable: holdPollOk,
+          builder: (context, pollOk, _) {
+            return ValueListenableBuilder<String>(
+              valueListenable: activity,
+              builder: (context, liveActivity, _) {
+                if (hideWhenIdle && liveActivity.trim().isEmpty && livePhase != 'hold') {
+                  return const SizedBox.shrink();
+                }
+                final steps = _workSteps(liveActivity, _livePhaseLabel(livePhase));
+                final visible =
+                    steps.length <= _workRows ? steps : steps.sublist(steps.length - _workRows);
+                final pad = _workRows - visible.length;
+                final holdPoll = livePhase == 'hold';
+                return SizedBox(
+                  key: const Key('wx-work-log'),
+                  height: _workPanelHeight,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      for (var i = 0; i < pad; i++) const SizedBox(height: _workRowHeight),
+                      for (var i = 0; i < visible.length; i++)
+                        _WorkRow(
+                          text: visible[i].text,
+                          thought: visible[i].thought,
+                          active: i == visible.length - 1,
+                          holdPoll: holdPoll && i == visible.length - 1,
+                          holdPollFailed: holdPoll && !pollOk,
+                        ),
+                    ],
+                  ),
+                );
+              },
             );
           },
         );
@@ -2100,13 +2121,15 @@ class _WorkRow extends StatelessWidget {
     required this.text,
     required this.thought,
     required this.active,
-    this.dropped = false,
+    this.holdPoll = false,
+    this.holdPollFailed = false,
   });
 
   final String text;
   final bool thought;
   final bool active;
-  final bool dropped;
+  final bool holdPoll;
+  final bool holdPollFailed;
 
   @override
   Widget build(BuildContext context) {
@@ -2126,7 +2149,9 @@ class _WorkRow extends StatelessWidget {
                   ? WxLoading(
                       key: const Key('wx-working-mark'),
                       size: 14,
-                      color: dropped ? Wx.danger : null,
+                      color: holdPoll
+                          ? (holdPollFailed ? Wx.danger : Wx.holdPoll)
+                          : null,
                     )
                   : const _StepDot(),
             ),

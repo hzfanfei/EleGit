@@ -15,6 +15,8 @@ class Wx {
   static const serif = 'WenxiangSerif';
   static const danger = Color(0xFFC97B8E);
   static const ok = Color(0xFF8A9A7B);
+  /// Inbox poll while SSE is down (distinct from ochre accent).
+  static const holdPoll = Color(0xFFFFD600);
 
   /// Warm paper tone for long-form reading (slightly lifted from bg).
   static const readerPaper = Color(0xFF121110);
