@@ -18,7 +18,6 @@ import '../voice/volc_tts_voices.dart';
 import '../voice/xiaomi_tts_voices.dart';
 import '../widgets/wx_chrome.dart';
 import '../widgets/wx_edge_back.dart';
-import '../widgets/wx_link_route.dart';
 import 'log_center_page.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -376,10 +375,6 @@ class _SettingsPageState extends State<SettingsPage> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(Wx.inset, 18, Wx.inset, 32),
               children: [
-                if (widget.api != null) ...[
-                  WxLinkQualityMark(api: widget.api!, compact: false),
-                  const SizedBox(height: 22),
-                ],
                 Text('智能问答', style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 6),
                 Text(
