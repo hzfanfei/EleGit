@@ -50,6 +50,10 @@ Iterable<Uri> annaCookieLookupUris(Uri downloadUri, {String? pageUrl}) {
   final out = <Uri>{};
   out.add(downloadUri);
   out.add(Uri.parse('${downloadUri.scheme}://$host/'));
+  out.add(Uri.parse('${downloadUri.scheme}://$host'));
+  if (host.startsWith('www.')) {
+    out.add(Uri.parse('${downloadUri.scheme}://${host.substring(4)}/'));
+  }
   final md5 = annaMd5FromPath(downloadUri.path);
   if (md5 != null) {
     out.add(Uri.parse('${downloadUri.origin}/md5/$md5'));

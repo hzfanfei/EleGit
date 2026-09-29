@@ -49,6 +49,32 @@ Map<String, String> annaFetchHeaders({
   };
 }
 
+Future<String?> _warmAnnaSlowGatePage(
+  Uri downloadUri, {
+  required String userAgent,
+  String? cookieHeader,
+  String? referer,
+}) async {
+  final res = await http
+      .get(
+        downloadUri,
+        headers: {
+          ...annaFetchHeaders(
+            userAgent: userAgent,
+            cookieHeader: cookieHeader,
+            referer: referer,
+          ),
+          'Accept':
+              'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        },
+      )
+      .timeout(const Duration(seconds: 45));
+  return mergeAnnaCookieHeader(
+    cookieHeader,
+    setCookieLinesFromHeaders(res.headers),
+  );
+}
+
 Future<String?> _warmAnnaMd5Page(
   Uri downloadUri, {
   required String userAgent,
@@ -93,6 +119,15 @@ Future<Uint8List> downloadAnnaEpubOnDevice({
     cookieHeader: cookieHeader,
     referer: effectiveReferer,
   );
+
+  if (downloadUri.path.toLowerCase().contains('/slow_download/')) {
+    cookies = await _warmAnnaSlowGatePage(
+      downloadUri,
+      userAgent: userAgent,
+      cookieHeader: cookies,
+      referer: effectiveReferer,
+    );
+  }
 
   onProgress?.call(
     BookDownloadProgress(phase: 'downloading', bytesReceived: 0, bytesTotal: null),

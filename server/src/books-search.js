@@ -482,6 +482,21 @@ async function warmAnnaMd5Page(parsed, { fetchImpl, signal, cookieHeader, refere
   return res.ok || res.status === 304;
 }
 
+async function warmAnnaSlowGatePage(parsed, { fetchImpl, signal, cookieHeader, referer }) {
+  const host = parsed.hostname.toLowerCase();
+  if (!host.includes("annas-archive")) return false;
+  if (!String(parsed.pathname || "").toLowerCase().includes("/slow_download/")) return false;
+  const headers = downloadFetchHeaders(parsed, cookieHeader, referer);
+  headers.Accept =
+    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8";
+  const res = await fetchImpl(parsed.href, {
+    signal,
+    redirect: "follow",
+    headers,
+  });
+  return res.ok || res.status === 304;
+}
+
 function logBookDownloadDiag(label, diag) {
   try {
     console.error(`[book-download] ${label} ${JSON.stringify(diag)}`);
@@ -857,6 +872,18 @@ export async function downloadBookFromUrl(rawUrl, opts = {}) {
         referer,
         error: warmErr?.message || String(warmErr),
       });
+    }
+    if (pathKind === "slow_download") {
+      try {
+        await warmAnnaSlowGatePage(parsed, { fetchImpl, signal, cookieHeader, referer });
+      } catch (warmSlowErr) {
+        logBookDownloadDiag("warm-slow-gate-failed", {
+          url: parsed.href,
+          cookie: cookieDiag,
+          referer,
+          error: warmSlowErr?.message || String(warmSlowErr),
+        });
+      }
     }
   }
 

@@ -1,9 +1,17 @@
 bool _isAnnasHost(String host) => host.contains('annas-archive');
 
+/// Anna slow mirror gate — must load in WebView before HTTP/WebView binary fetch.
+bool isAnnaSlowDownloadGateUri(Uri uri) {
+  if (!_isAnnasHost(uri.host.toLowerCase())) return false;
+  return uri.path.toLowerCase().contains('/slow_download/');
+}
+
 /// 判断 WebView 里出现的 URL 是否应交给问象服务端下载到 workspace/books（仅安娜域名）。
 bool shouldCaptureBookDownloadUrl(Uri uri, {String? mimeType}) {
   final host = uri.host.toLowerCase();
   if (!_isAnnasHost(host)) return false;
+
+  if (isAnnaSlowDownloadGateUri(uri)) return false;
 
   final mime = (mimeType ?? '').toLowerCase();
   if (mime.contains('epub') ||
@@ -14,9 +22,7 @@ bool shouldCaptureBookDownloadUrl(Uri uri, {String? mimeType}) {
 
   final path = uri.path.toLowerCase();
   if (path.endsWith('.epub') || path.endsWith('.epub.zip')) return true;
-  if (path.contains('/fast_download/') || path.contains('/slow_download/')) {
-    return true;
-  }
+  if (path.contains('/fast_download/')) return true;
   return false;
 }
 

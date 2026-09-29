@@ -4,6 +4,14 @@ import 'package:wenxiang/utils/anna_device_download.dart';
 import 'package:wenxiang/utils/book_download_capture.dart';
 
 void main() {
+  test('slow_download gate opens in WebView, not intercepted as binary', () {
+    final slow = Uri.parse(
+      'https://annas-archive.gl/slow_download/86eb03dc6a6956f90f5e4d51574c99e4/0/1',
+    );
+    expect(isAnnaSlowDownloadGateUri(slow), isTrue);
+    expect(shouldCaptureBookDownloadUrl(slow), isFalse);
+  });
+
   test('captures annas fast_download only on annas host', () {
     expect(
       shouldCaptureBookDownloadUrl(

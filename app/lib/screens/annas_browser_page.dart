@@ -43,6 +43,8 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
   String? _capturingLabel;
   BookDownloadProgress? _captureProgress;
   final Set<String> _inFlightUrls = {};
+  final Set<String> _inFlightMd5 = {};
+  final Set<String> _slowGateWaiting = {};
   String _currentUrl = '';
   String? _activeDownloadUrl;
   final WebViewCookieManager _cookieManager = WebViewCookieManager();
@@ -77,9 +79,18 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
               _currentUrl = url;
             });
             _completePageLoadWait(url);
+            final uri = Uri.tryParse(url);
+            if (uri != null && isAnnaSlowDownloadGateUri(uri)) {
+              unawaited(_captureAfterSlowGatePage(uri));
+            } else {
+              _maybeCaptureFromUrl(url);
+            }
           },
           onNavigationRequest: (request) {
             final uri = Uri.tryParse(request.url);
+            if (uri != null && isAnnaSlowDownloadGateUri(uri)) {
+              return NavigationDecision.navigate;
+            }
             if (uri != null && shouldCaptureBookDownloadUrl(uri)) {
               unawaited(_captureAndDownload(uri));
               return NavigationDecision.prevent;
@@ -90,6 +101,7 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
             final url = change.url;
             if (url != null && url.isNotEmpty && mounted) {
               setState(() => _currentUrl = url);
+              _maybeCaptureFromUrl(url);
             }
           },
         ),
@@ -159,10 +171,67 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
     );
   }
 
-  Future<void> _captureAndDownload(Uri uri) async {
+  void _maybeCaptureFromUrl(String? url) {
+    if (url == null || url.isEmpty) return;
+    final uri = Uri.tryParse(url);
+    if (uri == null || !shouldCaptureBookDownloadUrl(uri)) return;
+    unawaited(_captureAndDownload(uri));
+  }
+
+  Future<void> _captureAfterSlowGatePage(Uri gateUri) async {
+    final url = bookDownloadUrlForServer(gateUri);
+    final md5 = annaMd5FromDownloadUrl(gateUri);
+    if (_inFlightUrls.contains(url)) return;
+    if (md5 != null &&
+        (_inFlightMd5.contains(md5) || _slowGateWaiting.contains(md5))) {
+      return;
+    }
+    if (md5 != null) _slowGateWaiting.add(md5);
+    recordBookDownloadDiag(
+      '慢速下载页已打开',
+      summary: 'url=$url · 等待跳转或倒计时…',
+    );
+    try {
+    for (var i = 0; i < 90; i++) {
+      if (!mounted) return;
+      String cur = _currentUrl;
+      try {
+        final fromWebView = await _controller.currentUrl();
+        if (fromWebView != null && fromWebView.isNotEmpty) cur = fromWebView;
+      } catch (_) {}
+      final curUri = Uri.tryParse(cur);
+      if (curUri != null &&
+          shouldCaptureBookDownloadUrl(curUri) &&
+          curUri.toString() != gateUri.toString()) {
+        recordBookDownloadDiag(
+          '慢速页已跳转到文件链',
+          summary: 'from=$url · to=$cur',
+        );
+        await _captureAndDownload(curUri);
+        return;
+      }
+      await Future<void>.delayed(const Duration(seconds: 1));
+    }
+    recordBookDownloadDiag(
+      '慢速页等待结束，开始 WebView 直载',
+      summary: 'url=$url',
+    );
+    await _captureAndDownload(gateUri, preferWebViewFirst: true);
+    } finally {
+      if (md5 != null) _slowGateWaiting.remove(md5);
+    }
+  }
+
+  Future<void> _captureAndDownload(
+    Uri uri, {
+    bool preferWebViewFirst = false,
+  }) async {
     final url = bookDownloadUrlForServer(uri);
     if (_inFlightUrls.contains(url)) return;
+    final md5 = annaMd5FromDownloadUrl(uri);
+    if (md5 != null && _inFlightMd5.contains(md5)) return;
     _inFlightUrls.add(url);
+    if (md5 != null) _inFlightMd5.add(md5);
     final title = suggestedTitleFromDownloadUrl(uri);
     final cookieHeader = await _cookieHeaderFor(uri);
     final referer = _currentUrl.trim().isNotEmpty ? _currentUrl.trim() : null;
@@ -180,6 +249,33 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
     }
     try {
       Uint8List bytes;
+      if (preferWebViewFirst) {
+        try {
+          bytes = await downloadAnnaEpubViaWebView(
+            controller: _controller,
+            downloadUri: uri,
+            onProgress: (p) {
+              if (!mounted) return;
+              setState(() => _captureProgress = p);
+            },
+          );
+        } catch (wvErr) {
+          recordBookDownloadDiag(
+            'WebView 直载失败，改 HTTP',
+            summary: 'url=$url · err=$wvErr',
+          );
+          bytes = await downloadAnnaEpubOnDevice(
+            downloadUri: uri,
+            userAgent: annaMobileChromeUa,
+            cookieHeader: cookieHeader,
+            referer: referer ?? uri.toString(),
+            onProgress: (p) {
+              if (!mounted) return;
+              setState(() => _captureProgress = p);
+            },
+          );
+        }
+      } else
       try {
         bytes = await downloadAnnaEpubOnDevice(
           downloadUri: uri,
@@ -268,6 +364,7 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
       showWxFailureSnackBar(context, err, prefix: '保存失败：');
     } finally {
       _inFlightUrls.remove(url);
+      if (md5 != null) _inFlightMd5.remove(md5);
       if (mounted) {
         setState(() {
           _capturingLabel = null;
