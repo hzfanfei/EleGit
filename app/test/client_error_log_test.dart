@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:wenxiang/api/wenxiang_api.dart';
 import 'package:wenxiang/copy/errors.dart';
 import 'package:wenxiang/diagnostics/client_error_log.dart';
 import 'package:wenxiang/persist/app_memory.dart';
@@ -39,25 +38,10 @@ void main() {
     final reloaded = ClientErrorLog(root: dir, maxEntries: 3);
     final stored = await reloaded.peek(10);
     expect(stored, hasLength(1));
-    await log.markSynced([pending.single['id'] as String]);
-    expect(await log.peekPending(10), isEmpty);
-    expect(await log.peek(10), hasLength(1));
-    await log.clear();
+    await log.drop([pending.single['id'] as String]);
     expect(await log.peek(10), isEmpty);
-  });
-
-  test('listNewest returns entries in reverse chronological order', () async {
-    final dir = Directory.systemTemp.createTempSync('wx-client-log-');
-    addTearDown(() {
-      if (dir.existsSync()) dir.deleteSync(recursive: true);
-    });
-    final log = ClientErrorLog(root: dir);
-    log.note(message: 'first');
-    log.note(message: 'second');
-    await log.idle;
-    final newest = await log.listNewest(10);
-    expect(newest.map((e) => e['message']), ['second', 'first']);
-    expect(formatClientLogExport(newest), contains('second'));
+    final afterUpload = ClientErrorLog(root: dir, maxEntries: 3);
+    expect(await afterUpload.peek(10), isEmpty);
   });
 
   test('drops the oldest reasons once the local cap is full', () async {
@@ -72,24 +56,6 @@ void main() {
     await log.idle;
     final pending = await log.peek(10);
     expect(pending.map((entry) => entry['message']), ['two', 'three']);
-  });
-
-  test('ApiException from the client API layer is recorded as api', () async {
-    final dir = Directory.systemTemp.createTempSync('wx-client-log-');
-    addTearDown(() {
-      if (dir.existsSync()) dir.deleteSync(recursive: true);
-    });
-    final previous = ClientErrorLog.instance;
-    ClientErrorLog.instance = ClientErrorLog(root: dir);
-    addTearDown(() => ClientErrorLog.instance = previous);
-
-    try {
-      throw ApiException('火山 TTS 合成失败 HTTP 502');
-    } catch (_) {}
-    await ClientErrorLog.instance.idle;
-    final pending = await ClientErrorLog.instance.peek(10);
-    expect(pending.single['kind'], 'api');
-    expect(pending.single['message'], contains('TTS'));
   });
 
   test('a shown error records the raw reason and the Chinese summary', () async {
@@ -130,22 +96,20 @@ void main() {
     await _flushUploads(tester, log, api, 1);
     expect(api.uploadedClientLogs, hasLength(1));
     expect(api.uploadedClientLogs.single.single['message'], contains('Connection refused'));
-    expect(await log.peekPending(10), isEmpty);
-    expect(await log.peek(10), hasLength(1));
+    expect(await log.peek(10), isEmpty);
 
     log.note(message: 'inactive overlay should stay on the phone');
     await log.idle;
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
     await tester.pump();
     expect(api.uploadedClientLogs, hasLength(1));
-    expect(await log.peekPending(10), hasLength(1));
+    expect(await log.peek(10), hasLength(1));
 
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
     await _flushUploads(tester, log, api, 2);
     expect(api.uploadedClientLogs, hasLength(2));
     expect(api.uploadedClientLogs.last.single['message'], 'inactive overlay should stay on the phone');
-    expect(await log.peekPending(10), isEmpty);
-    expect(await log.peek(10), hasLength(2));
+    expect(await log.peek(10), isEmpty);
   });
 }
 

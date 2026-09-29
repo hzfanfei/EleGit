@@ -524,11 +524,6 @@ export function createVoiceSession({
         onDelta: ({ text, engine }) => {
           pushCaption("assistant", text, { engine, preview: true, final: false });
         },
-        onActivity: (detail) => {
-          const label = String(detail ?? "").trim();
-          if (!label) return;
-          emit({ type: "activity", text: label });
-        },
         onCaption: (speak) => {
           beginSpeaking();
           pushCaption("assistant", speak, { segment: true, final: false });

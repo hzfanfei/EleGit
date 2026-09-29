@@ -118,8 +118,6 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
   Timer? _speakerIdleTimer;
   bool _watchingSpeaker = false;
   int _pcmSeq = 0;
-  int _turnPcmChunks = 0;
-  int _turnPcmBytes = 0;
   bool _watchBargeMic = false;
   int _bargeMicPeak = 0;
   int _listenHold = 0;
@@ -228,7 +226,6 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
       }
     } catch (err) {
       if (!mounted || _disposing) return;
-      recordClientFault('加载语音状态失败', cause: err, kind: 'voice');
       setState(() {
         _checking = false;
         _error = '通话断了';
@@ -410,26 +407,8 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
       });
       return;
     }
-    if (event.type == 'pcm' && event.pcm != null) {
-      if (!_shouldPlayDownlink(event.pcm!)) {
-        recordVoiceTrace(
-          '通话下行音频丢弃',
-          detail:
-              'bytes=${event.pcm!.length} phase=$_phase playing=$_playing live=$_live '
-              'audioDone=$_answerAudioDone',
-        );
-        return;
-      }
+    if (event.type == 'pcm' && event.pcm != null && _shouldPlayDownlink(event.pcm!)) {
       _pcmSeq++;
-      _turnPcmChunks += 1;
-      _turnPcmBytes += event.pcm!.length;
-      recordVoiceTrace(
-        '通话下行音频',
-        detail:
-            'seq=$_pcmSeq bytes=${event.pcm!.length} rate=${event.outputRate} phase=$_phase '
-            'playing=$_playing caption=${voiceLogClip(_segmentCaption)} '
-            '累计块=$_turnPcmChunks 累计字节=$_turnPcmBytes',
-      );
       _speakerIdleTimer?.cancel();
       if (!_playing) {
         setState(() {
@@ -495,12 +474,6 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
       _speakerIdleTimer = Timer(_speakerIdle, () {
         _speakerIdleTimer = null;
         if (!mounted || _disposing || seq != _pcmSeq || !_playing || _phase != 'speaking') return;
-        recordVoiceTrace(
-          '通话口播间隙(UI)',
-          detail:
-              'pcmSeq=$seq 当前=$_pcmSeq ${_speakerIdle.inMilliseconds}ms 无新音频，UI 退出「在说」 '
-              'caption=${voiceLogClip(_voiceCaption)}',
-        );
         setState(() => _playing = false);
       });
     });
@@ -511,10 +484,6 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
 
   void _applyState(String next) {
     if (next == 'barge') {
-      recordVoiceTrace(
-        '通话打断(barge)',
-        detail: 'phase=$_phase playing=$_playing pcmSeq=$_pcmSeq caption=${voiceLogClip(_voiceCaption)}',
-      );
       _cancelPlaybackEnd();
       _clearThinkMist();
       setState(() {
@@ -527,12 +496,6 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
       return;
     }
     if (next == 'audio_done') {
-      recordVoiceTrace(
-        '通话服务端音频发完',
-        detail:
-            'phase=$_phase playing=$_playing pendingEnd=$_playbackEndPending '
-            'chunks=$_turnPcmChunks bytes=$_turnPcmBytes caption=${voiceLogClip(_voiceCaption)}',
-      );
       _answerAudioDone = true;
       if (_phase == 'speaking') {
         _schedulePlaybackEnd();
@@ -549,8 +512,6 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
     setState(() {
       _phase = next == 'audio_done' ? 'listening' : next;
       if (next == 'thinking') {
-        _turnPcmChunks = 0;
-        _turnPcmBytes = 0;
         _answerAudioDone = false;
         _playbackEndPending = false;
         _clearAssistantSubtitle();
@@ -576,14 +537,6 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
     if (!mounted || _disposing || hold != _listenHold) return;
     if (_phase != 'speaking' && !_answerAudioDone) return;
     _answerAudioDone = false;
-    recordVoiceTrace(
-      '通话本机口播队列播完',
-      detail:
-          'chunks=$_turnPcmChunks bytes=$_turnPcmBytes caption=${voiceLogClip(_voiceCaption)} '
-          '→ listening',
-    );
-    _turnPcmChunks = 0;
-    _turnPcmBytes = 0;
     _client?.played();
     setState(() {
       _phase = 'listening';
@@ -608,10 +561,6 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
   void _userTapBarge() {
     if (!_live || _disposing) return;
     if (!_playing && _phase != 'speaking' && _phase != 'thinking') return;
-    recordVoiceTrace(
-      '通话用户点打断',
-      detail: 'phase=$_phase playing=$_playing pcmSeq=$_pcmSeq',
-    );
     _cancelPlaybackEnd();
     setState(() {
       _phase = 'listening';
@@ -715,7 +664,6 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
   }
 
   void _fail(String hint, {Object? cause}) {
-    recordClientFault(hint, cause: cause, kind: 'voice');
     hangup(pop: false);
     if (!mounted || _disposing) return;
     setState(() {
@@ -745,7 +693,6 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
   }
 
   void _drop({String hint = '通话断了', Object? cause}) {
-    recordClientFault(hint, cause: cause, kind: 'voice');
     hangup(pop: false);
     if (!mounted) return;
     setState(() {
@@ -827,25 +774,28 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
   /// Whole assistant reply (including short gaps between TTS chunks): headline shows captions, not「在说」.
   bool get _assistantHeadlineCaptions => _live && (_playing || _phase == 'speaking');
 
-  TextStyle? _assistantCaptionStyle(BuildContext context) {
-    return Theme.of(context).textTheme.bodyLarge?.copyWith(
-          height: 1.55,
+  TextStyle? _assistantHeadlineCaptionStyle(BuildContext context) {
+    return Theme.of(context).textTheme.headlineMedium?.copyWith(
+          height: 1.45,
           fontWeight: FontWeight.w500,
         );
   }
 
-  /// Bottom stage: scrollable assistant caption at normal reading size.
+  /// Bottom stage: status when idle, large scrollable caption while speaking.
   Widget _callStageBody(BuildContext context) {
     final line = _assistantSubtitleLine.trim();
     final speakingNow = _assistantHeadlineCaptions;
-    final captionStyle = _assistantCaptionStyle(context);
+    final bodyLarge = Theme.of(context).textTheme.titleLarge?.copyWith(
+          height: 1.5,
+          fontWeight: FontWeight.w500,
+        );
 
     Widget centerChild;
     if (line.isNotEmpty) {
       centerChild = Text(
         line,
         textAlign: TextAlign.start,
-        style: captionStyle,
+        style: speakingNow ? _assistantHeadlineCaptionStyle(context) : bodyLarge,
       );
     } else {
       centerChild = const SizedBox.shrink();

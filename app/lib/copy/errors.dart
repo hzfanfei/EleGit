@@ -1,67 +1,11 @@
 import '../diagnostics/client_error_log.dart';
 
-/// User-facing wording for [error], without writing to the log.
-String explainError(Object error) => _explain(error);
-
-/// Persist [error] for the in-app log center (deduped inside [ClientErrorLog]).
-void recordClientError(
-  Object error, {
-  String kind = 'error',
-  String? summary,
-  String? stack,
-}) {
-  final raw = error.toString().trim();
-  if (raw.isEmpty || raw == 'cancelled') return;
-  ClientErrorLog.instance.note(
-    message: raw,
-    summary: summary ?? explainError(error),
-    stack: stack ?? '',
-    kind: kind,
-  );
-}
-
-/// Short UI hint plus optional underlying cause (voice / websocket / server detail).
-void recordClientFault(
-  String summary, {
-  Object? cause,
-  String kind = 'voice',
-}) {
-  final hint = summary.trim();
-  if (hint.isEmpty) return;
-  final detail = cause?.toString().trim() ?? '';
-  if (detail.isEmpty || detail == hint) {
-    recordClientError(hint, kind: kind, summary: hint);
-    return;
-  }
-  ClientErrorLog.instance.note(
-    message: detail,
-    summary: hint,
-    kind: kind,
-  );
-}
-
-/// Milestone for voice/TTS diagnosis (log center, kind=voice).
-void recordVoiceTrace(String summary, {String? detail}) {
-  final hint = summary.trim();
-  if (hint.isEmpty) return;
-  final body = detail?.trim() ?? '';
-  ClientErrorLog.instance.note(
-    message: body.isEmpty ? hint : body,
-    summary: hint,
-    kind: 'voice',
-  );
-}
-
-String voiceLogClip(String text, [int max = 56]) {
-  final cleaned = text.replaceAll(RegExp(r'\s+'), ' ').trim();
-  if (cleaned.isEmpty) return '—';
-  if (cleaned.length <= max) return cleaned;
-  return '${cleaned.substring(0, max)}…';
-}
-
 String humanizeError(Object error) {
-  final text = explainError(error);
-  recordClientError(error, summary: text, kind: 'shown');
+  final text = _explain(error);
+  final raw = error.toString().trim();
+  if (raw.isNotEmpty && raw != 'cancelled') {
+    ClientErrorLog.instance.note(message: raw, summary: text, kind: 'shown');
+  }
   return text;
 }
 
@@ -167,12 +111,6 @@ bool _isClone(String lower) {
 
 bool isChatTransportDrop(Object error) {
   return _isSseDrop(error.toString().toLowerCase());
-}
-
-/// Server-side ACP session already gone (e.g. companion restarted).
-bool isStaleSessionError(Object error) {
-  final lower = error.toString().toLowerCase();
-  return lower.contains('session not found');
 }
 
 bool _isSseDrop(String lower) {
