@@ -4,6 +4,7 @@ import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../app_brand.dart';
 import '../api/wenxiang_api.dart';
 import '../config.dart';
 import '../copy/errors.dart';
@@ -447,7 +448,16 @@ class _BootPane extends StatelessWidget {
                 children: [
                   busy ? const WxLoading(size: 44) : const WxMark(size: 44),
                   const SizedBox(height: 22),
-                  Text('问象', style: Theme.of(context).textTheme.displaySmall),
+                  Text(AppBrand.label, style: Theme.of(context).textTheme.displaySmall),
+                  if (AppBrand.isBackup) ...[
+                    const SizedBox(height: 8),
+                    Chip(
+                      label: const Text('备用安装'),
+                      visualDensity: VisualDensity.compact,
+                      backgroundColor: Wx.accent.withValues(alpha: 0.22),
+                      side: BorderSide(color: Wx.accent.withValues(alpha: 0.55)),
+                    ),
+                  ],
                   const SizedBox(height: 10),
                   Text(
                     busy

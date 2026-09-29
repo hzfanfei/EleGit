@@ -2,6 +2,7 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
+import 'app_brand.dart';
 import 'diagnostics/client_error_log.dart';
 import 'screens/shell_page.dart';
 import 'theme.dart';
@@ -44,7 +45,7 @@ class WenxiangApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: '问象',
+      title: AppBrand.label,
       debugShowCheckedModeBanner: false,
       theme: wenxiangTheme(),
       home: const ShellPage(),
