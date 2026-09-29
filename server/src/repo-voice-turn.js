@@ -16,6 +16,7 @@ import { writeAudioToSse } from "./spoken-tts.js";
 import { runVoiceTurn } from "./voice-call.js";
 import { resolveTurnTtsVoice, resolveVoiceConfig, withTtsVoice } from "./voice-config.js";
 import { createVoiceProviders } from "./voice-ws.js";
+import { noteServerLog } from "./server-logs.js";
 
 export function createRepoAskIterator({
   progress,
@@ -228,9 +229,18 @@ export async function handleRepoVoiceTurn(
           voiceConfig.ttsProvider === "xiaomi"
             ? "语音合成失败，请检查本机 .env 里的 XIAOMI_MIMO_TOKEN。"
             : "语音合成失败，请检查本机 .env 里的火山 TTS 配置。";
+      } else if (/asr|stt|recogn/i.test(hint)) {
+        code = code || "stt_failed";
       } else if (hint.length > 200 || !/[\u4e00-\u9fff]/.test(hint)) {
         hint = "快问快答失败，请稍后重试。";
       }
+      const logKind =
+        code === "tts_failed" ? "voice-tts" : /stt|asr/i.test(String(code)) ? "voice-asr" : "voice-turn";
+      noteServerLog({
+        kind: logKind,
+        message: String(err?.message || err),
+        summary: hint,
+      });
       writeSse(res, { type: "error", code, hint });
     }
   } finally {

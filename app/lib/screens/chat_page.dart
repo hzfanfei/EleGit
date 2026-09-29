@@ -189,6 +189,7 @@ class _ChatPageState extends State<ChatPage> {
     );
     _restoreLocal();
     chatBackfillTick.addListener(_onChatBackfill);
+    inboxProgressHint.addListener(_onInboxProgressHint);
     _agentMode = widget.memory?.agentModeFor(widget.repo.fullName) ?? false;
     widget.api
         .warmChatSession(widget.repo.owner, widget.repo.name)
@@ -1053,6 +1054,7 @@ class _ChatPageState extends State<ChatPage> {
   void _showSendError(int userIndex, Object err) {
     _typewriter.flushNow();
     final partial = _typewriter.fullText;
+    recordClientError(err, kind: 'chat');
     final raw = err.toString().trim();
     final reason = raw.isEmpty ? '出了点问题。请稍后重试。' : raw;
     setState(() {
@@ -1099,7 +1101,7 @@ class _ChatPageState extends State<ChatPage> {
         await _pullInboxIntoChat(userIndex);
       } catch (_) {}
       if (_answerAfter(userIndex)) return true;
-      await _waitWhileHolding(const Duration(seconds: 1));
+      await _waitWhileHolding(const Duration(milliseconds: 400));
     }
     return _answerAfter(userIndex);
   }
@@ -1198,6 +1200,28 @@ class _ChatPageState extends State<ChatPage> {
     if (!mounted) return;
     if (_busy && !_holdForAnswer) return;
     _mergeBackfill();
+  }
+
+  void _onInboxProgressHint() {
+    if (!mounted || !_holdForAnswer) return;
+    final hint = inboxProgressHint.value;
+    if (hint == null) return;
+    final userIndex = _processingUserIndex;
+    if (userIndex == null) return;
+    if (!_messagesMatchNotice(
+      userIndex,
+      sessionId: hint.sessionId,
+      question: hint.question,
+    )) {
+      return;
+    }
+    final activity = hint.activity.trim();
+    final answer = hint.answer.trim();
+    if (activity.isNotEmpty) _liveActivity.value = activity;
+    if (answer.isNotEmpty) _showHeldPreview(answer);
+    if (activity.isNotEmpty || answer.isNotEmpty) {
+      _setLivePhase('generate');
+    }
   }
 
   void _mergeBackfill() {
@@ -1329,6 +1353,7 @@ class _ChatPageState extends State<ChatPage> {
   void dispose() {
     widget.api.linkEpoch.removeListener(_onLinkChanged);
     chatBackfillTick.removeListener(_onChatBackfill);
+    inboxProgressHint.removeListener(_onInboxProgressHint);
     _quickVoice.dispose();
     _disposeStt();
     _micSub?.cancel();

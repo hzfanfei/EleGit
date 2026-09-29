@@ -341,6 +341,20 @@ class WenxiangApi {
     return body;
   }
 
+  Future<List<Map<String, dynamic>>> fetchErrorLogs({int limit = 200}) async {
+    final capped = limit.clamp(1, 500);
+    final res = await http
+        .get(_uri('/v1/error-logs', {'limit': '$capped'}), headers: _headers)
+        .timeout(const Duration(seconds: 15));
+    final body = await _json(res, fallback: '拉取错误日志失败');
+    final entries = body['entries'];
+    if (entries is! List) return const [];
+    return [
+      for (final raw in entries)
+        if (raw is Map) Map<String, dynamic>.from(raw),
+    ];
+  }
+
   Future<List<String>> uploadClientLogs(
     List<Map<String, dynamic>> entries, {
     String app = 'wenxiang',

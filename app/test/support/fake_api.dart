@@ -96,6 +96,14 @@ class FakeWenxiangApi extends WenxiangApi {
   Future<void> preferLan(List<String> lanUrls) async {}
 
   final List<List<Map<String, dynamic>>> uploadedClientLogs = [];
+  List<Map<String, dynamic>> errorLogs = const [];
+
+  @override
+  Future<List<Map<String, dynamic>>> fetchErrorLogs({int limit = 200}) async {
+    return [
+      for (final entry in errorLogs.take(limit)) Map<String, dynamic>.from(entry),
+    ];
+  }
 
   @override
   Future<List<String>> uploadClientLogs(

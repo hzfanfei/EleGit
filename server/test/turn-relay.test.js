@@ -240,6 +240,63 @@ describe("turn relay", () => {
     }
   });
 
+  it("mirrors partial answer text while the companion socket is still up", async () => {
+    const agent = fakeAgent();
+    const published = [];
+    const relay = await startTurnRelay({
+      port: 0,
+      spawnImpl: () => agent,
+      publish: async (_workspaceRoot, notice) => {
+        published.push({ notice });
+      },
+    });
+    try {
+      const socket = net.connect(relay.port, "127.0.0.1");
+      await once(socket, "connect");
+      socket.write(`${JSON.stringify({
+        op: "spawn",
+        key: "s1:3b",
+        file: "agent",
+        args: [],
+      })}\n`);
+      socket.write(`${JSON.stringify({
+        op: "meta",
+        key: "s1:3b",
+        meta: {
+          workspaceRoot: "C:/问象",
+          session: { id: "s1", owner: "octo", repo: "demo" },
+          question: "进度如何",
+          partial: true,
+        },
+      })}\n`);
+      socket.write(`${JSON.stringify({
+        op: "stdin",
+        key: "s1:3b",
+        data: `${JSON.stringify({ jsonrpc: "2.0", id: 7, method: "session/prompt", params: {} })}\n`,
+      })}\n`);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      agent.stdout.write(`${JSON.stringify({
+        method: "session/update",
+        params: {
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "重启前已写" },
+          },
+        },
+      })}\n`);
+      const deadline = Date.now() + 1200;
+      while (!published.length && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      assert.equal(published.length, 1);
+      assert.equal(published[0].notice.partial, true);
+      assert.equal(published[0].notice.answer, "重启前已写");
+      assert.equal(agent.killed, false);
+    } finally {
+      relay.close();
+    }
+  });
+
   it("publishes thought and tool steps before any answer text", async () => {
     const agent = fakeAgent();
     const published = [];

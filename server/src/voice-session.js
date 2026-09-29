@@ -1,4 +1,5 @@
 import { encodeAdpcm } from "./adpcm.js";
+import { noteServerLog } from "./server-logs.js";
 import { bookSessionOwner } from "./books.js";
 import { CALL_MIN_RMS, createCallMachine, pcmRms, runVoiceTurn } from "./voice-call.js";
 
@@ -559,8 +560,14 @@ export function createVoiceSession({
       }
     } catch (err) {
       if (signal.aborted || err?.code === "cancelled") return;
-      console.error(`[voice] turn ${err?.code || ""} ${err?.message || err}`);
-      const ttsFailed = err?.code === "tts" || /tts/i.test(String(err?.message || ""));
+      const turnMsg = String(err?.message || err || "");
+      console.error(`[voice] turn ${err?.code || ""} ${turnMsg}`);
+      const ttsFailed = err?.code === "tts" || /tts/i.test(turnMsg);
+      noteServerLog({
+        kind: ttsFailed ? "voice-tts" : "voice-turn",
+        message: turnMsg,
+        summary: ttsFailed ? "语音通话合成失败" : "语音通话问答失败",
+      });
       if (ttsFailed) {
         emit({ type: "caption", role: "assistant", text: "这句没说成，再说一次", final: true });
       } else {
@@ -634,6 +641,7 @@ export function createVoiceSession({
         machine.fail();
         const detail = String(err?.message || err || "").slice(0, 400);
         console.error(`[voice] start ${detail}`);
+        noteServerLog({ kind: "voice-asr", message: detail, summary: "语音通话启动失败（识别通道）" });
         emit({ type: "error", code: "channel", hint: "通话断了", detail });
       }
     },
@@ -690,7 +698,9 @@ export function createVoiceSession({
     },
     onAsrFailure(message) {
       if (!started || closed) return;
-      console.error(`[voice] asr ${String(message || "failed")}`);
+      const asrMsg = String(message || "failed");
+      console.error(`[voice] asr ${asrMsg}`);
+      noteServerLog({ kind: "voice-asr", message: asrMsg, summary: "语音识别失败" });
       const busy = playbackOpen || machine.state === "speaking" || machine.state === "thinking";
       if (!busy) {
         emit({ type: "caption", role: "assistant", text: "没听清，再说一次", final: true });
@@ -705,7 +715,9 @@ export function createVoiceSession({
           await asr?.start?.();
         })
         .catch((err) => {
-          console.error(`[voice] asr restart ${err?.message || err}`);
+          const restartMsg = String(err?.message || err || "");
+          console.error(`[voice] asr restart ${restartMsg}`);
+          noteServerLog({ kind: "voice-asr", message: restartMsg, summary: "语音识别重启失败" });
         });
     },
     barge(reason = "tap") {

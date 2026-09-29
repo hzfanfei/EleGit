@@ -518,6 +518,7 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
             _typewriter.reset();
             break;
           case 'error':
+            recordClientMessage(event.error ?? '问书失败', kind: 'chat');
             setState(() {
               _messages.add(ChatMessage(role: 'error', content: event.error ?? '问书失败'));
               _live = false;

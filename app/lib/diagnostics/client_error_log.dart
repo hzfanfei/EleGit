@@ -52,13 +52,40 @@ class ClientErrorLog {
     } catch (_) {}
   }
 
-  Future<List<Map<String, dynamic>>> peek(int limit) {
+  Future<List<Map<String, dynamic>>> peek(int limit, {bool unsyncedOnly = false}) {
     return _enqueue(() async {
       await _load();
       final take = limit < 0 ? 0 : limit;
+      final source = unsyncedOnly
+          ? _entries.where((entry) => entry['synced'] != true)
+          : _entries;
       return [
-        for (final entry in _entries.take(take)) Map<String, dynamic>.from(entry),
+        for (final entry in source.take(take)) Map<String, dynamic>.from(entry),
       ];
+    });
+  }
+
+  Future<void> markSynced(Iterable<String> ids) {
+    return _enqueue(() async {
+      await _load();
+      final synced = ids.toSet();
+      var changed = false;
+      for (final entry in _entries) {
+        if (synced.contains(entry['id']) && entry['synced'] != true) {
+          entry['synced'] = true;
+          changed = true;
+        }
+      }
+      if (changed) await _save();
+    });
+  }
+
+  Future<void> clear() {
+    return _enqueue(() async {
+      await _load();
+      if (_entries.isEmpty) return;
+      _entries.clear();
+      await _save();
     });
   }
 

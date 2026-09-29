@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../api/wenxiang_api.dart';
+import '../copy/errors.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../widgets/agent_decision_card.dart';
@@ -149,6 +150,7 @@ class _BookChatPageState extends State<BookChatPage> {
             _typewriter.reset();
             break;
           case 'error':
+            recordClientMessage(event.error ?? '问书失败', kind: 'chat');
             setState(() {
               _messages.add(ChatMessage(role: 'error', content: event.error ?? '问书失败'));
               _live = false;
@@ -170,6 +172,7 @@ class _BookChatPageState extends State<BookChatPage> {
       _typewriter.reset();
     } catch (err) {
       if (!mounted) return;
+      recordClientError(err, kind: 'chat');
       setState(() {
         final raw = err.toString().trim();
         _messages.add(ChatMessage(

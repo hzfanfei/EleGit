@@ -38,7 +38,10 @@ void main() {
     final reloaded = ClientErrorLog(root: dir, maxEntries: 3);
     final stored = await reloaded.peek(10);
     expect(stored, hasLength(1));
-    await log.drop([pending.single['id'] as String]);
+    await log.markSynced([pending.single['id'] as String]);
+    expect(await log.peek(10, unsyncedOnly: true), isEmpty);
+    expect(await log.peek(10), hasLength(1));
+    await log.clear();
     expect(await log.peek(10), isEmpty);
     final afterUpload = ClientErrorLog(root: dir, maxEntries: 3);
     expect(await afterUpload.peek(10), isEmpty);
@@ -96,20 +99,21 @@ void main() {
     await _flushUploads(tester, log, api, 1);
     expect(api.uploadedClientLogs, hasLength(1));
     expect(api.uploadedClientLogs.single.single['message'], contains('Connection refused'));
-    expect(await log.peek(10), isEmpty);
+    expect(await log.peek(10, unsyncedOnly: true), isEmpty);
 
     log.note(message: 'inactive overlay should stay on the phone');
     await log.idle;
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
     await tester.pump();
     expect(api.uploadedClientLogs, hasLength(1));
-    expect(await log.peek(10), hasLength(1));
+    expect(await log.peek(10, unsyncedOnly: true), hasLength(1));
 
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
     await _flushUploads(tester, log, api, 2);
     expect(api.uploadedClientLogs, hasLength(2));
     expect(api.uploadedClientLogs.last.single['message'], 'inactive overlay should stay on the phone');
-    expect(await log.peek(10), isEmpty);
+    expect(await log.peek(10, unsyncedOnly: true), isEmpty);
+    expect(await log.peek(10), hasLength(2));
   });
 }
 
@@ -122,6 +126,8 @@ Future<void> _flushUploads(
   for (var i = 0; i < 20; i += 1) {
     await tester.pump(const Duration(milliseconds: 50));
     final pending = await log.peek(10);
-    if (api.uploadedClientLogs.length >= uploads && pending.isEmpty) return;
+    if (api.uploadedClientLogs.length >= uploads && (await log.peek(10, unsyncedOnly: true)).isEmpty) {
+      return;
+    }
   }
 }

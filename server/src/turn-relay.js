@@ -104,7 +104,14 @@ export function startTurnRelay({
   }
 
   function maybePublish(turn) {
-    if (turn.clients.size > 0 || turn.acked || turn.publishedFinal) return;
+    if (turn.publishedFinal) return;
+    if (turn.acked && !turn.state.done) return;
+    const liveCompanion = turn.clients.size > 0 && !turn.acked;
+    if (liveCompanion) {
+      // Phone may lose SSE during a planned companion restart while the agent
+      // keeps running on this relay — mirror partial progress into inbox early.
+      if (!turn.meta?.partial || turn.state.done) return;
+    }
     const answer = String(turn.state.answer || "").trim();
     const activity = String(turn.activity || "").trim();
     const workspaceRoot = turn.meta?.workspaceRoot;

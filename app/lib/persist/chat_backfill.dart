@@ -8,6 +8,24 @@ import 'book_chat_store.dart';
 /// Bumps when a notification has been written into a saved chat.
 final ValueNotifier<int> chatBackfillTick = ValueNotifier<int>(0);
 
+/// Live partial inbox row while a turn is still running (restart backfill).
+class InboxProgressHint {
+  InboxProgressHint({
+    required this.sessionId,
+    required this.question,
+    this.activity = '',
+    this.answer = '',
+  });
+
+  final String sessionId;
+  final String question;
+  final String activity;
+  final String answer;
+}
+
+final ValueNotifier<InboxProgressHint?> inboxProgressHint =
+    ValueNotifier<InboxProgressHint?>(null);
+
 String stripTaskMarker(String text) {
   return text.replaceFirst(RegExp(r'^===TASK_COMPLETED===\s*', multiLine: true), '').trim();
 }

@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wenxiang/copy/ask_engine.dart';
 import 'package:wenxiang/copy/cursor_model.dart';
 import 'package:wenxiang/persist/app_memory.dart';
+import 'package:wenxiang/screens/log_center_page.dart';
 import 'package:wenxiang/screens/settings_page.dart';
 import 'package:wenxiang/theme.dart';
 
@@ -186,6 +187,23 @@ void main() {
     expect(memory.askEngineBook(), AskEngineChoice.cursor);
     expect(api.lastSetAskEngine, 'cursor');
     expect(api.lastSetAskEngineScope, 'book');
+  });
+
+  testWidgets('settings header opens log center', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final memory = AppMemory(await SharedPreferences.getInstance());
+    final api = FakeWenxiangApi();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme().copyWith(splashFactory: NoSplash.splashFactory),
+        home: SettingsPage(api: api, memory: memory),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('wx-settings-log-center')));
+    await tester.pumpAndSettle();
+    expect(find.byType(LogCenterPage), findsOneWidget);
   });
 
   testWidgets('settings page switches the Cursor model', (tester) async {

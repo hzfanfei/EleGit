@@ -1,11 +1,24 @@
 import '../diagnostics/client_error_log.dart';
 
+void recordClientError(Object error, {String kind = 'error'}) {
+  final raw = error.toString().trim();
+  if (raw.isEmpty || raw == 'cancelled') return;
+  ClientErrorLog.instance.note(message: raw, summary: _explain(error), kind: kind);
+}
+
+void recordClientMessage(String message, {String summary = '', String kind = 'error'}) {
+  final raw = message.trim();
+  if (raw.isEmpty || raw == 'cancelled') return;
+  ClientErrorLog.instance.note(
+    message: raw,
+    summary: summary.isEmpty ? _explain(raw) : summary,
+    kind: kind,
+  );
+}
+
 String humanizeError(Object error) {
   final text = _explain(error);
-  final raw = error.toString().trim();
-  if (raw.isNotEmpty && raw != 'cancelled') {
-    ClientErrorLog.instance.note(message: raw, summary: text, kind: 'shown');
-  }
+  recordClientError(error, kind: 'shown');
   return text;
 }
 
@@ -116,7 +129,14 @@ bool isChatTransportDrop(Object error) {
 bool _isSseDrop(String lower) {
   return lower.contains('connection closed') ||
       lower.contains('connection abort') ||
+      lower.contains('connection reset') ||
+      lower.contains('connection refused') ||
       lower.contains('broken pipe') ||
       lower.contains('stream ended') ||
+      lower.contains('socketexception') ||
+      (lower.contains('clientexception') &&
+          (lower.contains('connection') ||
+              lower.contains('socket') ||
+              lower.contains('failed host lookup'))) ||
       (lower.contains('sse') && (lower.contains('drop') || lower.contains('interrupt')));
 }

@@ -4,6 +4,7 @@ import path from "node:path";
 import { AcpChannel, acpEnginePreference, detectCursorEngine } from "./acp.js";
 import { createVoiceProviders } from "./voice-ws.js";
 import { resolveVoiceConfig, withTtsVoice } from "./voice-config.js";
+import { noteServerLog } from "./server-logs.js";
 import { volcTtsV3StreamLatency } from "./voice-volc.js";
 
 const ASK_MODEL_PROMPT = "仅回复一个字：通";
@@ -321,6 +322,20 @@ export async function runDiagnosticsProbe({
   }
   if (voiceTts) out.voiceTts = await probeVoiceTts({ ttsVoice, signal });
   if (voiceStt) out.voiceStt = await probeVoiceStt({ signal });
+  if (out.voiceTts?.ok === false && out.voiceTts.error) {
+    noteServerLog({
+      kind: "voice-tts",
+      message: String(out.voiceTts.error),
+      summary: "通路检测：语音合成未通过",
+    });
+  }
+  if (out.voiceStt?.ok === false && out.voiceStt.error) {
+    noteServerLog({
+      kind: "voice-asr",
+      message: String(out.voiceStt.error),
+      summary: "通路检测：语音识别未通过",
+    });
+  }
   out.ok =
     (!askCli || (out.askCliBook?.ok === true && out.askCliRepo?.ok === true)) &&
     (!askModel || (out.askModelBook?.ok === true && out.askModelRepo?.ok === true)) &&

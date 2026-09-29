@@ -28,6 +28,7 @@ class InboxItem {
     this.repo,
     this.bookId,
     this.partial = false,
+    this.activity,
   });
 
   final String id;
@@ -43,6 +44,7 @@ class InboxItem {
   final String? repo;
   final String? bookId;
   final bool partial;
+  final String? activity;
 
   factory InboxItem.fromJson(Map<String, dynamic> json) {
     DateTime parseCreated() {
@@ -65,6 +67,7 @@ class InboxItem {
       repo: json['repo']?.toString(),
       bookId: json['bookId']?.toString(),
       partial: json['partial'] == true,
+      activity: json['activity']?.toString(),
     );
   }
 }
@@ -305,7 +308,19 @@ class NotificationCenter {
   }
 
   Future<void> _showItem(InboxItem item) async {
-    if (item.partial) return;
+    if (item.partial) {
+      final activity = (item.activity ?? '').trim();
+      final answer = (item.answer ?? '').trim();
+      if (activity.isNotEmpty || answer.isNotEmpty) {
+        inboxProgressHint.value = InboxProgressHint(
+          sessionId: item.sessionId ?? '',
+          question: item.question ?? '',
+          activity: activity,
+          answer: answer,
+        );
+      }
+      return;
+    }
     try {
       await backfillChatFromNotice(
         sessionId: item.sessionId ?? '',

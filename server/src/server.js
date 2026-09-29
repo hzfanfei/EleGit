@@ -59,6 +59,7 @@ import { bindCompanion } from "./listen.js";
 import { attachSttGateway } from "./voice-stt-ws.js";
 import { attachVoiceGateway, isVoiceCallEnabled } from "./voice-ws.js";
 import { appendClientLogs } from "./client-logs.js";
+import { configureServerLogs, listErrorLogs, noteServerLog } from "./server-logs.js";
 import { runDiagnosticsProbe, synthesizeVoicePreview } from "./diagnostics.js";
 import {
   checkoutPath,
@@ -111,6 +112,7 @@ const PORT = Number(process.env.WENXIANG_PORT || 8787);
 const BIND = process.env.WENXIANG_BIND || "0.0.0.0";
 
 const store = await loadStore();
+configureServerLogs(store.config.workspaceRoot);
 
 function syncAcpEngineConfig(config) {
   const legacy = sanitizeAcpEngine(config.acpEngine);
@@ -813,6 +815,11 @@ app.post("/v1/voice/tts-preview", async (req, res) => {
     if (isCancelled(err)) {
       return;
     }
+    noteServerLog({
+      kind: "voice-tts",
+      message: String(err?.message || err),
+      summary: "音色试听 / TTS 预览失败",
+    });
     sendError(res, err);
   }
 });
@@ -825,6 +832,16 @@ app.post("/v1/client-logs", async (req, res) => {
       platform: body.platform,
     });
     res.json({ accepted });
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.get("/v1/error-logs", async (req, res) => {
+  try {
+    const limit = Number.parseInt(String(req.query?.limit ?? "200"), 10);
+    const entries = await listErrorLogs(store.config.workspaceRoot, { limit });
+    res.json({ entries });
   } catch (err) {
     sendError(res, err);
   }

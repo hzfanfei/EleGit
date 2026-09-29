@@ -1,5 +1,6 @@
 import { WebSocketServer } from "ws";
 import { resolveVoiceConfig } from "./voice-config.js";
+import { noteServerLog } from "./server-logs.js";
 import { sttErrorFromFailure } from "./voice-stt-copy.js";
 import { createVoiceProviders, voiceKeyFromRequest } from "./voice-ws.js";
 
@@ -109,6 +110,11 @@ export function createSttSession({
         },
         onAsrError: (detail) => {
           const mapped = sttErrorFromFailure(detail?.err, detail?.message);
+          noteServerLog({
+            kind: "voice-asr",
+            message: String(detail?.message || detail?.err?.message || mapped.code),
+            summary: mapped.hint,
+          });
           emit({ type: "error", code: mapped.code, hint: mapped.hint });
           cleanup();
         },
@@ -122,6 +128,11 @@ export function createSttSession({
         await asr.start();
       } catch (err) {
         const mapped = sttErrorFromFailure(err);
+        noteServerLog({
+          kind: "voice-asr",
+          message: String(err?.message || err),
+          summary: mapped.hint,
+        });
         emit({ type: "error", code: mapped.code, hint: mapped.hint });
         cleanup();
         return;

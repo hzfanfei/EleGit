@@ -19,6 +19,7 @@ import '../voice/xiaomi_tts_voices.dart';
 import '../widgets/wx_chrome.dart';
 import '../widgets/wx_edge_back.dart';
 import '../widgets/wx_link_route.dart';
+import 'log_center_page.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key, this.api, this.memory, this.onBack});
@@ -355,6 +356,20 @@ class _SettingsPageState extends State<SettingsPage> {
             title: '设置',
             onBack: widget.onBack ?? () => Navigator.of(context).maybePop(),
             backTooltip: '返回',
+            trailing: [
+              IconButton(
+                key: const Key('wx-settings-log-center'),
+                tooltip: '日志中心',
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => LogCenterPage(api: widget.api),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.receipt_long_outlined),
+              ),
+            ],
           ),
           const WxHairline(),
           Expanded(
