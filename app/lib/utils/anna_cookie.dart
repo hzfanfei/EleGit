@@ -50,7 +50,7 @@ Iterable<Uri> annaCookieLookupUris(Uri downloadUri, {String? pageUrl}) {
   final out = <Uri>{};
   out.add(downloadUri);
   out.add(Uri.parse('${downloadUri.scheme}://$host/'));
-  final md5 = _md5FromPath(downloadUri.path);
+  final md5 = annaMd5FromPath(downloadUri.path);
   if (md5 != null) {
     out.add(Uri.parse('${downloadUri.origin}/md5/$md5'));
   }
@@ -61,14 +61,15 @@ Iterable<Uri> annaCookieLookupUris(Uri downloadUri, {String? pageUrl}) {
   return out;
 }
 
-String? _md5FromPath(String path) {
+/// Supports `/slow_download/{md5}/…` and `/slow_download/0/{md5}/…`.
+String? annaMd5FromPath(String path) {
   var match = RegExp(
-    r'/slow_download/\d+/([a-f0-9]{32})',
+    r'/slow_download/(?:\d+/)?([a-f0-9]{32})(?:/|$)',
     caseSensitive: false,
   ).firstMatch(path);
   if (match != null) return match.group(1)!.toLowerCase();
   match = RegExp(
-    r'/fast_download/(?:\d+/)?([a-f0-9]{32})',
+    r'/fast_download/(?:\d+/)?([a-f0-9]{32})(?:/|$)',
     caseSensitive: false,
   ).firstMatch(path);
   return match?.group(1)?.toLowerCase();

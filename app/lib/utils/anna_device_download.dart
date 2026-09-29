@@ -30,19 +30,7 @@ class AnnaHttpDownloadException implements Exception {
 }
 
 /// Anna / DDoS-Guard cookies are tied to the phone IP — download on device, then upload.
-String? annaMd5FromDownloadUrl(Uri uri) {
-  final path = uri.path;
-  var match = RegExp(
-    r'/slow_download/\d+/([a-f0-9]{32})',
-    caseSensitive: false,
-  ).firstMatch(path);
-  if (match != null) return match.group(1)!.toLowerCase();
-  match = RegExp(
-    r'/fast_download/(?:\d+/)?([a-f0-9]{32})',
-    caseSensitive: false,
-  ).firstMatch(path);
-  return match?.group(1)?.toLowerCase();
-}
+String? annaMd5FromDownloadUrl(Uri uri) => annaMd5FromPath(uri.path);
 
 /// Browser-like GET headers. Do not send Sec-Fetch-Mode: cors — Anna / DDoS-Guard
 /// often returns 403 for non-navigation fetches.

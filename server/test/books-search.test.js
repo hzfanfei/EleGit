@@ -529,6 +529,15 @@ describe("books-search", () => {
       assert.ok(parsed.pathname.includes("slow_download"));
     });
 
+    it("extracts md5 from annas slow_download without mirror index", () => {
+      const url =
+        "https://annas-archive.gl/slow_download/86eb03dc6a6956f90f5e4d51574c99e4/0/1";
+      assert.equal(
+        extractBookMd5FromUrl(new URL(url)),
+        "86eb03dc6a6956f90f5e4d51574c99e4",
+      );
+    });
+
     it("extracts md5 from annas fast_download without mirror index", () => {
       const url =
         "https://annas-archive.gl/fast_download/f87448722f0072549206b63999ec39e1/0/0";

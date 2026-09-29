@@ -59,6 +59,14 @@ void main() {
     expect(
       annaMd5FromDownloadUrl(
         Uri.parse(
+          'https://annas-archive.gl/slow_download/86eb03dc6a6956f90f5e4d51574c99e4/0/1',
+        ),
+      ),
+      '86eb03dc6a6956f90f5e4d51574c99e4',
+    );
+    expect(
+      annaMd5FromDownloadUrl(
+        Uri.parse(
           'https://annas-archive.gl/fast_download/f87448722f0072549206b63999ec39e1/0/0',
         ),
       ),

@@ -395,7 +395,9 @@ const DEFAULT_ANNAS_HOSTS = ["annas-archive.gl", "annas-archive.pk", "annas-arch
 const BOOK_DOWNLOAD_USER_AGENT =
   "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";
 const MD5_HEX32_RE = /^[a-f0-9]{32}$/i;
-const ANNAS_SLOW_DOWNLOAD_MD5_RE = /\/slow_download\/\d+\/([a-f0-9]{32})(?:\/|$)/i;
+/** `/slow_download/{md5}/…` and `/slow_download/0/{md5}/…` */
+const ANNAS_SLOW_DOWNLOAD_MD5_RE =
+  /\/slow_download\/(?:\d+\/)?([a-f0-9]{32})(?:\/|$)/i;
 const ANNAS_FAST_DOWNLOAD_MD5_RE =
   /\/fast_download\/(?:\d+\/)?([a-f0-9]{32})(?:\/|$)/i;
 
