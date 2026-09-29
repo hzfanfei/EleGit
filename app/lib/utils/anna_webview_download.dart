@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -7,6 +8,19 @@ import '../models.dart';
 import 'anna_device_download.dart';
 
 const _maxWebViewBytes = 120 * 1024 * 1024;
+
+/// Load the md5 detail page in WebView so HttpOnly / DDoS-Guard cookies refresh.
+Future<void> warmAnnaMd5PageInWebView({
+  required WebViewController controller,
+  required Uri downloadUri,
+  required Future<void> Function(Uri md5Uri) waitForPage,
+}) async {
+  final md5 = annaMd5FromDownloadUrl(downloadUri);
+  if (md5 == null) return;
+  final md5Uri = Uri.parse('${downloadUri.origin}/md5/$md5');
+  await controller.loadRequest(md5Uri);
+  await waitForPage(md5Uri);
+}
 
 /// Uses the WebView cookie jar (credentials: include) when plain HTTP gets 403.
 Future<Uint8List> downloadAnnaEpubViaWebView({
@@ -18,31 +32,53 @@ Future<Uint8List> downloadAnnaEpubViaWebView({
     BookDownloadProgress(phase: 'downloading', bytesReceived: 0, bytesTotal: null),
   );
   final urlJson = jsonEncode(downloadUri.toString());
+  // fetch() sends Sec-Fetch-Mode: cors; try sync XHR first (some WebViews differ).
   final js = '''
 (async function() {
-  try {
-    const url = $urlJson;
-    const resp = await fetch(url, { credentials: 'include', redirect: 'follow' });
-    const ct = (resp.headers.get('content-type') || '').toLowerCase();
-    if (!resp.ok) {
-      return JSON.stringify({ ok: false, status: resp.status, ct: ct });
-    }
-    if (ct.startsWith('text/html')) {
-      return JSON.stringify({ ok: false, status: 415, ct: ct });
-    }
-    const buf = await resp.arrayBuffer();
-    if (buf.byteLength > $_maxWebViewBytes) {
-      return JSON.stringify({ ok: false, status: 413, size: buf.byteLength });
-    }
+  const url = $urlJson;
+  function packOk(buf) {
     const bytes = new Uint8Array(buf);
     const chunk = 32768;
     let binary = '';
     for (let i = 0; i < bytes.length; i += chunk) {
       binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
     }
-    return JSON.stringify({ ok: true, b64: btoa(binary), size: buf.byteLength });
+    return JSON.stringify({ ok: true, b64: btoa(binary), size: buf.byteLength, via: 'xhr' });
+  }
+  function packFail(status, extra) {
+    return JSON.stringify(Object.assign({ ok: false, status: status }, extra || {}));
+  }
+  try {
+    try {
+      const xhr = new XMLHttpRequest();
+      xhr.open('GET', url, false);
+      xhr.withCredentials = true;
+      xhr.responseType = 'arraybuffer';
+      xhr.send(null);
+      const ct = (xhr.getResponseHeader('content-type') || '').toLowerCase();
+      if (xhr.status >= 200 && xhr.status < 300) {
+        if (ct.startsWith('text/html')) return packFail(415, { ct: ct, via: 'xhr' });
+        const buf = xhr.response;
+        if (!buf || buf.byteLength === 0) return packFail(0, { err: 'empty xhr', via: 'xhr' });
+        if (buf.byteLength > $_maxWebViewBytes) return packFail(413, { size: buf.byteLength, via: 'xhr' });
+        return packOk(buf);
+      }
+    } catch (_) {}
+    const resp = await fetch(url, { credentials: 'include', redirect: 'follow' });
+    const ct = (resp.headers.get('content-type') || '').toLowerCase();
+    if (!resp.ok) {
+      return packFail(resp.status, { ct: ct, via: 'fetch' });
+    }
+    if (ct.startsWith('text/html')) {
+      return packFail(415, { ct: ct, via: 'fetch' });
+    }
+    const buf = await resp.arrayBuffer();
+    if (buf.byteLength > $_maxWebViewBytes) {
+      return packFail(413, { size: buf.byteLength, via: 'fetch' });
+    }
+    return packOk(buf);
   } catch (e) {
-    return JSON.stringify({ ok: false, status: 0, err: String(e) });
+    return packFail(0, { err: String(e) });
   }
 })()
 ''';
@@ -55,13 +91,16 @@ Future<Uint8List> downloadAnnaEpubViaWebView({
   if (map['ok'] != true) {
     final status = map['status'];
     final st = status is int ? status : int.tryParse('$status') ?? 0;
+    final via = (map['via'] ?? '').toString();
     if (st == 415) {
       throw Exception('下载到了网页而不是 epub（请先在浏览器完成验证或换一本）');
     }
     if (st == 413) {
       throw Exception('文件过大，WebView 直载超过 120MB 限制');
     }
-    throw Exception('WebView 下载失败 (${st == 0 ? map['err'] ?? 'unknown' : st})');
+    throw Exception(
+      'WebView 下载失败 (${st == 0 ? map['err'] ?? 'unknown' : st}${via.isNotEmpty ? ', $via' : ''})',
+    );
   }
 
   final b64 = (map['b64'] ?? '').toString();

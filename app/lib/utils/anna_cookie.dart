@@ -44,6 +44,36 @@ Map<String, List<String>> _headersSplitValues(Map<String, String> headers) {
   return out;
 }
 
+/// Candidate URIs for [WebViewCookieManager.getCookies] on Anna hosts.
+Iterable<Uri> annaCookieLookupUris(Uri downloadUri, {String? pageUrl}) {
+  final host = downloadUri.host.toLowerCase();
+  final out = <Uri>{};
+  out.add(downloadUri);
+  out.add(Uri.parse('${downloadUri.scheme}://$host/'));
+  final md5 = _md5FromPath(downloadUri.path);
+  if (md5 != null) {
+    out.add(Uri.parse('${downloadUri.origin}/md5/$md5'));
+  }
+  final page = pageUrl?.trim() ?? '';
+  if (page.isNotEmpty) {
+    if (Uri.tryParse(page) case final Uri u) out.add(u);
+  }
+  return out;
+}
+
+String? _md5FromPath(String path) {
+  var match = RegExp(
+    r'/slow_download/\d+/([a-f0-9]{32})',
+    caseSensitive: false,
+  ).firstMatch(path);
+  if (match != null) return match.group(1)!.toLowerCase();
+  match = RegExp(
+    r'/fast_download/(?:\d+/)?([a-f0-9]{32})',
+    caseSensitive: false,
+  ).firstMatch(path);
+  return match?.group(1)?.toLowerCase();
+}
+
 String cookieNamesForLog(String? cookieHeader) {
   if (cookieHeader == null || cookieHeader.isEmpty) return '(none)';
   return cookieHeader

@@ -66,6 +66,20 @@ void main() {
     );
   });
 
+  test('annaCookieLookupUris includes origin and md5 page', () {
+    final download = Uri.parse(
+      'https://annas-archive.gl/slow_download/0/f87448722f0072549206b63999ec39e1/0/0',
+    );
+    final uris = annaCookieLookupUris(download).map((u) => u.toString()).toSet();
+    expect(uris.contains('https://annas-archive.gl/'), isTrue);
+    expect(
+      uris.contains(
+        'https://annas-archive.gl/md5/f87448722f0072549206b63999ec39e1',
+      ),
+      isTrue,
+    );
+  });
+
   test('mergeAnnaCookieHeader merges set-cookie without dropping prior', () {
     const base = 'a=1; b=2';
     final merged = mergeAnnaCookieHeader(base, ['c=3; Path=/', 'b=9']);

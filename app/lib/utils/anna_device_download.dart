@@ -44,27 +44,20 @@ String? annaMd5FromDownloadUrl(Uri uri) {
   return match?.group(1)?.toLowerCase();
 }
 
-Map<String, String> _annaFetchHeaders({
+/// Browser-like GET headers. Do not send Sec-Fetch-Mode: cors — Anna / DDoS-Guard
+/// often returns 403 for non-navigation fetches.
+Map<String, String> annaFetchHeaders({
   required String userAgent,
   String? cookieHeader,
   String? referer,
-  Uri? target,
 }) {
   final ref = referer?.trim() ?? '';
-  final sameOrigin = target != null &&
-      ref.isNotEmpty &&
-      Uri.tryParse(ref)?.host.toLowerCase() == target.host.toLowerCase();
   return {
     'User-Agent': userAgent,
     'Accept': '*/*',
     'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
     if (ref.isNotEmpty) 'Referer': ref,
     if (cookieHeader != null && cookieHeader.isNotEmpty) 'Cookie': cookieHeader,
-    if (sameOrigin) ...const {
-      'Sec-Fetch-Dest': 'empty',
-      'Sec-Fetch-Mode': 'cors',
-      'Sec-Fetch-Site': 'same-origin',
-    },
   };
 }
 
@@ -80,11 +73,10 @@ Future<String?> _warmAnnaMd5Page(
   final res = await http
       .get(
         md5Uri,
-        headers: _annaFetchHeaders(
+        headers: annaFetchHeaders(
           userAgent: userAgent,
           cookieHeader: cookieHeader,
           referer: referer ?? md5Uri.toString(),
-          target: md5Uri,
         ),
       )
       .timeout(const Duration(seconds: 45));
@@ -123,11 +115,10 @@ Future<Uint8List> downloadAnnaEpubOnDevice({
     Future<http.StreamedResponse> sendOnce(String? cookiesNow) {
       final request = http.Request('GET', downloadUri);
       request.headers.addAll(
-        _annaFetchHeaders(
+        annaFetchHeaders(
           userAgent: userAgent,
           cookieHeader: cookiesNow,
           referer: effectiveReferer,
-          target: downloadUri,
         ),
       );
       return client.send(request).timeout(const Duration(minutes: 20));

@@ -46,6 +46,8 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
   String _currentUrl = '';
   String? _activeDownloadUrl;
   final WebViewCookieManager _cookieManager = WebViewCookieManager();
+  Completer<void>? _pageLoadCompleter;
+  String? _pageLoadTarget;
 
   @override
   void initState() {
@@ -74,6 +76,7 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
               _pageLoading = false;
               _currentUrl = url;
             });
+            _completePageLoadWait(url);
           },
           onNavigationRequest: (request) {
             final uri = Uri.tryParse(request.url);
@@ -94,19 +97,36 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
       ..loadRequest(Uri.parse(startUrl));
   }
 
+  void _completePageLoadWait(String url) {
+    final target = _pageLoadTarget;
+    final pending = _pageLoadCompleter;
+    if (target == null || pending == null || pending.isCompleted) return;
+    if (url.startsWith(target) || url.contains('/md5/')) {
+      pending.complete();
+    }
+  }
+
+  Future<void> _waitForWebViewPage(Uri target) async {
+    _pageLoadTarget = target.toString();
+    _pageLoadCompleter = Completer<void>();
+    try {
+      await _pageLoadCompleter!.future.timeout(const Duration(seconds: 45));
+    } on TimeoutException {
+      // continue with best-effort cookies
+    } finally {
+      _pageLoadTarget = null;
+      _pageLoadCompleter = null;
+    }
+  }
+
   Future<String?> _cookieHeaderFor(Uri downloadUri) async {
     final byName = <String, String>{};
-    final candidates = <Uri>{downloadUri};
-    candidates.add(Uri.parse('${downloadUri.scheme}://${downloadUri.host}/'));
+    String? pageUrl = _currentUrl.trim().isNotEmpty ? _currentUrl.trim() : null;
     try {
       final cur = await _controller.currentUrl();
-      if (cur != null && cur.isNotEmpty) {
-        if (Uri.tryParse(cur) case final Uri u) candidates.add(u);
-      }
+      if (cur != null && cur.isNotEmpty) pageUrl = cur;
     } catch (_) {}
-    if (_currentUrl.isNotEmpty) {
-      if (Uri.tryParse(_currentUrl) case final Uri u) candidates.add(u);
-    }
+    final candidates = annaCookieLookupUris(downloadUri, pageUrl: pageUrl);
     for (final uri in candidates) {
       try {
         for (final c in await _cookieManager.getCookies(domain: uri)) {
@@ -174,18 +194,48 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
       } on AnnaHttpDownloadException catch (httpErr) {
         if (httpErr.statusCode != 403) rethrow;
         recordBookDownloadDiag(
-          'HTTP 403，改 WebView 直载',
+          'HTTP 403，WebView 预热 md5 后重试',
           summary:
               'url=$url · referer=${httpErr.referer} · cookies=${cookieNamesForLog(httpErr.cookieHeader)} · snippet=${httpErr.bodySnippet.isEmpty ? "-" : httpErr.bodySnippet}',
         );
-        bytes = await downloadAnnaEpubViaWebView(
+        await warmAnnaMd5PageInWebView(
           controller: _controller,
           downloadUri: uri,
-          onProgress: (p) {
-            if (!mounted) return;
-            setState(() => _captureProgress = p);
-          },
+          waitForPage: _waitForWebViewPage,
         );
+        final warmedCookies = await _cookieHeaderFor(uri);
+        recordBookDownloadDiag(
+          'WebView 预热完成',
+          summary:
+              'url=$url · cookies=${cookieNamesForLog(warmedCookies)}',
+        );
+        try {
+          bytes = await downloadAnnaEpubOnDevice(
+            downloadUri: uri,
+            userAgent: annaMobileChromeUa,
+            cookieHeader: warmedCookies ?? httpErr.cookieHeader,
+            referer: httpErr.referer,
+            onProgress: (p) {
+              if (!mounted) return;
+              setState(() => _captureProgress = p);
+            },
+          );
+        } on AnnaHttpDownloadException catch (retryErr) {
+          if (retryErr.statusCode != 403) rethrow;
+          recordBookDownloadDiag(
+            'HTTP 仍 403，改 WebView 直载',
+            summary:
+                'url=$url · cookies=${cookieNamesForLog(retryErr.cookieHeader)} · snippet=${retryErr.bodySnippet.isEmpty ? "-" : retryErr.bodySnippet}',
+          );
+          bytes = await downloadAnnaEpubViaWebView(
+            controller: _controller,
+            downloadUri: uri,
+            onProgress: (p) {
+              if (!mounted) return;
+              setState(() => _captureProgress = p);
+            },
+          );
+        }
       }
       recordBookDownloadDiag(
         '安娜上传问象',
