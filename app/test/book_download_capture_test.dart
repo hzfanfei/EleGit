@@ -24,6 +24,16 @@ void main() {
     );
   });
 
+  test('normalizes annas fast_download md5-only to libgen ads', () {
+    final uri = Uri.parse(
+      'https://annas-archive.gl/fast_download/f87448722f0072549206b63999ec39e1/0/0',
+    );
+    expect(
+      bookDownloadUrlForServer(uri),
+      'https://libgen.li/ads.php?md5=f87448722f0072549206b63999ec39e1',
+    );
+  });
+
   test('annas search url builder', () {
     expect(annasArchiveStartUrl(), 'https://annas-archive.gl');
     expect(

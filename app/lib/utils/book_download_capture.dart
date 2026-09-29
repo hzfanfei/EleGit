@@ -47,6 +47,45 @@ String annasArchiveStartUrl({String? query}) {
   return '$base/search?q=${Uri.encodeComponent(q)}&ext=epub';
 }
 
+/// 交给服务端前统一成 LibGen ads.php，避免 Anna 403 或 get.php 一次性 key 失效。
+String bookDownloadUrlForServer(Uri uri) {
+  final md5 = uri.queryParameters['md5'] ?? '';
+  final hasMd5 = RegExp(r'^[a-f0-9]{32}$').hasMatch(md5);
+  final host = uri.host.toLowerCase();
+  final path = uri.path.toLowerCase();
+
+  if (hasMd5 &&
+      (host.contains('libgen') || host.contains('library.lol')) &&
+      path.contains('get.php')) {
+    return 'https://libgen.li/ads.php?md5=$md5';
+  }
+
+  if (host.contains('annas-archive') &&
+      (path.contains('/fast_download/') || path.contains('/slow_download/'))) {
+    final fromPath = _md5FromAnnasDownloadPath(path);
+    if (fromPath != null) {
+      return 'https://libgen.li/ads.php?md5=$fromPath';
+    }
+  }
+
+  return uri.toString();
+}
+
+String? _md5FromAnnasDownloadPath(String path) {
+  final slow = RegExp(r'/slow_download/\d+/([a-f0-9]{32})', caseSensitive: false);
+  final slowMatch = slow.firstMatch(path);
+  if (slowMatch != null) return slowMatch.group(1)!.toLowerCase();
+
+  final fast = RegExp(
+    r'/fast_download/(?:\d+/)?([a-f0-9]{32})',
+    caseSensitive: false,
+  );
+  final fastMatch = fast.firstMatch(path);
+  if (fastMatch != null) return fastMatch.group(1)!.toLowerCase();
+
+  return null;
+}
+
 String? suggestedTitleFromDownloadUrl(Uri uri) {
   final path = uri.path;
   final parts = path.split('/').where((s) => s.isNotEmpty).toList();

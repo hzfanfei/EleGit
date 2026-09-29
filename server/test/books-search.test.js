@@ -9,6 +9,8 @@ import { describe, it } from "node:test";
 import {
   assertSafeExternalUrl,
   downloadBookFromUrl,
+  extractBookMd5FromUrl,
+  normalizeBookDownloadUrl,
   rewriteAnnaDownloadToLibgen,
   parseAnnasSearchHtml,
   resolveLibgenDownloadUrl,
@@ -536,7 +538,7 @@ describe("books-search", () => {
     });
 
     it("rewrites annas slow_download to libgen ads.php", () => {
-      const parsed = rewriteAnnaDownloadToLibgen(
+      const parsed = normalizeBookDownloadUrl(
         new URL(
           "https://annas-archive.gl/slow_download/0/f87448722f0072549206b63999ec39e1/0/0",
         ),
@@ -544,6 +546,29 @@ describe("books-search", () => {
       assert.equal(parsed.hostname, "libgen.li");
       assert.equal(parsed.pathname, "/ads.php");
       assert.equal(parsed.searchParams.get("md5"), "f87448722f0072549206b63999ec39e1");
+    });
+
+    it("rewrites annas fast_download without mirror index to libgen ads.php", () => {
+      const url =
+        "https://annas-archive.gl/fast_download/f87448722f0072549206b63999ec39e1/0/0";
+      assert.equal(
+        extractBookMd5FromUrl(new URL(url)),
+        "f87448722f0072549206b63999ec39e1",
+      );
+      const parsed = normalizeBookDownloadUrl(new URL(url));
+      assert.equal(parsed.hostname, "libgen.li");
+      assert.equal(parsed.searchParams.get("md5"), "f87448722f0072549206b63999ec39e1");
+    });
+
+    it("rewrites libgen get.php with md5 to libgen ads.php", () => {
+      const parsed = normalizeBookDownloadUrl(
+        new URL(
+          "https://libgen.li/get.php?md5=f87448722f0072549206b63999ec39e1&key=STALE",
+        ),
+      );
+      assert.equal(parsed.pathname, "/ads.php");
+      assert.equal(parsed.searchParams.get("md5"), "f87448722f0072549206b63999ec39e1");
+      assert.equal(parsed.searchParams.get("key"), null);
     });
 
     it("resolves annas slow_download via libgen then downloads epub", async () => {

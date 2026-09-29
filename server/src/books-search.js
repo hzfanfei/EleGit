@@ -393,11 +393,13 @@ async function fetchJiumoHubs(query, opts) {
  */
 const DEFAULT_ANNAS_HOSTS = ["annas-archive.gl", "annas-archive.pk", "annas-archive.gd"];
 const DEFAULT_LIBGEN_HOST = "libgen.li";
-const LIBGEN_GET_KEY_RE = /get\.php\?md5=([0-9a-f]{32})&key=([A-Z0-9]+)/i;
+const LIBGEN_GET_KEY_RE = /get\.php\?md5=([0-9a-f]{32})&key=([A-Za-z0-9]+)/i;
 const BOOK_DOWNLOAD_USER_AGENT =
   "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";
-const ANNAS_MIRROR_DOWNLOAD_MD5_RE =
-  /\/(?:fast_download|slow_download)\/\d+\/([a-f0-9]{32})(?:\/|$)/i;
+const MD5_HEX32_RE = /^[a-f0-9]{32}$/i;
+const ANNAS_SLOW_DOWNLOAD_MD5_RE = /\/slow_download\/\d+\/([a-f0-9]{32})(?:\/|$)/i;
+const ANNAS_FAST_DOWNLOAD_MD5_RE =
+  /\/fast_download\/(?:\d+\/)?([a-f0-9]{32})(?:\/|$)/i;
 
 function annasHostsFromEnv() {
   const raw = String(process.env.WENXIANG_ANNAS_BASE_URL || "").trim();
@@ -438,15 +440,61 @@ function downloadFetchHeaders(parsed) {
   return headers;
 }
 
-/**
- * Anna 站内 fast/slow_download 需浏览器 Cookie，服务端直拉常 403；改走 LibGen ads.php。
- */
-export function rewriteAnnaDownloadToLibgen(parsed) {
+function md5Hex32(raw) {
+  const s = String(raw || "").toLowerCase();
+  return MD5_HEX32_RE.test(s) ? s : "";
+}
+
+/** 从 Anna / LibGen 下载 URL 提取 md5（纯函数，供单测）。 */
+export function extractBookMd5FromUrl(parsed) {
+  const fromQuery = md5Hex32(parsed.searchParams.get("md5"));
+  if (fromQuery) return fromQuery;
   const host = parsed.hostname.toLowerCase();
-  if (!host.includes("annas-archive")) return parsed;
-  const match = parsed.pathname.match(ANNAS_MIRROR_DOWNLOAD_MD5_RE);
-  if (!match) return parsed;
-  return libgenAdsUrlForMd5(match[1]);
+  if (!host.includes("annas-archive")) return "";
+  const path = parsed.pathname;
+  let match = path.match(ANNAS_SLOW_DOWNLOAD_MD5_RE);
+  if (match) return match[1].toLowerCase();
+  match = path.match(ANNAS_FAST_DOWNLOAD_MD5_RE);
+  if (match) return match[1].toLowerCase();
+  return "";
+}
+
+function isLibgenGetPhp(parsed) {
+  const host = parsed.hostname.toLowerCase();
+  return (
+    (host.includes("libgen") || host.includes("library.lol")) &&
+    parsed.pathname.toLowerCase().endsWith("/get.php")
+  );
+}
+
+function isAnnasMirrorDownload(parsed) {
+  const host = parsed.hostname.toLowerCase();
+  if (!host.includes("annas-archive")) return false;
+  return /\/(?:fast_download|slow_download)\//i.test(parsed.pathname);
+}
+
+/**
+ * 安娜 fast/slow_download 需浏览器 Cookie，服务端直拉常 403；
+ * WebView 传来的 LibGen get.php 带一次性 key，改统一走 ads.php→get.php。
+ */
+export function normalizeBookDownloadUrl(parsed) {
+  const md5 = extractBookMd5FromUrl(parsed);
+  if (md5 && (isAnnasMirrorDownload(parsed) || isLibgenGetPhp(parsed))) {
+    return libgenAdsUrlForMd5(md5);
+  }
+  if (
+    md5 &&
+    parsed.hostname.toLowerCase().includes("libgen") &&
+    parsed.pathname.toLowerCase().endsWith("/ads.php")
+  ) {
+    return libgenAdsUrlForMd5(md5);
+  }
+  return parsed;
+}
+
+/** @deprecated 使用 normalizeBookDownloadUrl */
+export function rewriteAnnaDownloadToLibgen(parsed) {
+  return normalizeBookDownloadUrl(parsed);
 }
 
 function md5FromLibgenUrl(parsed) {
@@ -726,7 +774,7 @@ export async function downloadBookFromUrl(rawUrl, opts = {}) {
   }
 
   let parsed = await assertSafeExternalUrl(rawUrl);
-  parsed = rewriteAnnaDownloadToLibgen(parsed);
+  parsed = normalizeBookDownloadUrl(parsed);
   if (parsed.pathname.endsWith("/ads.php") && parsed.searchParams.get("md5")) {
     opts.onProgress?.({ phase: "resolving", bytesReceived: 0, bytesTotal: null });
     parsed = await resolveLibgenDownloadUrl(String(parsed), { fetchImpl, signal });

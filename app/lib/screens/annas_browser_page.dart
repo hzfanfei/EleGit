@@ -91,7 +91,7 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
   }
 
   Future<void> _captureAndDownload(Uri uri) async {
-    final url = uri.toString();
+    final url = bookDownloadUrlForServer(uri);
     if (_inFlightUrls.contains(url)) return;
     _inFlightUrls.add(url);
     final title = suggestedTitleFromDownloadUrl(uri);
