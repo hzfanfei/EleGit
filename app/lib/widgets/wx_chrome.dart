@@ -247,6 +247,50 @@ class _BrandTitle extends StatelessWidget {
   }
 }
 
+/// 带「复制」操作的 SnackBar，便于把长错误信息发给调试。
+void showWxCopyableSnackBar(
+  BuildContext context, {
+  required String message,
+  String? copyText,
+  Duration duration = const Duration(seconds: 10),
+}) {
+  final messenger = ScaffoldMessenger.maybeOf(context);
+  if (messenger == null) return;
+  final payload = (copyText ?? message).trim();
+  messenger.showSnackBar(
+    SnackBar(
+      content: Text(message),
+      duration: duration,
+      behavior: SnackBarBehavior.floating,
+      action: SnackBarAction(
+        label: '复制',
+        onPressed: () {
+          Clipboard.setData(ClipboardData(text: payload));
+          messenger.hideCurrentSnackBar();
+          messenger.showSnackBar(
+            const SnackBar(
+              content: Text('已复制'),
+              duration: Duration(milliseconds: 1200),
+            ),
+          );
+        },
+      ),
+    ),
+  );
+}
+
+void showWxFailureSnackBar(
+  BuildContext context,
+  Object error, {
+  String prefix = '',
+}) {
+  final summary = humanizeError(error);
+  final message = prefix.isEmpty ? summary : '$prefix$summary';
+  final detail = errorDetail(error);
+  final copy = detail == null ? error.toString().trim() : '$message\n\n$detail';
+  showWxCopyableSnackBar(context, message: message, copyText: copy);
+}
+
 class WxErrorPanel extends StatefulWidget {
   const WxErrorPanel({
     super.key,

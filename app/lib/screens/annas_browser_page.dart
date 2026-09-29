@@ -121,9 +121,7 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
       );
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('保存失败：$err')),
-      );
+      showWxFailureSnackBar(context, err, prefix: '保存失败：');
     } finally {
       _inFlightUrls.remove(url);
       if (mounted) {
