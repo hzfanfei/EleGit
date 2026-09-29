@@ -1,5 +1,10 @@
 import { detectCursorEngine } from "./acp.js";
-import { clearLiveTurn, handoffActive, noteLiveTurn } from "./live-turns.js";
+import {
+  clearLiveTurn,
+  createUnwatchedInboxMirror,
+  handoffActive,
+  noteLiveTurn,
+} from "./live-turns.js";
 import { publishInboxNotice } from "./notifications.js";
 
 export { detectCursorEngine } from "./acp.js";
@@ -246,10 +251,22 @@ export async function* streamAnswer({
   bookId,
   taskSettleMs = 1500,
   partialBackfill = false,
+  isUnwatched,
 }) {
   const opts = { ...streamOpts, signal };
   const engine = detectEngine();
   if (engine && sessions && session) {
+    const inboxMirror =
+      workspaceRoot && typeof isUnwatched === "function"
+        ? createUnwatchedInboxMirror({
+            workspaceRoot,
+            isUnwatched,
+            noticeFor: answerReadyNotice,
+            publish: publishInboxNotice,
+          })
+        : null;
+    const touchInboxMirror = () => inboxMirror?.schedule(session.id);
+    try {
     yield { type: "start", engine: "acp" };
     yield { type: "status", phase: "agent", detail: "正在调用本机 Agent…" };
     const queue = [];
@@ -316,6 +333,7 @@ export async function* streamAnswer({
         onDelta: (chunk) => {
           full += chunk;
           noteLiveTurn({ session, question, bookId, answer: full, activity: lastActivity });
+          touchInboxMirror();
           queue.push({ kind: "delta", text: chunk });
           notify?.();
           maybePublishTaskNotice();
@@ -326,6 +344,7 @@ export async function* streamAnswer({
           if (label) {
             lastActivity = label;
             noteLiveTurn({ session, question, bookId, answer: full, activity: lastActivity });
+            touchInboxMirror();
           }
           if (hintCleared) return;
           queue.push({ kind: "status", phase: "activity", detail: label });
@@ -405,6 +424,9 @@ export async function* streamAnswer({
     if (signal?.aborted) return;
     yield { type: "done", engine: "local-progress", answer: fallback, sessionId: session.id };
     return;
+    } finally {
+      inboxMirror?.dispose();
+    }
   }
   const answer = synthesize({ question, progress, context, local, bookContext });
   yield { type: "start", engine: "local-progress" };

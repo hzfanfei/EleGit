@@ -1208,6 +1208,7 @@ app.post("/v1/books/chat", async (req, res) => {
       signal,
       workspaceRoot: store.config.workspaceRoot,
       bookId: book.id,
+      isUnwatched: unwatched,
     })) {
       if (event.type === "notification") notified = true;
       if (event.type === "done") {
@@ -1393,6 +1394,7 @@ app.post("/v1/chat", async (req, res) => {
       workspaceRoot: store.config.workspaceRoot,
       detectEngine: () => detectCursorEngine("repo"),
       partialBackfill: String(req.headers["x-wenxiang-backfill"] || "") === "partial",
+      isUnwatched: unwatched,
     })) {
       if (event.type === "notification") notified = true;
       if (event.type === "done") {
