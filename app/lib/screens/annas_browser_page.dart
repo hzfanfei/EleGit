@@ -138,8 +138,7 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
           duration: Duration(milliseconds: 1600),
         ),
       );
-      final isSlow = isAnnaSlowDownloadGateUri(uri);
-      await _captureAndDownload(uri, preferWebViewFirst: isSlow);
+      await _captureAndDownload(uri);
     } catch (_) {}
   }
 
@@ -497,7 +496,7 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
             Padding(
               padding: const EdgeInsets.fromLTRB(Wx.inset, 8, Wx.inset, 12),
               child: Text(
-                '网页内正常浏览、点下载；把 slow / fast 下载链接复制到剪切板，问象会自动检测并写入问书库（约每 0.45 秒检查一次）。',
+                '网页内正常浏览、点下载；复制以 .epub 结尾的文件链接到剪切板，问象会自动检测并写入问书库（约每 0.45 秒检查一次）。',
                 style: theme.textTheme.bodySmall?.copyWith(color: Wx.faint),
               ),
             ),

@@ -11,9 +11,10 @@ bool shouldCaptureBookDownloadUrl(Uri uri, {String? mimeType}) {
   return _annasBookDownloadUri(uri, mimeType: mimeType, includeSlowGate: false);
 }
 
-/// 剪切板复制到的安娜下载链（含 slow_download；用户先在网页里过验证再复制）。
+/// 剪切板：仅 path 以 `.epub` 结尾时触发入库。
 bool shouldCaptureBookDownloadFromClipboard(Uri uri) {
-  return _annasBookDownloadUri(uri, includeSlowGate: true);
+  if (!uri.hasScheme || uri.host.isEmpty) return false;
+  return uri.path.toLowerCase().endsWith('.epub');
 }
 
 bool _annasBookDownloadUri(
@@ -40,27 +41,32 @@ bool _annasBookDownloadUri(
   return false;
 }
 
-final _clipboardAnnaUrl = RegExp(
-  r'https?://\S*annas-archive\S+',
-  caseSensitive: false,
-);
+final _clipboardHttpUrl = RegExp(r'https?://[^\s]+', caseSensitive: false);
 
-/// 从剪切板文本解析第一条安娜下载 URL。
+String _trimUrlToken(String url) {
+  var s = url.trim();
+  while (s.isNotEmpty && ',.;)]}'.contains(s[s.length - 1])) {
+    s = s.substring(0, s.length - 1);
+  }
+  return s;
+}
+
+/// 从剪切板文本解析第一条以 `.epub` 结尾的下载 URL。
 Uri? annaDownloadUriFromClipboard(String? raw) {
   final text = raw?.trim() ?? '';
   if (text.isEmpty) return null;
-  final direct = Uri.tryParse(text);
-  if (direct != null &&
-      direct.hasScheme &&
-      direct.host.isNotEmpty &&
-      shouldCaptureBookDownloadFromClipboard(direct)) {
-    return direct;
+  Uri? pick(String candidate) {
+    final uri = Uri.tryParse(_trimUrlToken(candidate));
+    if (uri != null && shouldCaptureBookDownloadFromClipboard(uri)) return uri;
+    return null;
   }
-  final match = _clipboardAnnaUrl.firstMatch(text);
-  if (match == null) return null;
-  final uri = Uri.tryParse(match.group(0)!);
-  if (uri == null || !shouldCaptureBookDownloadFromClipboard(uri)) return null;
-  return uri;
+  final direct = pick(text);
+  if (direct != null) return direct;
+  for (final match in _clipboardHttpUrl.allMatches(text)) {
+    final found = pick(match.group(0)!);
+    if (found != null) return found;
+  }
+  return null;
 }
 
 String annasArchiveStartUrl({String? query}) {

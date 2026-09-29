@@ -10,16 +10,25 @@ void main() {
     );
     expect(isAnnaSlowDownloadGateUri(slow), isTrue);
     expect(shouldCaptureBookDownloadUrl(slow), isFalse);
-    expect(shouldCaptureBookDownloadFromClipboard(slow), isTrue);
+    expect(shouldCaptureBookDownloadFromClipboard(slow), isFalse);
   });
 
-  test('annaDownloadUriFromClipboard parses slow link', () {
-    final url =
-        'https://annas-archive.gl/slow_download/86eb03dc6a6956f90f5e4d51574c99e4/0/1';
-    expect(annaDownloadUriFromClipboard(url)?.toString(), url);
+  test('clipboard only triggers on .epub path', () {
+    final epub = Uri.parse('https://annas-archive.gl/dyn/files/demo.epub');
+    expect(shouldCaptureBookDownloadFromClipboard(epub), isTrue);
     expect(
-      annaDownloadUriFromClipboard('链接 $url 请下载')?.toString(),
-      url,
+      annaDownloadUriFromClipboard(epub.toString())?.toString(),
+      epub.toString(),
+    );
+    expect(
+      annaDownloadUriFromClipboard('下载 ${epub.toString()} 谢谢')?.toString(),
+      epub.toString(),
+    );
+    expect(
+      annaDownloadUriFromClipboard(
+        'https://annas-archive.gl/fast_download/abc/0/0',
+      ),
+      isNull,
     );
   });
 
