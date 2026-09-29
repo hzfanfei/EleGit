@@ -602,6 +602,42 @@ describe("books-search", () => {
       });
     });
 
+    it("warms md5 and sends referer for slow_download without mirror index", async () => {
+      await withWorkspace(async (workspaceRoot) => {
+        const buf = makeFakeEpubBuffer();
+        const annaUrl =
+          "https://annas-archive.gl/slow_download/86eb03dc6a6956f90f5e4d51574c99e4/0/1";
+        const seen = [];
+        const fetchImpl = async (url, init) => {
+          const u = typeof url === "string" ? new URL(url) : url;
+          seen.push(u.pathname);
+          if (u.pathname.startsWith("/md5/")) {
+            return new Response("<html>ok</html>", {
+              status: 200,
+              headers: { "Content-Type": "text/html" },
+            });
+          }
+          if (u.href === annaUrl) {
+            const ref = init?.headers?.Referer || init?.headers?.referer || "";
+            assert.ok(String(ref).includes("/md5/86eb03dc6a6956f90f5e4d51574c99e4"));
+            return new Response(buf, {
+              status: 200,
+              headers: { "Content-Type": "application/epub+zip" },
+            });
+          }
+          return new Response("nope", { status: 404 });
+        };
+        await downloadBookFromUrl(annaUrl, {
+          workspaceRoot,
+          fetchImpl,
+          suggestedTitle: "Anna No Mirror",
+          cookieHeader: "session=test",
+        });
+        assert.ok(seen.some((p) => p.startsWith("/md5/86eb03dc6a6956f90f5e4d51574c99e4")));
+        assert.ok(seen.some((p) => p.includes("slow_download")));
+      });
+    });
+
     it("downloads annas slow_download when cookie header is sent", async () => {
       await withWorkspace(async (workspaceRoot) => {
         const buf = makeFakeEpubBuffer();
