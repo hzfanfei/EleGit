@@ -703,7 +703,7 @@ class WenxiangApi {
         .toList();
   }
 
-  /// 搜书：聚合 Open Library + 鸠摩搜索；直链 epub 可下发，网盘链需浏览器打开。
+  /// 搜书：Open Library + 安娜的档案 + 鸠摩；前两源可直下 epub，鸠摩多为网盘外链。
   Future<List<BookSearchResult>> searchBooks(
     String query, {
     List<String>? sources,
@@ -714,7 +714,7 @@ class WenxiangApi {
     final qp = <String, String>{
       'q': trimmed,
       'sources': (sources == null || sources.isEmpty)
-          ? 'openlibrary,jiumo'
+          ? 'openlibrary,annas,jiumo'
           : sources.join(','),
     };
     if (limit != null) qp['limit'] = limit.toString();
