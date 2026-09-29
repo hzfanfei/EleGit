@@ -816,12 +816,14 @@ app.post("/v1/books/download", async (req, res) => {
       return;
     }
     const title = req.body?.title ? String(req.body.title) : "";
+    const cookieHeader = req.body?.cookieHeader ? String(req.body.cookieHeader) : "";
     const sync = req.body?.sync === true || req.query?.sync === "1";
     if (sync) {
       const result = await downloadBookFromUrl(url, {
         workspaceRoot: store.config.workspaceRoot,
         signal: req.signal,
         suggestedTitle: title,
+        cookieHeader,
       });
       res.json({ ok: true, status: "done", ...result });
       return;
@@ -829,6 +831,7 @@ app.post("/v1/books/download", async (req, res) => {
     const jobId = startBookDownloadJob({
       url,
       title,
+      cookieHeader,
       workspaceRoot: store.config.workspaceRoot,
     });
     res.json({ ok: true, status: "pending", jobId });

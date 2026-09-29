@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { downloadBookFromUrl } from "./books-search.js";
 
-/** 大书 / 慢镜像：LibGen 解析 + 落盘可能超过数分钟 */
+/** 大书 / 慢镜像落盘可能超过数分钟 */
 export const BOOK_DOWNLOAD_TIMEOUT_MS = 20 * 60 * 1000;
 const JOB_TTL_MS = 60 * 60 * 1000;
 const MAX_JOBS = 48;
@@ -17,7 +17,7 @@ function pruneOldJobs() {
 }
 
 /**
- * @param {{ url: string, title?: string, workspaceRoot: string }} opts
+ * @param {{ url: string, title?: string, cookieHeader?: string, workspaceRoot: string }} opts
  * @returns {string} jobId
  */
 export function startBookDownloadJob(opts) {
@@ -35,6 +35,7 @@ export function startBookDownloadJob(opts) {
     createdAt: Date.now(),
     url: String(opts.url || "").trim(),
     title: String(opts.title || "").trim(),
+    cookieHeader: String(opts.cookieHeader || "").trim(),
     progress: { phase: "queued", bytesReceived: 0, bytesTotal: null },
   };
   jobs.set(id, job);
@@ -54,6 +55,7 @@ async function runBookDownloadJob(job, workspaceRoot) {
     const result = await downloadBookFromUrl(job.url, {
       workspaceRoot,
       suggestedTitle: job.title,
+      cookieHeader: job.cookieHeader,
       signal: AbortSignal.timeout(BOOK_DOWNLOAD_TIMEOUT_MS),
       onProgress: (p) => {
         job.progress = {
@@ -84,6 +86,7 @@ async function runBookDownloadJob(job, workspaceRoot) {
  * @property {number} [finishedAt]
  * @property {string} url
  * @property {string} title
+ * @property {string} cookieHeader
  * @property {object} [result]
  * @property {string} [error]
  * @property {string} [code]

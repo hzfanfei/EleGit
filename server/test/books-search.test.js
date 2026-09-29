@@ -13,7 +13,6 @@ import {
   normalizeBookDownloadUrl,
   rewriteAnnaDownloadToLibgen,
   parseAnnasSearchHtml,
-  resolveLibgenDownloadUrl,
   searchAnnasArchive,
   searchBooks,
   searchJiumo,
@@ -226,7 +225,7 @@ describe("books-search", () => {
   });
 
   describe("parseAnnasSearchHtml", () => {
-    it("keeps epub rows with libgen ads downloadUrl, skips pdf", () => {
+    it("keeps epub rows with anna md5 downloadUrl, skips pdf", () => {
       const results = parseAnnasSearchHtml(annasFixture, {
         origin: "https://annas-archive.gl",
         limit: 10,
@@ -240,7 +239,7 @@ describe("books-search", () => {
       assert.equal(results[0].format, "epub");
       assert.equal(
         results[0].downloadUrl,
-        "https://libgen.li/ads.php?md5=f87448722f0072549206b63999ec39e1",
+        "https://annas-archive.gl/md5/f87448722f0072549206b63999ec39e1",
       );
       assert.equal(
         results[0].detailUrl,
@@ -264,24 +263,6 @@ describe("books-search", () => {
       const results = await searchAnnasArchive("python", { fetchImpl, limit: 5 });
       assert.equal(results.length, 2);
       assert.equal(results[0].source, "annas");
-    });
-  });
-
-  describe("resolveLibgenDownloadUrl", () => {
-    it("extracts get.php link from ads.php HTML", async () => {
-      const fetchImpl = async () =>
-        new Response(
-          '<a href="get.php?md5=f87448722f0072549206b63999ec39e1&key=AB12CD">dl</a>',
-          { status: 200, headers: { "Content-Type": "text/html" } },
-        );
-      const resolved = await resolveLibgenDownloadUrl(
-        "https://libgen.li/ads.php?md5=f87448722f0072549206b63999ec39e1",
-        { fetchImpl },
-      );
-      assert.equal(
-        resolved.href,
-        "https://libgen.li/get.php?md5=f87448722f0072549206b63999ec39e1&key=AB12CD",
-      );
     });
   });
 
@@ -537,18 +518,17 @@ describe("books-search", () => {
       assert.ok(result.path.startsWith(path.join(dir, "books")));
     });
 
-    it("rewrites annas slow_download to libgen ads.php", () => {
+    it("keeps annas slow_download url unchanged", () => {
       const parsed = normalizeBookDownloadUrl(
         new URL(
           "https://annas-archive.gl/slow_download/0/f87448722f0072549206b63999ec39e1/0/0",
         ),
       );
-      assert.equal(parsed.hostname, "libgen.li");
-      assert.equal(parsed.pathname, "/ads.php");
-      assert.equal(parsed.searchParams.get("md5"), "f87448722f0072549206b63999ec39e1");
+      assert.equal(parsed.hostname, "annas-archive.gl");
+      assert.ok(parsed.pathname.includes("slow_download"));
     });
 
-    it("rewrites annas fast_download without mirror index to libgen ads.php", () => {
+    it("extracts md5 from annas fast_download without mirror index", () => {
       const url =
         "https://annas-archive.gl/fast_download/f87448722f0072549206b63999ec39e1/0/0";
       assert.equal(
@@ -556,75 +536,35 @@ describe("books-search", () => {
         "f87448722f0072549206b63999ec39e1",
       );
       const parsed = normalizeBookDownloadUrl(new URL(url));
-      assert.equal(parsed.hostname, "libgen.li");
-      assert.equal(parsed.searchParams.get("md5"), "f87448722f0072549206b63999ec39e1");
+      assert.equal(parsed.hostname, "annas-archive.gl");
+      assert.ok(parsed.pathname.includes("fast_download"));
     });
 
-    it("rewrites libgen get.php with md5 to libgen ads.php", () => {
-      const parsed = normalizeBookDownloadUrl(
-        new URL(
-          "https://libgen.li/get.php?md5=f87448722f0072549206b63999ec39e1&key=STALE",
-        ),
-      );
-      assert.equal(parsed.pathname, "/ads.php");
-      assert.equal(parsed.searchParams.get("md5"), "f87448722f0072549206b63999ec39e1");
-      assert.equal(parsed.searchParams.get("key"), null);
-    });
-
-    it("resolves annas slow_download via libgen then downloads epub", async () => {
+    it("downloads annas slow_download when cookie header is sent", async () => {
       await withWorkspace(async (workspaceRoot) => {
         const buf = makeFakeEpubBuffer();
-        const fetchImpl = async (url) => {
+        const annaUrl =
+          "https://annas-archive.gl/slow_download/0/f87448722f0072549206b63999ec39e1/0/0";
+        const fetchImpl = async (url, init) => {
           const u = typeof url === "string" ? new URL(url) : url;
-          if (u.pathname.endsWith("/ads.php")) {
-            return new Response(
-              "get.php?md5=f87448722f0072549206b63999ec39e1&key=ZZ99",
-              { status: 200, headers: { "Content-Type": "text/html" } },
-            );
-          }
-          if (u.pathname.endsWith("/get.php")) {
+          if (u.href === annaUrl) {
+            const cookie = init?.headers?.Cookie || init?.headers?.cookie || "";
+            if (!String(cookie).includes("session=test")) {
+              return new Response("forbidden", { status: 403 });
+            }
             return new Response(buf, {
               status: 200,
-              headers: { "Content-Type": "application/octet-stream" },
-            });
-          }
-          if (u.pathname.includes("slow_download")) {
-            return new Response("forbidden", { status: 403 });
-          }
-          return new Response("nope", { status: 404 });
-        };
-        const result = await downloadBookFromUrl(
-          "https://annas-archive.gl/slow_download/0/f87448722f0072549206b63999ec39e1/0/0",
-          { workspaceRoot, fetchImpl, suggestedTitle: "Anna Mirror" },
-        );
-        assert.equal(result.source, "annas");
-        assert.ok(result.filename.endsWith(".epub"));
-      });
-    });
-
-    it("resolves libgen ads.php then downloads epub", async () => {
-      await withWorkspace(async (workspaceRoot) => {
-        const buf = makeFakeEpubBuffer();
-        const fetchImpl = async (url) => {
-          const u = typeof url === "string" ? new URL(url) : url;
-          if (u.pathname.endsWith("/ads.php")) {
-            return new Response(
-              'get.php?md5=f87448722f0072549206b63999ec39e1&key=ZZ99',
-              { status: 200, headers: { "Content-Type": "text/html" } },
-            );
-          }
-          if (u.pathname.endsWith("/get.php")) {
-            return new Response(buf, {
-              status: 200,
-              headers: { "Content-Type": "application/octet-stream" },
+              headers: { "Content-Type": "application/epub+zip" },
             });
           }
           return new Response("nope", { status: 404 });
         };
-        const result = await downloadBookFromUrl(
-          "https://libgen.li/ads.php?md5=f87448722f0072549206b63999ec39e1",
-          { workspaceRoot, fetchImpl, suggestedTitle: "Libgen Book" },
-        );
+        const result = await downloadBookFromUrl(annaUrl, {
+          workspaceRoot,
+          fetchImpl,
+          suggestedTitle: "Anna Mirror",
+          cookieHeader: "session=test",
+        });
         assert.equal(result.source, "annas");
         assert.ok(result.filename.endsWith(".epub"));
       });

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../api/wenxiang_api.dart';
@@ -14,7 +15,7 @@ class AnnasBrowserOutcome {
   final int savedCount;
 }
 
-/// 内置浏览器打开安娜的档案；拦截 epub / LibGen 等直链，由服务端写入 workspace/books。
+/// 内置浏览器打开安娜的档案；拦截安娜下载链，由服务端写入 workspace/books。
 class AnnasBrowserPage extends StatefulWidget {
   const AnnasBrowserPage({
     super.key,
@@ -42,6 +43,8 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
   BookDownloadProgress? _captureProgress;
   final Set<String> _inFlightUrls = {};
   String _currentUrl = '';
+  String? _activeDownloadUrl;
+  final WebViewCookieManager _cookieManager = WebViewCookieManager();
 
   @override
   void initState() {
@@ -90,21 +93,43 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
       ..loadRequest(Uri.parse(startUrl));
   }
 
+  Future<String?> _cookieHeaderFor(Uri uri) async {
+    final origin = '${uri.scheme}://${uri.host}';
+    try {
+      final cookies = await _cookieManager.getCookies(origin);
+      if (cookies.isEmpty) return null;
+      return cookies.map((c) => '${c.name}=${c.value}').join('; ');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _copyText(String text, {String doneHint = '已复制'}) async {
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(doneHint), duration: const Duration(milliseconds: 1200)),
+    );
+  }
+
   Future<void> _captureAndDownload(Uri uri) async {
     final url = bookDownloadUrlForServer(uri);
     if (_inFlightUrls.contains(url)) return;
     _inFlightUrls.add(url);
     final title = suggestedTitleFromDownloadUrl(uri);
+    final cookieHeader = await _cookieHeaderFor(uri);
     if (mounted) {
       setState(() {
         _capturingLabel = title ?? '电子书';
         _captureProgress = null;
+        _activeDownloadUrl = url;
       });
     }
     try {
       await widget.api.downloadBook(
         url: url,
         title: title,
+        cookieHeader: cookieHeader,
         onProgress: (p) {
           if (!mounted) return;
           setState(() => _captureProgress = p);
@@ -128,6 +153,7 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
         setState(() {
           _capturingLabel = null;
           _captureProgress = null;
+          _activeDownloadUrl = null;
         });
       }
     }
@@ -142,7 +168,7 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
     final label = _capturingLabel ?? '电子书';
     final p = _captureProgress;
     if (p == null) return '正在保存「$label」…';
-    if (p.phase == 'resolving') return '正在解析 LibGen 链接…';
+    if (p.phase == 'resolving') return '正在准备下载…';
     final received = p.bytesReceived;
     final total = p.bytesTotal;
     if (total != null && total > 0) {
@@ -196,6 +222,46 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
                 minHeight: 2,
                 value: _pageLoading && _progress == 0 ? null : _progress / 100,
               ),
+            if (_activeDownloadUrl != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(Wx.inset, 8, Wx.inset, 0),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Wx.surface,
+                    borderRadius: BorderRadius.circular(Wx.radius),
+                    border: Border.all(color: Wx.hairline),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '下载地址',
+                                style: theme.textTheme.labelSmall?.copyWith(color: Wx.muted),
+                              ),
+                              const SizedBox(height: 4),
+                              SelectableText(
+                                _activeDownloadUrl!,
+                                style: theme.textTheme.bodySmall,
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: '复制下载地址',
+                          icon: const Icon(Icons.copy, size: 18),
+                          onPressed: () => _copyText(_activeDownloadUrl!, doneHint: '已复制下载地址'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
             if (busy)
               Padding(
                 padding: const EdgeInsets.fromLTRB(Wx.inset, 8, Wx.inset, 0),
@@ -229,7 +295,7 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
             Padding(
               padding: const EdgeInsets.fromLTRB(Wx.inset, 8, Wx.inset, 12),
               child: Text(
-                '在网页里正常搜索、点下载即可；检测到 epub / LibGen 链接时会写入本机 workspace 的 books 目录，无需再点「下载到手机」。',
+                '在网页里正常搜索、点下载即可；检测到安娜下载链时会写入本机 workspace 的 books 目录，无需再点「下载到手机」。',
                 style: theme.textTheme.bodySmall?.copyWith(color: Wx.faint),
               ),
             ),

@@ -731,6 +731,7 @@ class WenxiangApi {
   Future<BookDownloadResult> downloadBook({
     required String url,
     String? title,
+    String? cookieHeader,
     void Function(BookDownloadProgress progress)? onProgress,
   }) async {
     final res = await http
@@ -740,6 +741,8 @@ class WenxiangApi {
           body: jsonEncode({
             'url': url,
             if (title != null && title.isNotEmpty) 'title': title,
+            if (cookieHeader != null && cookieHeader.isNotEmpty)
+              'cookieHeader': cookieHeader,
           }),
         )
         .timeout(const Duration(seconds: 30));

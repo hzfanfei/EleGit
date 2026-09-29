@@ -392,8 +392,6 @@ async function fetchJiumoHubs(query, opts) {
  * 可通过环境变量 WENXIANG_JIUMO_COOKIE 配置；未配置时静默跳过该源。
  */
 const DEFAULT_ANNAS_HOSTS = ["annas-archive.gl", "annas-archive.pk", "annas-archive.gd"];
-const DEFAULT_LIBGEN_HOST = "libgen.li";
-const LIBGEN_GET_KEY_RE = /get\.php\?md5=([0-9a-f]{32})&key=([A-Za-z0-9]+)/i;
 const BOOK_DOWNLOAD_USER_AGENT =
   "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";
 const MD5_HEX32_RE = /^[a-f0-9]{32}$/i;
@@ -412,31 +410,19 @@ function annasHostsFromEnv() {
   }
 }
 
-function libgenHostFromEnv() {
-  const raw = String(process.env.WENXIANG_LIBGEN_HOST || DEFAULT_LIBGEN_HOST).trim();
-  return raw.replace(/^https?:\/\//i, "").replace(/\/.*$/, "") || DEFAULT_LIBGEN_HOST;
-}
-
-function libgenAdsUrlForMd5(md5) {
-  const host = libgenHostFromEnv();
-  const out = new URL(`https://${host}/ads.php`);
-  out.searchParams.set("md5", String(md5 || "").toLowerCase());
-  return out;
-}
-
-function downloadFetchHeaders(parsed) {
+function downloadFetchHeaders(parsed, cookieHeader) {
   const host = parsed.hostname.toLowerCase();
   const headers = {
     Accept: "*/*",
     "User-Agent": BOOK_DOWNLOAD_USER_AGENT,
   };
-  if (host.includes("libgen")) {
-    headers.Referer = `${parsed.origin}/`;
-  } else if (host.includes("archive.org")) {
+  if (host.includes("archive.org")) {
     headers.Referer = "https://archive.org/";
   } else if (host.includes("annas-archive")) {
     headers.Referer = `${parsed.origin}/`;
   }
+  const cookie = String(cookieHeader || "").trim();
+  if (cookie) headers.Cookie = cookie;
   return headers;
 }
 
@@ -459,47 +445,14 @@ export function extractBookMd5FromUrl(parsed) {
   return "";
 }
 
-function isLibgenGetPhp(parsed) {
-  const host = parsed.hostname.toLowerCase();
-  return (
-    (host.includes("libgen") || host.includes("library.lol")) &&
-    parsed.pathname.toLowerCase().endsWith("/get.php")
-  );
-}
-
-function isAnnasMirrorDownload(parsed) {
-  const host = parsed.hostname.toLowerCase();
-  if (!host.includes("annas-archive")) return false;
-  return /\/(?:fast_download|slow_download)\//i.test(parsed.pathname);
-}
-
-/**
- * 安娜 fast/slow_download 需浏览器 Cookie，服务端直拉常 403；
- * WebView 传来的 LibGen get.php 带一次性 key，改统一走 ads.php→get.php。
- */
+/** 下载 URL 不再改写为第三方镜像，保持安娜原链。 */
 export function normalizeBookDownloadUrl(parsed) {
-  const md5 = extractBookMd5FromUrl(parsed);
-  if (md5 && (isAnnasMirrorDownload(parsed) || isLibgenGetPhp(parsed))) {
-    return libgenAdsUrlForMd5(md5);
-  }
-  if (
-    md5 &&
-    parsed.hostname.toLowerCase().includes("libgen") &&
-    parsed.pathname.toLowerCase().endsWith("/ads.php")
-  ) {
-    return libgenAdsUrlForMd5(md5);
-  }
   return parsed;
 }
 
 /** @deprecated 使用 normalizeBookDownloadUrl */
 export function rewriteAnnaDownloadToLibgen(parsed) {
   return normalizeBookDownloadUrl(parsed);
-}
-
-function md5FromLibgenUrl(parsed) {
-  const md5 = String(parsed.searchParams.get("md5") || "").toLowerCase();
-  return /^[a-f0-9]{32}$/.test(md5) ? md5 : "";
 }
 
 function isAnnasBlockedHtml(html) {
@@ -530,7 +483,6 @@ function parseAnnasMetaLine(line) {
  */
 export function parseAnnasSearchHtml(html, opts = {}) {
   const origin = String(opts.origin || "https://annas-archive.gl").replace(/\/$/, "");
-  const libgenHost = libgenHostFromEnv();
   const limit = Math.max(1, Math.min(20, opts.limit || DEFAULT_LIMIT));
   const chunks = String(html || "").split(
     /<div class="flex\s+pt-3 pb-3 border-b last:border-b-0 border-gray-100">/,
@@ -569,7 +521,7 @@ export function parseAnnasSearchHtml(html, opts = {}) {
       year,
       format: EBOOK_FORMAT,
       size: meta.size,
-      downloadUrl: `https://${libgenHost}/ads.php?md5=${hash}`,
+      downloadUrl: `${origin}/md5/${hash}`,
       detailUrl: `${origin}/md5/${hash}`,
     });
     if (out.length >= limit) break;
@@ -616,59 +568,13 @@ async function fetchAnnasSearchPage(query, opts) {
   throw e;
 }
 
-/**
- * 安娜的档案搜索（HTML 抓取，ext=epub）。下载走 libgen ads.php→get.php，无需 AA 会员 key。
- */
+/** 安娜的档案搜索（HTML 抓取，ext=epub）。 */
 export async function searchAnnasArchive(query, opts = {}) {
   const limit = Math.max(1, Math.min(20, opts.limit || DEFAULT_LIMIT));
   const trimmedQuery = String(query || "").trim();
   if (!trimmedQuery) return [];
   const { html, origin } = await fetchAnnasSearchPage(trimmedQuery, opts);
   return parseAnnasSearchHtml(html, { origin, limit });
-}
-
-export async function resolveLibgenDownloadUrl(rawUrl, opts = {}) {
-  const fetchImpl = opts.fetchImpl || globalThis.fetch;
-  const signal = ensureSignal(opts.signal);
-  const parsed = await assertSafeExternalUrl(rawUrl);
-  const md5 = String(parsed.searchParams.get("md5") || "").toLowerCase();
-  if (!parsed.pathname.endsWith("/ads.php") || !/^[a-f0-9]{32}$/.test(md5)) {
-    return parsed;
-  }
-  let res;
-  try {
-    res = await fetchImpl(parsed, {
-      signal,
-      redirect: "follow",
-      headers: {
-        Accept: "text/html",
-        ...downloadFetchHeaders(parsed),
-      },
-    });
-  } catch (err) {
-    const e = new Error(`LibGen 解析下载链接失败: ${err?.message || "network"}`);
-    e.status = 502;
-    e.code = "libgen_network";
-    throw e;
-  }
-  if (!res.ok) {
-    const e = new Error(`LibGen 无此文件 (${res.status})`);
-    e.status = res.status === 404 ? 404 : 502;
-    e.code = "libgen_not_found";
-    throw e;
-  }
-  const text = await res.text();
-  const match = text.match(LIBGEN_GET_KEY_RE);
-  if (!match) {
-    const e = new Error("LibGen 页面未找到下载链接");
-    e.status = 502;
-    e.code = "libgen_no_link";
-    throw e;
-  }
-  const getUrl = new URL(parsed.origin);
-  getUrl.pathname = "/get.php";
-  getUrl.search = `md5=${match[1].toLowerCase()}&key=${match[2]}`;
-  return getUrl;
 }
 
 export async function searchJiumo(query, opts = {}) {
@@ -775,39 +681,20 @@ export async function downloadBookFromUrl(rawUrl, opts = {}) {
 
   let parsed = await assertSafeExternalUrl(rawUrl);
   parsed = normalizeBookDownloadUrl(parsed);
-  if (parsed.pathname.endsWith("/ads.php") && parsed.searchParams.get("md5")) {
-    opts.onProgress?.({ phase: "resolving", bytesReceived: 0, bytesTotal: null });
-    parsed = await resolveLibgenDownloadUrl(String(parsed), { fetchImpl, signal });
-  }
+  const cookieHeader = String(opts.cookieHeader || "").trim();
 
   let res;
   try {
     res = await fetchImpl(parsed, {
       signal,
       redirect: "follow",
-      headers: downloadFetchHeaders(parsed),
+      headers: downloadFetchHeaders(parsed, cookieHeader),
     });
   } catch (err) {
     const e = new Error(`下载请求失败: ${err?.message || "network"}`);
     e.status = 502;
     e.code = "download_network";
     throw e;
-  }
-  if (!res.ok && (res.status === 401 || res.status === 403)) {
-    const md5 = md5FromLibgenUrl(parsed);
-    const host = parsed.hostname.toLowerCase();
-    if (md5 && host.includes("libgen") && !parsed.pathname.endsWith("/ads.php")) {
-      opts.onProgress?.({ phase: "resolving", bytesReceived: 0, bytesTotal: null });
-      parsed = await resolveLibgenDownloadUrl(String(libgenAdsUrlForMd5(md5)), {
-        fetchImpl,
-        signal,
-      });
-      res = await fetchImpl(parsed, {
-        signal,
-        redirect: "follow",
-        headers: downloadFetchHeaders(parsed),
-      });
-    }
   }
   if (!res.ok) {
     const e = new Error(`下载失败 (${res.status})`);
@@ -938,7 +825,7 @@ export async function downloadBookFromUrl(rawUrl, opts = {}) {
 
   const host = parsed.hostname.toLowerCase();
   let source = "openlibrary";
-  if (host.includes("libgen")) source = "annas";
+  if (host.includes("annas-archive")) source = "annas";
   else if (host.includes("archive.org")) source = "openlibrary";
 
   return {
