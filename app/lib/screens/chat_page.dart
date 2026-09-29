@@ -1125,6 +1125,8 @@ class _ChatPageState extends State<ChatPage> {
   Future<void> _pullInboxIntoChat(int userIndex) async {
     final res = await widget.api.fetchInbox();
     final list = (res['items'] as List?) ?? const [];
+    Map<String, dynamic>? latestPartial;
+    DateTime? latestPartialAt;
     for (final entry in list) {
       if (entry is! Map) continue;
       final item = Map<String, dynamic>.from(entry);
@@ -1143,29 +1145,53 @@ class _ChatPageState extends State<ChatPage> {
           bookId: (item['bookId'] ?? '').toString(),
         );
       }
-      if (_messagesMatchNotice(userIndex, sessionId: sessionId, question: question)) {
-        if (item['partial'] == true) {
-          if (activity.trim().isNotEmpty) _liveActivity.value = activity;
-          if (answer.isNotEmpty) _showHeldPreview(answer);
-          if (!_holdForAnswer &&
-              (activity.trim().isNotEmpty || answer.isNotEmpty)) {
-            _setLivePhase('generate');
-          }
-        } else if (answer.isNotEmpty) {
-          await _placeHeldAnswer(userIndex, answer);
-        }
+      if (!_messagesMatchNotice(
+        userIndex,
+        sessionId: sessionId,
+        question: question,
+        holdLoose: _holdForAnswer,
+      )) {
+        continue;
       }
+      if (item['partial'] == true) {
+        final at = DateTime.tryParse((item['createdAt'] ?? '').toString());
+        final stamp = at ?? DateTime.fromMillisecondsSinceEpoch(0);
+        if (latestPartialAt != null && !stamp.isAfter(latestPartialAt)) continue;
+        latestPartialAt = stamp;
+        latestPartial = item;
+      } else if (answer.isNotEmpty) {
+        await _placeHeldAnswer(userIndex, answer);
+      }
+    }
+    if (latestPartial != null) {
+      _applyPartialInboxRow(latestPartial);
     }
     _mergeBackfill();
   }
 
-  bool _messagesMatchNotice(int userIndex, {required String sessionId, required String question}) {
+  void _applyPartialInboxRow(Map<String, dynamic> item) {
+    final activity = (item['activity'] ?? '').toString();
+    final answer = (item['answer'] ?? '').toString();
+    if (activity.trim().isNotEmpty) _liveActivity.value = activity;
+    if (answer.isNotEmpty) _showHeldPreview(answer);
+    if (!_holdForAnswer && (activity.trim().isNotEmpty || answer.isNotEmpty)) {
+      _setLivePhase('generate');
+    }
+  }
+
+  bool _messagesMatchNotice(
+    int userIndex, {
+    required String sessionId,
+    required String question,
+    bool holdLoose = false,
+  }) {
     if (userIndex < 0 || userIndex >= _messages.length) return false;
     return heldTurnMatchesNotice(
       sessionId: sessionId,
       currentSessionId: _sessionId ?? '',
       question: question,
       asked: _messages[userIndex].content,
+      holdLoose: holdLoose,
     );
   }
 
@@ -1219,6 +1245,7 @@ class _ChatPageState extends State<ChatPage> {
       userIndex,
       sessionId: hint.sessionId,
       question: hint.question,
+      holdLoose: _holdForAnswer,
     )) {
       return;
     }

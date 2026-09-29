@@ -54,13 +54,17 @@ bool heldTurnMatchesNotice({
   required String currentSessionId,
   required String question,
   required String asked,
+  bool holdLoose = false,
 }) {
   final current = currentSessionId.trim();
   final incoming = sessionId.trim();
-  if (current.isNotEmpty && incoming.isNotEmpty && incoming != current) return false;
   final q = question.trim();
   final text = asked.trim();
-  if (q.isNotEmpty) return text == q || text.startsWith(q);
+  final questionMatches = q.isNotEmpty && (text == q || text.startsWith(q));
+  if (current.isNotEmpty && incoming.isNotEmpty && incoming != current) {
+    if (!(holdLoose && questionMatches)) return false;
+  }
+  if (q.isNotEmpty) return questionMatches;
   return current.isNotEmpty && incoming == current;
 }
 

@@ -328,6 +328,51 @@ void main() {
     await tester.pump(const Duration(seconds: 2));
   });
 
+  testWidgets('hold poll applies partial inbox activity to the work log', (tester) async {
+    const asked = '这个仓库最近在做什么？';
+    final api = FakeWenxiangApi(
+      streamEvents: [
+        ChatStreamEvent(type: 'start', engine: 'local-progress', sessionId: 's-hold'),
+        ChatStreamEvent(type: 'status', phase: 'activity', detail: '思考·旧进度'),
+      ],
+      inboxItems: [
+        {
+          'kind': 'agent-notification',
+          'partial': true,
+          'sessionId': 'relay-session',
+          'question': asked,
+          'activity': '读·inbox-hold.md',
+          'answer': '',
+          'createdAt': '2026-09-29T12:00:01.000Z',
+        },
+      ],
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: ChatPage(
+          api: api,
+          repo: sampleRepo(),
+          onBack: () {},
+        ),
+      ),
+    );
+    await _pumpUntilChatReady(tester);
+    await tester.tap(find.text(asked));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('思考·旧进度'), findsOneWidget);
+    expect(find.textContaining('inbox-hold'), findsNothing);
+
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump();
+
+    expect(find.textContaining('inbox-hold'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('a quiet stream end enters hold like a transport drop', (tester) async {
     final api = FakeWenxiangApi(
       streamEvents: [

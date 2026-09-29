@@ -36,6 +36,7 @@ class FakeWenxiangApi extends WenxiangApi {
     this.bookVoiceTurnEvents,
     this.repoVoiceTurnEvents,
     this.booksResult = const [],
+    this.inboxItems = const [],
   }) : super(baseUrl: 'http://127.0.0.1:8787', apiKey: 'test-key');
 
   Object? oauthThrows;
@@ -68,6 +69,8 @@ class FakeWenxiangApi extends WenxiangApi {
   int cancelRepoVoiceTurnCalls = 0;
   List<ChatStreamEvent>? bookVoiceTurnEvents;
   List<ChatStreamEvent>? repoVoiceTurnEvents;
+  List<Map<String, dynamic>> inboxItems;
+  int fetchInboxCalls = 0;
   String? lastSessionId;
   String? lastChatMessage;
   final List<String> chatMessages = <String>[];
@@ -415,7 +418,10 @@ class FakeWenxiangApi extends WenxiangApi {
   }
 
   @override
-  Future<Map<String, dynamic>> fetchInbox() async => {'items': <Object>[]};
+  Future<Map<String, dynamic>> fetchInbox() async {
+    fetchInboxCalls += 1;
+    return {'items': List<Object>.from(inboxItems)};
+  }
 
   @override
   void cancelBookVoiceTurn() {

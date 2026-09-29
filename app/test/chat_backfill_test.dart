@@ -95,6 +95,16 @@ void main() {
     );
     expect(
       heldTurnMatchesNotice(
+        sessionId: 'other',
+        currentSessionId: 's1',
+        question: '修一下',
+        asked: '修一下',
+        holdLoose: true,
+      ),
+      isTrue,
+    );
+    expect(
+      heldTurnMatchesNotice(
         sessionId: 's1',
         currentSessionId: 's1',
         question: '上一问',
