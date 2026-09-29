@@ -236,18 +236,197 @@ export async function searchOpenLibrary(query, opts = {}) {
   return out;
 }
 
+const JIUMO_HOSTS = ["www.jiumodiary.com", "www2.jiumodiary.com", "www5.jiumodiary.com"];
+const JIUMO_FORMATS = [
+  ["epub", /epub/i],
+  ["mobi", /mobi(?!le)/i],
+  ["azw", /azw3?/i],
+  ["pdf", /pdf/i],
+  ["txt", /txt/i],
+  ["doc", /doc(?!ument)/i],
+];
+
+function detectJiumoFormat(title, des) {
+  const text = `${title || ""} ${des || ""}`;
+  for (const [name, re] of JIUMO_FORMATS) {
+    if (re.test(text)) return name;
+  }
+  return "other";
+}
+
+function isDirectEbookUrl(raw) {
+  try {
+    const u = new URL(String(raw || ""));
+    if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+    return /\.(epub|mobi|azw3?)(\?|#|$)/i.test(u.pathname);
+  } catch {
+    return false;
+  }
+}
+
+function jiumoCookieHeader(raw) {
+  const trimmed = String(raw || "").trim();
+  if (!trimmed) return "";
+  if (trimmed.includes("=")) return trimmed;
+  return `dyh1_wx6_code=${trimmed}`;
+}
+
+async function postJiumoForm(host, pathname, body, opts) {
+  const fetchImpl = opts.fetchImpl || globalThis.fetch;
+  const signal = ensureSignal(opts.signal);
+  const url = `https://${host}/${pathname.replace(/^\//, "")}`;
+  const headers = {
+    "Content-Type": "application/x-www-form-urlencoded",
+    "X-Requested-With": "XMLHttpRequest",
+    Accept: "application/json, text/plain, */*",
+    "User-Agent": "Mozilla/5.0 (compatible; Wenxiang/1.0; +book-search)",
+  };
+  const cookie = jiumoCookieHeader(opts.jiumoCookie);
+  if (cookie) headers.Cookie = cookie;
+  let res;
+  try {
+    res = await fetchImpl(url, { method: "POST", headers, body, signal });
+  } catch (err) {
+    const e = new Error(`鸠摩搜索请求失败: ${err?.message || "network"}`);
+    e.status = 502;
+    e.code = "jiumo_network";
+    throw e;
+  }
+  if (!res.ok) {
+    const e = new Error(`鸠摩搜索失败 (${res.status})`);
+    e.status = 502;
+    e.code = "jiumo_failed";
+    throw e;
+  }
+  const text = await res.text();
+  if (!text.trim()) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function flattenJiumoHubs(hubs) {
+  const items = [];
+  if (!Array.isArray(hubs)) return items;
+  for (const hub of hubs) {
+    const details = hub?.details;
+    if (!details || details.status !== "succeed") continue;
+    const viewType = String(hub?.view_type || "");
+    const data = details.data;
+    if (viewType === "view_forum" && data && typeof data === "object" && !Array.isArray(data)) {
+      for (const group of Object.values(data)) {
+        const rows = Array.isArray(group?.data) ? group.data : [];
+        for (const row of rows) items.push(row);
+      }
+      continue;
+    }
+    const rows = Array.isArray(data) ? data : [];
+    for (const row of rows) items.push(row);
+  }
+  return items;
+}
+
+function mapJiumoItem(row) {
+  const link = String(row?.link || "").trim();
+  const title = decodeEntities(String(row?.title || "").trim());
+  if (!link || !title) return null;
+  if (!/^https?:\/\//i.test(link)) return null;
+  const des = decodeEntities(String(row?.des || row?.info || "").trim());
+  const format = detectJiumoFormat(title, des);
+  const direct = isDirectEbookUrl(link);
+  return {
+    source: "jiumo",
+    sourceLabel: "鸠摩搜索",
+    title: title.slice(0, 160),
+    author: des.slice(0, 160),
+    year: "",
+    format,
+    size: "",
+    downloadUrl: direct && format === "epub" ? link : "",
+    detailUrl: link,
+    rateSummary: Number.parseInt(String(row?.rate_summary ?? "0"), 10) || 0,
+  };
+}
+
+async function fetchJiumoHubs(query, opts) {
+  const trimmedQuery = String(query || "").trim();
+  const timeInt = Date.now();
+  const initBody = `q=${encodeURIComponent(trimmedQuery)}&remote_ip=&time_int=${timeInt}`;
+  let initJson = null;
+  let usedHost = "";
+  for (const host of JIUMO_HOSTS) {
+    initJson = await postJiumoForm(host, "init_hubs.php", initBody, { ...opts, host });
+    if (initJson?.status === "succeed") {
+      usedHost = host;
+      break;
+    }
+    if (initJson?.status === "exceed" || initJson?.status === "tooshort") {
+      return { hubs: [], host: "" };
+    }
+  }
+  if (!usedHost || !initJson || initJson.status !== "succeed") {
+    return { hubs: [], host: "" };
+  }
+  let hubs = Array.isArray(initJson.sources) ? [...initJson.sources] : [];
+  let count = Number.parseInt(String(initJson.count ?? "0"), 10) || hubs.length;
+  const id = initJson.id;
+  if (!id) return { hubs, host: usedHost };
+
+  for (let round = 0; round < 12; round += 1) {
+    const ajaxBody = `id=${encodeURIComponent(id)}&set=${encodeURIComponent(String(count))}`;
+    const ajaxJson = await postJiumoForm(usedHost, "ajax_fetch_hubs.php", ajaxBody, opts);
+    if (!ajaxJson || ajaxJson.status !== "succeed") break;
+    if (Array.isArray(ajaxJson.sources) && ajaxJson.sources.length) {
+      hubs = hubs.concat(ajaxJson.sources);
+    }
+    count = Number.parseInt(String(ajaxJson.count ?? count), 10) || count;
+    if (String(ajaxJson.status_extra || "") === "completed") break;
+  }
+  return { hubs, host: usedHost };
+}
+
 /**
- * 鸠摩搜索 (jiumodiary.com) 当前被微信扫码验证拦截，需要异步 POST + id 二次拉取。
- * 实现复杂度较高，本期 V1 不接入，留接口方便后续补。
+ * 鸠摩搜索 (jiumodiary.com)。站点需微信公众号验证码 Cookie（dyh1_wx6_code），
+ * 可通过环境变量 WENXIANG_JIUMO_COOKIE 配置；未配置时静默跳过该源。
  */
-export async function searchJiumo(_query, _opts = {}) {
-  return [];
+export async function searchJiumo(query, opts = {}) {
+  const fetchImpl = opts.fetchImpl || globalThis.fetch;
+  const limit = Math.max(1, Math.min(20, opts.limit || DEFAULT_LIMIT));
+  const signal = ensureSignal(opts.signal);
+  const trimmedQuery = String(query || "").trim();
+  if (!trimmedQuery) return [];
+
+  const jiumoCookie =
+    opts.jiumoCookie ?? process.env.WENXIANG_JIUMO_COOKIE ?? "";
+  if (!jiumoCookieHeader(jiumoCookie)) {
+    return [];
+  }
+
+  const { hubs } = await fetchJiumoHubs(trimmedQuery, {
+    fetchImpl,
+    signal,
+    jiumoCookie,
+  });
+  const flat = flattenJiumoHubs(hubs);
+  const seen = new Set();
+  const ranked = [];
+  for (const row of flat) {
+    const mapped = mapJiumoItem(row);
+    if (!mapped) continue;
+    if (seen.has(mapped.detailUrl)) continue;
+    seen.add(mapped.detailUrl);
+    ranked.push(mapped);
+  }
+  ranked.sort((a, b) => b.rateSummary - a.rateSummary || a.title.localeCompare(b.title, "zh"));
+  return ranked.slice(0, limit).map(({ rateSummary: _rs, ...rest }) => rest);
 }
 
 export async function searchBooks(query, opts = {}) {
   const sources = Array.isArray(opts.sources) && opts.sources.length
     ? opts.sources
-    : ["openlibrary"];
+    : ["openlibrary", "jiumo"];
   const limit = Math.max(1, Math.min(20, opts.limit || DEFAULT_LIMIT));
   const signal = ensureSignal(opts.signal);
   const fetchImpl = opts.fetchImpl || globalThis.fetch;

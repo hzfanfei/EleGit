@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../api/wenxiang_api.dart';
 import '../models.dart';
@@ -92,8 +93,26 @@ class _BookSearchSheetState extends State<BookSearchSheet> {
     }
   }
 
+  String _resultKey(BookSearchResult r) {
+    if (r.downloadUrl.isNotEmpty) return r.downloadUrl;
+    return r.detailUrl ?? r.title;
+  }
+
+  Future<void> _openExternal(BookSearchResult r) async {
+    final url = r.detailUrl;
+    if (url == null || url.isEmpty) return;
+    final uri = Uri.tryParse(url);
+    if (uri == null) return;
+    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('无法打开链接')),
+      );
+    }
+  }
+
   Future<void> _download(BookSearchResult r) async {
-    final key = r.downloadUrl;
+    final key = _resultKey(r);
     setState(() => _downloadStates[key] = _DownloadState.busy);
     try {
       await widget.api.downloadBook(url: r.downloadUrl, title: r.title);
@@ -141,7 +160,7 @@ class _BookSearchSheetState extends State<BookSearchSheet> {
                       child: Text(
                         _doneCount > 0
                             ? '已下载 $_doneCount 本，回到书单查看'
-                            : '仅支持 epub；部分中文/新书需借阅，搜不到属正常',
+                            : 'Open Library 直下 epub；鸠摩多为网盘，点「打开」',
                         style: theme.textTheme.bodySmall?.copyWith(color: Wx.faint),
                       ),
                     ),
@@ -224,13 +243,13 @@ class _BookSearchSheetState extends State<BookSearchSheet> {
     if (_activeQuery.isEmpty) {
       return const WxEmpty(
         title: '输入书名搜索',
-        detail: 'V1 仅接入 Open Library 的公版书。中文/新书多为借阅资源，搜不到属正常。',
+        detail: '已聚合 Open Library 与鸠摩搜索。公版书可直下；中文网盘需在浏览器取书。',
       );
     }
     if (_results.isEmpty) {
       return WxEmpty(
-        title: '没有可下载的 epub',
-        detail: '试试更短的书名，或换英文名（公版书为主）。',
+        title: '没有匹配结果',
+        detail: '换关键词试试；鸠摩需在服务端 .env 配置 WENXIANG_JIUMO_COOKIE。',
         action: TextButton(
           onPressed: () => _runSearch(_activeQuery),
           child: const Text('重新搜索'),
@@ -246,8 +265,9 @@ class _BookSearchSheetState extends State<BookSearchSheet> {
         final r = _results[index];
         return _ResultCard(
           result: r,
-          state: _downloadStates[r.downloadUrl] ?? _DownloadState.idle,
+          state: _downloadStates[_resultKey(r)] ?? _DownloadState.idle,
           onDownload: () => _download(r),
+          onOpen: () => _openExternal(r),
         );
       },
     );
@@ -261,11 +281,13 @@ class _ResultCard extends StatelessWidget {
     required this.result,
     required this.state,
     required this.onDownload,
+    required this.onOpen,
   });
 
   final BookSearchResult result;
   final _DownloadState state;
   final VoidCallback onDownload;
+  final VoidCallback onOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -304,7 +326,8 @@ class _ResultCard extends StatelessWidget {
                     children: [
                       _Chip(label: result.sourceLabel.isEmpty ? result.source : result.sourceLabel),
                       if (result.year.isNotEmpty) _Chip(label: result.year),
-                      const _Chip(label: 'epub'),
+                      if (result.format.isNotEmpty)
+                        _Chip(label: result.format),
                     ],
                   ),
                 ],
@@ -346,6 +369,17 @@ class _ResultCard extends StatelessWidget {
           onPressed: onDownload,
         );
       case _DownloadState.idle:
+        if (result.downloadUrl.isEmpty) {
+          return FilledButton.tonalIcon(
+            onPressed: result.detailUrl == null ? null : onOpen,
+            icon: const Icon(Icons.open_in_new, size: 16),
+            label: const Text('打开'),
+            style: FilledButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            ),
+          );
+        }
         return FilledButton.tonalIcon(
           onPressed: onDownload,
           icon: const Icon(Icons.download_outlined, size: 16),

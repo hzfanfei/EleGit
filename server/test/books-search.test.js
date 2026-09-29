@@ -9,6 +9,7 @@ import {
   assertSafeExternalUrl,
   downloadBookFromUrl,
   searchBooks,
+  searchJiumo,
   searchOpenLibrary,
 } from "../src/books-search.js";
 
@@ -208,6 +209,82 @@ describe("books-search", () => {
         () => searchOpenLibrary("x", { fetchImpl }),
         (err) => err.status === 502 && err.code === "openlibrary_failed",
       );
+    });
+  });
+
+  describe("searchJiumo", () => {
+    it("returns empty without WENXIANG_JIUMO_COOKIE", async () => {
+      const prev = process.env.WENXIANG_JIUMO_COOKIE;
+      delete process.env.WENXIANG_JIUMO_COOKIE;
+      try {
+        const fetchImpl = async () => {
+          throw new Error("should not fetch");
+        };
+        const results = await searchJiumo("三体", { fetchImpl });
+        assert.deepEqual(results, []);
+      } finally {
+        if (prev === undefined) delete process.env.WENXIANG_JIUMO_COOKIE;
+        else process.env.WENXIANG_JIUMO_COOKIE = prev;
+      }
+    });
+
+    it("parses hub rows, prefers direct epub downloadUrl", async () => {
+      const fetchImpl = async (url, init) => {
+        const u = typeof url === "string" ? new URL(url) : url;
+        const body = String(init?.body || "");
+        if (u.pathname.endsWith("init_hubs.php")) {
+          return new Response(
+            JSON.stringify({
+              status: "succeed",
+              id: "abc123",
+              count: 1,
+              sources: [
+                {
+                  view_type: "view_main",
+                  details: {
+                    status: "succeed",
+                    data: [
+                      {
+                        title: "三体.epub",
+                        des: "刘慈欣",
+                        link: "https://archive.org/download/demo/demo.epub",
+                        rate_summary: 10,
+                      },
+                      {
+                        title: "三体 网盘",
+                        des: "刘慈欣",
+                        link: "https://pan.quark.cn/s/abc",
+                        rate_summary: 20,
+                      },
+                    ],
+                  },
+                },
+              ],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (u.pathname.endsWith("ajax_fetch_hubs.php")) {
+          return new Response(
+            JSON.stringify({ status: "succeed", status_extra: "completed", count: 1, sources: [] }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return new Response("nope", { status: 404 });
+      };
+      const results = await searchJiumo("三体", {
+        fetchImpl,
+        jiumoCookie: "test-code",
+        limit: 5,
+      });
+      assert.equal(results.length, 2);
+      const direct = results.find((r) => r.downloadUrl.includes("archive.org"));
+      const pan = results.find((r) => r.detailUrl.includes("quark"));
+      assert.ok(direct);
+      assert.ok(pan);
+      assert.equal(direct.source, "jiumo");
+      assert.equal(direct.format, "epub");
+      assert.equal(pan.downloadUrl, "");
     });
   });
 

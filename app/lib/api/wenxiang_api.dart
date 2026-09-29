@@ -703,8 +703,7 @@ class WenxiangApi {
         .toList();
   }
 
-  /// 搜书：聚合 Open Library 等源，返回可直接下载的 epub 候选。
-  /// V1 默认只搜 openlibrary；中文书大多仅 `borrowable`（需借阅登录），暂不下发。
+  /// 搜书：聚合 Open Library + 鸠摩搜索；直链 epub 可下发，网盘链需浏览器打开。
   Future<List<BookSearchResult>> searchBooks(
     String query, {
     List<String>? sources,
@@ -712,10 +711,12 @@ class WenxiangApi {
   }) async {
     final trimmed = query.trim();
     if (trimmed.isEmpty) return [];
-    final qp = <String, String>{'q': trimmed};
-    if (sources != null && sources.isNotEmpty) {
-      qp['sources'] = sources.join(',');
-    }
+    final qp = <String, String>{
+      'q': trimmed,
+      'sources': (sources == null || sources.isEmpty)
+          ? 'openlibrary,jiumo'
+          : sources.join(','),
+    };
     if (limit != null) qp['limit'] = limit.toString();
     final res = await http
         .get(_uri('/v1/books/search', qp), headers: _headers)
