@@ -1,4 +1,6 @@
 /// Latency tier for the header ping indicator (game-style signal bars).
+import 'package:http/http.dart' as http;
+
 enum LinkQualityTier {
   unknown,
   offline,
