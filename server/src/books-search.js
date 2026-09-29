@@ -391,6 +391,195 @@ async function fetchJiumoHubs(query, opts) {
  * 鸠摩搜索 (jiumodiary.com)。站点需微信公众号验证码 Cookie（dyh1_wx6_code），
  * 可通过环境变量 WENXIANG_JIUMO_COOKIE 配置；未配置时静默跳过该源。
  */
+const DEFAULT_ANNAS_HOSTS = ["annas-archive.org", "annas-archive.se", "annas-archive.gl"];
+const DEFAULT_LIBGEN_HOST = "libgen.li";
+const LIBGEN_GET_KEY_RE = /get\.php\?md5=([0-9a-f]{32})&key=([A-Z0-9]+)/i;
+
+function annasHostsFromEnv() {
+  const raw = String(process.env.WENXIANG_ANNAS_BASE_URL || "").trim();
+  if (!raw) return [...DEFAULT_ANNAS_HOSTS];
+  try {
+    const host = new URL(raw.includes("://") ? raw : `https://${raw}`).hostname;
+    return host ? [host, ...DEFAULT_ANNAS_HOSTS.filter((h) => h !== host)] : [...DEFAULT_ANNAS_HOSTS];
+  } catch {
+    return [...DEFAULT_ANNAS_HOSTS];
+  }
+}
+
+function libgenHostFromEnv() {
+  const raw = String(process.env.WENXIANG_LIBGEN_HOST || DEFAULT_LIBGEN_HOST).trim();
+  return raw.replace(/^https?:\/\//i, "").replace(/\/.*$/, "") || DEFAULT_LIBGEN_HOST;
+}
+
+function isAnnasBlockedHtml(html) {
+  const t = String(html || "");
+  if (t.length < 2500 && !t.includes("/md5/")) return true;
+  if (/DDoS-Guard|Antibot solution|Click for continue/i.test(t)) return true;
+  return false;
+}
+
+function parseAnnasMetaLine(line) {
+  const parts = String(line || "")
+    .split("·")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  let format = "";
+  let size = "";
+  let year = "";
+  for (const part of parts) {
+    if (/^epub$/i.test(part)) format = "epub";
+    else if (/^\d+(\.\d+)?\s*(KB|MB|GB)$/i.test(part)) size = part;
+    else if (/^\d{4}$/.test(part)) year = part;
+  }
+  return { format, size, year };
+}
+
+/**
+ * Parse Anna's Archive search HTML (ext=epub results). Pure function for tests.
+ */
+export function parseAnnasSearchHtml(html, opts = {}) {
+  const origin = String(opts.origin || "https://annas-archive.org").replace(/\/$/, "");
+  const libgenHost = libgenHostFromEnv();
+  const limit = Math.max(1, Math.min(20, opts.limit || DEFAULT_LIMIT));
+  const chunks = String(html || "").split(
+    /<div class="flex\s+pt-3 pb-3 border-b last:border-b-0 border-gray-100">/,
+  );
+  const seen = new Set();
+  const out = [];
+  for (const chunk of chunks) {
+    const titleMatch = chunk.match(
+      /href="\/md5\/([a-f0-9]{32})"[^>]*class="[^"]*js-vim-focus[^"]*font-semibold text-lg[^"]*"[^>]*>([^<]+)<\/a>/i,
+    );
+    if (!titleMatch) continue;
+    const hash = titleMatch[1].toLowerCase();
+    if (seen.has(hash)) continue;
+    const metaMatch = chunk.match(
+      /class="text-gray-800[^"]*font-semibold text-sm[^"]*mt-2"[^>]*>([^<]+)</i,
+    );
+    const meta = parseAnnasMetaLine(metaMatch ? metaMatch[1] : "");
+    if (meta.format !== "epub") continue;
+    seen.add(hash);
+    const title = decodeEntities(titleMatch[2].trim()).slice(0, 160);
+    let author = "";
+    const authorMatch = chunk.match(
+      /icon-\[mdi--user-edit\][^>]*><\/span>\s*([^<]+)<\/a>/i,
+    );
+    if (authorMatch) author = decodeEntities(authorMatch[1].trim()).slice(0, 160);
+    let year = meta.year;
+    if (!year) {
+      const yearMatch = chunk.match(/icon-\[mdi--company\][^>]*><\/span>\s*(\d{4})<\/a>/i);
+      if (yearMatch) year = yearMatch[1];
+    }
+    out.push({
+      source: "annas",
+      sourceLabel: "安娜的档案",
+      title,
+      author,
+      year,
+      format: EBOOK_FORMAT,
+      size: meta.size,
+      downloadUrl: `https://${libgenHost}/ads.php?md5=${hash}`,
+      detailUrl: `${origin}/md5/${hash}`,
+    });
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+async function fetchAnnasSearchPage(query, opts) {
+  const fetchImpl = opts.fetchImpl || globalThis.fetch;
+  const signal = ensureSignal(opts.signal);
+  const trimmedQuery = String(query || "").trim();
+  const path = `/search?q=${encodeURIComponent(trimmedQuery)}&ext=epub`;
+  const headers = {
+    Accept: "text/html,application/xhtml+xml",
+    "User-Agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  };
+  let lastErr = null;
+  for (const host of annasHostsFromEnv()) {
+    const url = `https://${host}${path}`;
+    try {
+      const res = await fetchImpl(url, { signal, headers, redirect: "follow" });
+      if (!res.ok) {
+        lastErr = new Error(`Anna's Archive 搜索失败 (${res.status})`);
+        continue;
+      }
+      const html = await res.text();
+      if (isAnnasBlockedHtml(html)) {
+        lastErr = new Error("Anna's Archive 返回反爬页面");
+        continue;
+      }
+      if (!html.includes("/md5/")) {
+        lastErr = new Error("Anna's Archive 搜索无结果页");
+        continue;
+      }
+      return { html, origin: `https://${host}` };
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  const e = new Error(`Anna's Archive 搜索失败: ${lastErr?.message || "network"}`);
+  e.status = 502;
+  e.code = "annas_failed";
+  throw e;
+}
+
+/**
+ * 安娜的档案搜索（HTML 抓取，ext=epub）。下载走 libgen ads.php→get.php，无需 AA 会员 key。
+ */
+export async function searchAnnasArchive(query, opts = {}) {
+  const limit = Math.max(1, Math.min(20, opts.limit || DEFAULT_LIMIT));
+  const trimmedQuery = String(query || "").trim();
+  if (!trimmedQuery) return [];
+  const { html, origin } = await fetchAnnasSearchPage(trimmedQuery, opts);
+  return parseAnnasSearchHtml(html, { origin, limit });
+}
+
+export async function resolveLibgenDownloadUrl(rawUrl, opts = {}) {
+  const fetchImpl = opts.fetchImpl || globalThis.fetch;
+  const signal = ensureSignal(opts.signal);
+  const parsed = await assertSafeExternalUrl(rawUrl);
+  const md5 = String(parsed.searchParams.get("md5") || "").toLowerCase();
+  if (!parsed.pathname.endsWith("/ads.php") || !/^[a-f0-9]{32}$/.test(md5)) {
+    return parsed;
+  }
+  let res;
+  try {
+    res = await fetchImpl(parsed, {
+      signal,
+      redirect: "follow",
+      headers: {
+        Accept: "text/html",
+        "User-Agent": "Wenxiang/1.0 (+book-download)",
+      },
+    });
+  } catch (err) {
+    const e = new Error(`LibGen 解析下载链接失败: ${err?.message || "network"}`);
+    e.status = 502;
+    e.code = "libgen_network";
+    throw e;
+  }
+  if (!res.ok) {
+    const e = new Error(`LibGen 无此文件 (${res.status})`);
+    e.status = res.status === 404 ? 404 : 502;
+    e.code = "libgen_not_found";
+    throw e;
+  }
+  const text = await res.text();
+  const match = text.match(LIBGEN_GET_KEY_RE);
+  if (!match) {
+    const e = new Error("LibGen 页面未找到下载链接");
+    e.status = 502;
+    e.code = "libgen_no_link";
+    throw e;
+  }
+  const getUrl = new URL(parsed.origin);
+  getUrl.pathname = "/get.php";
+  getUrl.search = `md5=${match[1].toLowerCase()}&key=${match[2]}`;
+  return getUrl;
+}
+
 export async function searchJiumo(query, opts = {}) {
   const fetchImpl = opts.fetchImpl || globalThis.fetch;
   const limit = Math.max(1, Math.min(20, opts.limit || DEFAULT_LIMIT));
@@ -426,7 +615,7 @@ export async function searchJiumo(query, opts = {}) {
 export async function searchBooks(query, opts = {}) {
   const sources = Array.isArray(opts.sources) && opts.sources.length
     ? opts.sources
-    : ["openlibrary", "jiumo"];
+    : ["openlibrary", "annas", "jiumo"];
   const limit = Math.max(1, Math.min(20, opts.limit || DEFAULT_LIMIT));
   const signal = ensureSignal(opts.signal);
   const fetchImpl = opts.fetchImpl || globalThis.fetch;
@@ -434,6 +623,13 @@ export async function searchBooks(query, opts = {}) {
   const tasks = sources.map((source) => {
     if (source === "openlibrary") {
       return searchOpenLibrary(query, { fetchImpl, limit, signal }).catch((err) => ({
+        __sourceError: source,
+        message: err?.message || String(err),
+        code: err?.code,
+      }));
+    }
+    if (source === "annas") {
+      return searchAnnasArchive(query, { fetchImpl, limit, signal }).catch((err) => ({
         __sourceError: source,
         message: err?.message || String(err),
         code: err?.code,
@@ -486,7 +682,10 @@ export async function downloadBookFromUrl(rawUrl, opts = {}) {
     throw err;
   }
 
-  const parsed = await assertSafeExternalUrl(rawUrl);
+  let parsed = await assertSafeExternalUrl(rawUrl);
+  if (parsed.pathname.endsWith("/ads.php") && parsed.searchParams.get("md5")) {
+    parsed = await resolveLibgenDownloadUrl(String(parsed), { fetchImpl, signal });
+  }
 
   let res;
   try {
@@ -620,10 +819,15 @@ export async function downloadBookFromUrl(rawUrl, opts = {}) {
     throw err;
   }
 
+  const host = parsed.hostname.toLowerCase();
+  let source = "openlibrary";
+  if (host.includes("libgen")) source = "annas";
+  else if (host.includes("archive.org")) source = "openlibrary";
+
   return {
     filename: finalName,
     path: finalPath,
     size: totalBytes,
-    source: "openlibrary",
+    source,
   };
 }

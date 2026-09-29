@@ -160,7 +160,7 @@ class _BookSearchSheetState extends State<BookSearchSheet> {
                       child: Text(
                         _doneCount > 0
                             ? '已下载 $_doneCount 本，回到书单查看'
-                            : 'Open Library 直下 epub；鸠摩多为网盘，点「打开」',
+                            : 'Open Library / 安娜的档案 可直下 epub；鸠摩多为网盘',
                         style: theme.textTheme.bodySmall?.copyWith(color: Wx.faint),
                       ),
                     ),
@@ -243,7 +243,7 @@ class _BookSearchSheetState extends State<BookSearchSheet> {
     if (_activeQuery.isEmpty) {
       return const WxEmpty(
         title: '输入书名搜索',
-        detail: '已聚合 Open Library 与鸠摩搜索。公版书可直下；中文网盘需在浏览器取书。',
+        detail: '已聚合 Open Library、安娜的档案与鸠摩。前两源可直下 epub。',
       );
     }
     if (_results.isEmpty) {

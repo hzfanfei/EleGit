@@ -2,16 +2,26 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { Buffer } from "node:buffer";
 import AdmZip from "adm-zip";
 import { describe, it } from "node:test";
 import {
   assertSafeExternalUrl,
   downloadBookFromUrl,
+  parseAnnasSearchHtml,
+  resolveLibgenDownloadUrl,
+  searchAnnasArchive,
   searchBooks,
   searchJiumo,
   searchOpenLibrary,
 } from "../src/books-search.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const annasFixture = await readFile(
+  path.join(__dirname, "fixtures", "annas-search.html"),
+  "utf8",
+);
 
 function makeFakeEpubBuffer() {
   const zip = new AdmZip();
@@ -208,6 +218,66 @@ describe("books-search", () => {
       await assert.rejects(
         () => searchOpenLibrary("x", { fetchImpl }),
         (err) => err.status === 502 && err.code === "openlibrary_failed",
+      );
+    });
+  });
+
+  describe("parseAnnasSearchHtml", () => {
+    it("keeps epub rows with libgen ads downloadUrl, skips pdf", () => {
+      const results = parseAnnasSearchHtml(annasFixture, {
+        origin: "https://annas-archive.org",
+        limit: 10,
+      });
+      assert.equal(results.length, 2);
+      assert.equal(results[0].source, "annas");
+      assert.equal(results[0].sourceLabel, "安娜的档案");
+      assert.equal(results[0].title, "Python Programming for Beginners");
+      assert.equal(results[0].author, "Publishing, AMZ");
+      assert.equal(results[0].year, "2021");
+      assert.equal(results[0].format, "epub");
+      assert.equal(
+        results[0].downloadUrl,
+        "https://libgen.li/ads.php?md5=f87448722f0072549206b63999ec39e1",
+      );
+      assert.equal(
+        results[0].detailUrl,
+        "https://annas-archive.org/md5/f87448722f0072549206b63999ec39e1",
+      );
+      assert.equal(results[1].title, "Intermediate Python");
+    });
+  });
+
+  describe("searchAnnasArchive", () => {
+    it("fetches search page and parses epub results", async () => {
+      const fetchImpl = async (url) => {
+        const u = typeof url === "string" ? new URL(url) : url;
+        assert.ok(u.pathname.includes("/search"));
+        assert.ok(u.searchParams.get("ext") === "epub");
+        return new Response(annasFixture, {
+          status: 200,
+          headers: { "Content-Type": "text/html" },
+        });
+      };
+      const results = await searchAnnasArchive("python", { fetchImpl, limit: 5 });
+      assert.equal(results.length, 2);
+      assert.equal(results[0].source, "annas");
+    });
+  });
+
+  describe("resolveLibgenDownloadUrl", () => {
+    it("extracts get.php link from ads.php HTML", async () => {
+      const fetchImpl = async () =>
+        new Response(
+          '<a href="get.php?md5=f87448722f0072549206b63999ec39e1&key=AB12CD">dl</a>',
+          { status: 200, headers: { "Content-Type": "text/html" } },
+        );
+      const resolved = await resolveLibgenDownloadUrl(
+        "https://libgen.li/ads.php?md5=f87448722f0072549206b63999ec39e1",
+        { fetchImpl },
+      );
+      assert.equal(
+        resolved.href,
+        "https://libgen.li/get.php?md5=f87448722f0072549206b63999ec39e1&key=AB12CD",
       );
     });
   });
@@ -462,6 +532,34 @@ describe("books-search", () => {
         suggestedTitle: "Hello",
       });
       assert.ok(result.path.startsWith(path.join(dir, "books")));
+    });
+
+    it("resolves libgen ads.php then downloads epub", async () => {
+      await withWorkspace(async (workspaceRoot) => {
+        const buf = makeFakeEpubBuffer();
+        const fetchImpl = async (url) => {
+          const u = typeof url === "string" ? new URL(url) : url;
+          if (u.pathname.endsWith("/ads.php")) {
+            return new Response(
+              'get.php?md5=f87448722f0072549206b63999ec39e1&key=ZZ99',
+              { status: 200, headers: { "Content-Type": "text/html" } },
+            );
+          }
+          if (u.pathname.endsWith("/get.php")) {
+            return new Response(buf, {
+              status: 200,
+              headers: { "Content-Type": "application/octet-stream" },
+            });
+          }
+          return new Response("nope", { status: 404 });
+        };
+        const result = await downloadBookFromUrl(
+          "https://libgen.li/ads.php?md5=f87448722f0072549206b63999ec39e1",
+          { workspaceRoot, fetchImpl, suggestedTitle: "Libgen Book" },
+        );
+        assert.equal(result.source, "annas");
+        assert.ok(result.filename.endsWith(".epub"));
+      });
     });
   });
 });

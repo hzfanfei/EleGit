@@ -790,7 +790,7 @@ app.get("/v1/books/search", async (req, res) => {
       res.status(400).json({ error: "搜索关键词不能为空" });
       return;
     }
-    const sourcesParam = String(req.query.sources || "openlibrary,jiumo");
+    const sourcesParam = String(req.query.sources || "openlibrary,annas,jiumo");
     const sources = sourcesParam
       .split(",")
       .map((s) => s.trim())
