@@ -169,12 +169,22 @@ function cachePaths(workspaceRoot, id) {
   return { dir, svg: join(dir, `${id}.svg`), png: join(dir, `${id}.png`) };
 }
 
+function isMermaidErrorSvg(svg) {
+  const text = String(svg || "");
+  return /aria-roledescription="error"/i.test(text) || /syntax error in text/i.test(text);
+}
+
 async function readCachedDiagram(workspaceRoot, id) {
   const paths = cachePaths(workspaceRoot, id);
   const [svg, png] = await Promise.all([
     readFile(paths.svg, "utf8"),
     readFile(paths.png),
   ]);
+  if (isMermaidErrorSvg(svg)) {
+    const err = new Error("cached mermaid error diagram");
+    err.code = "mermaid_error_cache";
+    throw err;
+  }
   return { svg, png };
 }
 
@@ -211,6 +221,7 @@ async function renderWithPuppeteer(code, paint, assets) {
     await page.addScriptTag({ path: assets.js });
     const mermaidConfig = {
       startOnLoad: false,
+      suppressErrorRendering: true,
       theme: "base",
       fontFamily: '"Microsoft YaHei", "Segoe UI", sans-serif',
       htmlLabels: false,
@@ -411,6 +422,11 @@ async function renderWithPuppeteer(code, paint, assets) {
     if (!svg.trim() || png.length < 8) {
       const err = new Error("Mermaid 渲染结果为空");
       err.code = "mermaid_empty_svg";
+      throw err;
+    }
+    if (isMermaidErrorSvg(svg)) {
+      const err = new Error("Mermaid 语法错误");
+      err.code = "mermaid_render_failed";
       throw err;
     }
     return { svg, png };

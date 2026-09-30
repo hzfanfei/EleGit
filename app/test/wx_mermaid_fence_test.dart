@@ -62,6 +62,13 @@ void main() {
     expect(pie, contains('\n"流程图" : 20'));
     expect(pie, contains('\n"其他图" : 10'));
 
+    const glued = splitMarkdownByMermaidFences(
+      '```mermaidpie showData title回答里的内容 "文字" :70 "流程图" :20 "其他图" :10```',
+    ).single.mermaidCode!;
+    expect(glued, startsWith('pie showData\n'));
+    expect(glued, contains('\ntitle 回答里的内容'));
+    expect(glued, contains('\n"文字" :70'));
+
     final er = segs[2].mermaidCode!;
     expect(er, contains('erDiagram'));
     expect(er, contains('ANSWER ||--o{ DIAGRAM : 包含'));

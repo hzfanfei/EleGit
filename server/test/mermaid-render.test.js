@@ -33,6 +33,13 @@ describe("mermaid-render", () => {
     assert.match(pie, /\n"文字" : 70/);
     assert.match(pie, /\n"其他图" : 10/);
 
+    const glued = normalizeMermaidSource(
+      'pie showData\ntitle回答里的内容\n"文字" :70\n"流程图" :20\n"其他图" :10',
+    );
+    assert.match(glued, /^pie showData\ntitle 回答里的内容\n/);
+    assert.match(glued, /\n"文字" :70/);
+    assert.match(glued, /\n"其他图" :10/);
+
     const er = normalizeMermaidSource(
       "erDiagram ANSWER ||--o{ DIAGRAM : 包含 ANSWER { string文本 } DIAGRAM { string类型 }",
     );
