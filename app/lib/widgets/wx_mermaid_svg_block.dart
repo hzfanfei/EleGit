@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
@@ -31,6 +33,7 @@ class WxMermaidSvgBlock extends StatefulWidget {
 }
 
 class _WxMermaidSvgBlockState extends State<WxMermaidSvgBlock> {
+  Uint8List? _png;
   String? _svg;
   String? _error;
   var _requestGen = 0;
@@ -47,6 +50,7 @@ class _WxMermaidSvgBlockState extends State<WxMermaidSvgBlock> {
     if (oldWidget.code != widget.code ||
         oldWidget.closed != widget.closed ||
         oldWidget.serverTheme != widget.serverTheme ||
+        oldWidget.backgroundColor != widget.backgroundColor ||
         oldWidget.api != widget.api) {
       _scheduleFetch();
     }
@@ -55,6 +59,7 @@ class _WxMermaidSvgBlockState extends State<WxMermaidSvgBlock> {
   void _scheduleFetch() {
     if (!widget.closed || widget.code.trim().isEmpty) {
       setState(() {
+        _png = null;
         _svg = null;
         _error = null;
       });
@@ -67,6 +72,7 @@ class _WxMermaidSvgBlockState extends State<WxMermaidSvgBlock> {
     }
     final gen = ++_requestGen;
     setState(() {
+      _png = null;
       _svg = null;
       _error = null;
     });
@@ -76,10 +82,11 @@ class _WxMermaidSvgBlockState extends State<WxMermaidSvgBlock> {
           theme: widget.serverTheme,
           backgroundColor: widget.backgroundColor,
         )
-        .then((svg) {
+        .then((diagram) {
           if (!mounted || gen != _requestGen) return;
           setState(() {
-            _svg = svg;
+            _png = diagram.png;
+            _svg = diagram.svg;
             _error = null;
           });
         })
@@ -87,6 +94,7 @@ class _WxMermaidSvgBlockState extends State<WxMermaidSvgBlock> {
           if (!mounted || gen != _requestGen) return;
           setState(() {
             _error = err.toString().replaceFirst('ApiException: ', '');
+            _png = null;
             _svg = null;
           });
         });
@@ -170,7 +178,7 @@ class _WxMermaidSvgBlockState extends State<WxMermaidSvgBlock> {
           Text(
             _error!,
             style: TextStyle(
-              color: Wx.muted,
+              color: Wx.danger,
               fontSize: 13,
               fontWeight: FontWeight.w600,
               fontFamilyFallback: Wx.fontFallback,
@@ -187,7 +195,7 @@ class _WxMermaidSvgBlockState extends State<WxMermaidSvgBlock> {
       );
     }
 
-    if (_svg == null) {
+    if (_png == null && _svg == null) {
       return SizedBox(
         height: 120,
         child: Center(
@@ -206,13 +214,39 @@ class _WxMermaidSvgBlockState extends State<WxMermaidSvgBlock> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final maxW = constraints.maxWidth.isFinite ? constraints.maxWidth : MediaQuery.sizeOf(context).width - 48;
-        return SvgPicture.string(
-          _svg!,
-          fit: BoxFit.contain,
-          width: maxW,
-          theme: const SvgTheme(currentColor: Wx.text),
-        );
+        final png = _png;
+        if (png != null) {
+          return Image.memory(
+            png,
+            width: maxW,
+            fit: BoxFit.fitWidth,
+            filterQuality: FilterQuality.medium,
+            gaplessPlayback: true,
+            errorBuilder: (_, __, ___) => _svgFallback(maxW),
+          );
+        }
+        return _svgFallback(maxW);
       },
+    );
+  }
+
+  Widget _svgFallback(double maxW) {
+    final svg = _svg;
+    if (svg == null || svg.isEmpty) {
+      return Text(
+        '图表无法显示',
+        style: TextStyle(color: Wx.danger, fontSize: 13, fontFamilyFallback: Wx.fontFallback),
+      );
+    }
+    return SvgPicture.string(
+      svg,
+      fit: BoxFit.contain,
+      width: maxW,
+      theme: const SvgTheme(currentColor: Wx.text),
+      errorBuilder: (_, __, ___) => Text(
+        '图表无法显示',
+        style: TextStyle(color: Wx.danger, fontSize: 13, fontFamilyFallback: Wx.fontFallback),
+      ),
     );
   }
 }

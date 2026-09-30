@@ -71,6 +71,13 @@ class OperationCancelled implements Exception {
   String toString() => 'cancelled';
 }
 
+class MermaidRender {
+  const MermaidRender({this.png, this.svg});
+
+  final Uint8List? png;
+  final String? svg;
+}
+
 class WenxiangApi {
   WenxiangApi({required String baseUrl, required this.apiKey})
       : baseUrl = normalizeBaseUrl(baseUrl),
@@ -245,8 +252,9 @@ class WenxiangApi {
     return res.bodyBytes;
   }
 
-  /// Renders Mermaid on the companion (full syntax → SVG).
-  Future<String> renderMermaidSvg(
+  /// Renders Mermaid on the companion. Prefer [MermaidRender.png]; [MermaidRender.svg]
+  /// is the flutter_svg fallback for builds that only read `svg`.
+  Future<MermaidRender> renderMermaidSvg(
     String code, {
     String theme = 'default',
     String backgroundColor = 'transparent',
@@ -265,7 +273,7 @@ class WenxiangApi {
             'backgroundColor': backgroundColor,
           }),
         )
-        .timeout(const Duration(seconds: 35));
+        .timeout(const Duration(seconds: 40));
     if (res.statusCode >= 400) {
       String message = 'Mermaid 渲染失败 HTTP ${res.statusCode}';
       try {
@@ -276,11 +284,19 @@ class WenxiangApi {
       throw ApiException(message);
     }
     final body = jsonDecode(res.body) as Map<String, dynamic>;
-    final svg = body['svg']?.toString() ?? '';
-    if (svg.trim().isEmpty) {
-      throw ApiException('Mermaid 返回空 SVG');
+    Uint8List? png;
+    final pngRaw = body['png']?.toString() ?? '';
+    if (pngRaw.isNotEmpty) {
+      try {
+        final bytes = base64Decode(pngRaw);
+        if (bytes.length >= 8) png = bytes;
+      } catch (_) {}
     }
-    return svg;
+    final svg = body['svg']?.toString() ?? '';
+    if (png == null && svg.trim().isEmpty) {
+      throw ApiException('Mermaid 返回空图');
+    }
+    return MermaidRender(png: png, svg: svg.trim().isEmpty ? null : svg);
   }
 
   http.Client? _checkoutClient;

@@ -76,7 +76,8 @@ WxMarkdownStyle chatMarkdownStyle(ThemeData theme) {
   return WxMarkdownStyle(
     body: body,
     gptTheme: gptTheme,
-    mermaidServerTheme: 'dark',
+    mermaidServerTheme: 'default',
+    mermaidBackground: '#F4F0E8',
     mermaidShellColor: Wx.surface,
     styleSheet: GptMarkdownStyleSheet(
       link: LinkStyle(
