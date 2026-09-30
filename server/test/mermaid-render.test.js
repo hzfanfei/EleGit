@@ -3,9 +3,21 @@ import assert from "node:assert/strict";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mermaidCacheId, renderMermaidSvg } from "../src/mermaid-render.js";
+import {
+  formatMermaidCliError,
+  mermaidCacheId,
+  renderMermaidSvg,
+} from "../src/mermaid-render.js";
 
 describe("mermaid-render", () => {
+  it("formatMermaidCliError surfaces parse errors", () => {
+    const msg = formatMermaidCliError({
+      message: "Command failed",
+      stderr: "Error: Parse error on line 2:\n...",
+    });
+    assert.match(msg, /Parse error on line/i);
+  });
+
   it("mermaidCacheId is stable", () => {
     const a = mermaidCacheId("graph TD\n  A-->B", "dark", "transparent");
     const b = mermaidCacheId("graph TD\n  A-->B", "dark", "transparent");
@@ -33,5 +45,23 @@ describe("mermaid-render", () => {
     });
     assert.equal(again.cached, true);
     assert.equal(again.id, id);
+  });
+
+  it("rejects invalid diagram with a short message", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "wx-mmd-bad-"));
+    await assert.rejects(
+      () =>
+        renderMermaidSvg({
+          code: "flowchart LR\n  BAD-->",
+          theme: "dark",
+          workspaceRoot,
+          useCache: false,
+        }),
+      (err) => {
+        assert.equal(err.code, "mermaid_render_failed");
+        assert.match(err.message, /Parse error on line/i);
+        return true;
+      },
+    );
   });
 });

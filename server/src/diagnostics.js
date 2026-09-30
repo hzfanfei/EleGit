@@ -4,6 +4,7 @@ import path from "node:path";
 import { AcpChannel, acpEnginePreference, detectCursorEngine } from "./acp.js";
 import { createVoiceProviders } from "./voice-ws.js";
 import { resolveVoiceConfig, withTtsVoice } from "./voice-config.js";
+import { formatMermaidCliError, mermaidCliInstalledSync, renderMermaidSvg } from "./mermaid-render.js";
 import { noteServerLog } from "./server-logs.js";
 import { volcTtsV3StreamLatency } from "./voice-volc.js";
 
@@ -299,6 +300,34 @@ export async function probeVoiceStt({ signal } = {}) {
   }
 }
 
+export async function probeMermaidRender({ workspaceRoot } = {}) {
+  const started = Date.now();
+  if (!mermaidCliInstalledSync()) {
+    return {
+      ok: false,
+      ms: msSince(started),
+      error: "Mermaid CLI 未安装，请在 server 目录执行 npm install",
+    };
+  }
+  const cwd = probeCwd(workspaceRoot);
+  try {
+    await renderMermaidSvg({
+      code: "flowchart LR\n  probe-->ok",
+      theme: "default",
+      backgroundColor: "transparent",
+      workspaceRoot: cwd,
+      useCache: true,
+    });
+    return { ok: true, ms: msSince(started) };
+  } catch (err) {
+    return {
+      ok: false,
+      ms: msSince(started),
+      error: formatMermaidCliError(err),
+    };
+  }
+}
+
 export async function runDiagnosticsProbe({
   workspaceRoot,
   ttsVoice,
@@ -306,6 +335,7 @@ export async function runDiagnosticsProbe({
   askModel = true,
   voiceTts = true,
   voiceStt = true,
+  mermaid = true,
   signal,
 } = {}) {
   const cwd = probeCwd(workspaceRoot);
@@ -322,6 +352,7 @@ export async function runDiagnosticsProbe({
   }
   if (voiceTts) out.voiceTts = await probeVoiceTts({ ttsVoice, signal });
   if (voiceStt) out.voiceStt = await probeVoiceStt({ signal });
+  if (mermaid) out.mermaid = await probeMermaidRender({ workspaceRoot });
   if (out.voiceTts?.ok === false && out.voiceTts.error) {
     noteServerLog({
       kind: "voice-tts",
@@ -336,10 +367,18 @@ export async function runDiagnosticsProbe({
       summary: "通路检测：语音识别未通过",
     });
   }
+  if (out.mermaid?.ok === false && out.mermaid.error) {
+    noteServerLog({
+      kind: "mermaid_render",
+      message: String(out.mermaid.error),
+      summary: "通路检测：Mermaid 渲染未通过",
+    });
+  }
   out.ok =
     (!askCli || (out.askCliBook?.ok === true && out.askCliRepo?.ok === true)) &&
     (!askModel || (out.askModelBook?.ok === true && out.askModelRepo?.ok === true)) &&
     (!voiceTts || out.voiceTts?.ok === true) &&
-    (!voiceStt || out.voiceStt?.ok === true);
+    (!voiceStt || out.voiceStt?.ok === true) &&
+    (!mermaid || out.mermaid?.ok === true);
   return out;
 }

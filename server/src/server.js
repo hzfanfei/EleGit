@@ -90,7 +90,11 @@ import {
   deleteBook,
 } from "./books.js";
 import { envWithNodeOnPath, resolveGitExecutable, resolveNodeExecutable } from "./which.js";
-import { readCachedMermaidSvg, renderMermaidSvg } from "./mermaid-render.js";
+import {
+  mermaidCliInstalledSync,
+  readCachedMermaidSvg,
+  renderMermaidSvg,
+} from "./mermaid-render.js";
 import {
   ensureStaticDir,
   deleteStaticFile,
@@ -379,6 +383,9 @@ app.get("/v1/status", (_req, res) => {
     tunnelHealth: tunnelHealth.status(),
     lanUrls: lans,
     port: PORT,
+    mermaid: {
+      cliInstalled: mermaidCliInstalledSync(),
+    },
   });
 });
 
@@ -659,11 +666,21 @@ app.post("/v1/mermaid/render", async (req, res) => {
       cached: result.cached,
     });
   } catch (err) {
-    if (err?.code === "mermaid_empty" || err?.code === "mermaid_too_long") {
-      res.status(400).json({ error: err.message, code: err.code });
+    if (
+      err?.code === "mermaid_empty" ||
+      err?.code === "mermaid_too_long" ||
+      err?.code === "mermaid_cli_missing"
+    ) {
+      const status = err.code === "mermaid_cli_missing" ? 503 : 400;
+      res.status(status).json({ error: err.message, code: err.code });
       return;
     }
-    noteServerLog("mermaid_render_failed", { message: err?.message || String(err) });
+    noteServerLog({
+      kind: "mermaid_render",
+      summary: "Mermaid 渲染失败",
+      message: err?.message || String(err),
+      stack: err?.stack || "",
+    });
     res.status(422).json({
       error: err?.message || "Mermaid 渲染失败",
       code: err?.code || "mermaid_render_failed",
@@ -1046,6 +1063,7 @@ app.post("/v1/diagnostics/probe", async (req, res) => {
       askModel: body.askModel !== false,
       voiceTts: body.voiceTts !== false,
       voiceStt: body.voiceStt !== false,
+      mermaid: body.mermaid !== false,
       signal: requestSignal(req, res),
     });
     res.json(result);
