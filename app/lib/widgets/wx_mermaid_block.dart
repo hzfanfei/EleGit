@@ -1,22 +1,23 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_mermaid/flutter_mermaid.dart';
 
 import '../theme.dart';
-import 'wx_mermaid_webview.dart';
+import '../utils/wx_mermaid_normalize.dart';
 import 'wx_rich_text.dart';
 
-/// Renders ```mermaid fences with [WxMermaidWebView] (mermaid.js).
+/// Renders a ```mermaid fence via [flutter_mermaid], with streaming fallback.
 class WxMermaidBlock extends StatelessWidget {
   const WxMermaidBlock({
     super.key,
     required this.code,
     required this.closed,
-    required this.theme,
+    required this.style,
     this.monoStyle,
   });
 
   final String code;
   final bool closed;
-  final WxMermaidWebTheme theme;
+  final MermaidStyle style;
   final TextStyle? monoStyle;
 
   static bool isMermaidLanguage(String name) {
@@ -25,7 +26,7 @@ class WxMermaidBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final trimmed = code.trim();
+    final trimmed = normalizeMermaidForFlutter(code.trim());
     if (!closed || trimmed.isEmpty) {
       return WxFencedCode(
         code: trimmed.isEmpty ? '…' : trimmed,
@@ -45,10 +46,36 @@ class WxMermaidBlock extends StatelessWidget {
         ),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(Wx.radius),
-          child: WxMermaidWebView(
+          child: MermaidDiagram(
             code: trimmed,
-            theme: theme,
-            monoStyle: monoStyle,
+            style: style,
+            errorBuilder: (context, error) {
+              return Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Mermaid 无法解析（已尝试兼容 ChatGPT 语法）',
+                      style: TextStyle(
+                        color: Wx.muted,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        fontFamilyFallback: Wx.fontFallback,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    WxFencedCode(
+                      code: trimmed,
+                      language: 'mermaid',
+                      framed: false,
+                      style: monoStyle ?? const TextStyle(fontFamily: 'ui-monospace', fontSize: 13),
+                    ),
+                  ],
+                ),
+              );
+            },
           ),
         ),
       ),
