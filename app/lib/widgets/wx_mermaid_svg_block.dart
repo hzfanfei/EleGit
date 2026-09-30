@@ -5,6 +5,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 
 import '../api/wenxiang_api.dart';
 import '../theme.dart';
+import '../utils/wx_mermaid_cache.dart';
 import 'wx_rich_text.dart';
 
 /// Server-rendered Mermaid (SVG via companion `/v1/mermaid/render`).
@@ -38,10 +39,16 @@ class _WxMermaidSvgBlockState extends State<WxMermaidSvgBlock> {
   String? _error;
   var _requestGen = 0;
 
+  String get _cacheKey => WxMermaidCache.key(
+        code: widget.code,
+        theme: widget.serverTheme,
+        backgroundColor: widget.backgroundColor,
+      );
+
   @override
   void initState() {
     super.initState();
-    _scheduleFetch();
+    _bindDiagram(notify: false);
   }
 
   @override
@@ -52,35 +59,56 @@ class _WxMermaidSvgBlockState extends State<WxMermaidSvgBlock> {
         oldWidget.serverTheme != widget.serverTheme ||
         oldWidget.backgroundColor != widget.backgroundColor ||
         oldWidget.api != widget.api) {
-      _scheduleFetch();
+      _bindDiagram(notify: true);
     }
   }
 
-  void _scheduleFetch() {
+  void _publish(VoidCallback fn, {required bool notify}) {
+    if (notify) {
+      setState(fn);
+    } else {
+      fn();
+    }
+  }
+
+  void _bindDiagram({required bool notify}) {
     if (!widget.closed || widget.code.trim().isEmpty) {
-      setState(() {
+      _publish(() {
         _png = null;
         _svg = null;
         _error = null;
-      });
+      }, notify: notify);
       return;
     }
     final api = widget.api;
     if (api == null) {
-      setState(() => _error = '未连接问象服务，无法渲染图表');
+      _publish(() => _error = '未连接问象服务，无法渲染图表', notify: notify);
+      return;
+    }
+    final key = _cacheKey;
+    final cached = WxMermaidCache.instance.peek(key);
+    if (cached != null) {
+      _publish(() {
+        _png = cached.png;
+        _svg = cached.svg;
+        _error = null;
+      }, notify: notify);
       return;
     }
     final gen = ++_requestGen;
-    setState(() {
+    _publish(() {
       _png = null;
       _svg = null;
       _error = null;
-    });
-    api
-        .renderMermaidSvg(
-          widget.code,
-          theme: widget.serverTheme,
-          backgroundColor: widget.backgroundColor,
+    }, notify: notify);
+    WxMermaidCache.instance
+        .load(
+          key,
+          () => api.renderMermaidSvg(
+            widget.code,
+            theme: widget.serverTheme,
+            backgroundColor: widget.backgroundColor,
+          ),
         )
         .then((diagram) {
           if (!mounted || gen != _requestGen) return;
