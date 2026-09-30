@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../theme.dart';
 import '../utils/wx_mermaid_fence.dart';
 import '../utils/wx_markdown_styles.dart';
-import 'wx_mermaid_block.dart';
 export '../utils/wx_markdown_styles.dart' show WxMarkdownStyle, chatMarkdownStyle;
 import 'wx_rich_text.dart';
 import 'wx_unified_markdown.dart';
@@ -96,15 +95,34 @@ class ChatMarkdownBlockParser {
     }
 
     pending = buf.toString();
+    _splitCompletedByMermaid();
+    _splitPendingByMermaid();
+  }
+
+  void _splitCompletedByMermaid() {
+    if (completed.isEmpty) return;
+    final expanded = <String>[];
+    for (final block in completed) {
+      expanded.addAll(expandMarkdownBlockByMermaid(block));
+    }
+    completed
+      ..clear()
+      ..addAll(expanded);
+  }
+
+  void _splitPendingByMermaid() {
+    if (pending.isEmpty) return;
+    final segments = splitMarkdownByMermaidFences(pending);
+    if (segments.length <= 1) return;
+    for (var i = 0; i < segments.length - 1; i++) {
+      completed.add(markdownSourceForMermaidSegment(segments[i]));
+    }
+    pending = markdownSourceForMermaidSegment(segments.last);
   }
 
   static bool _isFenceOpen(String line) {
-    if (!line.startsWith('```')) return false;
-    // At least 3 backticks, optionally preceded by up to 3 spaces of indent.
     final stripped = line.trimLeft();
-    if (!stripped.startsWith('```')) return false;
-    // Anything after the backticks on this line is the language hint.
-    return true;
+    return stripped.startsWith('```');
   }
 
   static bool _isFenceClose(String line) {
@@ -292,28 +310,15 @@ class _BlockView extends StatefulWidget {
 class _BlockViewState extends State<_BlockView> {
   @override
   Widget build(BuildContext context) {
-    final mermaidOnly = parseMermaidFenceBlock(widget.source);
-    final body = mermaidOnly != null
-        ? WxMermaidBlock(
-            code: mermaidOnly.code,
-            closed: mermaidOnly.closed,
-            style: widget.mdStyle.mermaidStyle,
-            shellColor: widget.mdStyle.mermaidShellColor,
-            monoStyle: widget.mdStyle.body.copyWith(
-              fontFamily: 'ui-monospace',
-              fontSize: (widget.mdStyle.body.fontSize ?? 16) * 0.88,
-              height: 1.45,
-            ),
-          )
-        : WxUnifiedMarkdownBody(
-            data: widget.source,
-            mdStyle: widget.mdStyle,
-            onTapLink: (text, href, title) {
-              final target = (href ?? '').trim();
-              if (target.isEmpty) return;
-              widget.onTapLink?.call(target, text);
-            },
-          );
+    final body = WxUnifiedMarkdownBody(
+      data: widget.source,
+      mdStyle: widget.mdStyle,
+      onTapLink: (text, href, title) {
+        final target = (href ?? '').trim();
+        if (target.isEmpty) return;
+        widget.onTapLink?.call(target, text);
+      },
+    );
     if (!widget.isNew) return body;
     return TweenAnimationBuilder<double>(
       tween: Tween<double>(begin: 0, end: 1),

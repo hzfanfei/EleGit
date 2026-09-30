@@ -81,6 +81,18 @@ void main() {
       expect(find.textContaining('图表'), findsOneWidget);
     });
 
+    testWidgets('同一块内说明+mermaid+说明 强制分段渲染', (tester) async {
+      await _pumpWithSource(
+        tester,
+        '上文说明\n```mermaid\ngraph TD\n  A[开始] --> B[结束]\n```\n下文继续\n',
+      );
+      expect(tester.takeException(), isNull);
+      expect(find.textContaining('上文说明'), findsOneWidget);
+      expect(find.textContaining('下文继续'), findsOneWidget);
+      expect(find.byKey(const Key('wx-mermaid-diagram')), findsOneWidget);
+      expect(find.textContaining('graph TD'), findsNothing);
+    });
+
     testWidgets('流式 mermaid 不泄漏源码，显示图表占位', (tester) async {
       await _pumpWithSource(
         tester,
