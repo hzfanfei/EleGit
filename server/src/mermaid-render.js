@@ -63,15 +63,24 @@ export function mermaidCacheDir(workspaceRoot) {
   return join(String(workspaceRoot || "."), ".wenxiang", "mermaid-cache");
 }
 
+/** Warm paper. Matches the chat card; not Mermaid's default purple. */
+const DIAGRAM_PAPER = "#F7F3EC";
+const DIAGRAM_INK = "#2C2620";
+const DIAGRAM_NODE = "#FBF7F1";
+const DIAGRAM_NODE_LINE = "#C6A07A";
+const DIAGRAM_CHOICE = "#F4E4D0";
+const DIAGRAM_CHOICE_LINE = "#A67C52";
+const DIAGRAM_ARROW = "#8A7056";
+
 /** Paper card. Dark/transparent requests from the app still paint as light ink. */
 export function resolveMermaidPaint(theme, backgroundColor) {
   const bg = String(backgroundColor || "").trim();
   const transparent = bg === "" || /^transparent$/i.test(bg) || /^none$/i.test(bg);
   if (transparent || theme === "dark") {
-    return { theme: "default", backgroundColor: "#F4F0E8" };
+    return { theme: "base", backgroundColor: DIAGRAM_PAPER };
   }
-  const safeTheme = theme === "forest" || theme === "neutral" ? theme : "default";
-  return { theme: safeTheme, backgroundColor: bg };
+  const safeTheme = theme === "forest" || theme === "neutral" ? theme : "base";
+  return { theme: safeTheme, backgroundColor: bg || DIAGRAM_PAPER };
 }
 
 export function mermaidCacheId(code, theme, backgroundColor) {
@@ -80,7 +89,7 @@ export function mermaidCacheId(code, theme, backgroundColor) {
     code: String(code || "").trim(),
     theme: paint.theme,
     backgroundColor: paint.backgroundColor,
-    render: "flutter-webp-1",
+    render: "wenxiang-paper-1",
   });
   return createHash("sha256").update(payload).digest("hex").slice(0, 32);
 }
@@ -129,6 +138,8 @@ async function renderWithPuppeteer(code, paint, assets) {
     await page.$eval(
       "body",
       (body, backgroundColor) => {
+        body.style.margin = "0";
+        body.style.padding = "12px";
         body.style.background = backgroundColor;
       },
       paint.backgroundColor,
@@ -136,12 +147,56 @@ async function renderWithPuppeteer(code, paint, assets) {
     await page.addScriptTag({ path: assets.js });
     const mermaidConfig = {
       startOnLoad: false,
-      theme: paint.theme,
+      theme: "base",
       fontFamily: '"Microsoft YaHei", "Segoe UI", sans-serif',
       htmlLabels: false,
-      flowchart: { htmlLabels: false, useMaxWidth: true },
+      themeVariables: {
+        darkMode: false,
+        background: paint.backgroundColor,
+        fontFamily: '"Microsoft YaHei", "Segoe UI", sans-serif',
+        fontSize: "16px",
+        primaryColor: DIAGRAM_NODE,
+        primaryTextColor: DIAGRAM_INK,
+        primaryBorderColor: DIAGRAM_NODE_LINE,
+        secondaryColor: DIAGRAM_CHOICE,
+        secondaryTextColor: DIAGRAM_INK,
+        secondaryBorderColor: DIAGRAM_CHOICE_LINE,
+        tertiaryColor: DIAGRAM_CHOICE,
+        tertiaryTextColor: DIAGRAM_INK,
+        tertiaryBorderColor: DIAGRAM_NODE_LINE,
+        lineColor: DIAGRAM_ARROW,
+        textColor: DIAGRAM_INK,
+        mainBkg: DIAGRAM_NODE,
+        nodeBorder: DIAGRAM_NODE_LINE,
+        clusterBkg: DIAGRAM_CHOICE,
+        clusterBorder: DIAGRAM_NODE_LINE,
+        defaultLinkColor: DIAGRAM_ARROW,
+        titleColor: DIAGRAM_INK,
+        edgeLabelBackground: paint.backgroundColor,
+        nodeTextColor: DIAGRAM_INK,
+        actorBkg: DIAGRAM_NODE,
+        actorBorder: DIAGRAM_NODE_LINE,
+        actorTextColor: DIAGRAM_INK,
+        signalColor: DIAGRAM_ARROW,
+        signalTextColor: DIAGRAM_INK,
+        labelBoxBkgColor: DIAGRAM_NODE,
+        labelBoxBorderColor: DIAGRAM_NODE_LINE,
+        labelTextColor: DIAGRAM_INK,
+        noteBkgColor: DIAGRAM_CHOICE,
+        noteTextColor: DIAGRAM_INK,
+        noteBorderColor: DIAGRAM_NODE_LINE,
+      },
+      flowchart: {
+        htmlLabels: false,
+        useMaxWidth: false,
+        curve: "basis",
+        padding: 12,
+        nodeSpacing: 22,
+        rankSpacing: 26,
+        diagramPadding: 8,
+      },
       sequence: {
-        useMaxWidth: true,
+        useMaxWidth: false,
         actorFontFamily: '"Microsoft YaHei", sans-serif',
         noteFontFamily: '"Microsoft YaHei", sans-serif',
         messageFontFamily: '"Microsoft YaHei", sans-serif',
@@ -163,6 +218,37 @@ async function renderWithPuppeteer(code, paint, assets) {
           container.innerHTML = svgText;
           const svg = container.querySelector("svg");
           if (svg?.style) svg.style.backgroundColor = backgroundColor;
+          const paintShape = (el, fill, stroke) => {
+            el.style.fill = fill;
+            el.style.stroke = stroke;
+            el.style.strokeWidth = "1.5px";
+          };
+          svg?.querySelectorAll(".node rect").forEach((el) => {
+            paintShape(el, "#FBF7F1", "#C6A07A");
+            el.setAttribute("rx", "14");
+            el.setAttribute("ry", "14");
+          });
+          svg?.querySelectorAll(".node polygon").forEach((el) => {
+            paintShape(el, "#F4E4D0", "#A67C52");
+          });
+          svg?.querySelectorAll(".node circle, .node ellipse").forEach((el) => {
+            paintShape(el, "#FBF7F1", "#C6A07A");
+          });
+          svg?.querySelectorAll(".edgePath path, .flowchart-link").forEach((el) => {
+            el.style.stroke = "#8A7056";
+            el.style.strokeWidth = "1.6px";
+          });
+          svg?.querySelectorAll("marker path, marker polygon").forEach((el) => {
+            el.style.fill = "#8A7056";
+            el.style.stroke = "#8A7056";
+          });
+          svg?.querySelectorAll(".edgeLabel rect, .labelBkg").forEach((el) => {
+            el.style.fill = backgroundColor;
+            el.style.stroke = "none";
+          });
+          svg?.querySelectorAll(".node text, .edgeLabel text, .edgeLabel tspan").forEach((el) => {
+            el.style.fill = "#2C2620";
+          });
         },
         code,
         mermaidConfig,
