@@ -1,7 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../theme.dart';
-import '../utils/wx_mermaid_fence.dart';
 import '../utils/wx_markdown_styles.dart';
 export '../utils/wx_markdown_styles.dart' show WxMarkdownStyle, chatMarkdownStyle;
 import 'wx_rich_text.dart';
@@ -95,29 +94,6 @@ class ChatMarkdownBlockParser {
     }
 
     pending = buf.toString();
-    _splitCompletedByMermaid();
-    _splitPendingByMermaid();
-  }
-
-  void _splitCompletedByMermaid() {
-    if (completed.isEmpty) return;
-    final expanded = <String>[];
-    for (final block in completed) {
-      expanded.addAll(expandMarkdownBlockByMermaid(block));
-    }
-    completed
-      ..clear()
-      ..addAll(expanded);
-  }
-
-  void _splitPendingByMermaid() {
-    if (pending.isEmpty) return;
-    final segments = splitMarkdownByMermaidFences(pending);
-    if (segments.length <= 1) return;
-    for (var i = 0; i < segments.length - 1; i++) {
-      completed.add(markdownSourceForMermaidSegment(segments[i]));
-    }
-    pending = markdownSourceForMermaidSegment(segments.last);
   }
 
   static bool _isFenceOpen(String line) {
