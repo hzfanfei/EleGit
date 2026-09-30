@@ -85,8 +85,6 @@ function splitPieBody(body) {
 
 const MAX_CODE_LEN = 48_000;
 const RENDER_TIMEOUT_MS = 28_000;
-/** Lossy WebP. Phone Image.memory decodes it; much smaller than the old PNG. */
-const WEBP_QUALITY = 80;
 
 export function mermaidCliPath() {
   return MMDC;
@@ -168,16 +166,16 @@ export async function readCachedMermaidSvg(workspaceRoot, id) {
 
 function cachePaths(workspaceRoot, id) {
   const dir = mermaidCacheDir(workspaceRoot);
-  return { dir, svg: join(dir, `${id}.svg`), webp: join(dir, `${id}.webp`) };
+  return { dir, svg: join(dir, `${id}.svg`), png: join(dir, `${id}.png`) };
 }
 
 async function readCachedDiagram(workspaceRoot, id) {
   const paths = cachePaths(workspaceRoot, id);
-  const [svg, webp] = await Promise.all([
+  const [svg, png] = await Promise.all([
     readFile(paths.svg, "utf8"),
-    readFile(paths.webp),
+    readFile(paths.png),
   ]);
-  return { svg, webp };
+  return { svg, png };
 }
 
 /**
@@ -348,8 +346,8 @@ async function renderWithPuppeteer(code, paint, assets) {
       height: Math.max(1, clip.y + clip.height),
       deviceScaleFactor: 2,
     });
-    const webp = Buffer.from(
-      await page.screenshot({ clip, type: "webp", quality: WEBP_QUALITY, omitBackground: false }),
+    const png = Buffer.from(
+      await page.screenshot({ clip, type: "png", omitBackground: false }),
     );
 
     const svg = await page.$eval("svg", (svg) => {
@@ -410,20 +408,19 @@ async function renderWithPuppeteer(code, paint, assets) {
       svg.removeAttribute("style");
       return new XMLSerializer().serializeToString(svg);
     });
-    if (!svg.trim() || webp.length < 12) {
+    if (!svg.trim() || png.length < 8) {
       const err = new Error("Mermaid 渲染结果为空");
       err.code = "mermaid_empty_svg";
       throw err;
     }
-    return { svg, webp };
+    return { svg, png };
   } finally {
     await browser.close();
   }
 }
 
 /**
- * Render Mermaid to a WebP (phone) and a flutter_svg-safe SVG (installed builds).
- * The JSON field stays `png` so builds that already decode the raster keep working.
+ * Render Mermaid to a PNG (phone) and a flutter_svg-safe SVG (installed builds).
  */
 export async function renderMermaidSvg({
   code,
@@ -451,7 +448,7 @@ export async function renderMermaidSvg({
   if (useCache) {
     try {
       const cached = await readCachedDiagram(workspaceRoot, id);
-      return { id, svg: cached.svg, webp: cached.webp, cached: true };
+      return { id, svg: cached.svg, png: cached.png, cached: true };
     } catch {
       // miss
     }
@@ -469,13 +466,13 @@ export async function renderMermaidSvg({
     throw err;
   }
 
-  const { svg, webp } = await renderWithPuppeteer(trimmed, paint, assets);
+  const { svg, png } = await renderWithPuppeteer(trimmed, paint, assets);
   if (useCache && workspaceRoot) {
     await mkdir(paths.dir, { recursive: true });
     await Promise.all([
       writeFile(paths.svg, svg, "utf8"),
-      writeFile(paths.webp, webp),
+      writeFile(paths.png, png),
     ]);
   }
-  return { id, svg, webp, cached: false };
+  return { id, svg, png, cached: false };
 }
