@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_mermaid/flutter_mermaid.dart';
 
 import '../theme.dart';
+import '../utils/wx_mermaid_normalize.dart';
 import 'wx_rich_text.dart';
 
 /// Renders a ```mermaid fence via [flutter_mermaid], with streaming fallback.
@@ -25,7 +26,7 @@ class WxMermaidBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final trimmed = code.trim();
+    final trimmed = normalizeMermaidForFlutter(code.trim());
     if (!closed || trimmed.isEmpty) {
       return WxFencedCode(
         code: trimmed.isEmpty ? '…' : trimmed,
@@ -56,7 +57,7 @@ class WxMermaidBlock extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      'Mermaid 无法解析',
+                      'Mermaid 无法解析（已尝试兼容 ChatGPT 语法）',
                       style: TextStyle(
                         color: Wx.muted,
                         fontSize: 13,
