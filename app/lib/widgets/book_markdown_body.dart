@@ -83,6 +83,7 @@ class BookMarkdownBody extends StatelessWidget {
     return WxUnifiedMarkdownBody(
       data: _prepared(),
       mdStyle: mdStyle,
+      api: api,
       softWrapProse: false,
       onTapLink: (text, href, title) {
         final target = (href ?? '').trim();

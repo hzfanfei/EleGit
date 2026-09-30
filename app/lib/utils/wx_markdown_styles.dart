@@ -11,11 +11,19 @@ class WxMarkdownStyle {
     required this.body,
     required this.gptTheme,
     required this.styleSheet,
+    required this.mermaidServerTheme,
+    required this.mermaidShellColor,
+    this.mermaidBackground = 'transparent',
   });
 
   final TextStyle body;
   final GptMarkdownThemeData gptTheme;
   final GptMarkdownStyleSheet styleSheet;
+
+  /// Passed to companion mermaid-cli (`dark` or `default`).
+  final String mermaidServerTheme;
+  final Color mermaidShellColor;
+  final String mermaidBackground;
 }
 
 WxMarkdownStyle chatMarkdownStyle(ThemeData theme) {
@@ -68,6 +76,8 @@ WxMarkdownStyle chatMarkdownStyle(ThemeData theme) {
   return WxMarkdownStyle(
     body: body,
     gptTheme: gptTheme,
+    mermaidServerTheme: 'dark',
+    mermaidShellColor: Wx.surface,
     styleSheet: GptMarkdownStyleSheet(
       link: LinkStyle(
         color: Wx.accent,
@@ -161,9 +171,13 @@ WxMarkdownStyle bookReaderMarkdownStyle({
       backgroundColor: codeFill,
     ),
   );
+  final mermaidShell = Color.lerp(palette.paper, palette.ink, 0.06) ?? palette.paper;
   return WxMarkdownStyle(
     body: body,
     gptTheme: gptTheme,
+    mermaidServerTheme: 'default',
+    mermaidShellColor: mermaidShell,
+    mermaidBackground: '#FAF8F5',
     styleSheet: GptMarkdownStyleSheet(
       link: LinkStyle(
         color: Wx.accent,

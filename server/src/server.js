@@ -90,6 +90,7 @@ import {
   deleteBook,
 } from "./books.js";
 import { envWithNodeOnPath, resolveGitExecutable, resolveNodeExecutable } from "./which.js";
+import { readCachedMermaidSvg, renderMermaidSvg } from "./mermaid-render.js";
 import {
   ensureStaticDir,
   deleteStaticFile,
@@ -638,6 +639,51 @@ app.delete("/v1/static", async (req, res) => {
       return;
     }
     sendError(res, err);
+  }
+});
+
+app.post("/v1/mermaid/render", async (req, res) => {
+  try {
+    const code = String(req.body?.code ?? "");
+    const theme = String(req.body?.theme ?? "default");
+    const backgroundColor = String(req.body?.backgroundColor ?? "transparent");
+    const result = await renderMermaidSvg({
+      code,
+      theme,
+      backgroundColor,
+      workspaceRoot: store.config.workspaceRoot,
+    });
+    res.json({
+      id: result.id,
+      svg: result.svg,
+      cached: result.cached,
+    });
+  } catch (err) {
+    if (err?.code === "mermaid_empty" || err?.code === "mermaid_too_long") {
+      res.status(400).json({ error: err.message, code: err.code });
+      return;
+    }
+    noteServerLog("mermaid_render_failed", { message: err?.message || String(err) });
+    res.status(422).json({
+      error: err?.message || "Mermaid 渲染失败",
+      code: err?.code || "mermaid_render_failed",
+    });
+  }
+});
+
+app.get("/v1/mermaid/svg/:id", async (req, res) => {
+  try {
+    const id = String(req.params.id || "").trim();
+    if (!/^[a-f0-9]{16,64}$/i.test(id)) {
+      res.status(400).json({ error: "无效 id", code: "mermaid_id" });
+      return;
+    }
+    const svg = await readCachedMermaidSvg(store.config.workspaceRoot, id);
+    res.setHeader("Content-Type", "image/svg+xml; charset=utf-8");
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.send(svg);
+  } catch (err) {
+    res.status(404).json({ error: "图表不存在或未渲染", code: "mermaid_missing" });
   }
 });
 

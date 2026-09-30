@@ -70,15 +70,14 @@ void main() {
       expect(find.textContaining('[官网](https://'), findsNothing);
     });
 
-    testWidgets('mermaid 围栏按普通代码块展示', (tester) async {
+    testWidgets('mermaid 围栏渲染为图表卡片（服务端 SVG）', (tester) async {
       await _pumpWithSource(
         tester,
         '```mermaid\ngraph TD\n  A[开始] --> B[结束]\n```\n',
       );
       expect(tester.takeException(), isNull);
-      expect(find.text('mermaid'), findsOneWidget);
-      expect(find.byKey(const Key('wx-md-code')), findsOneWidget);
-      expect(find.textContaining('graph TD'), findsOneWidget);
+      expect(find.byKey(const Key('wx-mermaid-diagram')), findsOneWidget);
+      expect(find.textContaining('图表'), findsOneWidget);
     });
 
     testWidgets('围栏代码块带语言标签、无 ``` 泄漏', (tester) async {

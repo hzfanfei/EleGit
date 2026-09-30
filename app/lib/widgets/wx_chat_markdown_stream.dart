@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../theme.dart';
+import '../api/wenxiang_api.dart';
+import '../utils/wx_mermaid_fence.dart';
 import '../utils/wx_markdown_styles.dart';
 export '../utils/wx_markdown_styles.dart' show WxMarkdownStyle, chatMarkdownStyle;
 import 'wx_rich_text.dart';
@@ -94,6 +96,29 @@ class ChatMarkdownBlockParser {
     }
 
     pending = buf.toString();
+    _splitCompletedByMermaid();
+    _splitPendingByMermaid();
+  }
+
+  void _splitCompletedByMermaid() {
+    if (completed.isEmpty) return;
+    final expanded = <String>[];
+    for (final block in completed) {
+      expanded.addAll(expandMarkdownBlockByMermaid(block));
+    }
+    completed
+      ..clear()
+      ..addAll(expanded);
+  }
+
+  void _splitPendingByMermaid() {
+    if (pending.isEmpty) return;
+    final segments = splitMarkdownByMermaidFences(pending);
+    if (segments.length <= 1) return;
+    for (var i = 0; i < segments.length - 1; i++) {
+      completed.add(markdownSourceForMermaidSegment(segments[i]));
+    }
+    pending = markdownSourceForMermaidSegment(segments.last);
   }
 
   static bool _isFenceOpen(String line) {
@@ -130,6 +155,7 @@ class WxChatMarkdownStream extends StatefulWidget {
     super.key,
     required this.source,
     required this.mdStyle,
+    this.api,
     this.showCaret = false,
     this.onTapLink,
   });
@@ -140,6 +166,7 @@ class WxChatMarkdownStream extends StatefulWidget {
   final ValueListenable<String> source;
 
   final WxMarkdownStyle mdStyle;
+  final WenxiangApi? api;
 
   /// When true, a blinking caret is appended after the pending block.
   final bool showCaret;
@@ -229,6 +256,7 @@ class _WxChatMarkdownStreamState extends State<WxChatMarkdownStream> {
               key: ValueKey(_renderedHashes[i]),
               source: _parser.completed[i],
               mdStyle: widget.mdStyle,
+              api: widget.api,
               onTapLink: widget.onTapLink,
               isNew: i >= _renderedHashes.length - (_renderedHashes.length - _completedCountAtLastRender()),
             ),
@@ -239,6 +267,7 @@ class _WxChatMarkdownStreamState extends State<WxChatMarkdownStream> {
                     key: ValueKey(_pendingHash),
                     source: _pendingText,
                     mdStyle: widget.mdStyle,
+                    api: widget.api,
                     onTapLink: widget.onTapLink,
                   ),
           if (widget.showCaret && _pendingText.isNotEmpty)
@@ -270,12 +299,14 @@ class _BlockView extends StatefulWidget {
     super.key,
     required this.source,
     required this.mdStyle,
+    this.api,
     this.onTapLink,
     this.isNew = false,
   });
 
   final String source;
   final WxMarkdownStyle mdStyle;
+  final WenxiangApi? api;
   final void Function(String href, String text)? onTapLink;
   final bool isNew;
 
@@ -289,6 +320,7 @@ class _BlockViewState extends State<_BlockView> {
     final body = WxUnifiedMarkdownBody(
       data: widget.source,
       mdStyle: widget.mdStyle,
+      api: widget.api,
       onTapLink: (text, href, title) {
         final target = (href ?? '').trim();
         if (target.isEmpty) return;

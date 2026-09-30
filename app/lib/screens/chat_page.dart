@@ -1495,6 +1495,7 @@ class _ChatPageState extends State<ChatPage> {
                         final message = _messages[chronological];
                         return _FinishedTurn(
                           key: ValueKey('m-$chronological-${message.role}'),
+                          api: widget.api,
                           appear: message.role == 'user' &&
                               _appearUserKey == '${_sessionId ?? ''}:$chronological',
                           message: message,
@@ -1517,6 +1518,7 @@ class _ChatPageState extends State<ChatPage> {
                         );
                       }
                       return _LiveTurn(
+                        api: widget.api,
                         text: _typewriter.visible,
                         engine: _liveEngine,
                         phase: _livePhase,
@@ -1836,6 +1838,7 @@ class _EditableUserTurnState extends State<_EditableUserTurn> {
 class _FinishedTurn extends StatelessWidget {
   const _FinishedTurn({
     super.key,
+    required this.api,
     required this.message,
     this.appear = false,
     this.queued = false,
@@ -1846,6 +1849,7 @@ class _FinishedTurn extends StatelessWidget {
     this.onRemoveQueue,
     this.onRetry,
   });
+  final WenxiangApi api;
   final ChatMessage message;
   final bool appear;
   final bool queued;
@@ -1910,6 +1914,7 @@ class _FinishedTurn extends StatelessWidget {
         child: WxChatMarkdownStream(
           source: ValueNotifier<String>(message.content),
           mdStyle: chatMarkdownStyle(Theme.of(context)),
+          api: api,
           showCaret: false,
         ),
       ),
@@ -1936,12 +1941,14 @@ String _livePhaseLabel(String phase) {
 
 class _LiveTurn extends StatelessWidget {
   const _LiveTurn({
+    required this.api,
     required this.text,
     required this.engine,
     required this.phase,
     required this.activity,
     required this.holdPollOk,
   });
+  final WenxiangApi api;
   final ValueNotifier<String> text;
   final ValueNotifier<String?> engine;
   final ValueNotifier<String> phase;
@@ -1975,6 +1982,7 @@ class _LiveTurn extends StatelessWidget {
               : WxChatMarkdownStream(
                   source: text,
                   mdStyle: chatMarkdownStyle(Theme.of(context)),
+                  api: api,
                   showCaret: false,
                 );
           return Column(

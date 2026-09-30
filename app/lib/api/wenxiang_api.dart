@@ -245,6 +245,44 @@ class WenxiangApi {
     return res.bodyBytes;
   }
 
+  /// Renders Mermaid on the companion (full syntax → SVG).
+  Future<String> renderMermaidSvg(
+    String code, {
+    String theme = 'default',
+    String backgroundColor = 'transparent',
+  }) async {
+    final trimmed = code.trim();
+    if (trimmed.isEmpty) {
+      throw ApiException('Mermaid 源码为空');
+    }
+    final res = await http
+        .post(
+          _uri('/v1/mermaid/render'),
+          headers: headers,
+          body: jsonEncode({
+            'code': trimmed,
+            'theme': theme,
+            'backgroundColor': backgroundColor,
+          }),
+        )
+        .timeout(const Duration(seconds: 35));
+    if (res.statusCode >= 400) {
+      String message = 'Mermaid 渲染失败 HTTP ${res.statusCode}';
+      try {
+        final body = jsonDecode(res.body) as Map<String, dynamic>;
+        final err = body['error']?.toString();
+        if (err != null && err.isNotEmpty) message = err;
+      } catch (_) {}
+      throw ApiException(message);
+    }
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    final svg = body['svg']?.toString() ?? '';
+    if (svg.trim().isEmpty) {
+      throw ApiException('Mermaid 返回空 SVG');
+    }
+    return svg;
+  }
+
   http.Client? _checkoutClient;
   http.Client? _chatClient;
   http.Client? _bookVoiceClient;
