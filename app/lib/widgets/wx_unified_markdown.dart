@@ -89,6 +89,7 @@ class WxUnifiedMarkdownBody extends StatelessWidget {
               code: code,
               closed: closed,
               style: mdStyle.mermaidStyle,
+              shellColor: mdStyle.mermaidShellColor,
               monoStyle: mono,
             );
           }

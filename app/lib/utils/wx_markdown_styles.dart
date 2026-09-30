@@ -13,12 +13,16 @@ class WxMarkdownStyle {
     required this.gptTheme,
     required this.styleSheet,
     required this.mermaidStyle,
+    required this.mermaidShellColor,
   });
 
   final TextStyle body;
   final GptMarkdownThemeData gptTheme;
   final GptMarkdownStyleSheet styleSheet;
   final MermaidStyle mermaidStyle;
+
+  /// Raised card behind mermaid (distinct from chat bubble / reader paper).
+  final Color mermaidShellColor;
 }
 
 WxMarkdownStyle chatMarkdownStyle(ThemeData theme) {
@@ -72,6 +76,7 @@ WxMarkdownStyle chatMarkdownStyle(ThemeData theme) {
     body: body,
     gptTheme: gptTheme,
     mermaidStyle: MermaidStyle.dark(),
+    mermaidShellColor: Wx.surface,
     styleSheet: GptMarkdownStyleSheet(
       link: LinkStyle(
         color: Wx.accent,
@@ -169,10 +174,12 @@ WxMarkdownStyle bookReaderMarkdownStyle({
   final mermaidStyle = MermaidStyle.neutral().copyWith(
     backgroundColor: mermaidBg,
   );
+  final mermaidShell = Color.lerp(palette.paper, palette.ink, 0.06) ?? palette.paper;
   return WxMarkdownStyle(
     body: body,
     gptTheme: gptTheme,
     mermaidStyle: mermaidStyle,
+    mermaidShellColor: mermaidShell,
     styleSheet: GptMarkdownStyleSheet(
       link: LinkStyle(
         color: Wx.accent,

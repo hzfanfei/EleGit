@@ -78,6 +78,19 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(find.byKey(const Key('wx-mermaid-diagram')), findsOneWidget);
       expect(find.textContaining('graph TD'), findsNothing);
+      expect(find.textContaining('图表'), findsOneWidget);
+    });
+
+    testWidgets('流式 mermaid 不泄漏源码，显示图表占位', (tester) async {
+      await _pumpWithSource(
+        tester,
+        '```mermaid\ngraph TD\n  A[开始] --> B[结束]',
+        showCaret: true,
+      );
+      expect(tester.takeException(), isNull);
+      expect(find.textContaining('graph TD'), findsNothing);
+      expect(find.textContaining('正在绘制图表'), findsOneWidget);
+      expect(find.byKey(const Key('wx-mermaid-pending')), findsNothing);
     });
 
     testWidgets('围栏代码块带语言标签、无 ``` 泄漏', (tester) async {

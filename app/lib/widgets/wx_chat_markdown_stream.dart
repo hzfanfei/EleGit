@@ -1,7 +1,9 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../theme.dart';
+import '../utils/wx_mermaid_fence.dart';
 import '../utils/wx_markdown_styles.dart';
+import 'wx_mermaid_block.dart';
 export '../utils/wx_markdown_styles.dart' show WxMarkdownStyle, chatMarkdownStyle;
 import 'wx_rich_text.dart';
 import 'wx_unified_markdown.dart';
@@ -290,15 +292,28 @@ class _BlockView extends StatefulWidget {
 class _BlockViewState extends State<_BlockView> {
   @override
   Widget build(BuildContext context) {
-    final body = WxUnifiedMarkdownBody(
-      data: widget.source,
-      mdStyle: widget.mdStyle,
-      onTapLink: (text, href, title) {
-        final target = (href ?? '').trim();
-        if (target.isEmpty) return;
-        widget.onTapLink?.call(target, text);
-      },
-    );
+    final mermaidOnly = parseMermaidFenceBlock(widget.source);
+    final body = mermaidOnly != null
+        ? WxMermaidBlock(
+            code: mermaidOnly.code,
+            closed: mermaidOnly.closed,
+            style: widget.mdStyle.mermaidStyle,
+            shellColor: widget.mdStyle.mermaidShellColor,
+            monoStyle: widget.mdStyle.body.copyWith(
+              fontFamily: 'ui-monospace',
+              fontSize: (widget.mdStyle.body.fontSize ?? 16) * 0.88,
+              height: 1.45,
+            ),
+          )
+        : WxUnifiedMarkdownBody(
+            data: widget.source,
+            mdStyle: widget.mdStyle,
+            onTapLink: (text, href, title) {
+              final target = (href ?? '').trim();
+              if (target.isEmpty) return;
+              widget.onTapLink?.call(target, text);
+            },
+          );
     if (!widget.isNew) return body;
     return TweenAnimationBuilder<double>(
       tween: Tween<double>(begin: 0, end: 1),
