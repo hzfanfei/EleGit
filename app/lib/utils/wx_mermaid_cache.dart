@@ -5,7 +5,7 @@ import '../api/wenxiang_api.dart';
 class WxMermaidCache {
   WxMermaidCache._();
 
-  static final instance = WxMermaidCache();
+  static final instance = WxMermaidCache._();
 
   static const maxEntries = 32;
 
