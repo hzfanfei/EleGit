@@ -91,11 +91,185 @@ bool isMermaidFenceCloseLine(String line) {
   return stripped.startsWith('```') && stripped.replaceAll('`', '').trim().isEmpty;
 }
 
+const _reflowDiagramTypes = <String>[
+  'stateDiagram-v2',
+  'sequenceDiagram',
+  'classDiagram',
+  'erDiagram',
+  'quadrantChart',
+  'xychart-beta',
+  'sankey-beta',
+  'block-beta',
+  'architecture-beta',
+  'flowchart',
+  'stateDiagram',
+  'gitGraph',
+  'mindmap',
+  'timeline',
+  'C4Context',
+  'journey',
+  'kanban',
+  'zenuml',
+  'gantt',
+  'graph',
+  'pie',
+];
+
+final _flowDirection = RegExp(r'^(TD|TB|LR|RL|BT)\b', caseSensitive: false);
+
+/// ACP text deltas sometimes arrive with newlines removed, so a fence shows up
+/// as ` ```mermaidflowchart TD A-->B ``` ` and never becomes a diagram.
+String restoreFlattenedMermaidFences(String input) {
+  if (!input.contains('```')) return input;
+  final text = input.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+  final out = StringBuffer();
+  var i = 0;
+  while (i < text.length) {
+    final start = _fenceOpenAt(text, i);
+    if (start < 0) {
+      out.write(text.substring(i));
+      break;
+    }
+    out.write(text.substring(i, start));
+    final close = _fenceCloseAt(text, start + 3);
+    if (close < 0) {
+      out.write(text.substring(start));
+      break;
+    }
+    final inner = text.substring(start + 3, close);
+    final reflowed = _reflowMermaidInner(inner);
+    if (out.isNotEmpty && !out.toString().endsWith('\n')) out.writeln();
+    if (reflowed == null) {
+      out
+        ..write('```')
+        ..write(inner)
+        ..write('```');
+    } else {
+      out.write(reflowed);
+    }
+    final after = close + 3;
+    if (after < text.length && text[after] != '\n') out.writeln();
+    i = after;
+  }
+  return out.toString();
+}
+
+int _fenceOpenAt(String text, int from) {
+  var i = from;
+  while (i < text.length) {
+    final at = text.indexOf('```', i);
+    if (at < 0) return -1;
+    final glued = (at > 0 && text[at - 1] == '`') || (at + 3 < text.length && text[at + 3] == '`');
+    if (!glued) return at;
+    i = at + 1;
+  }
+  return -1;
+}
+
+int _fenceCloseAt(String text, int from) => _fenceOpenAt(text, from);
+
+String? _reflowMermaidInner(String inner) {
+  final trimmed = inner.trim();
+  if (trimmed.isEmpty) return null;
+  if (trimmed.contains('\n')) {
+    final first = trimmed.split('\n').first.trim().toLowerCase();
+    if (first == 'mermaid' || firstLineLooksLikeMermaidDiagram(first)) return null;
+  }
+  var source = trimmed;
+  if (source.toLowerCase().startsWith('mermaid')) {
+    final rest = source.substring('mermaid'.length);
+    if (rest.isEmpty || !RegExp(r'^[A-Za-z]').hasMatch(rest)) return null;
+    source = rest;
+  }
+  final head = _matchDiagramHead(source);
+  if (head == null) return null;
+  final statements = _splitDiagramStatements(head.type, head.body);
+  final buf = StringBuffer('```mermaid\n');
+  buf.writeln(head.header);
+  if (statements.isNotEmpty) buf.writeln(statements);
+  buf.write('```');
+  return buf.toString();
+}
+
+class _DiagramHead {
+  const _DiagramHead(this.type, this.header, this.body);
+  final String type;
+  final String header;
+  final String body;
+}
+
+_DiagramHead? _matchDiagramHead(String source) {
+  final trimmed = source.trimLeft();
+  for (final type in _reflowDiagramTypes) {
+    if (!trimmed.toLowerCase().startsWith(type.toLowerCase())) continue;
+    final rest = trimmed.substring(type.length);
+    final lower = type.toLowerCase();
+    if (lower == 'flowchart' || lower == 'graph') {
+      if (rest.isNotEmpty && RegExp(r'^[A-Za-z]').hasMatch(rest)) {
+        final dir = _flowDirection.firstMatch(rest);
+        if (dir == null) continue;
+        final header = '$lower ${dir.group(1)!.toUpperCase()}';
+        return _DiagramHead(lower, header, rest.substring(dir.end).trimLeft());
+      }
+      if (rest.isNotEmpty && !RegExp(r'^\s').hasMatch(rest)) continue;
+      final spaced = RegExp(r'^\s+(TD|TB|LR|RL|BT)\b', caseSensitive: false).firstMatch(rest);
+      if (spaced == null) continue;
+      final header = '$lower ${spaced.group(1)!.toUpperCase()}';
+      return _DiagramHead(lower, header, rest.substring(spaced.end).trimLeft());
+    }
+    if (lower == 'pie' && rest.isNotEmpty && RegExp(r'^[A-Za-z]').hasMatch(rest)) continue;
+    return _DiagramHead(type, type, rest.trimLeft());
+  }
+  return null;
+}
+
+String _splitDiagramStatements(String type, String body) {
+  final lower = type.toLowerCase();
+  if (lower == 'flowchart' || lower == 'graph' || lower.startsWith('statediagram')) {
+    return _splitFlowStatements(body);
+  }
+  if (lower == 'sequencediagram') return _splitSequenceStatements(body);
+  return body.trim();
+}
+
+String _splitFlowStatements(String body) {
+  var s = body.trim();
+  if (s.isEmpty) return s;
+  s = s.replaceAllMapped(RegExp(r'(?<=[\]\}])\s+(?=[A-Za-z_])'), (_) => '\n');
+  s = s.replaceAllMapped(
+    RegExp(r'(?<=\S)\s+(?=(?:subgraph|end|classDef|click|style|linkStyle|direction)\b)'),
+    (_) => '\n',
+  );
+  s = s.replaceAllMapped(
+    RegExp(r'(?<=\S)\s+(?=[A-Za-z_][\w-]*\s*(?:-->|---|==>|-.->))'),
+    (_) => '\n',
+  );
+  return s;
+}
+
+String _splitSequenceStatements(String body) {
+  var s = body.trim();
+  if (s.isEmpty) return s;
+  s = s.replaceAllMapped(
+    RegExp(
+      r'(?<=\S)\s+(?=(?:participant|actor|Note|loop|alt|else|opt|par|and|rect|activate|deactivate|autonumber|end)\b)',
+    ),
+    (_) => '\n',
+  );
+  s = s.replaceAllMapped(
+    RegExp(r'(?<=\S)\s+(?=[A-Za-z_][\w-]*\s*(?:-->>|->>|--x|-x|-->|->))'),
+    (_) => '\n',
+  );
+  return s;
+}
+
 /// Splits [markdown] so every mermaid-class fence is its own segment.
 List<WxMarkdownMermaidSegment> splitMarkdownByMermaidFences(String markdown) {
   if (markdown.isEmpty) return const [];
 
-  final normalized = markdown.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+  final normalized = restoreFlattenedMermaidFences(
+    markdown.replaceAll('\r\n', '\n').replaceAll('\r', '\n'),
+  );
   final lines = normalized.split('\n');
   final segments = <WxMarkdownMermaidSegment>[];
   final proseBuf = StringBuffer();
