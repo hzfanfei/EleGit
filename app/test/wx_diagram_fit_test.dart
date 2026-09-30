@@ -4,21 +4,21 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:wenxiang/utils/wx_diagram_fit.dart';
 
 void main() {
-  test('tall diagram shrinks to one screen instead of full width', () {
-    final wide = fitDiagramBox(maxWidth: 360, maxHeight: 480, pixelWidth: 360, pixelHeight: 200);
-    expect(wide.width, 360);
-    expect(wide.height, closeTo(200, 0.01));
+  test('diagram uses column width minus side gutters and keeps aspect', () {
+    final wide = fitDiagramBox(maxWidth: 360, pixelWidth: 360, pixelHeight: 200);
+    expect(wide.width, 360 - diagramSideGutter * 2);
+    expect(wide.height, closeTo(wide.width * 200 / 360, 0.01));
 
-    final tall = fitDiagramBox(maxWidth: 360, maxHeight: 480, pixelWidth: 728, pixelHeight: 1620);
-    expect(tall.height, 480);
-    expect(tall.width, lessThan(360));
+    final tall = fitDiagramBox(maxWidth: 360, pixelWidth: 728, pixelHeight: 1620);
+    expect(tall.width, 360 - diagramSideGutter * 2);
+    expect(tall.height, greaterThan(480));
     expect(tall.width / tall.height, closeTo(728 / 1620, 0.001));
   });
 
-  test('one screen height leaves room for header and composer', () {
-    final height = oneScreenDiagramHeight(screenHeight: 800, paddingVertical: 48);
-    expect(height, lessThan(560));
-    expect(height, greaterThan(300));
+  test('narrow column keeps the full width when gutters would crush it', () {
+    final box = fitDiagramBox(maxWidth: 140, pixelWidth: 100, pixelHeight: 200);
+    expect(box.width, 140);
+    expect(box.height, closeTo(280, 0.01));
   });
 
   test('reads PNG and WebP sizes from headers', () {

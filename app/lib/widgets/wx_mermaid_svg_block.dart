@@ -242,18 +242,12 @@ class _WxMermaidSvgBlockState extends State<WxMermaidSvgBlock> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final media = MediaQuery.of(context);
-        final maxW = constraints.maxWidth.isFinite ? constraints.maxWidth : media.size.width - 48;
-        final maxH = oneScreenDiagramHeight(
-          screenHeight: media.size.height,
-          paddingVertical: media.padding.vertical,
-        );
+        final maxW = constraints.maxWidth.isFinite ? constraints.maxWidth : MediaQuery.sizeOf(context).width - 48;
         final png = _png;
         if (png != null) {
           final pixels = readRasterSize(png);
           final box = fitDiagramBox(
             maxWidth: maxW,
-            maxHeight: maxH,
             pixelWidth: (pixels?.width ?? 0).toDouble(),
             pixelHeight: (pixels?.height ?? 0).toDouble(),
           );
@@ -268,12 +262,12 @@ class _WxMermaidSvgBlockState extends State<WxMermaidSvgBlock> {
                 fit: BoxFit.contain,
                 filterQuality: FilterQuality.high,
                 gaplessPlayback: true,
-                errorBuilder: (_, __, ___) => _svgFallback(maxW, maxH),
+                errorBuilder: (_, __, ___) => _svgFallback(maxW),
               ),
             ),
           );
         }
-        return _svgFallback(maxW, maxH);
+        return _svgFallback(maxW);
       },
     );
   }
@@ -308,7 +302,7 @@ class _WxMermaidSvgBlockState extends State<WxMermaidSvgBlock> {
     );
   }
 
-  Widget _svgFallback(double maxW, double maxH) {
+  Widget _svgFallback(double maxW) {
     final svg = _svg;
     if (svg == null || svg.isEmpty) {
       return Text(
@@ -319,7 +313,6 @@ class _WxMermaidSvgBlockState extends State<WxMermaidSvgBlock> {
     final pixels = readSvgViewBoxSize(svg);
     final box = fitDiagramBox(
       maxWidth: maxW,
-      maxHeight: maxH,
       pixelWidth: (pixels?.width ?? 0).toDouble(),
       pixelHeight: (pixels?.height ?? 0).toDouble(),
     );

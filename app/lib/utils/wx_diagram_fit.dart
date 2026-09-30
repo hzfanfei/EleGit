@@ -22,41 +22,29 @@ class DiagramBox {
   final double height;
 }
 
-/// Height left for the picture after the chat header, composer, and card chrome.
-double oneScreenDiagramHeight({
-  required double screenHeight,
-  required double paddingVertical,
-}) {
-  const header = 64.0;
-  const composer = 72.0;
-  const cardChrome = 84.0;
-  final available = screenHeight - paddingVertical - header - composer - cardChrome;
-  if (available < 220) return 220;
-  final cap = screenHeight * 0.62;
-  return available < cap ? available : cap;
+/// Space kept on each side so a width-fitted diagram is not flush with the column.
+const diagramSideGutter = 16.0;
+
+/// Column width minus the side gutters. Very narrow columns keep the full width.
+double diagramLayoutWidth(double maxWidth) {
+  final maxW = maxWidth.isFinite && maxWidth > 0 ? maxWidth : 280.0;
+  final inner = maxW - diagramSideGutter * 2;
+  if (inner < 160) return maxW;
+  return inner;
 }
 
-/// Fit the whole picture inside [maxWidth] x [maxHeight]. Short diagrams stay
-/// full width; tall ones shrink so one phone screen can show them.
+/// Size the picture to the chat column width and keep its aspect ratio.
+/// Height follows the picture, so a tall diagram can run past one screen.
 DiagramBox fitDiagramBox({
   required double maxWidth,
-  required double maxHeight,
   required double pixelWidth,
   required double pixelHeight,
 }) {
-  final maxW = maxWidth.isFinite && maxWidth > 0 ? maxWidth : 280.0;
-  final maxH = maxHeight.isFinite && maxHeight > 0 ? maxHeight : maxW;
+  final width = diagramLayoutWidth(maxWidth);
   if (pixelWidth <= 0 || pixelHeight <= 0) {
-    return DiagramBox(maxW, maxH < maxW ? maxH : maxW * 0.75);
+    return DiagramBox(width, width * 0.75);
   }
-  final aspect = pixelWidth / pixelHeight;
-  var width = maxW;
-  var height = width / aspect;
-  if (height > maxH) {
-    height = maxH;
-    width = height * aspect;
-  }
-  return DiagramBox(width, height);
+  return DiagramBox(width, width * pixelHeight / pixelWidth);
 }
 
 RasterSize? readRasterSize(Uint8List bytes) {
