@@ -5,6 +5,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 
 import '../api/wenxiang_api.dart';
 import '../theme.dart';
+import '../utils/wx_diagram_fit.dart';
 import '../utils/wx_mermaid_cache.dart';
 import 'wx_rich_text.dart';
 
@@ -241,24 +242,73 @@ class _WxMermaidSvgBlockState extends State<WxMermaidSvgBlock> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final maxW = constraints.maxWidth.isFinite ? constraints.maxWidth : MediaQuery.sizeOf(context).width - 48;
+        final media = MediaQuery.of(context);
+        final maxW = constraints.maxWidth.isFinite ? constraints.maxWidth : media.size.width - 48;
+        final maxH = oneScreenDiagramHeight(
+          screenHeight: media.size.height,
+          paddingVertical: media.padding.vertical,
+        );
         final png = _png;
         if (png != null) {
-          return Image.memory(
-            png,
-            width: maxW,
-            fit: BoxFit.fitWidth,
-            filterQuality: FilterQuality.medium,
-            gaplessPlayback: true,
-            errorBuilder: (_, __, ___) => _svgFallback(maxW),
+          final pixels = readRasterSize(png);
+          final box = fitDiagramBox(
+            maxWidth: maxW,
+            maxHeight: maxH,
+            pixelWidth: (pixels?.width ?? 0).toDouble(),
+            pixelHeight: (pixels?.height ?? 0).toDouble(),
+          );
+          return Align(
+            alignment: Alignment.center,
+            child: GestureDetector(
+              onTap: () => _zoom(png),
+              child: Image.memory(
+                png,
+                width: box.width,
+                height: box.height,
+                fit: BoxFit.contain,
+                filterQuality: FilterQuality.high,
+                gaplessPlayback: true,
+                errorBuilder: (_, __, ___) => _svgFallback(maxW, maxH),
+              ),
+            ),
           );
         }
-        return _svgFallback(maxW);
+        return _svgFallback(maxW, maxH);
       },
     );
   }
 
-  Widget _svgFallback(double maxW) {
+  void _zoom(Uint8List bytes) {
+    showDialog<void>(
+      context: context,
+      barrierColor: const Color(0xE6000000),
+      builder: (context) {
+        return SafeArea(
+          child: Stack(
+            children: [
+              Center(
+                child: InteractiveViewer(
+                  minScale: 1,
+                  maxScale: 4,
+                  child: Image.memory(bytes, fit: BoxFit.contain),
+                ),
+              ),
+              Align(
+                alignment: Alignment.topRight,
+                child: IconButton(
+                  tooltip: '关闭',
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.close, color: Colors.white),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _svgFallback(double maxW, double maxH) {
     final svg = _svg;
     if (svg == null || svg.isEmpty) {
       return Text(
@@ -266,14 +316,25 @@ class _WxMermaidSvgBlockState extends State<WxMermaidSvgBlock> {
         style: TextStyle(color: Wx.danger, fontSize: 13, fontFamilyFallback: Wx.fontFallback),
       );
     }
-    return SvgPicture.string(
-      svg,
-      fit: BoxFit.contain,
-      width: maxW,
-      theme: const SvgTheme(currentColor: Wx.text),
-      errorBuilder: (_, __, ___) => Text(
-        '图表无法显示',
-        style: TextStyle(color: Wx.danger, fontSize: 13, fontFamilyFallback: Wx.fontFallback),
+    final pixels = readSvgViewBoxSize(svg);
+    final box = fitDiagramBox(
+      maxWidth: maxW,
+      maxHeight: maxH,
+      pixelWidth: (pixels?.width ?? 0).toDouble(),
+      pixelHeight: (pixels?.height ?? 0).toDouble(),
+    );
+    return Align(
+      alignment: Alignment.center,
+      child: SvgPicture.string(
+        svg,
+        fit: BoxFit.contain,
+        width: box.width,
+        height: box.height,
+        theme: const SvgTheme(currentColor: Wx.text),
+        errorBuilder: (_, __, ___) => Text(
+          '图表无法显示',
+          style: TextStyle(color: Wx.danger, fontSize: 13, fontFamilyFallback: Wx.fontFallback),
+        ),
       ),
     );
   }
