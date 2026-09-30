@@ -4,13 +4,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:wenxiang/utils/wx_diagram_fit.dart';
 
 void main() {
-  test('diagram uses column width minus side gutters and keeps aspect', () {
+  test('diagram uses two thirds of the column and keeps aspect', () {
     final wide = fitDiagramBox(maxWidth: 360, pixelWidth: 360, pixelHeight: 200);
-    expect(wide.width, 360 - diagramSideGutter * 2);
+    expect(wide.width, closeTo(360 * diagramWidthFraction, 0.01));
     expect(wide.height, closeTo(wide.width * 200 / 360, 0.01));
 
     final tall = fitDiagramBox(maxWidth: 360, pixelWidth: 728, pixelHeight: 1620);
-    expect(tall.width, 360 - diagramSideGutter * 2);
+    expect(tall.width, closeTo(360 * diagramWidthFraction, 0.01));
     expect(tall.height, greaterThan(480));
     expect(tall.width / tall.height, closeTo(728 / 1620, 0.001));
   });

@@ -22,18 +22,18 @@ class DiagramBox {
   final double height;
 }
 
-/// Space kept on each side so a width-fitted diagram is not flush with the column.
-const diagramSideGutter = 16.0;
+/// Inline diagrams use two thirds of the chat column so the sides stay open.
+const diagramWidthFraction = 2 / 3;
 
-/// Column width minus the side gutters. Very narrow columns keep the full width.
+/// Two thirds of the column. Very narrow columns keep the full width.
 double diagramLayoutWidth(double maxWidth) {
   final maxW = maxWidth.isFinite && maxWidth > 0 ? maxWidth : 280.0;
-  final inner = maxW - diagramSideGutter * 2;
+  final inner = maxW * diagramWidthFraction;
   if (inner < 160) return maxW;
   return inner;
 }
 
-/// Size the picture to the chat column width and keep its aspect ratio.
+/// Size the picture to two thirds of the chat column and keep its aspect ratio.
 /// Height follows the picture, so a tall diagram can run past one screen.
 DiagramBox fitDiagramBox({
   required double maxWidth,
