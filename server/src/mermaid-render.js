@@ -19,6 +19,8 @@ function mermaidAssetPaths() {
 
 const MAX_CODE_LEN = 48_000;
 const RENDER_TIMEOUT_MS = 28_000;
+/** Lossy WebP. Phone Image.memory decodes it; much smaller than the old PNG. */
+const WEBP_QUALITY = 80;
 
 export function mermaidCliPath() {
   return MMDC;
@@ -78,7 +80,7 @@ export function mermaidCacheId(code, theme, backgroundColor) {
     code: String(code || "").trim(),
     theme: paint.theme,
     backgroundColor: paint.backgroundColor,
-    render: "flutter-png-2",
+    render: "flutter-webp-1",
   });
   return createHash("sha256").update(payload).digest("hex").slice(0, 32);
 }
@@ -91,16 +93,16 @@ export async function readCachedMermaidSvg(workspaceRoot, id) {
 
 function cachePaths(workspaceRoot, id) {
   const dir = mermaidCacheDir(workspaceRoot);
-  return { dir, svg: join(dir, `${id}.svg`), png: join(dir, `${id}.png`) };
+  return { dir, svg: join(dir, `${id}.svg`), webp: join(dir, `${id}.webp`) };
 }
 
 async function readCachedDiagram(workspaceRoot, id) {
   const paths = cachePaths(workspaceRoot, id);
-  const [svg, png] = await Promise.all([
+  const [svg, webp] = await Promise.all([
     readFile(paths.svg, "utf8"),
-    readFile(paths.png),
+    readFile(paths.webp),
   ]);
-  return { svg, png };
+  return { svg, webp };
 }
 
 /**
@@ -194,7 +196,9 @@ async function renderWithPuppeteer(code, paint, assets) {
       height: Math.max(1, clip.y + clip.height),
       deviceScaleFactor: 2,
     });
-    const png = Buffer.from(await page.screenshot({ clip, type: "png", omitBackground: false }));
+    const webp = Buffer.from(
+      await page.screenshot({ clip, type: "webp", quality: WEBP_QUALITY, omitBackground: false }),
+    );
 
     const svg = await page.$eval("svg", (svg) => {
       const shapes = new Set(["path", "rect", "circle", "ellipse", "polygon", "polyline", "line", "text", "tspan"]);
@@ -254,19 +258,20 @@ async function renderWithPuppeteer(code, paint, assets) {
       svg.removeAttribute("style");
       return new XMLSerializer().serializeToString(svg);
     });
-    if (!svg.trim() || png.length < 8) {
+    if (!svg.trim() || webp.length < 12) {
       const err = new Error("Mermaid 渲染结果为空");
       err.code = "mermaid_empty_svg";
       throw err;
     }
-    return { svg, png };
+    return { svg, webp };
   } finally {
     await browser.close();
   }
 }
 
 /**
- * Render Mermaid to a PNG (phone) and a flutter_svg-safe SVG (installed builds).
+ * Render Mermaid to a WebP (phone) and a flutter_svg-safe SVG (installed builds).
+ * The JSON field stays `png` so builds that already decode the raster keep working.
  */
 export async function renderMermaidSvg({
   code,
@@ -294,7 +299,7 @@ export async function renderMermaidSvg({
   if (useCache) {
     try {
       const cached = await readCachedDiagram(workspaceRoot, id);
-      return { id, svg: cached.svg, png: cached.png, cached: true };
+      return { id, svg: cached.svg, webp: cached.webp, cached: true };
     } catch {
       // miss
     }
@@ -312,13 +317,13 @@ export async function renderMermaidSvg({
     throw err;
   }
 
-  const { svg, png } = await renderWithPuppeteer(trimmed, paint, assets);
+  const { svg, webp } = await renderWithPuppeteer(trimmed, paint, assets);
   if (useCache && workspaceRoot) {
     await mkdir(paths.dir, { recursive: true });
     await Promise.all([
       writeFile(paths.svg, svg, "utf8"),
-      writeFile(paths.png, png),
+      writeFile(paths.webp, webp),
     ]);
   }
-  return { id, svg, png, cached: false };
+  return { id, svg, webp, cached: false };
 }

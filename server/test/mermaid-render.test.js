@@ -25,9 +25,9 @@ describe("mermaid-render", () => {
     assert.notEqual(a, mermaidCacheId("graph TD\n  A-->B", "default", "#FAF8F5"));
   });
 
-  it("renders a flowchart to PNG and a flutter-safe SVG", async () => {
+  it("renders a flowchart to WebP and a flutter-safe SVG", async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), "wx-mmd-test-"));
-    const { svg, png, id, cached } = await renderMermaidSvg({
+    const { svg, webp, id, cached } = await renderMermaidSvg({
       code: "flowchart LR\n  A[开始] --> B[结束]",
       theme: "dark",
       backgroundColor: "transparent",
@@ -38,8 +38,8 @@ describe("mermaid-render", () => {
     assert.doesNotMatch(svg, /foreignObject/i);
     assert.doesNotMatch(svg, /<style[\s>]/i);
     assert.match(svg, /font-family="WenxiangSerif"/);
-    assert.equal(png[0], 0x89);
-    assert.equal(png[1], 0x50);
+    assert.equal(webp.subarray(0, 4).toString("ascii"), "RIFF");
+    assert.equal(webp.subarray(8, 12).toString("ascii"), "WEBP");
     assert.ok(id.length >= 16);
     assert.equal(cached, false);
 

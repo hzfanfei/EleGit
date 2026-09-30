@@ -663,7 +663,8 @@ app.post("/v1/mermaid/render", async (req, res) => {
     res.json({
       id: result.id,
       svg: result.svg,
-      png: Buffer.isBuffer(result.png) ? result.png.toString("base64") : "",
+      png: Buffer.isBuffer(result.webp) ? result.webp.toString("base64") : "",
+      format: "webp",
       cached: result.cached,
     });
   } catch (err) {
