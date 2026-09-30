@@ -3,6 +3,7 @@ import 'package:gpt_markdown/gpt_markdown.dart';
 
 import '../utils/text_fit.dart';
 import '../utils/wx_markdown_styles.dart';
+import 'wx_mermaid_block.dart';
 import 'wx_rich_text.dart';
 
 class WxMarkdownImageConfig {
@@ -77,16 +78,25 @@ class WxUnifiedMarkdownBody extends StatelessWidget {
                 );
               },
         codeBuilder: (context, name, code, closed) {
+          final mono = mdStyle.body.copyWith(
+            fontFamily: 'ui-monospace',
+            fontFamilyFallback: const ['SF Mono', 'Menlo', 'Consolas', 'monospace'],
+            fontSize: mdStyle.body.fontSize != null ? mdStyle.body.fontSize! * 0.88 : 14,
+            height: 1.45,
+          );
+          if (WxMermaidBlock.isMermaidLanguage(name)) {
+            return WxMermaidBlock(
+              code: code,
+              closed: closed,
+              style: mdStyle.mermaidStyle,
+              monoStyle: mono,
+            );
+          }
           return WxFencedCode(
             code: code,
             language: name,
             blockKey: const Key('wx-md-code'),
-            style: (mdStyle.body).copyWith(
-              fontFamily: 'ui-monospace',
-              fontFamilyFallback: const ['SF Mono', 'Menlo', 'Consolas', 'monospace'],
-              fontSize: mdStyle.body.fontSize != null ? mdStyle.body.fontSize! * 0.88 : 14,
-              height: 1.45,
-            ),
+            style: mono,
           );
         },
         checkboxBuilder: (context, checked, content, style) {
