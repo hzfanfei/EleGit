@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_mermaid/flutter_mermaid.dart';
 import 'package:gpt_markdown/gpt_markdown.dart';
 
 import '../persist/book_reader_prefs.dart';
 import '../theme.dart';
+import '../widgets/wx_mermaid_webview.dart';
 
 /// Chat and book reader share [GptMarkdown]; this bundles body text + theme.
 @immutable
@@ -12,13 +12,13 @@ class WxMarkdownStyle {
     required this.body,
     required this.gptTheme,
     required this.styleSheet,
-    required this.mermaidStyle,
+    required this.mermaidTheme,
   });
 
   final TextStyle body;
   final GptMarkdownThemeData gptTheme;
   final GptMarkdownStyleSheet styleSheet;
-  final MermaidStyle mermaidStyle;
+  final WxMermaidWebTheme mermaidTheme;
 }
 
 WxMarkdownStyle chatMarkdownStyle(ThemeData theme) {
@@ -71,7 +71,7 @@ WxMarkdownStyle chatMarkdownStyle(ThemeData theme) {
   return WxMarkdownStyle(
     body: body,
     gptTheme: gptTheme,
-    mermaidStyle: MermaidStyle.dark(),
+    mermaidTheme: WxMermaidWebTheme.dark,
     styleSheet: GptMarkdownStyleSheet(
       link: LinkStyle(
         color: Wx.accent,
@@ -165,14 +165,10 @@ WxMarkdownStyle bookReaderMarkdownStyle({
       backgroundColor: codeFill,
     ),
   );
-  final mermaidBg = palette.paper.toARGB32();
-  final mermaidStyle = MermaidStyle.neutral().copyWith(
-    backgroundColor: mermaidBg,
-  );
   return WxMarkdownStyle(
     body: body,
     gptTheme: gptTheme,
-    mermaidStyle: mermaidStyle,
+    mermaidTheme: WxMermaidWebTheme.light,
     styleSheet: GptMarkdownStyleSheet(
       link: LinkStyle(
         color: Wx.accent,

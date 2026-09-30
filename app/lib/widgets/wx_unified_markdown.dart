@@ -88,7 +88,7 @@ class WxUnifiedMarkdownBody extends StatelessWidget {
             return WxMermaidBlock(
               code: code,
               closed: closed,
-              style: mdStyle.mermaidStyle,
+              theme: mdStyle.mermaidTheme,
               monoStyle: mono,
             );
           }
