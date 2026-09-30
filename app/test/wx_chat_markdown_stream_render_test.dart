@@ -80,6 +80,16 @@ void main() {
       expect(find.textContaining('图表'), findsOneWidget);
     });
 
+    testWidgets('flowchart 语言标签围栏走图表卡片而非代码块', (tester) async {
+      await _pumpWithSource(
+        tester,
+        '```flowchart LR\n  A[开始] --> B[结束]\n```\n',
+      );
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const Key('wx-mermaid-diagram')), findsOneWidget);
+      expect(find.byKey(const Key('wx-md-code')), findsNothing);
+    });
+
     testWidgets('围栏代码块带语言标签、无 ``` 泄漏', (tester) async {
       await _pumpWithSource(
         tester,

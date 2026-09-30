@@ -116,9 +116,13 @@ class WxUnifiedMarkdownBody extends StatelessWidget {
                 );
               },
         codeBuilder: (context, name, code, closed) {
-          if (name.trim().toLowerCase() == 'mermaid') {
+          final lang = name.trim();
+          if (isMermaidFenceLang(lang) || looksLikeMermaidSource(code)) {
             return WxMermaidSvgBlock(
-              code: code,
+              code: normalizeMermaidFenceSource(
+                isMermaidFenceLang(lang) ? lang : 'mermaid',
+                code,
+              ),
               closed: closed,
               api: api,
               serverTheme: mdStyle.mermaidServerTheme,
