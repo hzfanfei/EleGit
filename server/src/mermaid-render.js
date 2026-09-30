@@ -17,6 +17,72 @@ function mermaidAssetPaths() {
   };
 }
 
+const ER_TYPE_GLUE =
+  /\b(string|int|integer|float|double|bool|boolean|date|datetime|number|varchar|char)(?=\S)/gi;
+const ER_TYPE_WORD =
+  /(?:string|int|integer|float|double|bool|boolean|date|datetime|number|varchar|char)/i;
+
+/** Put class, ER, and pie statements back on their own lines. */
+export function normalizeMermaidSource(code) {
+  const text = String(code || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+  if (!text) return text;
+  const flat = text.replace(/\s+/g, " ").trim();
+  const lower = flat.toLowerCase();
+  if (lower.startsWith("classdiagram")) {
+    const body = splitClassBody(flat.slice("classdiagram".length).trim());
+    return body ? `classDiagram\n${body}` : "classDiagram";
+  }
+  if (lower.startsWith("erdiagram")) {
+    const body = splitErBody(flat.slice("erdiagram".length).trim());
+    return body ? `erDiagram\n${body}` : "erDiagram";
+  }
+  if (lower.startsWith("pie")) {
+    let body = flat.slice(3).trim();
+    let header = "pie";
+    if (/^showdata\b/i.test(body)) {
+      header = "pie showData";
+      body = body.replace(/^showdata\b/i, "").trim();
+    }
+    const lines = splitPieBody(body);
+    return lines ? `${header}\n${lines}` : header;
+  }
+  return text;
+}
+
+function splitClassBody(body) {
+  let s = String(body || "").trim();
+  if (!s) return s;
+  s = s.replace(/\s+(?=class\s+)/g, "\n");
+  s = s.replace(/\{(?!\n)/g, "{\n");
+  s = s.replace(/\s*(?=})/g, "\n");
+  s = s.replace(/(?:(?<=\S)\s*|\s+)(?=(?:[+\#~]|-(?![->.])))/g, "\n");
+  s = s.replace(
+    /\s+(?=[A-Za-z_][\w]*\s*(?:<\|--|<\|\.\.|\*--|o--|-->|<--|==>|\.\.>|\.\.|--))/g,
+    "\n",
+  );
+  return s.replace(/\n{2,}/g, "\n").trim();
+}
+
+function splitErBody(body) {
+  let s = String(body || "").trim();
+  if (!s) return s;
+  s = s.replace(ER_TYPE_GLUE, "$1 ");
+  s = s.replace(/\s+(?=[A-Za-z_][\w]*\s*\{)/g, "\n");
+  s = s.replace(/(?<=\s)\{(?!\n)/g, "{\n");
+  s = s.replace(/\s*\}(?!\s*[|o])/g, "\n}");
+  s = s.replace(new RegExp(`\\s+(?=${ER_TYPE_WORD.source}\\b)`, "gi"), "\n");
+  return s.replace(/\n{2,}/g, "\n").trim();
+}
+
+function splitPieBody(body) {
+  let s = String(body || "").trim();
+  if (!s) return s;
+  s = s.replace(/\btitle(?=[^\s:])/gi, "title ");
+  s = s.replace(/\s+(?=title\b)/gi, "\n");
+  s = s.replace(/(?:\s+|(?<=\S))(?="[^"]*"\s*:)/g, "\n");
+  return s.replace(/\n{2,}/g, "\n").trim();
+}
+
 const MAX_CODE_LEN = 48_000;
 const RENDER_TIMEOUT_MS = 28_000;
 /** Lossy WebP. Phone Image.memory decodes it; much smaller than the old PNG. */
@@ -366,7 +432,7 @@ export async function renderMermaidSvg({
   workspaceRoot,
   useCache = true,
 }) {
-  const trimmed = String(code || "").trim();
+  const trimmed = normalizeMermaidSource(code);
   if (!trimmed) {
     const err = new Error("Mermaid 源码为空");
     err.code = "mermaid_empty";

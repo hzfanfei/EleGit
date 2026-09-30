@@ -217,7 +217,13 @@ _DiagramHead? _matchDiagramHead(String source) {
       final header = '$lower ${spaced.group(1)!.toUpperCase()}';
       return _DiagramHead(lower, header, rest.substring(spaced.end).trimLeft());
     }
-    if (lower == 'pie' && rest.isNotEmpty && RegExp(r'^[A-Za-z]').hasMatch(rest)) continue;
+    if (lower == 'pie') {
+      final showData = RegExp(r'^\s+showData\b', caseSensitive: false).firstMatch(rest);
+      if (showData != null) {
+        return _DiagramHead('pie', 'pie showData', rest.substring(showData.end).trimLeft());
+      }
+      if (rest.isNotEmpty && RegExp(r'^[A-Za-z]').hasMatch(rest)) continue;
+    }
     return _DiagramHead(type, type, rest.trimLeft());
   }
   return null;
@@ -229,7 +235,56 @@ String _splitDiagramStatements(String type, String body) {
     return _splitFlowStatements(body);
   }
   if (lower == 'sequencediagram') return _splitSequenceStatements(body);
+  if (lower == 'classdiagram') return _splitClassStatements(body);
+  if (lower == 'erdiagram') return _splitErStatements(body);
+  if (lower == 'pie') return _splitPieStatements(body);
   return body.trim();
+}
+
+String _splitClassStatements(String body) {
+  var s = body.trim();
+  if (s.isEmpty) return s;
+  s = s.replaceAllMapped(RegExp(r'\s+(?=class\s+)'), (_) => '\n');
+  s = s.replaceAllMapped(RegExp(r'\{(?!\n)'), (_) => '{\n');
+  s = s.replaceAllMapped(RegExp(r'\s*(?=})'), (_) => '\n');
+  s = s.replaceAllMapped(RegExp(r'(?:(?<=\S)\s*|\s+)(?=(?:[+\#~]|-(?![->.])))'), (_) => '\n');
+  s = s.replaceAllMapped(
+    RegExp(r'\s+(?=[A-Za-z_][\w]*\s*(?:<\|--|<\|\.\.|\*--|o--|-->|<--|==>|\.\.>|\.\.|--))'),
+    (_) => '\n',
+  );
+  return s.replaceAll(RegExp(r'\n{2,}'), '\n').trim();
+}
+
+String _splitErStatements(String body) {
+  var s = body.trim();
+  if (s.isEmpty) return s;
+  s = s.replaceAllMapped(
+    RegExp(
+      r'\b(string|int|integer|float|double|bool|boolean|date|datetime|number|varchar|char)(?=\S)',
+      caseSensitive: false,
+    ),
+    (m) => '${m[1]} ',
+  );
+  s = s.replaceAllMapped(RegExp(r'\s+(?=[A-Za-z_][\w]*\s*\{)'), (_) => '\n');
+  s = s.replaceAllMapped(RegExp(r'(?<=\s)\{(?!\n)'), (_) => '{\n');
+  s = s.replaceAllMapped(RegExp(r'\s*\}(?!\s*[|o])'), (_) => '\n}');
+  s = s.replaceAllMapped(
+    RegExp(
+      r'\s+(?=(?:string|int|integer|float|double|bool|boolean|date|datetime|number|varchar|char)\b)',
+      caseSensitive: false,
+    ),
+    (_) => '\n',
+  );
+  return s.replaceAll(RegExp(r'\n{2,}'), '\n').trim();
+}
+
+String _splitPieStatements(String body) {
+  var s = body.trim();
+  if (s.isEmpty) return s;
+  s = s.replaceAllMapped(RegExp(r'\btitle(?=[^\s:])', caseSensitive: false), (_) => 'title ');
+  s = s.replaceAllMapped(RegExp(r'\s+(?=title\b)', caseSensitive: false), (_) => '\n');
+  s = s.replaceAllMapped(RegExp(r'(?:\s+|(?<=\S))(?="[^"]*"\s*:)'), (_) => '\n');
+  return s.replaceAll(RegExp(r'\n{2,}'), '\n').trim();
 }
 
 String _splitFlowStatements(String body) {

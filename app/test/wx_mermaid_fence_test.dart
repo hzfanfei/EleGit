@@ -41,6 +41,34 @@ void main() {
     expect(seq, contains('\nU->>App:发送'));
   });
 
+  test('flattened class, pie, and er diagrams are split into statements', () {
+    const block =
+        '**类图**```mermaidclassDiagram class Answer { +文本 +有图() } class Diagram { +类型 +显示() } Answer --> Diagram: 包含```'
+        '**饼图**```mermaidpie showData title 回答里的内容 "文字" : 70 "流程图" : 20 "其他图" : 10```'
+        '**关系图**```mermaiderDiagram ANSWER ||--o{ DIAGRAM : 包含 ANSWER { string文本 } DIAGRAM { string类型 }```';
+    final segs = splitMarkdownByMermaidFences(block).where((s) => s.isMermaid).toList();
+    expect(segs, hasLength(3));
+
+    final klass = segs[0].mermaidCode!;
+    expect(klass, contains('classDiagram'));
+    expect(klass, contains('class Answer {\n+文本\n+有图()'));
+    expect(klass, contains('class Diagram {\n+类型\n+显示()'));
+    expect(klass, contains('\nAnswer --> Diagram: 包含'));
+
+    final pie = segs[1].mermaidCode!;
+    expect(pie, startsWith('pie showData\n'));
+    expect(pie, contains('\ntitle 回答里的内容'));
+    expect(pie, contains('\n"文字" : 70'));
+    expect(pie, contains('\n"流程图" : 20'));
+    expect(pie, contains('\n"其他图" : 10'));
+
+    final er = segs[2].mermaidCode!;
+    expect(er, contains('erDiagram'));
+    expect(er, contains('ANSWER ||--o{ DIAGRAM : 包含'));
+    expect(er, contains('ANSWER {\nstring 文本\n}'));
+    expect(er, contains('DIAGRAM {\nstring 类型\n}'));
+  });
+
   test('already multiline mermaid fence is left unchanged', () {
     const block = '```mermaid\nflowchart TD\n  A-->B\n```\n';
     final segs = splitMarkdownByMermaidFences(block);

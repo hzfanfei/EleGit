@@ -6,6 +6,7 @@ import { join } from "node:path";
 import {
   formatMermaidCliError,
   mermaidCacheId,
+  normalizeMermaidSource,
   renderMermaidSvg,
 } from "../src/mermaid-render.js";
 
@@ -16,6 +17,31 @@ describe("mermaid-render", () => {
       stderr: "Error: Parse error on line 2:\n...",
     });
     assert.match(msg, /Parse error on line/i);
+  });
+
+  it("normalizeMermaidSource splits collapsed class, pie, and er diagrams", () => {
+    const klass = normalizeMermaidSource(
+      "classDiagram\nclass Answer { +文本 +有图() } class Diagram { +类型 +显示() } Answer --> Diagram: 包含",
+    );
+    assert.match(klass, /class Answer \{\n\+文本\n\+有图\(\)/);
+    assert.match(klass, /Answer --> Diagram: 包含/);
+
+    const pie = normalizeMermaidSource(
+      'pie showData title 回答里的内容 "文字" : 70 "流程图" : 20 "其他图" : 10',
+    );
+    assert.match(pie, /^pie showData\n/);
+    assert.match(pie, /\n"文字" : 70/);
+    assert.match(pie, /\n"其他图" : 10/);
+
+    const er = normalizeMermaidSource(
+      "erDiagram ANSWER ||--o{ DIAGRAM : 包含 ANSWER { string文本 } DIAGRAM { string类型 }",
+    );
+    assert.match(er, /ANSWER \|\|--o\{ DIAGRAM : 包含/);
+    assert.match(er, /ANSWER \{\nstring 文本\n\}/);
+    assert.match(er, /DIAGRAM \{\nstring 类型\n\}/);
+
+    const flow = "flowchart LR\n  A[开始] --> B[结束]";
+    assert.equal(normalizeMermaidSource(flow), flow);
   });
 
   it("mermaidCacheId is stable", () => {
