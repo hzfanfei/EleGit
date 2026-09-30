@@ -254,7 +254,7 @@ class _WxMermaidSvgBlockState extends State<WxMermaidSvgBlock> {
           return Align(
             alignment: Alignment.center,
             child: GestureDetector(
-              onTap: () => _zoom(png),
+              onTap: () => _openFullscreen(png: png),
               child: Image.memory(
                 png,
                 width: box.width,
@@ -272,33 +272,12 @@ class _WxMermaidSvgBlockState extends State<WxMermaidSvgBlock> {
     );
   }
 
-  void _zoom(Uint8List bytes) {
-    showDialog<void>(
-      context: context,
-      barrierColor: const Color(0xE6000000),
-      builder: (context) {
-        return SafeArea(
-          child: Stack(
-            children: [
-              Center(
-                child: InteractiveViewer(
-                  minScale: 1,
-                  maxScale: 4,
-                  child: Image.memory(bytes, fit: BoxFit.contain),
-                ),
-              ),
-              Align(
-                alignment: Alignment.topRight,
-                child: IconButton(
-                  tooltip: '关闭',
-                  onPressed: () => Navigator.of(context).pop(),
-                  icon: const Icon(Icons.close, color: Colors.white),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
+  void _openFullscreen({Uint8List? png, String? svg}) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (_) => _DiagramStage(png: png, svg: svg),
+      ),
     );
   }
 
@@ -318,17 +297,150 @@ class _WxMermaidSvgBlockState extends State<WxMermaidSvgBlock> {
     );
     return Align(
       alignment: Alignment.center,
-      child: SvgPicture.string(
-        svg,
-        fit: BoxFit.contain,
-        width: box.width,
-        height: box.height,
-        theme: const SvgTheme(currentColor: Wx.text),
-        errorBuilder: (_, __, ___) => Text(
-          '图表无法显示',
-          style: TextStyle(color: Wx.danger, fontSize: 13, fontFamilyFallback: Wx.fontFallback),
+      child: GestureDetector(
+        onTap: () => _openFullscreen(svg: svg),
+        child: SvgPicture.string(
+          svg,
+          fit: BoxFit.contain,
+          width: box.width,
+          height: box.height,
+          theme: const SvgTheme(currentColor: Wx.text),
+          errorBuilder: (_, __, ___) => Text(
+            '图表无法显示',
+            style: TextStyle(color: Wx.danger, fontSize: 13, fontFamilyFallback: Wx.fontFallback),
+          ),
         ),
       ),
+    );
+  }
+}
+
+/// Full-screen diagram. Scale 1 fits the screen; pinch or the buttons zoom,
+/// and a drag moves the picture.
+class _DiagramStage extends StatefulWidget {
+  const _DiagramStage({this.png, this.svg});
+
+  final Uint8List? png;
+  final String? svg;
+
+  @override
+  State<_DiagramStage> createState() => _DiagramStageState();
+}
+
+class _DiagramStageState extends State<_DiagramStage> {
+  static const _minScale = 0.35;
+  static const _maxScale = 6.0;
+
+  final _transform = TransformationController();
+
+  @override
+  void dispose() {
+    _transform.dispose();
+    super.dispose();
+  }
+
+  void _zoomBy(double factor) {
+    final current = _transform.value.getMaxScaleOnAxis();
+    final next = (current * factor).clamp(_minScale, _maxScale);
+    if ((next - current).abs() < 0.001) return;
+    final size = MediaQuery.sizeOf(context);
+    final dx = size.width / 2;
+    final dy = size.height / 2;
+    final ratio = next / current;
+    final around = Matrix4.identity()
+      ..translateByDouble(dx, dy, 0, 1)
+      ..scaleByDouble(ratio, ratio, 1, 1)
+      ..translateByDouble(-dx, -dy, 0, 1);
+    _transform.value = around.multiplied(_transform.value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final png = widget.png;
+    final svg = widget.svg;
+    return Scaffold(
+      backgroundColor: Wx.bg,
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: InteractiveViewer(
+              transformationController: _transform,
+              minScale: _minScale,
+              maxScale: _maxScale,
+              panEnabled: true,
+              scaleEnabled: true,
+              boundaryMargin: const EdgeInsets.all(160),
+              child: png != null
+                  ? Image.memory(png, fit: BoxFit.contain, filterQuality: FilterQuality.high)
+                  : SvgPicture.string(
+                      svg ?? '',
+                      fit: BoxFit.contain,
+                      theme: const SvgTheme(currentColor: Wx.text),
+                    ),
+            ),
+          ),
+          SafeArea(
+            child: Align(
+              alignment: Alignment.topRight,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 4, right: 8),
+                child: _StageButton(
+                  tooltip: '关闭',
+                  icon: Icons.close,
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ),
+            ),
+          ),
+          SafeArea(
+            child: Align(
+              alignment: Alignment.bottomCenter,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Wx.raised.withValues(alpha: 0.94),
+                    borderRadius: BorderRadius.circular(28),
+                    border: Border.all(color: Wx.hairline),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _StageButton(
+                        tooltip: '缩小',
+                        icon: Icons.remove,
+                        onPressed: () => _zoomBy(0.8),
+                      ),
+                      _StageButton(
+                        tooltip: '放大',
+                        icon: Icons.add,
+                        onPressed: () => _zoomBy(1.25),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StageButton extends StatelessWidget {
+  const _StageButton({required this.tooltip, required this.icon, required this.onPressed});
+
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      tooltip: tooltip,
+      onPressed: onPressed,
+      icon: Icon(icon, color: Wx.text),
     );
   }
 }
