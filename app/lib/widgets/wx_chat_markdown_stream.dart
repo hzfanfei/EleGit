@@ -1,8 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_markdown/flutter_markdown.dart';
-
 import '../theme.dart';
+import '../utils/wx_markdown_styles.dart';
+export '../utils/wx_markdown_styles.dart' show WxMarkdownStyle, chatMarkdownStyle;
 import 'wx_rich_text.dart';
 import 'wx_unified_markdown.dart';
 
@@ -133,7 +133,7 @@ class WxChatMarkdownStream extends StatefulWidget {
   const WxChatMarkdownStream({
     super.key,
     required this.source,
-    required this.styleSheet,
+    required this.mdStyle,
     this.showCaret = false,
     this.onTapLink,
   });
@@ -143,7 +143,7 @@ class WxChatMarkdownStream extends StatefulWidget {
   /// messages, wrap the persisted string in a [ValueNotifier].
   final ValueListenable<String> source;
 
-  final MarkdownStyleSheet styleSheet;
+  final WxMarkdownStyle mdStyle;
 
   /// When true, a blinking caret is appended after the pending block.
   final bool showCaret;
@@ -232,7 +232,7 @@ class _WxChatMarkdownStreamState extends State<WxChatMarkdownStream> {
             _BlockView(
               key: ValueKey(_renderedHashes[i]),
               source: _parser.completed[i],
-              styleSheet: widget.styleSheet,
+              mdStyle: widget.mdStyle,
               onTapLink: widget.onTapLink,
               isNew: i >= _renderedHashes.length - (_renderedHashes.length - _completedCountAtLastRender()),
             ),
@@ -242,7 +242,7 @@ class _WxChatMarkdownStreamState extends State<WxChatMarkdownStream> {
                 : _BlockView(
                     key: ValueKey(_pendingHash),
                     source: _pendingText,
-                    styleSheet: widget.styleSheet,
+                    mdStyle: widget.mdStyle,
                     onTapLink: widget.onTapLink,
                   ),
           if (widget.showCaret && _pendingText.isNotEmpty)
@@ -273,13 +273,13 @@ class _BlockView extends StatefulWidget {
   const _BlockView({
     super.key,
     required this.source,
-    required this.styleSheet,
+    required this.mdStyle,
     this.onTapLink,
     this.isNew = false,
   });
 
   final String source;
-  final MarkdownStyleSheet styleSheet;
+  final WxMarkdownStyle mdStyle;
   final void Function(String href, String text)? onTapLink;
   final bool isNew;
 
@@ -292,8 +292,7 @@ class _BlockViewState extends State<_BlockView> {
   Widget build(BuildContext context) {
     final body = WxUnifiedMarkdownBody(
       data: widget.source,
-      styleSheet: widget.styleSheet,
-      fitContent: false,
+      mdStyle: widget.mdStyle,
       onTapLink: (text, href, title) {
         final target = (href ?? '').trim();
         if (target.isEmpty) return;
@@ -378,104 +377,3 @@ class _BlinkingCaretState extends State<_BlinkingCaret>
   }
 }
 
-/// Chat-themed [MarkdownStyleSheet] for assistant replies. Distinct from the
-/// book reader's style: uses the dark app palette instead of the reading
-/// paper palette, with body text on transparent surface.
-MarkdownStyleSheet chatMarkdownStyle(ThemeData theme) {
-  final body = TextStyle(
-    fontSize: 16,
-    height: 1.55,
-    color: Wx.text,
-    fontFamilyFallback: Wx.fontFallback,
-  );
-  return MarkdownStyleSheet.fromTheme(theme).copyWith(
-    p: body,
-    a: body.copyWith(
-      color: Wx.accent,
-      decoration: TextDecoration.underline,
-      decorationColor: Wx.accent.withValues(alpha: 0.45),
-    ),
-    h1: TextStyle(
-      fontSize: 22,
-      fontWeight: FontWeight.w700,
-      height: 1.3,
-      color: Wx.text,
-      fontFamilyFallback: Wx.fontFallback,
-    ),
-    h2: TextStyle(
-      fontSize: 19,
-      fontWeight: FontWeight.w700,
-      height: 1.3,
-      color: Wx.text,
-      fontFamilyFallback: Wx.fontFallback,
-    ),
-    h3: TextStyle(
-      fontSize: 17,
-      fontWeight: FontWeight.w600,
-      height: 1.3,
-      color: Wx.text,
-      fontFamilyFallback: Wx.fontFallback,
-    ),
-    h4: TextStyle(
-      fontSize: 16,
-      fontWeight: FontWeight.w600,
-      height: 1.35,
-      color: Wx.text,
-      fontFamilyFallback: Wx.fontFallback,
-    ),
-    h5: body.copyWith(fontWeight: FontWeight.w600),
-    h6: body.copyWith(fontWeight: FontWeight.w600),
-    h1Padding: const EdgeInsets.only(top: 16, bottom: 4),
-    h2Padding: const EdgeInsets.only(top: 14, bottom: 4),
-    h3Padding: const EdgeInsets.only(top: 12, bottom: 2),
-    h4Padding: const EdgeInsets.only(top: 10, bottom: 2),
-    h5Padding: const EdgeInsets.only(top: 8, bottom: 2),
-    h6Padding: const EdgeInsets.only(top: 8, bottom: 2),
-    em: body.copyWith(fontStyle: FontStyle.italic),
-    strong: body.copyWith(fontWeight: FontWeight.w700),
-    del: body.copyWith(
-      decoration: TextDecoration.lineThrough,
-      color: Wx.muted,
-    ),
-    listBullet: body.copyWith(color: Wx.muted, fontSize: 14, height: 1.4),
-    listIndent: 22,
-    listBulletPadding: const EdgeInsets.only(right: 4),
-    checkbox: body.copyWith(color: Wx.muted, fontSize: 16),
-    blockquote: body.copyWith(color: Wx.muted, fontSize: 15.5),
-    blockquotePadding: const EdgeInsets.fromLTRB(12, 8, 10, 8),
-    blockquoteDecoration: BoxDecoration(
-      color: Wx.surface,
-      borderRadius: BorderRadius.circular(8),
-      border: Border(
-        left: BorderSide(color: Wx.accent.withValues(alpha: 0.55), width: 3),
-      ),
-    ),
-    code: TextStyle(
-      fontFamily: 'ui-monospace',
-      fontFamilyFallback: const ['SF Mono', 'Menlo', 'Consolas', 'monospace'],
-      fontSize: 14,
-      height: 1.45,
-      color: Wx.text,
-      backgroundColor: Wx.raised,
-    ),
-    codeblockPadding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-    codeblockDecoration: BoxDecoration(
-      color: Wx.raised,
-      borderRadius: BorderRadius.circular(Wx.radius),
-      border: Border.all(color: Wx.hairline),
-    ),
-    tableHead: TextStyle(
-      fontWeight: FontWeight.w600,
-      fontSize: 14.5,
-      color: Wx.text,
-    ),
-    tableBody: body.copyWith(fontSize: 14.5),
-    tableBorder: TableBorder.all(color: Wx.hairline, width: 0.6),
-    tableCellsPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-    tableColumnWidth: const IntrinsicColumnWidth(),
-    blockSpacing: 16,
-    horizontalRuleDecoration: BoxDecoration(
-      border: Border(top: BorderSide(color: Wx.hairline, width: 0.6)),
-    ),
-  );
-}

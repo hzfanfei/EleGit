@@ -1,235 +1,106 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:gpt_markdown/gpt_markdown.dart';
 
-import '../theme.dart';
 import '../utils/text_fit.dart';
+import '../utils/wx_markdown_styles.dart';
 import 'wx_rich_text.dart';
 
-final _hrLine = RegExp(r'^ {0,3}(?:\*{3,}|-{3,}|_{3,})[ \t]*$');
+class WxMarkdownImageConfig {
+  const WxMarkdownImageConfig({
+    required this.uri,
+    this.alt,
+    this.title,
+    this.width,
+    this.height,
+  });
 
-class _MdPiece {
-  const _MdPiece.rule() : rule = true, text = '';
-  const _MdPiece.text(this.text) : rule = false;
-
-  final bool rule;
-  final String text;
+  final Uri uri;
+  final String? alt;
+  final String? title;
+  final double? width;
+  final double? height;
 }
 
-/// Pulls horizontal rules out so they can be a real hairline. flutter_markdown
-/// draws `hr` as a zero-height box, so the line never shows.
-List<_MdPiece> _splitRules(String data) {
-  final pieces = <_MdPiece>[];
-  final buf = StringBuffer();
-  var fence = false;
+typedef WxMarkdownImageBuilder = Widget Function(WxMarkdownImageConfig config);
 
-  void flush() {
-    // ASCII edges only. String.trim also drops 全角空格, which is the
-    // opening paragraph's first-line indent.
-    final text = buf.toString().replaceAll(RegExp(r'^[ \t\r\n]+|[ \t\r\n]+$'), '');
-    buf.clear();
-    if (text.isNotEmpty) pieces.add(_MdPiece.text(text));
-  }
-
-  for (final line in data.split('\n')) {
-    final trimmed = line.trimLeft();
-    if (trimmed.startsWith('```') || trimmed.startsWith('~~~')) {
-      fence = !fence;
-      buf.writeln(line);
-      continue;
-    }
-    if (!fence && _hrLine.hasMatch(line.trimRight())) {
-      // A dash line glued to the previous paragraph is a setext heading.
-      final dashes = RegExp(r'^ {0,3}-').hasMatch(line.trimRight());
-      if (dashes && _continuesSetext(_previousLine(buf))) {
-        buf.writeln(line);
-        continue;
-      }
-      flush();
-      pieces.add(const _MdPiece.rule());
-      continue;
-    }
-    buf.writeln(line);
-  }
-  flush();
-  return pieces;
-}
-
-String _previousLine(StringBuffer buf) {
-  final raw = buf.toString();
-  if (raw.isEmpty) return '';
-  final lines = raw.split('\n');
-  if (lines.isNotEmpty && lines.last.isEmpty) lines.removeLast();
-  if (lines.isEmpty) return '';
-  return lines.last.trim();
-}
-
-bool _continuesSetext(String previous) {
-  if (previous.isEmpty) return false;
-  if (previous.startsWith('#') || previous.startsWith('>') || previous.startsWith('|')) {
-    return false;
-  }
-  if (RegExp(r'^[-*+]\s').hasMatch(previous)) return false;
-  if (RegExp(r'^\d+\.\s').hasMatch(previous)) return false;
-  if (_hrLine.hasMatch(previous)) return false;
-  return true;
-}
-
-String _fenceLanguage(dynamic element) {
-  final children = element.children;
-  if (children is List) {
-    for (final child in children) {
-      final attrs = child.attributes;
-      if (attrs is! Map) continue;
-      final cls = attrs['class'];
-      if (cls is! String) continue;
-      final match = RegExp(r'language-(\S+)').firstMatch(cls);
-      if (match != null) return match.group(1)!;
-    }
-  }
-  return '';
-}
-
-/// Fenced code blocks that wrap long lines (shared by chat and book reader).
-class WrappingMarkdownCodeBlock extends MarkdownElementBuilder {
-  WrappingMarkdownCodeBlock(this.style);
-
-  final TextStyle style;
-
-  @override
-  Widget? visitText(dynamic text, TextStyle? preferredStyle) {
-    return const SizedBox.shrink();
-  }
-
-  @override
-  Widget? visitElementAfterWithContext(
-    BuildContext context,
-    dynamic element,
-    TextStyle? preferredStyle,
-    TextStyle? parentStyle,
-  ) {
-    final code = (element.textContent as String).replaceAll(RegExp(r'\s+$'), '');
-    return WxFencedCode(
-      code: code,
-      language: _fenceLanguage(element),
-      framed: false,
-      style: style,
-      blockKey: const Key('wx-md-code'),
-    );
-  }
-}
-
-Widget _wxBullet(MarkdownBulletParameters params) {
-  final nested = params.nestLevel > 0;
-  final ordered = params.style == BulletStyle.orderedList;
-  final mark = ordered ? '${params.index + 1}.' : (nested ? '◦' : '•');
-  return Padding(
-    padding: const EdgeInsets.only(right: 6, top: 1),
-    child: Text(
-      mark,
-      textAlign: TextAlign.right,
-      style: TextStyle(
-        color: nested ? Wx.faint : Wx.muted,
-        fontSize: ordered ? 14 : (nested ? 12 : 15),
-        height: 1.45,
-        fontFamilyFallback: Wx.fontFallback,
-      ),
-    ),
-  );
-}
-
-/// One markdown pipeline: prose soft-wrap, [WxMarkdownTable], wrapping code fences.
+/// One markdown pipeline for chat and book reader ([GptMarkdown]).
 class WxUnifiedMarkdownBody extends StatelessWidget {
   const WxUnifiedMarkdownBody({
     super.key,
     required this.data,
-    required this.styleSheet,
+    required this.mdStyle,
     this.onTapLink,
-    this.onSelectionChanged,
     this.sizedImageBuilder,
-    this.selectable = true,
-    this.splitTables = true,
     this.softWrapProse = true,
-    this.fitContent = true,
-    this.tableTheme = WxMarkdownTableTheme.chat,
   });
 
   final String data;
-  final MarkdownStyleSheet styleSheet;
+  final WxMarkdownStyle mdStyle;
   final void Function(String text, String? href, String? title)? onTapLink;
-  final MarkdownOnSelectionChangedCallback? onSelectionChanged;
-  final MarkdownSizedImageBuilder? sizedImageBuilder;
-  final bool selectable;
-  final bool splitTables;
+  final WxMarkdownImageBuilder? sizedImageBuilder;
   final bool softWrapProse;
 
-  /// When false, quotes, code, and rules stretch to the available width.
-  final bool fitContent;
-  final WxMarkdownTableTheme tableTheme;
-
-  Widget _markdownChunk(String chunk) {
-    final sheet = styleSheet;
-    final codeStyle = (sheet.code ?? const TextStyle()).copyWith(backgroundColor: null);
-    final prepared = softWrapProse
-        ? prepareChatMarkdownForDisplay(chunk, isTableLine: isMarkdownTableLine)
-        : chunk;
-    return MarkdownBody(
-      data: prepared,
-      selectable: selectable,
-      fitContent: fitContent,
-      styleSheet: sheet,
-      builders: {'pre': WrappingMarkdownCodeBlock(codeStyle)},
-      bulletBuilder: _wxBullet,
-      checkboxBuilder: (checked) => WxTaskBox(checked: checked),
-      listItemCrossAxisAlignment: MarkdownListItemCrossAxisAlignment.start,
-      onSelectionChanged: onSelectionChanged,
-      onTapLink: onTapLink,
-      sizedImageBuilder: sizedImageBuilder,
-    );
-  }
-
-  Widget _withRules(String chunk) {
-    final pieces = _splitRules(chunk);
-    if (pieces.isEmpty) return _markdownChunk(chunk);
-    if (pieces.length == 1 && !pieces.first.rule) return _markdownChunk(pieces.first.text);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        for (final piece in pieces)
-          if (piece.rule) const WxMarkdownRule() else _markdownChunk(piece.text),
-      ],
-    );
+  String _prepared() {
+    if (!softWrapProse) return data;
+    return prepareChatMarkdownForDisplay(data, isTableLine: isMarkdownTableLine);
   }
 
   @override
   Widget build(BuildContext context) {
-    if (!splitTables) {
-      return _withRules(data);
-    }
-    final segments = splitChatMarkdownSegments(data);
-    if (segments.length == 1 && segments.first.kind == ChatMdSegmentKind.markdown) {
-      return _withRules(segments.first.text);
-    }
-    if (segments.isEmpty) {
-      return _withRules(data);
-    }
-    return Column(
-      crossAxisAlignment:
-          fitContent ? CrossAxisAlignment.start : CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        for (var i = 0; i < segments.length; i++) ...[
-          if (i > 0) const SizedBox(height: 10),
-          if (segments[i].kind == ChatMdSegmentKind.table)
-            WxMarkdownTable(
-              segments[i].text,
-              selectable: selectable,
-              theme: tableTheme,
-            )
-          else
-            _withRules(segments[i].text),
-        ],
-      ],
+    final prepared = _prepared();
+    return GptMarkdownTheme(
+      gptThemeData: mdStyle.gptTheme,
+      child: GptMarkdown(
+        prepared,
+        style: mdStyle.body,
+        styleSheet: mdStyle.styleSheet,
+        isStreaming: false,
+        animation: GptMarkdownAnimation.none,
+        onLinkTap: (url, title) {
+          final href = url.trim();
+          if (href.isEmpty) return;
+          final label = title.trim().isNotEmpty ? title.trim() : href;
+          onTapLink?.call(label, href, title);
+        },
+        imageBuilder: sizedImageBuilder == null
+            ? null
+            : (context, imageUrl, width, height) {
+                final uri = Uri.tryParse(imageUrl) ?? Uri(path: imageUrl);
+                return sizedImageBuilder!(
+                  WxMarkdownImageConfig(
+                    uri: uri,
+                    title: '',
+                    alt: '',
+                    width: width,
+                    height: height,
+                  ),
+                );
+              },
+        codeBuilder: (context, name, code, closed) {
+          return WxFencedCode(
+            code: code,
+            language: name,
+            blockKey: const Key('wx-md-code'),
+            style: (mdStyle.body).copyWith(
+              fontFamily: 'ui-monospace',
+              fontFamilyFallback: const ['SF Mono', 'Menlo', 'Consolas', 'monospace'],
+              fontSize: mdStyle.body.fontSize != null ? mdStyle.body.fontSize! * 0.88 : 14,
+              height: 1.45,
+            ),
+          );
+        },
+        checkboxBuilder: (context, checked, content, style) {
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              WxTaskBox(checked: checked),
+              const SizedBox(width: 8),
+              Expanded(child: content),
+            ],
+          );
+        },
+        hrBuilder: (context, style) => const WxMarkdownRule(),
+      ),
     );
   }
 }

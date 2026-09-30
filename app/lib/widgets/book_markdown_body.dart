@@ -1,14 +1,13 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../api/wenxiang_api.dart';
 import '../theme.dart';
 import '../utils/book_markdown_assets.dart';
 import '../utils/book_markdown_markup.dart';
+import '../utils/wx_markdown_styles.dart';
 import 'wx_chrome.dart';
-import 'wx_rich_text.dart';
 import 'wx_unified_markdown.dart';
 
 final Map<String, Uint8List> _bookImageBytes = {};
@@ -20,13 +19,12 @@ class BookMarkdownBody extends StatelessWidget {
     required this.bookId,
     required this.chapterFile,
     required this.data,
-    required this.styleSheet,
+    required this.mdStyle,
     this.spineHref,
     this.chapterTitle,
     this.onTapLink,
     this.onConsumeTap,
     this.launchExternalLinks = true,
-    this.tableTheme,
   });
 
   final WenxiangApi api;
@@ -35,7 +33,7 @@ class BookMarkdownBody extends StatelessWidget {
   final String? spineHref;
   final String? chapterTitle;
   final String data;
-  final MarkdownStyleSheet styleSheet;
+  final WxMarkdownStyle mdStyle;
   final void Function(String href, String text)? onTapLink;
 
   /// A tap that should not also toggle the reader chrome.
@@ -46,9 +44,6 @@ class BookMarkdownBody extends StatelessWidget {
   /// still invoked for every link so callers can do their own bookkeeping
   /// (e.g. suppress the chrome-toggle gesture in the book reader).
   final bool launchExternalLinks;
-
-  /// When set, pipe tables follow the reader paper palette instead of chat chrome.
-  final WxMarkdownTableTheme? tableTheme;
 
   String _prepared() {
     final normalized = normalizeBookMarkdown(data);
@@ -87,12 +82,8 @@ class BookMarkdownBody extends StatelessWidget {
     final messenger = ScaffoldMessenger.maybeOf(context);
     return WxUnifiedMarkdownBody(
       data: _prepared(),
-      styleSheet: styleSheet,
-      fitContent: false,
-      tableTheme: tableTheme ?? WxMarkdownTableTheme.chat,
-      onSelectionChanged: (_, selection, __) {
-        if (!selection.isCollapsed) onConsumeTap?.call();
-      },
+      mdStyle: mdStyle,
+      softWrapProse: false,
       onTapLink: (text, href, title) {
         final target = (href ?? '').trim();
         if (target.isEmpty) return;

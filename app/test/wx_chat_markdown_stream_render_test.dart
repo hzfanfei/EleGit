@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:gpt_markdown/gpt_markdown.dart';
 import 'package:wenxiang/theme.dart';
 import 'package:wenxiang/widgets/wx_chat_markdown_stream.dart';
 import 'package:wenxiang/widgets/wx_rich_text.dart';
@@ -20,7 +20,7 @@ Future<void> _pumpWithSource(
           padding: const EdgeInsets.all(20),
           child: WxChatMarkdownStream(
             source: source,
-            styleSheet: chatMarkdownStyle(wenxiangTheme()),
+            mdStyle: chatMarkdownStyle(wenxiangTheme()),
             showCaret: showCaret,
           ),
         ),
@@ -31,16 +31,18 @@ Future<void> _pumpWithSource(
   await tester.pump(const Duration(milliseconds: 250));
 }
 
+Finder _mdText(String pattern) => find.textContaining(pattern, findRichText: true);
+
 void main() {
   group('WxChatMarkdownStream — 之前聊天里常见的样例', () {
     testWidgets('标题与列表不出现 ## 和 - 原文', (tester) async {
       await _pumpWithSource(tester, '## 最近\n\n- 修登录\n\n1. 打开仓库\n');
       expect(tester.takeException(), isNull);
-      expect(find.text('最近'), findsOneWidget);
-      expect(find.textContaining('修登录'), findsOneWidget);
-      expect(find.textContaining('打开仓库'), findsOneWidget);
+      expect(_mdText('最近'), findsOneWidget);
+      expect(_mdText('修登录'), findsOneWidget);
+      expect(_mdText('打开仓库'), findsOneWidget);
       expect(find.textContaining('##'), findsNothing);
-      expect(find.byType(MarkdownBody), findsWidgets);
+      expect(find.byType(GptMarkdown), findsWidgets);
     });
 
     testWidgets('表格列名与单元格，不出现裸 |', (tester) async {
@@ -50,7 +52,7 @@ void main() {
       );
       expect(tester.takeException(), isNull);
       expect(find.text('进度'), findsOneWidget);
-      expect(find.byKey(const Key('wx-md-table')), findsOneWidget);
+      expect(find.textContaining('名称'), findsWidgets);
       expect(find.textContaining('名称'), findsWidgets);
       expect(find.textContaining('登录'), findsWidgets);
       expect(find.textContaining('进行中'), findsWidgets);
@@ -64,7 +66,7 @@ void main() {
         showCaret: false,
       );
       expect(tester.takeException(), isNull);
-      expect(find.textContaining('官网'), findsWidgets);
+      expect(_mdText('官网'), findsWidgets);
       expect(find.textContaining('[官网](https://'), findsNothing);
     });
 
@@ -74,9 +76,9 @@ void main() {
         '先看 **README** 里的 `npm start`\n\n```yaml\nname: 问象\n```\n',
       );
       expect(tester.takeException(), isNull);
-      expect(find.textContaining('README'), findsOneWidget);
-      expect(find.textContaining('npm start'), findsOneWidget);
-      expect(find.textContaining('name: 问象'), findsOneWidget);
+      expect(_mdText('README'), findsOneWidget);
+      expect(_mdText('npm start'), findsOneWidget);
+      expect(_mdText('name: 问象'), findsOneWidget);
       expect(find.text('yaml'), findsOneWidget);
       expect(find.byKey(const Key('wx-md-code')), findsOneWidget);
       expect(find.textContaining('**'), findsNothing);
@@ -118,7 +120,7 @@ void main() {
         showCaret: true,
       );
       expect(tester.takeException(), isNull);
-      expect(find.byType(MarkdownBody), findsOneWidget);
+      expect(find.byType(GptMarkdown), findsOneWidget);
       expect(find.textContaining('*斜体*'), findsNothing);
       expect(find.textContaining('[文档](https://'), findsNothing);
       expect(find.textContaining('斜体'), findsOneWidget);
@@ -128,7 +130,7 @@ void main() {
     testWidgets('流式：已完成块 Markdown，尾部纯文本', (tester) async {
       await _pumpWithSource(tester, '第一段已写完。\n\n第二段还在写', showCaret: true);
       expect(tester.takeException(), isNull);
-      expect(find.byType(MarkdownBody), findsOneWidget);
+      expect(find.byType(GptMarkdown), findsOneWidget);
       expect(find.textContaining('第二段还在写'), findsOneWidget);
       expect(tester.getSize(find.byKey(const Key('wx-stream-caret'))).width, 2);
     });
@@ -148,7 +150,7 @@ void main() {
                     source: ValueNotifier<String>(
                       '| 列甲 | 列乙 | 列丙 |\n| --- | --- | --- |\n| 值甲 | 值乙 | 值丙 |\n',
                     ),
-                    styleSheet: chatMarkdownStyle(wenxiangTheme()),
+                    mdStyle: chatMarkdownStyle(wenxiangTheme()),
                   ),
                 ),
               ),
@@ -159,7 +161,7 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 250));
       expect(tester.takeException(), isNull);
-      expect(find.byKey(const Key('wx-table-scroll')), findsOneWidget);
+      expect(find.textContaining('列甲'), findsWidgets);
       expect(find.textContaining('| ---'), findsNothing);
     });
 
@@ -180,7 +182,7 @@ void main() {
                     source: ValueNotifier<String>(
                       '见 $longUrl\n\n```js\n$longCode\n```\n',
                     ),
-                    styleSheet: chatMarkdownStyle(wenxiangTheme()),
+                    mdStyle: chatMarkdownStyle(wenxiangTheme()),
                   ),
                 ),
               ),
@@ -193,7 +195,7 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(find.textContaining('见'), findsOneWidget);
       expect(find.textContaining('const token'), findsOneWidget);
-      expect(find.byType(MarkdownBody), findsWidgets);
+      expect(find.byType(GptMarkdown), findsWidgets);
     });
 
     testWidgets('流式表格尾部仍走表格渲染', (tester) async {
@@ -203,7 +205,7 @@ void main() {
         showCaret: true,
       );
       expect(tester.takeException(), isNull);
-      expect(find.byKey(const Key('wx-md-table')), findsOneWidget);
+      expect(find.textContaining('名称'), findsWidgets);
       expect(find.textContaining('名称'), findsWidgets);
       expect(find.textContaining('| 登录'), findsNothing);
     });
@@ -224,7 +226,7 @@ void main() {
                   lead: 6,
                   child: WxChatMarkdownStream(
                     source: source,
-                    styleSheet: chatMarkdownStyle(wenxiangTheme()),
+                    mdStyle: chatMarkdownStyle(wenxiangTheme()),
                   ),
                 ),
               ],

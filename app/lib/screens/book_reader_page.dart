@@ -689,7 +689,7 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
     final manifest = _manifest;
     final media = MediaQuery.of(context);
     final topContentPad = bookReaderTopContentPad(media: media);
-    final styleSheet = bookReaderMarkdownStyle(
+    final mdStyle = bookReaderMarkdownStyle(
       theme: Theme.of(context),
       palette: palette,
       settings: _settings,
@@ -835,11 +835,7 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
                                         spineHref: chapter?.href,
                                         chapterTitle: heading,
                                         data: body,
-                                        styleSheet: styleSheet,
-                                        tableTheme: bookReaderMarkdownTableTheme(
-                                          palette: palette,
-                                          fontSize: _settings.fontSize,
-                                        ),
+                                        mdStyle: mdStyle,
                                         onTapLink: _onBookLink,
                                         onConsumeTap: () => _linkTappedThisGesture = true,
                                       ),

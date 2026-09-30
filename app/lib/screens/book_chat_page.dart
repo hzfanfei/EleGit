@@ -264,7 +264,7 @@ class _BookChatPageState extends State<BookChatPage> {
                           children: [
                             WxChatMarkdownStream(
                               source: _typewriter.visible,
-                              styleSheet: chatMarkdownStyle(Theme.of(context)),
+                              mdStyle: chatMarkdownStyle(Theme.of(context)),
                               showCaret: true,
                             ),
                             ValueListenableBuilder<String>(
@@ -303,7 +303,7 @@ class _BookChatPageState extends State<BookChatPage> {
                     children: [
                       WxChatMarkdownStream(
                         source: ValueNotifier<String>(msg.content),
-                        styleSheet: chatMarkdownStyle(Theme.of(context)),
+                        mdStyle: chatMarkdownStyle(Theme.of(context)),
                         showCaret: false,
                       ),
                       if (msg.role == 'assistant') WxCopyAnswerButton(text: msg.content),

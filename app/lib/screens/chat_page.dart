@@ -1909,7 +1909,7 @@ class _FinishedTurn extends StatelessWidget {
         },
         child: WxChatMarkdownStream(
           source: ValueNotifier<String>(message.content),
-          styleSheet: chatMarkdownStyle(Theme.of(context)),
+          mdStyle: chatMarkdownStyle(Theme.of(context)),
           showCaret: false,
         ),
       ),
@@ -1974,7 +1974,7 @@ class _LiveTurn extends StatelessWidget {
               ? _WorkingNote(phase: phase, activity: activity, holdPollOk: holdPollOk)
               : WxChatMarkdownStream(
                   source: text,
-                  styleSheet: chatMarkdownStyle(Theme.of(context)),
+                  mdStyle: chatMarkdownStyle(Theme.of(context)),
                   showCaret: false,
                 );
           return Column(

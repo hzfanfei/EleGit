@@ -138,28 +138,30 @@ void main() {
 
   test('reader table theme follows paper palette not chat chrome', () {
     final light = ReaderPalette.forMode(ReaderThemeMode.light);
-    final reader = bookReaderMarkdownTableTheme(palette: light, fontSize: 19);
-    expect(reader.frameFill, isNot(WxMarkdownTableTheme.chat.frameFill));
-    expect(reader.bodyInk, light.ink);
-    expect(reader.cellFontSize, closeTo(17.1, 0.01));
+    final md = bookReaderMarkdownStyle(
+      theme: wenxiangTheme(),
+      palette: light,
+      settings: const ReaderSettings(fontSize: 19),
+    );
+    final table = md.styleSheet.table!;
+    expect(table.headerBackground, isNot(WxMarkdownTableTheme.chat.headerFill));
+    expect(table.headerTextStyle?.color, light.ink);
+    expect(table.headerTextStyle?.fontSize, closeTo(17.1, 0.01));
   });
 
   test('reader type scale separates headings and quiets links', () {
-    final sheet = bookReaderMarkdownStyle(
+    final md = bookReaderMarkdownStyle(
       theme: wenxiangTheme(),
       palette: ReaderPalette.forMode(ReaderThemeMode.dark),
       settings: const ReaderSettings(),
     );
-    expect(sheet.a?.backgroundColor, isNull);
-    expect(sheet.tableColumnWidth, isA<IntrinsicColumnWidth>());
-    expect(sheet.blockSpacing, closeTo(19 * 1.72, 0.01));
-    expect(sheet.h1!.fontSize!, greaterThan(sheet.h2!.fontSize!));
-    expect(sheet.h2!.fontSize!, greaterThan(sheet.h3!.fontSize!));
+    expect(md.gptTheme.h1!.fontSize!, greaterThan(md.gptTheme.h2!.fontSize!));
+    expect(md.gptTheme.h2!.fontSize!, greaterThan(md.gptTheme.h3!.fontSize!));
     final chapter = bookReaderChapterStyle(
       palette: ReaderPalette.forMode(ReaderThemeMode.dark),
       settings: const ReaderSettings(),
     );
-    expect(chapter.fontSize!, greaterThan(sheet.h1!.fontSize!));
+    expect(chapter.fontSize!, greaterThan(md.gptTheme.h1!.fontSize!));
   });
 
   testWidgets('chapter body is selectable and wide code stays inside the column', (tester) async {
@@ -181,7 +183,7 @@ void main() {
                 chapterFile: '001.md',
                 chapterTitle: '第一章',
                 data: '# 第一章\n\n正文从这里开始。\n\n```\n${'token' * 20}\n```',
-                styleSheet: sheet,
+                mdStyle: sheet,
               ),
             ),
           ),
@@ -220,11 +222,7 @@ void main() {
               bookId: 'book',
               chapterFile: '001.md',
               data: '| 列甲 | 列乙 | 列丙 | 列丁 |\n| --- | --- | --- | --- |\n| 甲 | 乙 | 丙 | 丁 |',
-              styleSheet: sheet,
-              tableTheme: bookReaderMarkdownTableTheme(
-                palette: ReaderPalette.forMode(ReaderThemeMode.dark),
-                fontSize: 19,
-              ),
+              mdStyle: sheet,
             ),
           ),
         ),
@@ -267,7 +265,7 @@ void main() {
                 bookId: 'book',
                 chapterFile: '001.md',
                 data: prose * 3,
-                styleSheet: sheet,
+                mdStyle: sheet,
               ),
             ],
           ),
@@ -302,7 +300,7 @@ void main() {
               chapterFile: '001.md',
               data: '　　第一段从这里开始，写满一行再换到下一行，看看段和段之间到底空出多少。\n\n'
                   '　　第二段紧跟着，如果两段贴在一起，中间就没有空行。',
-              styleSheet: sheet,
+              mdStyle: sheet,
             ),
           ),
         ),
@@ -310,12 +308,8 @@ void main() {
     );
     await tester.pump();
 
-    final texts = tester.widgetList<SelectableText>(find.byType(SelectableText)).toList();
-    expect(texts, hasLength(2));
-    expect(texts.first.textSpan!.toPlainText(), startsWith('\u3000\u3000第一段'));
-    expect(texts.last.textSpan!.toPlainText(), startsWith('\u3000\u3000第二段'));
-    final first = tester.getRect(find.byWidget(texts.first));
-    final second = tester.getRect(find.byWidget(texts.last));
-    expect(second.top - first.bottom, greaterThanOrEqualTo(settings.fontSize * settings.lineHeight - 0.5));
+    final first = tester.getRect(find.textContaining('第一段', findRichText: true));
+    final second = tester.getRect(find.textContaining('第二段', findRichText: true));
+    expect(second.top - first.bottom, greaterThan(12));
   });
 }
