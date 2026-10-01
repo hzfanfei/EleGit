@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../theme.dart';
 import '../api/wenxiang_api.dart';
+import '../utils/text_fit.dart';
 import '../utils/wx_mermaid_fence.dart';
 import '../utils/wx_markdown_styles.dart';
 export '../utils/wx_markdown_styles.dart' show WxMarkdownStyle, chatMarkdownStyle;
@@ -215,7 +216,9 @@ class _WxChatMarkdownStreamState extends State<WxChatMarkdownStream> {
     final raw = widget.source.value;
     if (raw == _lastSource) return;
     _lastSource = raw;
-    final stripped = normalizeChatMarkdownTables(_stripTaskMarker(raw));
+    final stripped = separateChatParagraphs(
+      normalizeChatMarkdownTables(_stripTaskMarker(raw)),
+    );
     _parser.update(stripped);
     final newHashes = [
       for (final block in _parser.completed) block.hashCode,
@@ -250,6 +253,9 @@ class _WxChatMarkdownStreamState extends State<WxChatMarkdownStream> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
+        // Blank lines are the block boundary, so the markdown paragraph gap
+        // never reaches the screen. This is the space between paragraphs.
+        spacing: 14,
         children: [
           for (var i = 0; i < _parser.completed.length; i++)
             _BlockView(

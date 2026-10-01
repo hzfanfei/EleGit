@@ -35,6 +35,15 @@ Finder _mdText(String pattern) => find.textContaining(pattern, findRichText: tru
 
 void main() {
   group('WxChatMarkdownStream — 之前聊天里常见的样例', () {
+    testWidgets('单换行的正文拆成上下两段', (tester) async {
+      await _pumpWithSource(tester, '第一句已经说完。\n第二句另外起一段。\n');
+      expect(tester.takeException(), isNull);
+      expect(find.byType(GptMarkdown), findsNWidgets(2));
+      final first = tester.getTopLeft(_mdText('第一句已经说完'));
+      final second = tester.getTopLeft(_mdText('第二句另外起一段'));
+      expect(second.dy - first.dy, greaterThan(28));
+    });
+
     testWidgets('标题与列表不出现 ## 和 - 原文', (tester) async {
       await _pumpWithSource(tester, '## 最近\n\n- 修登录\n\n1. 打开仓库\n');
       expect(tester.takeException(), isNull);

@@ -123,6 +123,9 @@ WxMarkdownStyle chatMarkdownStyle(ThemeData theme) {
         rowStripeColor: const Color(0x121C1F24),
       ),
       hr: const HrStyle(thickness: 0.6, color: Wx.hairline),
+      heading: const HeadingStyle(
+        padding: EdgeInsets.only(top: 10, bottom: 4),
+      ),
     ),
   );
 }
