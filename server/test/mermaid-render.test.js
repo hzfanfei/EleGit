@@ -238,6 +238,12 @@ describe("mermaid-render", () => {
     assert.match(inherited, /Animal <\|-- Dog/);
     assert.match(inherited, /\}\nAnimal <\|-- Dog/);
 
+    const brokenArrow = normalizeMermaidSource(
+      "classDiagram\nclass Animal {\n+int age\n+String gender\n+isMammal()\n}class Dog {\n+bark()\n}Animal <|-\n- Dog:是",
+    );
+    assert.match(brokenArrow, /Animal <\|-- Dog:是/);
+    assert.doesNotMatch(brokenArrow, /<\|\-\s*\n\s*-/);
+
     const composed = normalizeMermaidSource(
       "classDiagramclass Car {+start()}class Engine {+power}Car *-- Engine Car o-- Wheel class Wheel {+size}",
     );

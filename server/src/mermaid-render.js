@@ -169,9 +169,20 @@ function erBlockCuts(source) {
   return cuts;
 }
 
+/** Put a relationship arrow back together when a line break landed inside it. */
+function repairSplitClassArrows(source) {
+  return String(source)
+    .replace(/<\|\s*-\s+-/g, "<|--")
+    .replace(/<\|\s*\.\s+\./g, "<|..")
+    .replace(/\*\s*-\s+-/g, "*--")
+    .replace(/(?<![A-Za-z0-9_])o\s*-\s+-/g, "o--")
+    .replace(/(?<![|])<\s*-\s+-/g, "<--");
+}
+
 function splitClassBody(body) {
   let s = String(body || "").trim();
   if (!s) return s;
+  s = repairSplitClassArrows(s);
   s = s.replace(/(?<=\})(?=[A-Za-z_][A-Za-z0-9_])/g, "\n");
   s = s.replace(
     /(?:\s+|(?<=\S))(?=(?:classDef|cssClass|namespace|direction)\b|note\s+(?:for\b|"))/g,
