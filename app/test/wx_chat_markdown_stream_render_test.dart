@@ -41,8 +41,9 @@ void main() {
       expect(find.byType(GptMarkdown), findsNWidgets(2));
       final first = tester.getRect(_mdText('第一句已经说完'));
       final second = tester.getRect(_mdText('第二句另外起一段'));
-      expect(second.top - first.bottom, greaterThan(22));
-      expect(_mdText('\u3000\u3000'), findsWidgets);
+      expect(second.top, greaterThan(first.top));
+      expect(second.top - first.bottom, lessThan(12));
+      expect(_mdText('\u3000'), findsNothing);
     });
 
     testWidgets('标题与列表不出现 ## 和 - 原文', (tester) async {

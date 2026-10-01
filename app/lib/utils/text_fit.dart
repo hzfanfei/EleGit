@@ -28,8 +28,8 @@ final _chatRule = RegExp(r'^(?:\*{3,}|-{3,}|_{3,})[ \t]*$');
 
 /// Chat replies often break lines once where a new paragraph was meant.
 /// Markdown keeps those lines in one block, so the phone shows them stacked.
-/// Put a blank line between prose lines, indent Chinese paragraphs, and
-/// break a long run of sentences into more than one paragraph. Lists,
+/// Put a blank line between prose lines and break a long run of sentences
+/// into more than one paragraph. Lists,
 /// tables, quotes, headings, and fenced code stay together. Top-level
 /// bullets are separated so each item is its own block.
 String separateChatParagraphs(String markdown) {
@@ -103,10 +103,10 @@ String _separateChatBlock(String block) {
     if (content.isEmpty) return block;
     final groups = _groupChatProse(content.first);
     if (groups.length < 2) {
-      final shown = _indentChatProse(groups.isEmpty ? content.first : groups.first);
+      final shown = _plainChatProse(groups.isEmpty ? content.first : groups.first);
       return shown.isEmpty ? block : shown;
     }
-    return groups.map(_indentChatProse).join('\n\n');
+    return groups.map(_plainChatProse).join('\n\n');
   }
 
   final out = <String>[];
@@ -126,7 +126,7 @@ String _separateChatBlock(String block) {
     if (text.isEmpty) return;
     for (final part in text.split('\n')) {
       for (final group in _groupChatProse(part)) {
-        final shown = _indentChatProse(group);
+        final shown = _plainChatProse(group);
         if (shown.isNotEmpty) out.add(shown);
       }
     }
@@ -170,18 +170,7 @@ bool _topLevelBullet(String line) {
   return trimmed.startsWith('- ') || trimmed.startsWith('* ') || trimmed.startsWith('+ ');
 }
 
-final _chatBoldLabel = RegExp(r'^\*\*[^*\n]+\*\*$');
-final _chatHan = RegExp(r'[\u3400-\u9FFF]');
-
-String _indentChatProse(String text) {
-  final trimmed = text.trim();
-  if (trimmed.isEmpty || trimmed.startsWith('\u3000')) return trimmed;
-  if (_chatStructuralLine(trimmed) || !_chatHan.hasMatch(trimmed)) return trimmed;
-  if (_chatBoldLabel.hasMatch(trimmed) && trimmed.runes.length <= 32) return trimmed;
-  // A bare ideographic space is trimmed away before the paragraph is drawn.
-  // A zero-width space keeps the indent in the text.
-  return '\u200b\u3000\u3000$trimmed';
-}
+String _plainChatProse(String text) => text.trim();
 
 /// A phone column is about eighteen characters wide. Two long sentences on
 /// one line read as a wall, so start a new paragraph after two sentences or

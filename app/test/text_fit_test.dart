@@ -33,7 +33,8 @@ void main() {
         '```\n'
         '收尾。';
     final out = separateChatParagraphs(raw);
-    expect(out, contains('\u200b\u3000\u3000第一句已经说完。\n\n\u200b\u3000\u3000第二句另外起一段。'));
+    expect(out, contains('第一句已经说完。\n\n第二句另外起一段。'));
+    expect(out, isNot(contains('\u3000')));
     expect(out, contains('- 甲\n\n- 乙\n  续在同一条里'));
     expect(out, contains('| a | b |\n| --- | --- |\n| c | d |'));
     expect(out, contains('```\nline1\nline2\n```'));
@@ -41,14 +42,14 @@ void main() {
     expect(out, isNot(contains('line1\n\nline2')));
   });
 
-  test('a long run of sentences becomes more than one indented paragraph', () {
+  test('a long run of sentences becomes more than one paragraph', () {
     const raw = '最近三天的改动几乎都挤在十月一日这一天，提交从夜里排到下午。'
         '九月二十九日没有新的提交。'
         '当前分支已经和远程对齐。'
         '手机安装包也跟着收到了一百四十一。';
     final out = separateChatParagraphs(raw);
     expect(out, contains('\n\n'));
-    expect(out, startsWith('\u200b\u3000\u3000'));
+    expect(out, isNot(contains('\u3000')));
     expect(out.split('\n\n').length, greaterThan(1));
   });
 
@@ -56,8 +57,8 @@ void main() {
     final ordered = separateChatParagraphs('1. 甲\n2. 乙');
     expect(ordered, '1. 甲\n2. 乙');
     final label = separateChatParagraphs('**图表**\n下面这句是正文。');
-    expect(label, contains('**图表**\n\n\u200b\u3000\u3000下面这句是正文。'));
-    expect(label, isNot(contains('\u3000\u3000**图表**')));
+    expect(label, contains('**图表**\n\n下面这句是正文。'));
+    expect(label, isNot(contains('\u3000')));
   });
 
   test('prepareChatMarkdownForDisplay does not break image or link targets', () {
