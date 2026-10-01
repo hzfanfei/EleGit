@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { planScriptActivityUpdates } from "../src/script-activity.js";
+import { commandAlive, keepEndedScriptRows, planScriptActivityUpdates } from "../src/script-activity.js";
 
 const stuck = {
   id: "inb1",
@@ -43,6 +43,44 @@ describe("planScriptActivityUpdates", () => {
     assert.equal(twice.length, 1);
     assert.match(twice[0].activity, /已结束/);
     assert.doesNotMatch(twice[0].activity, /已跑/);
+  });
+
+  it("counts a Windows command line that only shares the script path", () => {
+    const anchors = new Map();
+    const now = 10_000;
+    const win = String.raw`"C:\Program Files\nodejs\node.exe" C:\Users\Administrator\wenxiang\hzfanfei\EleGit\scripts\restart-companion.mjs`;
+    planScriptActivityUpdates([stuck], { commands: [win], now, anchors });
+    const next = planScriptActivityUpdates([stuck], {
+      commands: [win],
+      now: now + 2000,
+      anchors,
+    });
+    assert.equal(next.length, 1);
+    assert.match(next[0].activity, /已跑 3 秒/);
+  });
+
+  it("treats npm test as alive only when both words are on the same line", () => {
+    assert.equal(commandAlive("npm test", ["npm test"]), true);
+    assert.equal(commandAlive("npm test", ["node scripts/test-runner.js"]), false);
+    assert.equal(
+      commandAlive("node scripts/restart-companion.mjs", [
+        String.raw`C:\Program Files\nodejs\node.exe C:\repo\scripts\restart-companion.mjs`,
+      ]),
+      true,
+    );
+  });
+
+  it("keeps 已结束 when a later pulse writes 已跑 again", () => {
+    const prev = "跑脚本\nnode scripts/restart-companion.mjs · 已结束";
+    const next = "跑脚本\nnode scripts/restart-companion.mjs · 已跑 4 秒";
+    const kept = keepEndedScriptRows(prev, next);
+    assert.match(kept, /已结束/);
+    assert.doesNotMatch(kept, /已跑/);
+    const finished = keepEndedScriptRows(
+      prev,
+      "跑脚本\nnode scripts/restart-companion.mjs · stopped companion",
+    );
+    assert.match(finished, /stopped companion/);
   });
 
   it("leaves a row alone once the wait label is gone", () => {

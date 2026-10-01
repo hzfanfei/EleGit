@@ -1,4 +1,5 @@
 const WAIT_LABEL = /^(跑着|已跑 \d+ 秒|已跑 \d+ 分 \d+ 秒)$/;
+const GENERIC_COMMAND = /^(node(?:\.exe)?|npm|npx|python(?:3)?(?:\.exe)?|powershell(?:\.exe)?|pwsh(?:\.exe)?|cmd(?:\.exe)?|bash|sh|flutter|dart|git|yarn|pnpm|bun|deno)$/i;
 
 export function formatScriptWait(seconds) {
   const sec = Math.max(0, Math.floor(Number(seconds) || 0));
@@ -17,28 +18,82 @@ export function scriptWaitSeconds(label) {
   return null;
 }
 
-/** Running script rows inside one activity blob. */
+/** Running script rows inside one activity blob. Ended rows stay out. */
 export function scriptRuns(activity) {
   const blocks = String(activity || "").split(/\n\n/);
   const runs = [];
   blocks.forEach((block, blockIndex) => {
-    const lines = block.split("\n");
-    if (lines[0] !== "跑脚本" || lines.length < 2) return;
-    const parts = lines[1].split(" · ");
-    if (parts.length < 2) return;
-    const wait = parts[parts.length - 1];
-    if (!WAIT_LABEL.test(wait)) return;
-    runs.push({
-      blockIndex,
-      command: parts[0],
-      seconds: scriptWaitSeconds(wait),
-    });
+    const row = scriptRow(block);
+    if (!row || row.ended) return;
+    runs.push({ blockIndex, command: row.command, seconds: row.seconds });
   });
   return runs;
 }
 
+/**
+ * A relay pulse keeps rewriting「已跑 N 秒」after the ticker has already
+ * closed that command. Put「已结束」back so the progress hint stops flipping.
+ */
+export function keepEndedScriptRows(prevActivity, nextActivity) {
+  const ended = new Set();
+  for (const block of String(prevActivity || "").split(/\n\n/)) {
+    const row = scriptRow(block);
+    if (row?.ended && row.command) ended.add(row.command);
+  }
+  if (!ended.size) return String(nextActivity || "");
+  const blocks = String(nextActivity || "").split(/\n\n/);
+  let changed = false;
+  const next = blocks.map((block) => {
+    const row = scriptRow(block);
+    if (!row || row.ended || !ended.has(row.command)) return block;
+    changed = true;
+    return setScriptWait(block, 0, "已结束");
+  });
+  return changed ? next.join("\n\n") : String(nextActivity || "");
+}
+
 export function commandProbe(command) {
   return String(command || "").replace(/…$/, "").trim();
+}
+
+function normalizeCommandLine(text) {
+  return String(text || "").replace(/\\/g, "/").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+/**
+ * True when a process list still contains this script.
+ * Windows command lines use a full exe path, so the visible
+ * `node scripts/foo.mjs` label is matched by its script token.
+ */
+export function commandAlive(command, lines) {
+  const probe = normalizeCommandLine(commandProbe(command));
+  if (probe.length < 8) return false;
+  const normalized = (lines || []).map(normalizeCommandLine).filter(Boolean);
+  if (normalized.some((line) => line.includes(probe))) return true;
+  const tokens = probe.split(" ").filter((token) => token.length >= 2);
+  const specific = tokens.filter((token) => !GENERIC_COMMAND.test(token));
+  if (!specific.length) return false;
+  const generics = tokens.filter((token) => GENERIC_COMMAND.test(token));
+  const shortOnly = specific.every((token) => token.length < 8);
+  return normalized.some((line) => {
+    if (!specific.every((token) => line.includes(token))) return false;
+    if (!shortOnly || !generics.length) return true;
+    return generics.some((token) => line.includes(token.replace(/\.exe$/, "")) || line.includes(token));
+  });
+}
+
+function scriptRow(block) {
+  const lines = String(block || "").split("\n");
+  if (lines[0] !== "跑脚本" || lines.length < 2) return null;
+  const parts = lines[1].split(" · ");
+  if (parts.length < 2) return null;
+  const wait = parts[parts.length - 1];
+  if (wait !== "已结束" && !WAIT_LABEL.test(wait)) return null;
+  return {
+    command: parts[0],
+    seconds: scriptWaitSeconds(wait) ?? 0,
+    ended: wait === "已结束",
+  };
 }
 
 export function setScriptWait(activity, blockIndex, waitLabel) {
@@ -66,8 +121,7 @@ export function planScriptActivityUpdates(items, { commands = [], now = Date.now
     const runs = scriptRuns(item.activity);
     if (!runs.length) continue;
     const last = runs[runs.length - 1];
-    const probe = commandProbe(last.command);
-    const alive = probe.length >= 8 && lines.some((line) => line.includes(probe));
+    const alive = commandAlive(last.command, lines);
     let anchor = anchors.get(item.id);
     if (!anchor || anchor.command !== last.command) {
       anchor = {

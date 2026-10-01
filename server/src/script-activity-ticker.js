@@ -23,7 +23,7 @@ function listProcessCommandLines() {
     });
     return out.split("\n").map((line) => line.trim()).filter(Boolean);
   } catch {
-    return [];
+    return null;
   }
 }
 
@@ -52,6 +52,8 @@ export function startScriptActivityTicker({
       const interesting = items.some((item) => item?.partial && scriptRuns(item.activity || "").length);
       if (!interesting) return;
       const commands = await listCommands();
+      // A failed or empty snapshot is not "every script has exited".
+      if (!Array.isArray(commands) || commands.length === 0) return;
       const patches = planScriptActivityUpdates(items, { commands, now: Date.now(), anchors });
       for (const change of patches) {
         const next = await patch(workspaceRoot, change.id, change.expected, change.activity);

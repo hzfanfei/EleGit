@@ -70,4 +70,34 @@ describe("inbox turn progress", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it("does not let a later partial revive a script that already ended", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "wx-inbox-"));
+    try {
+      await appendInboxItem(root, {
+        kind: "agent-notification",
+        title: "回答编写中",
+        body: "跑脚本",
+        answer: "",
+        sessionId: "s1",
+        question: "重启下服务",
+        partial: true,
+        activity: "跑脚本\nnode scripts/restart-companion.mjs · 已结束",
+      });
+      const revived = await appendInboxItem(root, {
+        kind: "agent-notification",
+        title: "回答编写中",
+        body: "跑脚本",
+        answer: "",
+        sessionId: "s1",
+        question: "重启下服务",
+        partial: true,
+        activity: "跑脚本\nnode scripts/restart-companion.mjs · 已跑 3 秒",
+      });
+      assert.match(revived.activity, /已结束/);
+      assert.doesNotMatch(revived.activity, /已跑/);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });

@@ -5,6 +5,7 @@
 
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { keepEndedScriptRows } from "./script-activity.js";
 
 const INBOX_CAP = 100;
 
@@ -69,9 +70,12 @@ export async function appendInboxItem(workspaceRoot, item) {
   const openIndex = items.findIndex((it) => sameOpenTurn(it, item));
   if (openIndex >= 0) {
     const prev = items[openIndex];
+    const incoming = item.partial === true && item.activity != null
+      ? { ...item, activity: keepEndedScriptRows(prev.activity, item.activity) }
+      : item;
     const next = {
       ...prev,
-      ...item,
+      ...incoming,
       id: prev.id,
       createdAt: new Date().toISOString(),
       read: false,
