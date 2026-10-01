@@ -4,27 +4,66 @@ import {
   DIAGRAM_ONLY_SPOKEN,
   buildSpeakSummaryPrompt,
   clipAnswerForSpeech,
+  completeSpeakSummary,
   runSpeakSummary,
-  speakSummaryCommand,
+  speakSummaryApiConfig,
+  speakSummaryMessagesUrl,
+  textFromMessagesResponse,
 } from "../src/speak-summary.js";
 
 describe("speak summary", () => {
-  it("uses Claude Code and its current model, not the repo chat engine", () => {
-    const prev = process.env.WENXIANG_ACP_ENGINE;
-    const prevModel = process.env.WENXIANG_ACP_MODEL;
-    process.env.WENXIANG_ACP_ENGINE = "cursor";
-    process.env.WENXIANG_ACP_MODEL = "grok-4.7-high-fast";
-    try {
-      const command = speakSummaryCommand();
-      if (!command) return;
-      assert.equal(command.provider, "claude");
-      assert.notEqual(command.model, "grok-4.7-high-fast");
-    } finally {
-      if (prev !== undefined) process.env.WENXIANG_ACP_ENGINE = prev;
-      else delete process.env.WENXIANG_ACP_ENGINE;
-      if (prevModel !== undefined) process.env.WENXIANG_ACP_MODEL = prevModel;
-      else delete process.env.WENXIANG_ACP_MODEL;
-    }
+  it("calls Claude Code's current model API, not the repo chat engine", () => {
+    const config = speakSummaryApiConfig({
+      model: "ignored-by-env-field",
+      env: {
+        ANTHROPIC_MODEL: "MiniMax-M3",
+        ANTHROPIC_BASE_URL: "https://api.minimaxi.com/anthropic/",
+        ANTHROPIC_AUTH_TOKEN: "sk-test",
+      },
+    });
+    assert.equal(config.model, "MiniMax-M3");
+    assert.equal(config.base, "https://api.minimaxi.com/anthropic");
+    assert.equal(config.auth, "bearer");
+    assert.equal(config.token, "sk-test");
+    assert.equal(
+      speakSummaryMessagesUrl(config.base),
+      "https://api.minimaxi.com/anthropic/v1/messages",
+    );
+    assert.equal(speakSummaryApiConfig({ env: { ANTHROPIC_MODEL: "MiniMax-M3" } }), null);
+  });
+
+  it("posts one messages request and skips thinking blocks", async () => {
+    let seen;
+    const text = await completeSpeakSummary("改写成口语", {
+      config: {
+        model: "MiniMax-M3",
+        base: "https://api.minimaxi.com/anthropic",
+        token: "sk-test",
+        auth: "bearer",
+      },
+      fetchImpl: async (url, init) => {
+        seen = { url, init };
+        return {
+          ok: true,
+          status: 200,
+          text: async () =>
+            JSON.stringify({
+              content: [
+                { type: "thinking", thinking: "先想一下" },
+                { type: "text", text: "登录已经修好。" },
+              ],
+            }),
+        };
+      },
+    });
+    assert.equal(text, "登录已经修好。");
+    assert.equal(seen.url, "https://api.minimaxi.com/anthropic/v1/messages");
+    const body = JSON.parse(seen.init.body);
+    assert.equal(body.model, "MiniMax-M3");
+    assert.equal(body.tools, undefined);
+    assert.equal(body.messages.length, 1);
+    assert.equal(seen.init.headers.authorization, "Bearer sk-test");
+    assert.equal(textFromMessagesResponse({ content: [{ type: "thinking", thinking: "x" }] }), "");
   });
 
   it("clips markup down to prose and asks for spoken Chinese", () => {
