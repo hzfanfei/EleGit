@@ -297,6 +297,32 @@ export function mermaidCacheDir(workspaceRoot) {
 
 /** Warm paper. Matches the chat card; not Mermaid's default purple. */
 const DIAGRAM_PAPER = "#F7F3EC";
+/** SVG text, not HTML labels. foreignObject drops CJK in flutter_svg. */
+const CJK_FONT = '"Microsoft YaHei", "Segoe UI", sans-serif';
+
+function cjkDiagramOptions() {
+  return {
+    htmlLabels: false,
+    fontFamily: CJK_FONT,
+    flowchart: {
+      htmlLabels: false,
+      useMaxWidth: false,
+    },
+    sequence: {
+      useMaxWidth: false,
+      actorFontFamily: CJK_FONT,
+      noteFontFamily: CJK_FONT,
+      messageFontFamily: CJK_FONT,
+    },
+    class: { useMaxWidth: false },
+    state: { useMaxWidth: false },
+    er: { useMaxWidth: false },
+    pie: { useMaxWidth: false },
+    mindmap: { useMaxWidth: false, padding: 12 },
+    gantt: { useMaxWidth: false },
+  };
+}
+
 const DIAGRAM_INK = "#2C2620";
 const DIAGRAM_NODE = "#FBF7F1";
 const DIAGRAM_NODE_LINE = "#C6A07A";
@@ -321,7 +347,7 @@ export function mermaidCacheId(code, theme, backgroundColor) {
     code: String(code || "").trim(),
     theme: paint.theme,
     backgroundColor: paint.backgroundColor,
-    render: "wenxiang-paper-2",
+    render: "wenxiang-paper-3",
   });
   return createHash("sha256").update(payload).digest("hex").slice(0, 32);
 }
@@ -391,12 +417,11 @@ async function renderWithPuppeteer(candidates, paint, assets) {
       startOnLoad: false,
       suppressErrorRendering: true,
       theme: "base",
-      fontFamily: '"Microsoft YaHei", "Segoe UI", sans-serif',
-      htmlLabels: false,
+      ...cjkDiagramOptions(),
       themeVariables: {
         darkMode: false,
         background: paint.backgroundColor,
-        fontFamily: '"Microsoft YaHei", "Segoe UI", sans-serif',
+        fontFamily: CJK_FONT,
         fontSize: "16px",
         primaryColor: DIAGRAM_NODE,
         primaryTextColor: DIAGRAM_INK,
@@ -449,19 +474,12 @@ async function renderWithPuppeteer(candidates, paint, assets) {
         noteBorderColor: DIAGRAM_NODE_LINE,
       },
       flowchart: {
-        htmlLabels: false,
-        useMaxWidth: false,
+        ...cjkDiagramOptions().flowchart,
         curve: "basis",
         padding: 12,
         nodeSpacing: 22,
         rankSpacing: 26,
         diagramPadding: 8,
-      },
-      sequence: {
-        useMaxWidth: false,
-        actorFontFamily: '"Microsoft YaHei", sans-serif',
-        noteFontFamily: '"Microsoft YaHei", sans-serif',
-        messageFontFamily: '"Microsoft YaHei", sans-serif',
       },
     };
     try {
@@ -652,14 +670,13 @@ export async function probeMermaidSources(codes) {
     page.setDefaultTimeout(RENDER_TIMEOUT_MS);
     await page.goto(pathToFileURL(assets.html).href);
     await page.addScriptTag({ path: assets.js });
-    await page.evaluate(() => {
+    await page.evaluate((config) => {
       globalThis.mermaid.initialize({
         startOnLoad: false,
         suppressErrorRendering: true,
-        htmlLabels: false,
-        fontFamily: '"Microsoft YaHei", "Segoe UI", sans-serif',
+        ...config,
       });
-    });
+    }, cjkDiagramOptions());
     const results = [];
     for (let i = 0; i < list.length; i += 1) {
       const sources = mermaidSourceCandidates(list[i]);
