@@ -218,11 +218,14 @@ _DiagramHead? _matchDiagramHead(String source) {
       return _DiagramHead(lower, header, rest.substring(spaced.end).trimLeft());
     }
     if (lower == 'pie') {
-      final showData = RegExp(r'^\s+showData\b', caseSensitive: false).firstMatch(rest);
+      var pieRest = rest;
+      var header = 'pie';
+      final showData = RegExp(r'^\s*showData', caseSensitive: false).firstMatch(pieRest);
       if (showData != null) {
-        return _DiagramHead('pie', 'pie showData', rest.substring(showData.end).trimLeft());
+        header = 'pie showData';
+        pieRest = pieRest.substring(showData.end);
       }
-      if (rest.isNotEmpty && RegExp(r'^[A-Za-z]').hasMatch(rest)) continue;
+      return _DiagramHead('pie', header, pieRest.trimLeft());
     }
     return _DiagramHead(type, type, rest.trimLeft());
   }
@@ -244,12 +247,13 @@ String _splitDiagramStatements(String type, String body) {
 String _splitClassStatements(String body) {
   var s = body.trim();
   if (s.isEmpty) return s;
-  s = s.replaceAllMapped(RegExp(r'\s+(?=class\s+)'), (_) => '\n');
+  s = s.replaceAllMapped(RegExp(r'(?<=\})(?=[A-Za-z_][A-Za-z0-9_])'), (_) => '\n');
+  s = s.replaceAllMapped(RegExp(r'\s+(?=class\b)'), (_) => '\n');
   s = s.replaceAllMapped(RegExp(r'\{(?!\n)'), (_) => '{\n');
   s = s.replaceAllMapped(RegExp(r'\s*(?=})'), (_) => '\n');
   s = s.replaceAllMapped(RegExp(r'(?:(?<=\S)\s*|\s+)(?=(?:[+\#~]|-(?![->.])))'), (_) => '\n');
   s = s.replaceAllMapped(
-    RegExp(r'\s+(?=[A-Za-z_][\w]*\s*(?:<\|--|<\|\.\.|\*--|o--|-->|<--|==>|\.\.>|\.\.|--))'),
+    RegExp(r'(?:\s+|(?<=\}))(?=[A-Za-z_][\w]*\s*(?:<\|--|<\|\.\.|\*--|o--|-->|<--|==>|\.\.>|\.\.|--))'),
     (_) => '\n',
   );
   return s.replaceAll(RegExp(r'\n{2,}'), '\n').trim();
@@ -265,9 +269,13 @@ String _splitErStatements(String body) {
     ),
     (m) => '${m[1]} ',
   );
-  s = s.replaceAllMapped(RegExp(r'\s+(?=[A-Za-z_][\w]*\s*\{)'), (_) => '\n');
-  s = s.replaceAllMapped(RegExp(r'(?<=\s)\{(?!\n)'), (_) => '{\n');
+  s = s.replaceAllMapped(
+    RegExp(r'(?<![-|A-Za-z0-9_])(?:\s+|(?<=\S))(?=[A-Za-z_][\w]*\s*\{)'),
+    (_) => '\n',
+  );
+  s = s.replaceAllMapped(RegExp(r'(?<![o|])\{(?!\n)'), (_) => '{\n');
   s = s.replaceAllMapped(RegExp(r'\s*\}(?!\s*[|o])'), (_) => '\n}');
+  s = s.replaceAllMapped(RegExp(r'(?<=\})(?=[A-Za-z_][A-Za-z0-9_])'), (_) => '\n');
   s = s.replaceAllMapped(
     RegExp(
       r'\s+(?=(?:string|int|integer|float|double|bool|boolean|date|datetime|number|varchar|char)\b)',

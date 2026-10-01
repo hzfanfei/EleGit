@@ -49,6 +49,24 @@ describe("mermaid-render", () => {
 
     const flow = "flowchart LR\n  A[开始] --> B[结束]";
     assert.equal(normalizeMermaidSource(flow), flow);
+
+    const classGlued = normalizeMermaidSource(
+      "classDiagramclass Answer {+文本+有图()}class Diagram {+类型+显示()}Answer --> Diagram:包含",
+    );
+    assert.match(classGlued, /\}\nclass Diagram \{\n\+类型/);
+    assert.match(classGlued, /\}\nAnswer --> Diagram:包含/);
+
+    const erGlued = normalizeMermaidSource(
+      "erDiagramANSWER ||--o{ DIAGRAM :包含ANSWER {string文本}DIAGRAM {string类型}",
+    );
+    assert.match(erGlued, /\|\|--o\{ DIAGRAM :包含\nANSWER \{/);
+    assert.match(erGlued, /string 文本/);
+    assert.match(erGlued, /\}\nDIAGRAM \{\nstring 类型/);
+
+    const pieGlued = normalizeMermaidSource(
+      'pieshowDatatitle回答里的内容"文字" :70"流程图" :20"其他图" :10',
+    );
+    assert.match(pieGlued, /^pie showData\ntitle 回答里的内容\n"文字" :70\n"流程图" :20/);
   });
 
   it("mermaidCacheId is stable", () => {

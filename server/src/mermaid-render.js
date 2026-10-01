@@ -39,9 +39,9 @@ export function normalizeMermaidSource(code) {
   if (lower.startsWith("pie")) {
     let body = flat.slice(3).trim();
     let header = "pie";
-    if (/^showdata\b/i.test(body)) {
+    if (/^showdata/i.test(body)) {
       header = "pie showData";
-      body = body.replace(/^showdata\b/i, "").trim();
+      body = body.replace(/^showdata/i, "").trim();
     }
     const lines = splitPieBody(body);
     return lines ? `${header}\n${lines}` : header;
@@ -52,12 +52,13 @@ export function normalizeMermaidSource(code) {
 function splitClassBody(body) {
   let s = String(body || "").trim();
   if (!s) return s;
-  s = s.replace(/\s+(?=class\s+)/g, "\n");
+  s = s.replace(/(?<=\})(?=[A-Za-z_][A-Za-z0-9_])/g, "\n");
+  s = s.replace(/\s+(?=class\b)/g, "\n");
   s = s.replace(/\{(?!\n)/g, "{\n");
   s = s.replace(/\s*(?=})/g, "\n");
   s = s.replace(/(?:(?<=\S)\s*|\s+)(?=(?:[+\#~]|-(?![->.])))/g, "\n");
   s = s.replace(
-    /\s+(?=[A-Za-z_][\w]*\s*(?:<\|--|<\|\.\.|\*--|o--|-->|<--|==>|\.\.>|\.\.|--))/g,
+    /(?:\s+|(?<=\}))(?=[A-Za-z_][\w]*\s*(?:<\|--|<\|\.\.|\*--|o--|-->|<--|==>|\.\.>|\.\.|--))/g,
     "\n",
   );
   return s.replace(/\n{2,}/g, "\n").trim();
@@ -67,9 +68,12 @@ function splitErBody(body) {
   let s = String(body || "").trim();
   if (!s) return s;
   s = s.replace(ER_TYPE_GLUE, "$1 ");
-  s = s.replace(/\s+(?=[A-Za-z_][\w]*\s*\{)/g, "\n");
-  s = s.replace(/(?<=\s)\{(?!\n)/g, "{\n");
+  // Break only at the start of an entity name. A shorter prefix of that name
+  // also reaches `{`, so the match has to be outside the identifier.
+  s = s.replace(/(?<![-|A-Za-z0-9_])(?:\s+|(?<=\S))(?=[A-Za-z_][\w]*\s*\{)/g, "\n");
+  s = s.replace(/(?<![o|])\{(?!\n)/g, "{\n");
   s = s.replace(/\s*\}(?!\s*[|o])/g, "\n}");
+  s = s.replace(/(?<=\})(?=[A-Za-z_][A-Za-z0-9_])/g, "\n");
   s = s.replace(new RegExp(`\\s+(?=${ER_TYPE_WORD.source}\\b)`, "gi"), "\n");
   return s.replace(/\n{2,}/g, "\n").trim();
 }
@@ -153,7 +157,7 @@ export function mermaidCacheId(code, theme, backgroundColor) {
     code: String(code || "").trim(),
     theme: paint.theme,
     backgroundColor: paint.backgroundColor,
-    render: "wenxiang-paper-1",
+    render: "wenxiang-paper-2",
   });
   return createHash("sha256").update(payload).digest("hex").slice(0, 32);
 }
@@ -247,6 +251,25 @@ async function renderWithPuppeteer(code, paint, assets) {
         clusterBorder: DIAGRAM_NODE_LINE,
         defaultLinkColor: DIAGRAM_ARROW,
         titleColor: DIAGRAM_INK,
+        pie1: "#C47B4A",
+        pie2: "#6E8B74",
+        pie3: "#A65D57",
+        pie4: "#7D8AA6",
+        pie5: "#C4A35A",
+        pie6: "#8A7056",
+        pie7: "#9A7A62",
+        pie8: "#8E9A84",
+        pie9: "#B76E79",
+        pie10: "#6F8F9A",
+        pie11: "#D4A574",
+        pie12: "#7A6A58",
+        pieOpacity: "1",
+        pieStrokeColor: DIAGRAM_INK,
+        pieStrokeWidth: "1px",
+        pieOuterStrokeColor: DIAGRAM_INK,
+        pieTitleTextColor: DIAGRAM_INK,
+        pieSectionTextColor: DIAGRAM_INK,
+        pieLegendTextColor: DIAGRAM_INK,
         edgeLabelBackground: paint.backgroundColor,
         nodeTextColor: DIAGRAM_INK,
         actorBkg: DIAGRAM_NODE,

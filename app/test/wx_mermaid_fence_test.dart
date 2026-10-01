@@ -74,6 +74,27 @@ void main() {
     expect(er, contains('ANSWER ||--o{ DIAGRAM : 包含'));
     expect(er, contains('ANSWER {\nstring 文本\n}'));
     expect(er, contains('DIAGRAM {\nstring 类型\n}'));
+
+    final classGlued = splitMarkdownByMermaidFences(
+      '```mermaidclassDiagramclass Answer {+文本+有图()}class Diagram {+类型+显示()}Answer --> Diagram:包含```',
+    ).single.mermaidCode!;
+    expect(classGlued, contains('}\nclass Diagram'));
+    expect(classGlued, contains('\nAnswer --> Diagram:包含'));
+
+    final erGlued = splitMarkdownByMermaidFences(
+      '```mermaiderDiagramANSWER ||--o{ DIAGRAM :包含ANSWER {string文本}DIAGRAM {string类型}```',
+    ).single.mermaidCode!;
+    expect(erGlued, contains('||--o{ DIAGRAM :包含\nANSWER {'));
+    expect(erGlued, contains('}\nDIAGRAM {'));
+    expect(erGlued, contains('string 文本'));
+
+    final pieTight = splitMarkdownByMermaidFences(
+      '```mermaidpieshowDatatitle回答里的内容"文字" :70"流程图" :20"其他图" :10```',
+    ).single.mermaidCode!;
+    expect(pieTight, startsWith('pie showData\n'));
+    expect(pieTight, contains('\ntitle 回答里的内容'));
+    expect(pieTight, contains('\n"文字" :70'));
+    expect(pieTight, contains('\n"流程图" :20'));
   });
 
   test('already multiline mermaid fence is left unchanged', () {
