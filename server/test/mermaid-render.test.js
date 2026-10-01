@@ -291,6 +291,24 @@ describe("mermaid-render", () => {
     assert.match(erMany, /teaches\nPARENT \{/);
   });
 
+  it("normalizeMermaidSource splits collapsed mindmap after root((…))", () => {
+    const glued = normalizeMermaidSource(
+      "mindmap\nroot((书桌))左边台灯杯子右边笔记本订书机",
+    );
+    assert.match(glued, /^mindmap\nroot\(\(书桌\)\)\n/);
+    assert.match(glued, /\n  左边\n\s+台灯\n\s+杯子\n  右边\n\s+笔记本\n\s+订书机/);
+
+    const flat = normalizeMermaidSource(
+      "mindmap root((书桌))左边台灯杯子右边笔记本订书机",
+    );
+    assert.match(flat, /\n  左边\n\s+台灯/);
+
+    const ok = normalizeMermaidSource(
+      "mindmap\n  root((窗台))\n    向阳\n      薄荷",
+    );
+    assert.equal(ok, "mindmap\n  root((窗台))\n    向阳\n      薄荷");
+  });
+
   it("tries the original source before a rebuilt copy", () => {
     const valid = [
       "classDiagram",

@@ -77,8 +77,54 @@ function glueTypesInBlocks(source) {
   });
 }
 
+const MINDMAP_BRANCH =
+  /(?:左边|右边|上边|下边|里面|外面|上午|下午|晚上|早上|中午|向阳|背阴)/;
+
+/** Collapsed mindmap lines often glue siblings after root((…)) or branch names. */
+function splitCjkGlue(text) {
+  const t = String(text || "").trim();
+  if (!t) return [];
+  if (!/^[\u4e00-\u9fff]+$/.test(t)) return [t];
+  const chunk = t.length % 3 === 0 ? 3 : 2;
+  const out = [];
+  for (let i = 0; i < t.length; i += chunk) out.push(t.slice(i, i + chunk));
+  return out;
+}
+
+function splitMindmapBranchLine(line) {
+  const m = line.match(
+    new RegExp(`^(\\s*)(${MINDMAP_BRANCH.source})([\\u4e00-\\u9fff]+)$`),
+  );
+  if (!m) return [line];
+  const indent = m[1];
+  const branch = m[2];
+  const childIndent = `${indent}    `;
+  const children = splitCjkGlue(m[3]);
+  return [`${indent}${branch}`, ...children.map((c) => `${childIndent}${c}`)];
+}
+
+function splitMindmapBody(body) {
+  let s = String(body || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/\s+$/g, "");
+  if (!s.trim()) return s.trim();
+
+  s = s.replace(/\)\)([\u4e00-\u9fff])/g, "))\n  $1");
+  s = s.replace(
+    new RegExp(`([\\u4e00-\\u9fff\\)])(?=${MINDMAP_BRANCH.source})`, "g"),
+    "$1\n  ",
+  );
+
+  const out = [];
+  for (const line of s.split("\n")) {
+    out.push(...splitMindmapBranchLine(line));
+  }
+  return out.join("\n").replace(/\n{2,}/g, "\n").trimEnd();
+}
+
 /**
- * Guess line breaks for class, ER, and pie text that already lost them.
+ * Guess line breaks for class, ER, pie, and mindmap text that already lost them.
  * Not used when the original source parses: Mermaid's own parser is the gate.
  */
 export function normalizeMermaidSource(code) {
@@ -86,6 +132,18 @@ export function normalizeMermaidSource(code) {
   if (!text) return text;
   const flat = text.replace(/\s+/g, " ").trim();
   const lower = flat.toLowerCase();
+  if (lower.startsWith("mindmap")) {
+    const afterHeader = text.replace(/^mindmap\b/i, "");
+    const rawBody = afterHeader.startsWith("\n")
+      ? afterHeader.slice(1)
+      : afterHeader.trimStart();
+    const collapsed =
+      !rawBody.includes("\n") || /\)\)[\u4e00-\u9fff]/.test(rawBody.replace(/\s+/g, " "));
+    const source = collapsed ? rawBody.replace(/\s+/g, " ").trim() : rawBody.replace(/\s+$/g, "");
+    const body = splitMindmapBody(source);
+    const repaired = body ? `mindmap\n${body}` : "mindmap";
+    return repaired === text ? text : repaired;
+  }
   if (lower.startsWith("classdiagram")) {
     const v2 = lower.startsWith("classdiagram-v2");
     const header = v2 ? "classDiagram-v2" : "classDiagram";
