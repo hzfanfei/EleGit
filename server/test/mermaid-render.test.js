@@ -6,6 +6,7 @@ import { join } from "node:path";
 import {
   formatMermaidCliError,
   mermaidCacheId,
+  mermaidSourceCandidates,
   normalizeMermaidSource,
   probeMermaidSources,
   renderMermaidSvg,
@@ -288,6 +289,44 @@ describe("mermaid-render", () => {
     );
     assert.match(erMany, /PARENT \|\|--\|\| CHILD :has\nTEACHER \|o--o\{ COURSE :teaches/);
     assert.match(erMany, /teaches\nPARENT \{/);
+  });
+
+  it("tries the original source before a rebuilt copy", () => {
+    const valid = [
+      "classDiagram",
+      "class A {",
+      "  +int age",
+      "}",
+      "class B {",
+      "  +int age",
+      "}",
+      "A --> B : 包含-关系",
+    ].join("\n");
+    const candidates = mermaidSourceCandidates(valid);
+    assert.equal(candidates[0], valid);
+    assert.notEqual(candidates[1], valid);
+    assert.match(normalizeMermaidSource(valid), /包含\n-关系/);
+  });
+
+  it("renders a valid class diagram without rewriting the label", { timeout: 60_000 }, async () => {
+    const valid = [
+      "classDiagram",
+      "class A {",
+      "  +int age",
+      "}",
+      "class B {",
+      "  +int age",
+      "}",
+      "A --> B : 包含-关系",
+    ].join("\n");
+    const collapsed = "classDiagramclass A {+int age}class B {+int age}A --> B:包含";
+    const [kept, fixed] = await probeMermaidSources([valid, collapsed]);
+    assert.equal(kept.ok, true, kept.error);
+    assert.equal(kept.source, valid);
+    assert.match(kept.svg, /包含-关系/);
+    assert.equal(fixed.ok, true, fixed.error);
+    assert.equal(fixed.source, normalizeMermaidSource(collapsed));
+    assert.match(fixed.svg, /包含/);
   });
 
   it("mermaidCacheId is stable", () => {

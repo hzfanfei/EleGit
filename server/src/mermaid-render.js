@@ -77,7 +77,10 @@ function glueTypesInBlocks(source) {
   });
 }
 
-/** Put class, ER, and pie statements back on their own lines. */
+/**
+ * Guess line breaks for class, ER, and pie text that already lost them.
+ * Not used when the original source parses: Mermaid's own parser is the gate.
+ */
 export function normalizeMermaidSource(code) {
   const text = String(code || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
   if (!text) return text;
@@ -104,6 +107,15 @@ export function normalizeMermaidSource(code) {
     return lines ? `${header}\n${lines}` : header;
   }
   return text;
+}
+
+/** Original source first. A rebuilt copy is only a fallback when parse fails. */
+export function mermaidSourceCandidates(code) {
+  const original = String(code || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+  if (!original) return [];
+  const repaired = normalizeMermaidSource(original);
+  if (!repaired || repaired === original) return [original];
+  return [original, repaired];
 }
 
 function applyCuts(source, cuts) {
@@ -349,7 +361,7 @@ async function readCachedDiagram(workspaceRoot, id) {
  * uses the app's WenxiangSerif face so flutter_svg on already-installed builds
  * can draw it. flutter_svg ignores `<style>` and `<foreignObject>`.
  */
-async function renderWithPuppeteer(code, paint, assets) {
+async function renderWithPuppeteer(candidates, paint, assets) {
   const browser = await puppeteer.launch({
     headless: "shell",
     args: ["--no-sandbox", "--disable-dev-shm-usage", "--font-render-hinting=none"],
@@ -455,7 +467,7 @@ async function renderWithPuppeteer(code, paint, assets) {
     try {
       await page.$eval(
         "#container",
-        async (container, definition, mermaidConfig, backgroundColor) => {
+        async (container, sources, mermaidConfig, backgroundColor) => {
           const { mermaid, zenuml, elkLayouts } = globalThis;
           if (zenuml && mermaid.registerExternalDiagrams) {
             await mermaid.registerExternalDiagrams([zenuml]);
@@ -464,6 +476,18 @@ async function renderWithPuppeteer(code, paint, assets) {
             mermaid.registerLayoutLoaders(elkLayouts);
           }
           mermaid.initialize(mermaidConfig);
+          let definition = "";
+          let parseError = "Mermaid 语法错误";
+          for (const candidate of sources) {
+            try {
+              await mermaid.parse(candidate);
+              definition = candidate;
+              break;
+            } catch (err) {
+              parseError = String(err?.message || err);
+            }
+          }
+          if (!definition) throw new Error(parseError);
           const { svg: svgText } = await mermaid.render("my-svg", definition, container);
           container.innerHTML = svgText;
           const svg = container.querySelector("svg");
@@ -500,7 +524,7 @@ async function renderWithPuppeteer(code, paint, assets) {
             el.style.fill = "#2C2620";
           });
         },
-        code,
+        candidates,
         mermaidConfig,
         paint.backgroundColor,
       );
@@ -638,24 +662,42 @@ export async function probeMermaidSources(codes) {
     });
     const results = [];
     for (let i = 0; i < list.length; i += 1) {
-      const source = normalizeMermaidSource(list[i]);
-      const outcome = await page.evaluate(async (definition, elementId) => {
+      const sources = mermaidSourceCandidates(list[i]);
+      const outcome = await page.evaluate(async (candidates, elementId) => {
         const host = document.querySelector("#container");
         if (host) host.innerHTML = "";
         document.getElementById(elementId)?.remove();
+        let definition = "";
+        let parseError = "Mermaid 语法错误";
+        for (const candidate of candidates) {
+          try {
+            await globalThis.mermaid.parse(candidate);
+            definition = candidate;
+            break;
+          } catch (err) {
+            parseError = String(err?.message || err);
+          }
+        }
+        if (!definition) {
+          return { ok: false, error: parseError.slice(0, 700), source: candidates[0] || "" };
+        }
         try {
           const rendered = await globalThis.mermaid.render(elementId, definition, host);
           const svg = String(rendered?.svg || "");
           document.getElementById(elementId)?.remove();
-          return { ok: true, svg };
+          return { ok: true, svg, source: definition };
         } catch (err) {
           document.getElementById(elementId)?.remove();
-          return { ok: false, error: String(err?.message || err).slice(0, 700) };
+          return {
+            ok: false,
+            error: String(err?.message || err).slice(0, 700),
+            source: definition,
+          };
         }
-      }, source, `probe${i}`);
+      }, sources, `probe${i}`);
       const errorSvg = outcome.ok && isMermaidErrorSvg(outcome.svg);
       results.push({
-        source,
+        source: String(outcome.source || sources[0] || ""),
         ok: Boolean(outcome.ok) && !errorSvg,
         error: errorSvg ? "Mermaid 语法错误" : String(outcome.error || ""),
         svg: outcome.ok ? outcome.svg : "",
@@ -677,7 +719,8 @@ export async function renderMermaidSvg({
   workspaceRoot,
   useCache = true,
 }) {
-  const trimmed = normalizeMermaidSource(code);
+  const candidates = mermaidSourceCandidates(code);
+  const trimmed = candidates[0] || "";
   if (!trimmed) {
     const err = new Error("Mermaid 源码为空");
     err.code = "mermaid_empty";
@@ -714,7 +757,7 @@ export async function renderMermaidSvg({
     throw err;
   }
 
-  const { svg, png } = await renderWithPuppeteer(trimmed, paint, assets);
+  const { svg, png } = await renderWithPuppeteer(candidates, paint, assets);
   if (useCache && workspaceRoot) {
     await mkdir(paths.dir, { recursive: true });
     await Promise.all([
