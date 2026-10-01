@@ -287,7 +287,9 @@ class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
       return true;
     }
     if (_step == AppStep.chat) {
-      _backFromChat();
+      // Edge swipe and the system back gesture both arrive here. A chat is
+      // easy to leave by accident while scrolling, so stay. The header
+      // back button calls _backFromChat directly.
       return true;
     }
     if (_step == AppStep.repos) {

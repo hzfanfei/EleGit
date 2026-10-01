@@ -123,7 +123,7 @@ void main() {
     expect(find.text('重新打开 GitHub'), findsNothing);
   });
 
-  testWidgets('back from chat returns to repo list without OAuth', (tester) async {
+  testWidgets('system back stays in chat; header back returns to repos', (tester) async {
     final store = await memory();
     final api = FakeWenxiangApi();
 
@@ -137,13 +137,21 @@ void main() {
     await tester.pump();
 
     await tester.tap(find.text('demo').first);
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 80));
     expect(find.textContaining('从进度问起'), findsOneWidget);
 
     await tester.binding.handlePopRoute();
-    await tester.pumpAndSettle();
-    expect(find.text('搜索仓库名'), findsOneWidget);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 80));
+    expect(find.textContaining('从进度问起'), findsOneWidget);
     expect(api.startOAuthCalls, 0);
+
+    await tester.tap(find.byTooltip('返回仓库'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('搜索仓库名'), findsOneWidget);
+    expect(find.textContaining('从进度问起'), findsNothing);
   });
 
   testWidgets('back on home does not leave the app', (tester) async {
@@ -164,7 +172,7 @@ void main() {
     expect(find.byType(ShellPage), findsOneWidget);
   });
 
-  testWidgets('edge swipes go back and never exit from home', (tester) async {
+  testWidgets('edge swipes stay in chat and never exit from home', (tester) async {
     final store = await memory();
     await tester.pumpWidget(
       MaterialApp(
@@ -185,17 +193,18 @@ void main() {
     await left.up();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 80));
-    expect(find.text('搜索仓库名'), findsOneWidget);
+    expect(find.textContaining('从进度问起'), findsOneWidget);
 
-    await tester.tap(find.text('demo').first, warnIfMissed: false);
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 80));
     final size = tester.getSize(find.byType(ShellPage));
     final right = await tester.startGesture(Offset(size.width - 8, 360));
     await right.moveBy(const Offset(-90, 0));
     await right.up();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 80));
+    expect(find.textContaining('从进度问起'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('返回仓库'));
+    await tester.pumpAndSettle();
     expect(find.text('搜索仓库名'), findsOneWidget);
 
     final stay = await tester.startGesture(const Offset(8, 360));

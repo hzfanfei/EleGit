@@ -1413,7 +1413,9 @@ class _ChatPageState extends State<ChatPage> {
         ? ''
         : session.title;
     final itemCount = _messages.length + (_live ? 1 : 0);
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      child: Scaffold(
       body: Stack(
         children: [
           Column(
@@ -1597,6 +1599,7 @@ class _ChatPageState extends State<ChatPage> {
             ),
         ],
       ),
+    ),
     );
   }
 }
