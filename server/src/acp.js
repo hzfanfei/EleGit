@@ -316,6 +316,7 @@ export function buildAcpPrompt({
       : "You are in ask mode. Do not edit files, commit, or change the working tree.",
     "Answer in Simplified Chinese unless the user writes in another language.",
     "Be concise and efficient: lead with the direct answer; use short paragraphs or bullets; skip preamble, filler, and long recaps unless the user asks for detail.",
+    "手机阅读：每段一两句，段与段之间必须空一行，不要把好几句写成一整段。",
     "Do not invent commits, PRs, files, or dates. Prefer the local checkout when it disagrees with stale memory.",
     "【通知钩子】如你刚刚派发了后台任务并已得到最终结果，开始本轮答复前独占一行写 ===TASK_COMPLETED=== 再紧接答案正文；没有后台任务不要写这行。问象会把它推到用户的本地通知中心。",
   ];

@@ -39,9 +39,10 @@ void main() {
       await _pumpWithSource(tester, '第一句已经说完。\n第二句另外起一段。\n');
       expect(tester.takeException(), isNull);
       expect(find.byType(GptMarkdown), findsNWidgets(2));
-      final first = tester.getTopLeft(_mdText('第一句已经说完'));
-      final second = tester.getTopLeft(_mdText('第二句另外起一段'));
-      expect(second.dy - first.dy, greaterThan(28));
+      final first = tester.getRect(_mdText('第一句已经说完'));
+      final second = tester.getRect(_mdText('第二句另外起一段'));
+      expect(second.top - first.bottom, greaterThan(22));
+      expect(_mdText('\u3000\u3000'), findsWidgets);
     });
 
     testWidgets('标题与列表不出现 ## 和 - 原文', (tester) async {
@@ -99,7 +100,7 @@ void main() {
       );
       expect(tester.takeException(), isNull);
       expect(find.byKey(const Key('wx-mermaid-diagram')), findsOneWidget);
-      expect(find.textContaining('图表'), findsOneWidget);
+      expect(find.text('图表'), findsOneWidget);
     });
 
     testWidgets('flowchart 语言标签围栏走图表卡片而非代码块', (tester) async {
@@ -278,7 +279,7 @@ void main() {
       );
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 250));
-      final prose = tester.getRect(find.textContaining('铺满屏幕宽度'));
+      final prose = tester.getRect(find.textContaining('铺满屏幕宽度').first);
       expect(prose.left, lessThan(20));
       expect(prose.right, greaterThan(370));
     });
