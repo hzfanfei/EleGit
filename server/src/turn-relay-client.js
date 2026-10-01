@@ -102,9 +102,10 @@ export async function ensureTurnRelay() {
       try {
         const info = JSON.parse(readFileSync(file, "utf8"));
         if (pidAlive(info.pid) && info.port) {
-          if (Date.now() < busyRelayUntil) return info.port;
+          const stampStale = String(info.sourceStamp || "") !== sourceStamp;
+          if (!stampStale && Date.now() < busyRelayUntil) return info.port;
           const busy = relayProcessBusy(info.pid);
-          if (busy) busyRelayUntil = Date.now() + 60_000;
+          if (busy) busyRelayUntil = Date.now() + (stampStale ? 2_000 : 60_000);
           const recycle = relayNeedsRecycle({
             alive: true,
             runningStamp: String(info.sourceStamp || ""),

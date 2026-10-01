@@ -52,6 +52,14 @@ describe("noteRelayTraffic", () => {
       JSON.stringify({ jsonrpc: "2.0", id: 7, result: { stopReason: "end_turn" } }),
     );
     assert.equal(state.done, true);
+    state = noteRelayTraffic(
+      state,
+      "in",
+      JSON.stringify({ jsonrpc: "2.0", id: 8, method: "session/prompt", params: {} }),
+    );
+    assert.equal(state.answer, "");
+    assert.equal(state.done, false);
+    assert.equal(state.promptId, 8);
   });
 });
 
@@ -462,6 +470,124 @@ describe("turn relay", () => {
       assert.equal(published[0].partial, true);
       assert.equal(published[0].answer, "已经写到这里");
       assert.equal(agent.killed, false);
+    } finally {
+      socket?.destroy();
+      relay.close();
+    }
+  });
+
+  it("keeps publishing a later prompt after the previous turn was acked", async () => {
+    const agent = fakeAgent();
+    const published = [];
+    const relay = await startTurnRelay({
+      port: 0,
+      spawnImpl: () => agent,
+      publish: async (_workspaceRoot, notice) => {
+        published.push(notice);
+      },
+    });
+    let socket;
+    try {
+      socket = net.connect(relay.port, "127.0.0.1");
+      await once(socket, "connect");
+      const step = (update) => `${JSON.stringify({ method: "session/update", params: { update } })}\n`;
+      const prompt = (id) =>
+        `${JSON.stringify({ jsonrpc: "2.0", id, method: "session/prompt", params: {} })}\n`;
+      socket.write(`${JSON.stringify({ op: "spawn", key: "s1:ack", file: "agent", args: [] })}\n`);
+      socket.write(`${JSON.stringify({
+        op: "meta",
+        key: "s1:ack",
+        meta: {
+          workspaceRoot: "C:/问象",
+          session: { id: "s1", owner: "octo", repo: "demo" },
+          question: "重启下服务器",
+        },
+      })}\n`);
+      socket.write(`${JSON.stringify({ op: "stdin", key: "s1:ack", data: prompt(1) })}\n`);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      agent.stdout.write(step({
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "上一轮结束" },
+      }));
+      agent.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, result: { stopReason: "end_turn" } })}\n`);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      socket.write(`${JSON.stringify({ op: "ack", key: "s1:ack" })}\n`);
+      socket.write(`${JSON.stringify({ op: "stdin", key: "s1:ack", data: prompt(2) })}\n`);
+      socket.write(`${JSON.stringify({ op: "drop", key: "s1:ack" })}\n`);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      agent.stdout.write(step({
+        sessionUpdate: "tool_call",
+        toolCallId: "sh1",
+        title: "Shell",
+        kind: "execute",
+        status: "in_progress",
+        rawInput: { command: "node scripts/restart-companion.mjs" },
+      }));
+      const deadline = Date.now() + 1500;
+      const ready = () => published.some((notice) => String(notice.activity || "").includes("跑脚本"));
+      while (!ready() && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      assert.equal(ready(), true);
+      assert.equal(published.some((notice) => String(notice.answer || "").includes("上一轮结束")), false);
+    } finally {
+      socket?.destroy();
+      relay.close();
+    }
+  });
+
+  it("refreshes a running script after the companion drops", async () => {
+    const agent = fakeAgent();
+    const published = [];
+    const relay = await startTurnRelay({
+      port: 0,
+      pulseMs: 200,
+      spawnImpl: () => agent,
+      publish: async (_workspaceRoot, notice) => {
+        published.push(String(notice.activity || ""));
+      },
+    });
+    let socket;
+    try {
+      socket = net.connect(relay.port, "127.0.0.1");
+      await once(socket, "connect");
+      socket.write(`${JSON.stringify({ op: "spawn", key: "s1:pulse", file: "agent", args: [] })}\n`);
+      socket.write(`${JSON.stringify({
+        op: "meta",
+        key: "s1:pulse",
+        meta: {
+          workspaceRoot: "C:/问象",
+          session: { id: "s1", owner: "octo", repo: "demo" },
+          question: "重启下服务器",
+          partial: true,
+        },
+      })}\n`);
+      socket.write(`${JSON.stringify({
+        op: "stdin",
+        key: "s1:pulse",
+        data: `${JSON.stringify({ jsonrpc: "2.0", id: 3, method: "session/prompt", params: {} })}\n`,
+      })}\n`);
+      socket.write(`${JSON.stringify({ op: "drop", key: "s1:pulse" })}\n`);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      agent.stdout.write(`${JSON.stringify({
+        method: "session/update",
+        params: {
+          update: {
+            sessionUpdate: "tool_call",
+            toolCallId: "sh1",
+            title: "Shell",
+            kind: "execute",
+            status: "in_progress",
+            rawInput: { command: "node scripts/restart-companion.mjs" },
+          },
+        },
+      })}\n`);
+      const deadline = Date.now() + 2500;
+      const sawElapsed = () => published.some((activity) => /已跑 \d+ 秒/.test(activity));
+      while (!sawElapsed() && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      assert.equal(sawElapsed(), true);
     } finally {
       socket?.destroy();
       relay.close();

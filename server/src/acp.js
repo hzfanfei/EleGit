@@ -877,11 +877,19 @@ function renderToolLog(log) {
   return log.items.map(renderToolItem).filter(Boolean).join("\n\n");
 }
 
+/** Current work-row text. Used to refresh a running script's elapsed time. */
+export function renderAcpToolLog(log) {
+  if (!log || !Array.isArray(log.items)) return "";
+  return renderToolLog(log);
+}
+
 const TOOL_TERMINAL = new Set(["completed", "complete", "failed", "cancelled", "canceled", "error"]);
 
 function toolRunningFromUpdate(update, kind) {
   const status = String(update?.status || update?.toolCall?.status || "").trim().toLowerCase();
   if (TOOL_TERMINAL.has(status)) return false;
+  const raw = update?.rawOutput ?? update?.toolCall?.rawOutput;
+  if (raw && typeof raw === "object" && raw.exitCode != null) return false;
   if (status === "in_progress" || status === "pending" || status === "running") return true;
   if (kind === "tool_call") return true;
   return null;

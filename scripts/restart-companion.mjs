@@ -8,6 +8,7 @@
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { loadLocalEnv, repoRoot } from "../server/src/env.js";
+import { listeningPidsFromNetstat } from "../server/src/listen-pid.js";
 import { publishRestartNoticeLive } from "../server/src/restart-notice.js";
 import { configuredWorkspaceRoot } from "../server/src/workspace.js";
 
@@ -26,16 +27,17 @@ function sleep(ms) {
 
 function killListenerOnPort(p) {
   if (process.platform === "win32") {
-    const script = [
-      `$c = Get-NetTCPConnection -LocalPort ${p} -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1`,
-      "if ($c) { Stop-Process -Id $c.OwningProcess -Force; exit 0 }",
-      "exit 1",
-    ].join("; ");
-    const out = spawnSync("powershell", ["-NoProfile", "-Command", script], {
+    // Get-NetTCPConnection walks every connection and often takes most of a minute.
+    const out = spawnSync("netstat", ["-ano", "-p", "tcp"], {
       encoding: "utf8",
       windowsHide: true,
     });
-    return out.status === 0;
+    const pids = listeningPidsFromNetstat(out.stdout, p);
+    if (!pids.length) return false;
+    for (const pid of pids) {
+      spawnSync("taskkill", ["/PID", String(pid), "/F"], { windowsHide: true });
+    }
+    return true;
   }
   const out = spawnSync("sh", ["-c", `fuser -k ${p}/tcp 2>/dev/null || lsof -ti :${p} | xargs -r kill -TERM`], {
     encoding: "utf8",
@@ -72,6 +74,7 @@ async function main() {
   console.log(`[restart-companion] notice via ${notice.via}`);
   if (leadMs > 0) await sleep(leadMs);
   await handoffTurns(true);
+  console.log(`[restart-companion] stopping listener on :${port}`);
   const killed = killListenerOnPort(port);
   if (!killed) {
     console.warn(`[restart-companion] no listener on port ${port} (keep-alive may still boot it)`);

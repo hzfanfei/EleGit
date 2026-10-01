@@ -342,6 +342,25 @@ describe("pushAcpToolActivity", () => {
     assert.equal(log.items.find((entry) => entry.id === "sh2").running, false);
   });
 
+  it("stops the script timer when the result includes an exit code", () => {
+    const log = { items: [] };
+    pushAcpToolActivity(log, {
+      sessionUpdate: "tool_call",
+      toolCallId: "sh3",
+      title: "Shell",
+      kind: "execute",
+      rawInput: { command: "node scripts/restart-companion.mjs" },
+    });
+    const done = pushAcpToolActivity(log, {
+      sessionUpdate: "tool_call_update",
+      toolCallId: "sh3",
+      rawOutput: { exitCode: 0, stdout: "stopped companion on :8787" },
+    });
+    assert.match(done, /stopped companion/);
+    assert.doesNotMatch(done, /已跑/);
+    assert.equal(log.items[0].running, false);
+  });
+
   it("keeps the thought block when older tools fall off the log", () => {
     const log = { items: [] };
     pushAcpToolActivity(log, {

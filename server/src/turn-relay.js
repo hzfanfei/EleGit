@@ -1,7 +1,7 @@
 import net from "node:net";
 import readline from "node:readline";
 import { spawn } from "node:child_process";
-import { acpVisibleTextFromUpdate, pushAcpToolActivity } from "./acp.js";
+import { acpVisibleTextFromUpdate, pushAcpToolActivity, renderAcpToolLog } from "./acp.js";
 import { answerReadyNotice } from "./ask.js";
 
 /**
@@ -22,6 +22,7 @@ export function noteRelayTraffic(state, direction, line) {
   }
   if (!msg || typeof msg !== "object") return next;
   if (direction === "in" && msg.method === "session/prompt" && msg.id != null) {
+    if (next.promptId !== msg.id) next.answer = "";
     next.promptId = msg.id;
     next.done = false;
     return next;
@@ -75,6 +76,7 @@ export function startTurnRelay({
   host = "127.0.0.1",
   spawnImpl = spawn,
   publish = async () => {},
+  pulseMs = 2000,
 } = {}) {
   const turns = new Map();
 
@@ -83,10 +85,24 @@ export function startTurnRelay({
     socket.write(`${JSON.stringify(msg)}\n`);
   }
 
+  function clearScriptPulse(turn) {
+    if (!turn?.scriptPulse) return;
+    clearInterval(turn.scriptPulse);
+    turn.scriptPulse = null;
+  }
+
+  function releaseTurn(turn) {
+    clearScriptPulse(turn);
+    if (!turn?.stdoutRl) return;
+    turn.stdoutRl.close();
+    turn.stdoutRl = null;
+  }
+
   function endOrphan(turn, { force = false } = {}) {
     if (turn.ended) return;
     if (!force && turn.clients.size > 0) return;
     clearPartialTimer(turn);
+    releaseTurn(turn);
     turn.ended = true;
     try {
       turn.child.kill?.();
@@ -103,9 +119,33 @@ export function startTurnRelay({
     turn.publishTimer = null;
   }
 
+  function beginPrompt(turn) {
+    // Ack belongs to the previous prompt. A restart kills the companion
+    // mid-prompt; this turn must keep publishing or the phone freezes.
+    turn.acked = false;
+    turn.publishedFinal = false;
+    turn.publishedActivity = "";
+    turn.publishedAnswer = "";
+    turn.activity = "";
+    turn.toolLog = { items: [] };
+    turn.lastPublishAt = 0;
+  }
+
+  function refreshRunningScript(turn) {
+    if (turn.ended) return;
+    const exposed = Boolean(turn.forceExpose) || turn.clients.size === 0;
+    if (!exposed) return;
+    const running = (turn.toolLog?.items || []).some((item) => item.script && item.running !== false);
+    if (!running) return;
+    const text = renderAcpToolLog(turn.toolLog);
+    if (!text || text === turn.activity) return;
+    turn.activity = text;
+    maybePublish(turn);
+  }
+
   function maybePublish(turn) {
     if (turn.publishedFinal) return;
-    if (turn.acked && !turn.state.done) return;
+    if (turn.acked && !turn.state.done && !turn.forceExpose && turn.clients.size > 0) return;
     const liveCompanion = turn.clients.size > 0 && !turn.acked;
     if (liveCompanion) {
       // Phone may lose SSE during a planned companion restart while the agent
@@ -128,6 +168,7 @@ export function startTurnRelay({
           turn.publishTimer = null;
           maybePublish(turn);
         }, partialMs - (now - turn.lastPublishAt));
+        turn.publishTimer.unref?.();
       }
       return;
     }
@@ -153,6 +194,7 @@ export function startTurnRelay({
 
   function attachChild(turn) {
     const rl = readline.createInterface({ input: turn.child.stdout });
+    turn.stdoutRl = rl;
     rl.on("line", (line) => {
       turn.state = noteRelayTraffic(turn.state, "out", line);
       const traced = noteRelayActivity(turn.toolLog, line);
@@ -169,6 +211,7 @@ export function startTurnRelay({
       if (!turn.state.done && String(turn.state.answer || "").trim()) {
         turn.state = { ...turn.state, done: true };
       }
+      releaseTurn(turn);
       turn.ended = true;
       maybePublish(turn);
     });
@@ -209,6 +252,9 @@ export function startTurnRelay({
       published: false,
       ended: false,
     };
+    const every = Math.max(200, Number(pulseMs) || 2000);
+    turn.scriptPulse = setInterval(() => refreshRunningScript(turn), every);
+    turn.scriptPulse.unref?.();
     turns.set(key, turn);
     attachChild(turn);
     send(socket, { op: "spawned", key, pid: child.pid || 0 });
@@ -231,7 +277,9 @@ export function startTurnRelay({
     if (!turn) return;
     if (msg.op === "stdin") {
       turn.pendingIn = consumeLines(turn.pendingIn, msg.data, (one) => {
+        const before = turn.state.promptId;
         turn.state = noteRelayTraffic(turn.state, "in", one);
+        if (turn.state.promptId !== before) beginPrompt(turn);
       });
       try {
         turn.child.stdin.write(String(msg.data || ""));
@@ -264,7 +312,10 @@ export function startTurnRelay({
     }
   }
 
+  const sockets = new Set();
   const server = net.createServer((socket) => {
+    sockets.add(socket);
+    socket.on("close", () => sockets.delete(socket));
     socket.setEncoding("utf8");
     const rl = readline.createInterface({ input: socket });
     rl.on("line", (line) => onClientLine(socket, line));
@@ -286,7 +337,11 @@ export function startTurnRelay({
       resolve({
         port: address.port,
         close() {
-          for (const turn of turns.values()) endOrphan(turn, { force: true });
+          for (const turn of turns.values()) {
+            releaseTurn(turn);
+            endOrphan(turn, { force: true });
+          }
+          for (const socket of sockets) socket.destroy();
           server.close();
         },
       });
