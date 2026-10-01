@@ -608,9 +608,8 @@ function acpToolActivityLabel({ title = "", toolKind = "", filePath = "", sessio
     if (t) return clipActivityLabel(`改·${t}`, 40);
     return "改文件…";
   }
-  if (/shell|terminal|bash|command|run|npm|git|exec|pnpm|node|python/.test(hay)) {
-    if (t) return clipActivityLabel(`终端·${t}`, 40);
-    return "跑命令…";
+  if (k === "execute" || /shell|terminal|bash|powershell|script/.test(hay)) {
+    return "跑脚本";
   }
   if (/mcp|invoke/.test(hay)) {
     return t ? clipActivityLabel(t, 40) : "扩展工具…";
@@ -801,7 +800,64 @@ function toolOutputFromUpdate(update) {
   return clipToolOutput(text);
 }
 
+function isScriptUpdate(update) {
+  const input = rawInputOf(update);
+  if (asActivityText(input.command).trim()) return true;
+  const title = explicitToolTitle(update);
+  const kind = String(update?.kind || update?.toolCall?.kind || "").trim().toLowerCase();
+  const hay = `${title} ${kind}`.toLowerCase();
+  return kind === "execute" || /shell|terminal|bash|powershell|script/.test(hay);
+}
+
+function scriptWaitLabel(item, now = Date.now()) {
+  const sec = item?.startedAt ? Math.max(0, Math.floor((now - item.startedAt) / 1000)) : 0;
+  if (sec < 1) return "跑着";
+  if (sec < 60) return `已跑 ${sec} 秒`;
+  return `已跑 ${Math.floor(sec / 60)} 分 ${sec % 60} 秒`;
+}
+
+function scriptStatusLine(item, now = Date.now()) {
+  const bits = [];
+  if (item.command) bits.push(clipActivityLabel(item.command, 48));
+  if (item.output) {
+    const last = String(item.output)
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .at(-1);
+    if (last) bits.push(clipActivityLabel(last, 40));
+  }
+  bits.push(scriptWaitLabel(item, now));
+  return bits.join(" · ");
+}
+
+function workStillRunning(log) {
+  return (log?.items || []).some(
+    (entry) => entry && entry.id !== "thought" && entry.id !== "plan" && entry.running === true,
+  );
+}
+
+function placeThought(log, item) {
+  const index = log.items.indexOf(item);
+  if (index < 0) return;
+  if (workStillRunning(log)) {
+    log.items.splice(index, 1);
+    const runningAt = log.items.findIndex(
+      (entry) => entry.running === true && entry.id !== "thought" && entry.id !== "plan",
+    );
+    log.items.splice(runningAt < 0 ? log.items.length : runningAt, 0, item);
+    return;
+  }
+  if (index !== log.items.length - 1) {
+    log.items.splice(index, 1);
+    log.items.push(item);
+  }
+}
+
 function renderToolItem(item) {
+  if (item.script && item.running !== false) {
+    return `跑脚本\n${scriptStatusLine(item)}`;
+  }
   if (item.id === "thought") {
     const body = String(item.output || "").trim();
     if (!body) return item.title || "思考";
@@ -863,18 +919,18 @@ export function pushAcpToolActivity(log, update) {
     let item = log.items.find((entry) => entry.id === "thought");
     if (!item) {
       item = { id: "thought", title: "思考", command: "", output: "", raw: "" };
-      log.items.push(item);
+      const runningAt = log.items.findIndex(
+        (entry) => entry.running === true && entry.id !== "thought" && entry.id !== "plan",
+      );
+      if (runningAt >= 0) log.items.splice(runningAt, 0, item);
+      else log.items.push(item);
     }
     item.raw = mergeThoughtText(item.raw || item.output, piece);
     if (item.raw.length > THOUGHT_ACTIVITY_CAP * 8) {
       item.raw = item.raw.slice(item.raw.length - THOUGHT_ACTIVITY_CAP * 8);
     }
     item.output = clipThoughtText(item.raw);
-    const index = log.items.indexOf(item);
-    if (index >= 0 && index !== log.items.length - 1) {
-      log.items.splice(index, 1);
-      log.items.push(item);
-    }
+    placeThought(log, item);
     capToolLog(log);
     return renderToolLog(log);
   }
@@ -898,26 +954,37 @@ export function pushAcpToolActivity(log, update) {
   const command = toolCommandFromUpdate(update);
   const output = toolOutputFromUpdate(update);
   let item = id ? log.items.find((entry) => entry.id === id) : null;
-  if (!item && kind === "tool_call_update" && log.items.length) {
-    item = log.items[log.items.length - 1];
+  if (!item && kind === "tool_call_update") {
+    for (let i = log.items.length - 1; i >= 0; i -= 1) {
+      const candidate = log.items[i];
+      if (candidate.id === "thought" || candidate.id === "plan") continue;
+      item = candidate;
+      break;
+    }
   }
   const running = toolRunningFromUpdate(update, kind);
+  const script = Boolean(item?.script) || isScriptUpdate(update);
   if (!item) {
-    const createdTitle = title || acpActivityLabelFromUpdate(update);
+    const createdTitle = title || acpActivityLabelFromUpdate(update) || (script ? "跑脚本" : "");
     if (!createdTitle && !command && !output) return renderToolLog(log);
     item = {
       id: id || `tool-${log.items.length + 1}`,
-      title: createdTitle,
+      title: script ? "跑脚本" : createdTitle,
       command,
       output,
       running: running !== false,
+      script,
+      startedAt: Date.now(),
     };
     log.items.push(item);
   } else {
-    if (title) item.title = title;
+    if (script) item.script = true;
+    if (item.script) item.title = "跑脚本";
+    else if (title) item.title = title;
     if (command) item.command = command;
     if (output) item.output = output;
     if (running != null) item.running = running;
+    if (item.running !== false && !item.startedAt) item.startedAt = Date.now();
   }
   capToolLog(log);
   return renderToolLog(log);
@@ -1121,6 +1188,7 @@ export class AcpChannel {
     };
     this.onActivity = onActivity;
     onActivity?.("Agent 处理中…");
+    this._armActivityPulse();
     try {
       // Wait for session/prompt to finish. Do not cancel on short SSE idle: Claude Code
       // often goes silent for seconds while listing/reading files during code review.
@@ -1136,6 +1204,7 @@ export class AcpChannel {
     this.onDelta = null;
     this.onActivity = null;
     this._promptId = null;
+    this._stopActivityPulse();
   }
   }
 
@@ -1219,6 +1288,7 @@ export class AcpChannel {
     if (this._promptId != null) this._settleAfterCancel(this._promptId);
     this.onDelta = null;
     this.onActivity = null;
+    this._stopActivityPulse();
     try {
       this.child.stdin.write(
         `${JSON.stringify({
@@ -1237,6 +1307,7 @@ export class AcpChannel {
 
   async close() {
     this.alive = false;
+    this._stopActivityPulse();
     clearTimeout(this.idleTimer);
     this._failAll(new Error("ACP channel closed"));
     if (this.child && !this.child.killed) {
@@ -1296,6 +1367,31 @@ export class AcpChannel {
   respond(id, result) {
     if (!this.child?.stdin) return;
     this.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, result })}\n`);
+  }
+
+  rejectRequest(id, code, message) {
+    if (!this.child?.stdin || id == null) return;
+    this.child.stdin.write(
+      `${JSON.stringify({ jsonrpc: "2.0", id, error: { code, message } })}\n`,
+    );
+  }
+
+  _armActivityPulse() {
+    this._stopActivityPulse();
+    this._activityPulse = setInterval(() => {
+      if (!this.onActivity) return;
+      const running = (this._toolLog?.items || []).some((item) => item.script && item.running !== false);
+      if (!running) return;
+      const text = renderToolLog(this._toolLog);
+      if (text) this.onActivity(text);
+    }, 2000);
+    this._activityPulse.unref?.();
+  }
+
+  _stopActivityPulse() {
+    if (!this._activityPulse) return;
+    clearInterval(this._activityPulse);
+    this._activityPulse = null;
   }
 
   _onLine(line) {
@@ -1386,6 +1482,10 @@ export class AcpChannel {
         return;
       }
       this._relayInteraction(msg, "plan");
+      return;
+    }
+    if (msg.id != null && msg.method) {
+      this.rejectRequest(msg.id, -32601, `不支持 ${msg.method}`);
     }
   }
 

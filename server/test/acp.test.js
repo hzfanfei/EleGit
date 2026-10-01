@@ -252,8 +252,9 @@ describe("pushAcpToolActivity", () => {
       kind: "execute",
       rawInput: { command: "npm test" },
     });
-    assert.match(started, /Shell/);
+    assert.match(started, /跑脚本/);
     assert.match(started, /npm test/);
+    assert.match(started, /跑着/);
 
     const done = pushAcpToolActivity(log, {
       sessionUpdate: "tool_call_update",
@@ -307,6 +308,38 @@ describe("pushAcpToolActivity", () => {
     });
     assert.match(replaced, /先看登录页，再对会话/);
     assert.doesNotMatch(replaced, /先看登录页先看登录页/);
+  });
+
+  it("keeps a running script ahead of later thoughts and shows how long it has run", () => {
+    const log = { items: [] };
+    pushAcpToolActivity(log, {
+      sessionUpdate: "tool_call",
+      toolCallId: "sh2",
+      title: "Run checks",
+      kind: "execute",
+      rawInput: { command: "node scripts/build-android.mjs" },
+    });
+    log.items[0].startedAt = Date.now() - 12_000;
+    const shown = pushAcpToolActivity(log, {
+      sessionUpdate: "agent_thought_chunk",
+      content: { type: "text", text: "等打包" },
+    });
+    const blocks = shown.trim().split(/\n\n/);
+    assert.match(blocks.at(-1), /跑脚本/);
+    assert.match(blocks.at(-1), /已跑 12 秒/);
+    assert.match(blocks.at(-1), /build-android\.mjs/);
+    assert.match(shown, /思考/);
+    assert.equal(log.items.at(-1).id, "sh2");
+
+    const done = pushAcpToolActivity(log, {
+      sessionUpdate: "tool_call_update",
+      toolCallId: "sh2",
+      status: "completed",
+      rawOutput: { exitCode: 0, stdout: "OK" },
+    });
+    assert.match(done, /OK/);
+    assert.doesNotMatch(done, /已跑/);
+    assert.equal(log.items.find((entry) => entry.id === "sh2").running, false);
   });
 
   it("keeps the thought block when older tools fall off the log", () => {
@@ -790,6 +823,29 @@ describe("AcpChannel", () => {
     await channel.prompt("follow up", { onDelta: (t) => chunks.push(t) });
     await channel.close();
     assert.deepEqual(chunks, ["first:1", "followup:2"]);
+  });
+
+  it("answers an unsupported terminal request instead of waiting it out", async () => {
+    const channel = new AcpChannel({
+      command: { path: process.execPath, args: [fakeAcp] },
+      cwd: process.cwd(),
+      spawnImpl: (file, args, opts) =>
+        spawn(file, args, {
+          ...opts,
+          env: { ...opts.env, FAKE_ACP_TERMINAL: "1" },
+        }),
+      idleMs: 0,
+    });
+    try {
+      await channel.start();
+      const started = Date.now();
+      const chunks = [];
+      await channel.prompt("run script", { onDelta: (t) => chunks.push(t), timeoutMs: 3000 });
+      assert.ok(Date.now() - started < 2500);
+      assert.equal(chunks.some((t) => t.includes("first:")), true);
+    } finally {
+      await channel.close();
+    }
   });
 
   it("does not close the channel while a prompt is still running", async () => {

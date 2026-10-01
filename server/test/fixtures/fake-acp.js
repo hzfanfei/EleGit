@@ -15,7 +15,7 @@ function write(obj) {
 rl.on("line", (line) => {
   if (!line.trim()) return;
   const msg = JSON.parse(line);
-  if (msg.result && !msg.method && askResume) {
+  if ((msg.result || msg.error) && !msg.method && askResume) {
     const resume = askResume;
     askResume = null;
     resume(msg.result);
@@ -66,6 +66,16 @@ rl.on("line", (line) => {
   }
   if (msg.method === "session/prompt") {
     const text = (msg.params?.prompt || []).map((p) => p.text || "").join("");
+    if (process.env.FAKE_ACP_TERMINAL === "1") {
+      write({
+        jsonrpc: "2.0",
+        id: 81,
+        method: "terminal/create",
+        params: { command: "node slow.js" },
+      });
+      askResume = () => answerPrompt(msg);
+      return;
+    }
     if (process.env.FAKE_ACP_PLAN === "1") {
       write({
         jsonrpc: "2.0",
