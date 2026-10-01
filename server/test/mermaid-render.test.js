@@ -7,8 +7,172 @@ import {
   formatMermaidCliError,
   mermaidCacheId,
   normalizeMermaidSource,
+  probeMermaidSources,
   renderMermaidSvg,
 } from "../src/mermaid-render.js";
+
+const diagramCases = [
+  {
+    name: "01 class 原文粘连",
+    code: "classDiagramclass Answer {+文本+有图()}class Diagram {+类型+显示()}Answer --> Diagram:包含",
+    parts: ["class Answer {", "+文本", "+有图()", "class Diagram {", "+类型", "Answer --> Diagram:包含"],
+    marker: "包含",
+  },
+  {
+    name: "02 class 继承",
+    code: "classDiagramclass Animal {+int age+String gender+isMammal()}class Dog {+bark()}Animal <|-- Dog:是",
+    parts: ["+int age", "+String gender", "+isMammal()", "+bark()", "Animal <|-- Dog:是"],
+    marker: "是",
+  },
+  {
+    name: "03 class 组合与聚合",
+    code: "classDiagramclass Car {+start()}class Engine {+power}class Wheel {+size}Car *-- Engine:动力Car o-- Wheel:滚动",
+    parts: ["+start()", "+power", "+size", "Car *-- Engine:动力", "Car o-- Wheel:滚动"],
+    marker: "动力",
+  },
+  {
+    name: "04 class 两条中文关系",
+    code: "classDiagramclass A {+x}class B {+y}class C {+z}A --> B:包含B --> C:调用",
+    parts: ["A --> B:包含", "B --> C:调用"],
+    marker: "调用",
+  },
+  {
+    name: "05 class 可见性",
+    code: "classDiagramclass Account {-id#balance~cache+deposit(amount)+withdraw(amount) int}",
+    parts: ["-id", "#balance", "~cache", "+deposit(amount)", "+withdraw(amount) int"],
+    marker: "deposit",
+  },
+  {
+    name: "06 class 依赖与实现",
+    code: "classDiagramclass Service {+run()}class Repo {+save()}class Logger {+write()}Repo <|.. Service:实现Service ..> Logger:记录",
+    parts: ["Repo <|.. Service:实现", "Service ..> Logger:记录"],
+    marker: "实现",
+  },
+  {
+    name: "07 class 泛型",
+    code: "classDiagramclass Box~Item~ {+List~String~ items+int count}class Item {+name}Box --> Item:持有",
+    parts: ["class Box~Item~ {", "+List~String~ items", "+int count", "Box --> Item:持有"],
+    marker: "持有",
+  },
+  {
+    name: "08 class 接口与基数",
+    code: 'classDiagramclass Flyable {<<interface>>+fly()}class Duck {+quack()}class Pond {+water}Flyable <|.. Duck:实现Duck "1" --> "*" Pond:游',
+    parts: ["<<interface>>", "+fly()", "Flyable <|.. Duck:实现", 'Duck "1" --> "*" Pond:游'],
+    marker: "游",
+  },
+  {
+    name: "09 class 方向样式备注",
+    code: "classDiagram-v2 direction LR class Task {+name} class Done {+ok} classDef hot fill:#f6d6b8,stroke:#a67c52 cssClass \"Task\" hot Task --> Done:完成 note for Done \"结束\"",
+    parts: [
+      "classDiagram-v2",
+      "direction LR",
+      "+name",
+      "+ok",
+      "classDef hot fill:#f6d6b8,stroke:#a67c52",
+      'cssClass "Task" hot',
+      "Task --> Done:完成",
+      'note for Done "结束"',
+    ],
+    marker: "完成",
+  },
+  {
+    name: "10 er 原文粘连",
+    code: "erDiagramANSWER ||--o{ DIAGRAM :包含ANSWER {string文本}DIAGRAM {string类型}",
+    parts: ["ANSWER ||--o{ DIAGRAM :包含", "string 文本", "string 类型"],
+    marker: "包含",
+  },
+  {
+    name: "11 er 英文标签粘实体",
+    code: "erDiagramCUSTOMER ||--o{ ORDER :placesCUSTOMER {string name string email PK}ORDER {int total float tax}",
+    parts: ["ORDER :places", "CUSTOMER {", "string name", "string email PK", "int total", "float tax"],
+    marker: "places",
+  },
+  {
+    name: "12 er 多种基数",
+    code: "erDiagramPARENT ||--|| CHILD :has TEACHER |o--o{ COURSE :teaches STUDENT }|--|{ COURSE :enrolls PARENT {string id}CHILD {string id}TEACHER {string name}COURSE {int credit}STUDENT {string sid}",
+    parts: [
+      "PARENT ||--|| CHILD :has",
+      "TEACHER |o--o{ COURSE :teaches",
+      "STUDENT }|--|{ COURSE :enrolls",
+      "int credit",
+      "string sid",
+    ],
+    marker: "enrolls",
+  },
+  {
+    name: "13 er 键与注释",
+    code: 'erDiagramUSER ||--o{ LOGIN :recordsUSER {string name "姓名" string email PK "邮箱" int orgId FK}LOGIN {datetime when string ip}',
+    parts: [
+      "USER ||--o{ LOGIN :records",
+      'string name "姓名"',
+      'string email PK "邮箱"',
+      "int orgId FK",
+      "datetime when",
+      "string ip",
+    ],
+    marker: "姓名",
+  },
+  {
+    name: "14 er 长类型名",
+    code: "erDiagramSAMPLE {integer count booleanflag datetimecreated date day varcharcode charflag double ratio floatscore}",
+    parts: [
+      "integer count",
+      "boolean flag",
+      "datetime created",
+      "date day",
+      "varchar code",
+      "char flag",
+      "double ratio",
+      "float score",
+    ],
+    marker: "integer",
+  },
+  {
+    name: "15 er 带连字符的实体",
+    code: "erDiagramORDER ||--|{ LINE-ITEM :containsORDER {int id PK}LINE-ITEM {string sku PK int qty}",
+    parts: ["ORDER ||--|{ LINE-ITEM :contains", "int id PK", "LINE-ITEM {", "string sku PK", "int qty"],
+    marker: "LINE-ITEM",
+  },
+  {
+    name: "16 er 标识关系",
+    code: "erDiagramPERSON ||..o{ PASSPORT :holdsPERSON {string id PK}PASSPORT {string no PK string personId FK}",
+    parts: ["PERSON ||..o{ PASSPORT :holds", "string id PK", "string no PK", "string personId FK"],
+    marker: "holds",
+  },
+  {
+    name: "17 pie 中文标题粘连",
+    code: 'pieshowDatatitle回答里的内容"文字" :70"流程图" :20"其他图" :10',
+    parts: ["pie showData", "title 回答里的内容", '"文字" :70', '"流程图" :20', '"其他图" :10'],
+    marker: "回答里的内容",
+  },
+  {
+    name: "18 pie 小数",
+    code: 'pieshowDatatitle营养成分"钙" :42.96"钾" :50.05"镁" :10.01"铁" :5',
+    parts: ["title 营养成分", '"钙" :42.96', '"钾" :50.05', '"镁" :10.01', '"铁" :5'],
+    marker: "42.96",
+  },
+  {
+    name: "19 pie 单引号",
+    code: "pietitle份额'甲' :60'乙' :40",
+    parts: ["pie", "title 份额", "'甲' :60", "'乙' :40"],
+    marker: "份额",
+  },
+  {
+    name: "20 pie 零值小数与标题词",
+    code: 'pieshowDatatitle分布"甲" :0"乙" :1"丙" :12.5"丁" :2.5"戊" :30"己" :8"title词" :4',
+    parts: ["title 分布", '"甲" :0', '"丙" :12.5', '"丁" :2.5', '"title词" :4'],
+    marker: "title词",
+  },
+];
+
+function assertInOrder(source, parts) {
+  let at = 0;
+  for (const part of parts) {
+    const found = source.indexOf(part, at);
+    assert.notEqual(found, -1, `missing ${JSON.stringify(part)} in\n${source}`);
+    at = found + part.length;
+  }
+}
 
 describe("mermaid-render", () => {
   it("formatMermaidCliError surfaces parse errors", () => {
@@ -131,6 +295,34 @@ describe("mermaid-render", () => {
     });
     assert.equal(again.cached, true);
     assert.equal(again.id, id);
+  });
+
+  it("normalizes twenty collapsed class, er, and pie diagrams", () => {
+    assert.equal(diagramCases.length, 20);
+    const failed = [];
+    for (const sample of diagramCases) {
+      try {
+        assertInOrder(normalizeMermaidSource(sample.code), sample.parts);
+      } catch (err) {
+        failed.push(`${sample.name}: ${err.message}`);
+      }
+    }
+    assert.equal(failed.length, 0, failed.join("\n\n"));
+  });
+
+  it("renders twenty collapsed class, er, and pie diagrams", { timeout: 180_000 }, async () => {
+    const results = await probeMermaidSources(diagramCases.map((sample) => sample.code));
+    const failed = [];
+    for (let i = 0; i < diagramCases.length; i += 1) {
+      const sample = diagramCases[i];
+      const result = results[i];
+      if (!result?.ok || !String(result.svg || "").includes(sample.marker)) {
+        failed.push(
+          `${sample.name}: ${result?.error || "rendered without marker"}\n${result?.source || ""}`,
+        );
+      }
+    }
+    assert.equal(failed.length, 0, failed.join("\n\n"));
   });
 
   it("rejects invalid diagram with a short message", async () => {

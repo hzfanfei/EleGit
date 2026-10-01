@@ -17,10 +17,57 @@ function mermaidAssetPaths() {
   };
 }
 
-const ER_TYPE_GLUE =
-  /\b(string|int|integer|float|double|bool|boolean|date|datetime|number|varchar|char)(?=\S)/gi;
-const ER_TYPE_WORD =
-  /(?:string|int|integer|float|double|bool|boolean|date|datetime|number|varchar|char)/i;
+const ER_TYPE_NAMES = [
+  "integer",
+  "int",
+  "datetime",
+  "date",
+  "boolean",
+  "bool",
+  "double",
+  "float",
+  "varchar",
+  "string",
+  "number",
+  "char",
+];
+const ER_TYPE_ALT = ER_TYPE_NAMES.join("|");
+
+function maskMatches(source, pattern) {
+  const kept = [];
+  const masked = source.replace(pattern, (match) => {
+    const token = `\uE000${kept.length}\uE001`;
+    kept.push(match);
+    return token;
+  });
+  return { masked, kept };
+}
+
+function unmask(source, kept) {
+  if (!kept.length) return source;
+  return source.replace(/\uE000(\d+)\uE001/g, (_, index) => kept[Number(index)]);
+}
+
+/** `integername` / `string文本` → separate the type. Leave `integer` itself intact. */
+function glueErTypes(source) {
+  const types = [...ER_TYPE_NAMES].sort((a, b) => b.length - a.length);
+  return source.replace(/[A-Za-z]+/g, (word, offset, whole) => {
+    const next = whole[offset + word.length] || "";
+    const lower = word.toLowerCase();
+    for (const type of types) {
+      if (lower === type) return next && !/\s/.test(next) ? `${word} ` : word;
+      if (!lower.startsWith(type)) continue;
+      const rest = word.slice(type.length);
+      if (/^[a-z]/.test(rest)) return `${word.slice(0, type.length)} ${rest}`;
+      return word;
+    }
+    return word;
+  });
+}
+
+function glueTypesInBlocks(source) {
+  return source.replace(/(?<![o|])\{([^{}]*)\}/g, (_full, inner) => `{${glueErTypes(inner)}}`);
+}
 
 /** Put class, ER, and pie statements back on their own lines. */
 export function normalizeMermaidSource(code) {
@@ -29,8 +76,10 @@ export function normalizeMermaidSource(code) {
   const flat = text.replace(/\s+/g, " ").trim();
   const lower = flat.toLowerCase();
   if (lower.startsWith("classdiagram")) {
-    const body = splitClassBody(flat.slice("classdiagram".length).trim());
-    return body ? `classDiagram\n${body}` : "classDiagram";
+    const v2 = lower.startsWith("classdiagram-v2");
+    const header = v2 ? "classDiagram-v2" : "classDiagram";
+    const body = splitClassBody(flat.slice(header.length).trim());
+    return body ? `${header}\n${body}` : header;
   }
   if (lower.startsWith("erdiagram")) {
     const body = splitErBody(flat.slice("erdiagram".length).trim());
@@ -62,7 +111,7 @@ function applyCuts(source, cuts) {
 
 function peelLabeledName(source, index, name, entityUpper) {
   const peeled = entityUpper
-    ? name.match(/^(.*[a-z])([A-Z][A-Z0-9_]*)$/)
+    ? name.match(/^(.*[a-z])([A-Z][A-Z0-9_-]*)$/)
     : name.match(/^(.*[a-z])([A-Z][A-Za-z0-9_]*)$/);
   if (!peeled || !/:\s*$/.test(source.slice(0, index))) return index;
   return index + peeled[1].length;
@@ -70,7 +119,7 @@ function peelLabeledName(source, index, name, entityUpper) {
 
 function classRelationCuts(source) {
   const re =
-    /([A-Za-z_][A-Za-z0-9_]*)\s*(?:<\|--|<\|\.\.|\*--|o--|-->|<--|==>|\.\.>|\.\.|--)/g;
+    /([A-Za-z_][A-Za-z0-9_]*)(?:\s*(?:"[^"]*"|'[^']*'|\d+|\*))?\s*(?:<\|--|<\|\.\.|\*--|o--|-->|<--|==>|\.\.>|\.\.|--)/g;
   const cuts = [];
   for (const match of source.matchAll(re)) {
     cuts.push(peelLabeledName(source, match.index, match[1], false));
@@ -79,7 +128,7 @@ function classRelationCuts(source) {
 }
 
 function erRelationCuts(source) {
-  const re = /([A-Za-z_][A-Za-z0-9_]*)\s*(?:\|\||\|o|\}o|\}\|)(?:--|\.\.)/g;
+  const re = /([A-Za-z_](?:[A-Za-z0-9_]|-(?=[A-Za-z0-9_]))*)\s*(?:\|\||\|o|\}o|\}\|)(?:--|\.\.)/g;
   const cuts = [];
   for (const match of source.matchAll(re)) {
     cuts.push(peelLabeledName(source, match.index, match[1], true));
@@ -93,11 +142,26 @@ function erBlockCuts(source) {
     let index = match.index - 1;
     while (index >= 0 && /\s/.test(source[index])) index -= 1;
     const end = index + 1;
-    while (index >= 0 && /[A-Za-z0-9_]/.test(source[index])) index -= 1;
+    while (index >= 0) {
+      const ch = source[index];
+      if (/[A-Za-z0-9_]/.test(ch)) {
+        index -= 1;
+        continue;
+      }
+      if (
+        ch === "-" &&
+        /[A-Za-z0-9_]/.test(source[index - 1] || "") &&
+        /[A-Za-z0-9_]/.test(source[index + 1] || "")
+      ) {
+        index -= 1;
+        continue;
+      }
+      break;
+    }
     const start = index + 1;
     if (start >= end) continue;
     const name = source.slice(start, end);
-    const peeled = name.match(/^(.*[a-z])([A-Z][A-Z0-9_]*)$/);
+    const peeled = name.match(/^(.*[a-z])([A-Z][A-Z0-9_-]*)$/);
     let cut = start;
     if (peeled && /:\s*$/.test(source.slice(0, start))) cut = start + peeled[1].length;
     cuts.push(cut);
@@ -109,35 +173,50 @@ function splitClassBody(body) {
   let s = String(body || "").trim();
   if (!s) return s;
   s = s.replace(/(?<=\})(?=[A-Za-z_][A-Za-z0-9_])/g, "\n");
-  s = s.replace(/\s+(?=class\b)/g, "\n");
+  s = s.replace(
+    /(?:\s+|(?<=\S))(?=(?:classDef|cssClass|namespace|direction)\b|note\s+(?:for\b|"))/g,
+    "\n",
+  );
+  s = s.replace(/\s+(?=class(?!Def\b|Diagram\b)\b)/g, "\n");
+  s = s.replace(/(?<=\S)(?=class(?!Def\b|Diagram\b)\b)/g, "\n");
+  s = s.replace(/\bclass(?!Def\b|Diagram\b)(?=\S)/g, "class ");
   s = s.replace(/\{(?!\n)/g, "{\n");
   s = s.replace(/\s*(?=})/g, "\n");
+  const generics = maskMatches(s, /~[^~\s{}]+~/g);
+  s = generics.masked;
   // A private member starts with "-", but the second dash of <|--, *--, o--
   // is not one: it is preceded by another relationship character.
-  s = s.replace(/(?:(?<=\S)\s*|\s+)(?=(?:[+\#~]|(?<![-|<*o.])-(?![->.])))/g, "\n");
+  // "#" after ":" is a color, not protected visibility.
+  s = s.replace(/(?:(?<=\S)\s*|\s+)(?=(?:[+~]|(?<!:)#|(?<![-|<*o.])-(?![->.])))/g, "\n");
   s = applyCuts(s, classRelationCuts(s));
+  s = unmask(s, generics.kept);
   return s.replace(/\n{2,}/g, "\n").trim();
 }
 
 function splitErBody(body) {
   let s = String(body || "").trim();
   if (!s) return s;
-  s = s.replace(ER_TYPE_GLUE, "$1 ");
+  const quoted = maskMatches(s, /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/g);
+  s = glueTypesInBlocks(quoted.masked);
   s = applyCuts(s, erRelationCuts(s));
   s = applyCuts(s, erBlockCuts(s));
   s = s.replace(/(?<![o|])\{(?!\n)/g, "{\n");
   s = s.replace(/\s*\}(?!\s*[|o])/g, "\n}");
   s = s.replace(/(?<=\})(?=[A-Za-z_][A-Za-z0-9_])/g, "\n");
-  s = s.replace(new RegExp(`\\s+(?=${ER_TYPE_WORD.source}\\b)`, "gi"), "\n");
+  s = s.replace(new RegExp(`\\s+(?=(?:${ER_TYPE_ALT})\\b)`, "gi"), "\n");
+  s = unmask(s, quoted.kept);
   return s.replace(/\n{2,}/g, "\n").trim();
 }
 
 function splitPieBody(body) {
   let s = String(body || "").trim();
   if (!s) return s;
+  s = s.replace(/(?:\s+|(?<=\S))(?=(?:"[^"\n]*"|'[^'\n]*')\s*:)/g, "\n");
+  const quoted = maskMatches(s, /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/g);
+  s = quoted.masked;
   s = s.replace(/\btitle(?=[^\s:])/gi, "title ");
   s = s.replace(/\s+(?=title\b)/gi, "\n");
-  s = s.replace(/(?:\s+|(?<=\S))(?="[^"]*"\s*:)/g, "\n");
+  s = unmask(s, quoted.kept);
   return s.replace(/\n{2,}/g, "\n").trim();
 }
 
@@ -507,6 +586,63 @@ async function renderWithPuppeteer(code, paint, assets) {
       throw err;
     }
     return { svg, png };
+  } finally {
+    await browser.close();
+  }
+}
+
+/** Parse many diagrams in one browser. A syntax error is a failed probe. */
+export async function probeMermaidSources(codes) {
+  const list = Array.isArray(codes) ? codes : [];
+  const assets = mermaidAssetPaths();
+  if (!mermaidCliInstalledSync() || !existsSync(assets.html) || !existsSync(assets.js)) {
+    const err = new Error("Mermaid CLI 未安装，请在 server 目录执行 npm install");
+    err.code = "mermaid_cli_missing";
+    throw err;
+  }
+  const browser = await puppeteer.launch({
+    headless: "shell",
+    args: ["--no-sandbox", "--disable-dev-shm-usage", "--font-render-hinting=none"],
+  });
+  try {
+    const page = await browser.newPage();
+    page.setDefaultTimeout(RENDER_TIMEOUT_MS);
+    await page.goto(pathToFileURL(assets.html).href);
+    await page.addScriptTag({ path: assets.js });
+    await page.evaluate(() => {
+      globalThis.mermaid.initialize({
+        startOnLoad: false,
+        suppressErrorRendering: true,
+        htmlLabels: false,
+        fontFamily: '"Microsoft YaHei", "Segoe UI", sans-serif',
+      });
+    });
+    const results = [];
+    for (let i = 0; i < list.length; i += 1) {
+      const source = normalizeMermaidSource(list[i]);
+      const outcome = await page.evaluate(async (definition, elementId) => {
+        const host = document.querySelector("#container");
+        if (host) host.innerHTML = "";
+        document.getElementById(elementId)?.remove();
+        try {
+          const rendered = await globalThis.mermaid.render(elementId, definition, host);
+          const svg = String(rendered?.svg || "");
+          document.getElementById(elementId)?.remove();
+          return { ok: true, svg };
+        } catch (err) {
+          document.getElementById(elementId)?.remove();
+          return { ok: false, error: String(err?.message || err).slice(0, 700) };
+        }
+      }, source, `probe${i}`);
+      const errorSvg = outcome.ok && isMermaidErrorSvg(outcome.svg);
+      results.push({
+        source,
+        ok: Boolean(outcome.ok) && !errorSvg,
+        error: errorSvg ? "Mermaid 语法错误" : String(outcome.error || ""),
+        svg: outcome.ok ? outcome.svg : "",
+      });
+    }
+    return results;
   } finally {
     await browser.close();
   }
