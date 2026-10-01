@@ -244,6 +244,67 @@ String _splitDiagramStatements(String type, String body) {
   return body.trim();
 }
 
+String _applyCuts(String source, List<int> cuts) {
+  final unique = cuts.where((cut) => cut > 0 && cut < source.length && source[cut - 1] != '\n').toSet().toList()
+    ..sort((a, b) => b.compareTo(a));
+  var out = source;
+  for (final cut in unique) {
+    final left = out.substring(0, cut).replaceAll(RegExp(r'[ \t]+$'), '');
+    out = '$left\n${out.substring(cut)}';
+  }
+  return out;
+}
+
+int _peelLabeledName(String source, int index, String name, {required bool entityUpper}) {
+  final peeled = entityUpper
+      ? RegExp(r'^(.*[a-z])([A-Z][A-Z0-9_]*)$').firstMatch(name)
+      : RegExp(r'^(.*[a-z])([A-Z][A-Za-z0-9_]*)$').firstMatch(name);
+  if (peeled == null || !RegExp(r':\s*$').hasMatch(source.substring(0, index))) return index;
+  return index + peeled.group(1)!.length;
+}
+
+List<int> _classRelationCuts(String source) {
+  final re = RegExp(
+    r'([A-Za-z_][A-Za-z0-9_]*)\s*(?:<\|--|<\|\.\.|\*--|o--|-->|<--|==>|\.\.>|\.\.|--)',
+  );
+  return [
+    for (final match in re.allMatches(source))
+      _peelLabeledName(source, match.start, match.group(1)!, entityUpper: false),
+  ];
+}
+
+List<int> _erRelationCuts(String source) {
+  final re = RegExp(r'([A-Za-z_][A-Za-z0-9_]*)\s*(?:\|\||\|o|\}o|\}\|)(?:--|\.\.)');
+  return [
+    for (final match in re.allMatches(source))
+      _peelLabeledName(source, match.start, match.group(1)!, entityUpper: true),
+  ];
+}
+
+List<int> _erBlockCuts(String source) {
+  final cuts = <int>[];
+  for (final match in RegExp(r'(?<![o|])\{').allMatches(source)) {
+    var index = match.start - 1;
+    while (index >= 0 && RegExp(r'\s').hasMatch(source[index])) {
+      index -= 1;
+    }
+    final end = index + 1;
+    while (index >= 0 && RegExp(r'[A-Za-z0-9_]').hasMatch(source[index])) {
+      index -= 1;
+    }
+    final start = index + 1;
+    if (start >= end) continue;
+    final name = source.substring(start, end);
+    final peeled = RegExp(r'^(.*[a-z])([A-Z][A-Z0-9_]*)$').firstMatch(name);
+    var cut = start;
+    if (peeled != null && RegExp(r':\s*$').hasMatch(source.substring(0, start))) {
+      cut = start + peeled.group(1)!.length;
+    }
+    cuts.add(cut);
+  }
+  return cuts;
+}
+
 String _splitClassStatements(String body) {
   var s = body.trim();
   if (s.isEmpty) return s;
@@ -251,11 +312,11 @@ String _splitClassStatements(String body) {
   s = s.replaceAllMapped(RegExp(r'\s+(?=class\b)'), (_) => '\n');
   s = s.replaceAllMapped(RegExp(r'\{(?!\n)'), (_) => '{\n');
   s = s.replaceAllMapped(RegExp(r'\s*(?=})'), (_) => '\n');
-  s = s.replaceAllMapped(RegExp(r'(?:(?<=\S)\s*|\s+)(?=(?:[+\#~]|-(?![->.])))'), (_) => '\n');
   s = s.replaceAllMapped(
-    RegExp(r'(?:\s+|(?<=\}))(?=[A-Za-z_][\w]*\s*(?:<\|--|<\|\.\.|\*--|o--|-->|<--|==>|\.\.>|\.\.|--))'),
+    RegExp(r'(?:(?<=\S)\s*|\s+)(?=(?:[+\#~]|(?<![-|<*o.])-(?![->.])))'),
     (_) => '\n',
   );
+  s = _applyCuts(s, _classRelationCuts(s));
   return s.replaceAll(RegExp(r'\n{2,}'), '\n').trim();
 }
 
@@ -269,10 +330,8 @@ String _splitErStatements(String body) {
     ),
     (m) => '${m[1]} ',
   );
-  s = s.replaceAllMapped(
-    RegExp(r'(?<![-|A-Za-z0-9_])(?:\s+|(?<=\S))(?=[A-Za-z_][\w]*\s*\{)'),
-    (_) => '\n',
-  );
+  s = _applyCuts(s, _erRelationCuts(s));
+  s = _applyCuts(s, _erBlockCuts(s));
   s = s.replaceAllMapped(RegExp(r'(?<![o|])\{(?!\n)'), (_) => '{\n');
   s = s.replaceAllMapped(RegExp(r'\s*\}(?!\s*[|o])'), (_) => '\n}');
   s = s.replaceAllMapped(RegExp(r'(?<=\})(?=[A-Za-z_][A-Za-z0-9_])'), (_) => '\n');

@@ -62,7 +62,7 @@ void main() {
     expect(pie, contains('\n"流程图" : 20'));
     expect(pie, contains('\n"其他图" : 10'));
 
-    const glued = splitMarkdownByMermaidFences(
+    final glued = splitMarkdownByMermaidFences(
       '```mermaidpie showData title回答里的内容 "文字" :70 "流程图" :20 "其他图" :10```',
     ).single.mermaidCode!;
     expect(glued, startsWith('pie showData\n'));
@@ -95,6 +95,24 @@ void main() {
     expect(pieTight, contains('\ntitle 回答里的内容'));
     expect(pieTight, contains('\n"文字" :70'));
     expect(pieTight, contains('\n"流程图" :20'));
+
+    final inherited = splitMarkdownByMermaidFences(
+      '```mermaidclassDiagramclass Animal {+int age+name}class Dog {+bark()}Animal <|-- Dog```',
+    ).single.mermaidCode!;
+    expect(inherited, contains('Animal <|-- Dog'));
+    expect(inherited, contains('}\nAnimal <|-- Dog'));
+
+    final twoRel = splitMarkdownByMermaidFences(
+      '```mermaidclassDiagramclass A {+x}class B {+y}class C {+z}A --> B:包含B --> C:调用```',
+    ).single.mermaidCode!;
+    expect(twoRel, contains('A --> B:包含\nB --> C:调用'));
+
+    final erEnglish = splitMarkdownByMermaidFences(
+      '```mermaiderDiagramCUSTOMER ||--o{ ORDER :placesCUSTOMER {string name string email PK}ORDER {int total float tax}```',
+    ).single.mermaidCode!;
+    expect(erEnglish, contains('ORDER :places\nCUSTOMER {'));
+    expect(erEnglish, contains('string email PK'));
+    expect(erEnglish, contains('}\nORDER {\nint total\nfloat tax'));
   });
 
   test('already multiline mermaid fence is left unchanged', () {

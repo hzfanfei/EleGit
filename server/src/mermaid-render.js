@@ -49,6 +49,62 @@ export function normalizeMermaidSource(code) {
   return text;
 }
 
+function applyCuts(source, cuts) {
+  const unique = [...new Set(cuts.filter((cut) => cut > 0 && cut < source.length && source[cut - 1] !== "\n"))];
+  unique.sort((a, b) => b - a);
+  let out = source;
+  for (const cut of unique) {
+    const left = out.slice(0, cut).replace(/[ \t]+$/g, "");
+    out = `${left}\n${out.slice(cut)}`;
+  }
+  return out;
+}
+
+function peelLabeledName(source, index, name, entityUpper) {
+  const peeled = entityUpper
+    ? name.match(/^(.*[a-z])([A-Z][A-Z0-9_]*)$/)
+    : name.match(/^(.*[a-z])([A-Z][A-Za-z0-9_]*)$/);
+  if (!peeled || !/:\s*$/.test(source.slice(0, index))) return index;
+  return index + peeled[1].length;
+}
+
+function classRelationCuts(source) {
+  const re =
+    /([A-Za-z_][A-Za-z0-9_]*)\s*(?:<\|--|<\|\.\.|\*--|o--|-->|<--|==>|\.\.>|\.\.|--)/g;
+  const cuts = [];
+  for (const match of source.matchAll(re)) {
+    cuts.push(peelLabeledName(source, match.index, match[1], false));
+  }
+  return cuts;
+}
+
+function erRelationCuts(source) {
+  const re = /([A-Za-z_][A-Za-z0-9_]*)\s*(?:\|\||\|o|\}o|\}\|)(?:--|\.\.)/g;
+  const cuts = [];
+  for (const match of source.matchAll(re)) {
+    cuts.push(peelLabeledName(source, match.index, match[1], true));
+  }
+  return cuts;
+}
+
+function erBlockCuts(source) {
+  const cuts = [];
+  for (const match of source.matchAll(/(?<![o|])\{/g)) {
+    let index = match.index - 1;
+    while (index >= 0 && /\s/.test(source[index])) index -= 1;
+    const end = index + 1;
+    while (index >= 0 && /[A-Za-z0-9_]/.test(source[index])) index -= 1;
+    const start = index + 1;
+    if (start >= end) continue;
+    const name = source.slice(start, end);
+    const peeled = name.match(/^(.*[a-z])([A-Z][A-Z0-9_]*)$/);
+    let cut = start;
+    if (peeled && /:\s*$/.test(source.slice(0, start))) cut = start + peeled[1].length;
+    cuts.push(cut);
+  }
+  return cuts;
+}
+
 function splitClassBody(body) {
   let s = String(body || "").trim();
   if (!s) return s;
@@ -56,11 +112,10 @@ function splitClassBody(body) {
   s = s.replace(/\s+(?=class\b)/g, "\n");
   s = s.replace(/\{(?!\n)/g, "{\n");
   s = s.replace(/\s*(?=})/g, "\n");
-  s = s.replace(/(?:(?<=\S)\s*|\s+)(?=(?:[+\#~]|-(?![->.])))/g, "\n");
-  s = s.replace(
-    /(?:\s+|(?<=\}))(?=[A-Za-z_][\w]*\s*(?:<\|--|<\|\.\.|\*--|o--|-->|<--|==>|\.\.>|\.\.|--))/g,
-    "\n",
-  );
+  // A private member starts with "-", but the second dash of <|--, *--, o--
+  // is not one: it is preceded by another relationship character.
+  s = s.replace(/(?:(?<=\S)\s*|\s+)(?=(?:[+\#~]|(?<![-|<*o.])-(?![->.])))/g, "\n");
+  s = applyCuts(s, classRelationCuts(s));
   return s.replace(/\n{2,}/g, "\n").trim();
 }
 
@@ -68,9 +123,8 @@ function splitErBody(body) {
   let s = String(body || "").trim();
   if (!s) return s;
   s = s.replace(ER_TYPE_GLUE, "$1 ");
-  // Break only at the start of an entity name. A shorter prefix of that name
-  // also reaches `{`, so the match has to be outside the identifier.
-  s = s.replace(/(?<![-|A-Za-z0-9_])(?:\s+|(?<=\S))(?=[A-Za-z_][\w]*\s*\{)/g, "\n");
+  s = applyCuts(s, erRelationCuts(s));
+  s = applyCuts(s, erBlockCuts(s));
   s = s.replace(/(?<![o|])\{(?!\n)/g, "{\n");
   s = s.replace(/\s*\}(?!\s*[|o])/g, "\n}");
   s = s.replace(/(?<=\})(?=[A-Za-z_][A-Za-z0-9_])/g, "\n");

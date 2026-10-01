@@ -67,6 +67,35 @@ describe("mermaid-render", () => {
       'pieshowDatatitle回答里的内容"文字" :70"流程图" :20"其他图" :10',
     );
     assert.match(pieGlued, /^pie showData\ntitle 回答里的内容\n"文字" :70\n"流程图" :20/);
+
+    const inherited = normalizeMermaidSource(
+      "classDiagramclass Animal {+int age+name}class Dog {+bark()}Animal <|-- Dog",
+    );
+    assert.match(inherited, /Animal <\|-- Dog/);
+    assert.match(inherited, /\}\nAnimal <\|-- Dog/);
+
+    const composed = normalizeMermaidSource(
+      "classDiagramclass Car {+start()}class Engine {+power}Car *-- Engine Car o-- Wheel class Wheel {+size}",
+    );
+    assert.match(composed, /Car \*-- Engine\nCar o-- Wheel/);
+
+    const twoRel = normalizeMermaidSource(
+      "classDiagramclass A {+x}class B {+y}class C {+z}A --> B:包含B --> C:调用",
+    );
+    assert.match(twoRel, /A --> B:包含\nB --> C:调用/);
+
+    const erEnglish = normalizeMermaidSource(
+      "erDiagramCUSTOMER ||--o{ ORDER :placesCUSTOMER {string name string email PK}ORDER {int total float tax}",
+    );
+    assert.match(erEnglish, /ORDER :places\nCUSTOMER \{/);
+    assert.match(erEnglish, /string email PK/);
+    assert.match(erEnglish, /\}\nORDER \{\nint total\nfloat tax/);
+
+    const erMany = normalizeMermaidSource(
+      "erDiagramPARENT ||--|| CHILD :has TEACHER |o--o{ COURSE :teaches PARENT {string id}CHILD {string id}",
+    );
+    assert.match(erMany, /PARENT \|\|--\|\| CHILD :has\nTEACHER \|o--o\{ COURSE :teaches/);
+    assert.match(erMany, /teaches\nPARENT \{/);
   });
 
   it("mermaidCacheId is stable", () => {
