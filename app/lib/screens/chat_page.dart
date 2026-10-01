@@ -1385,6 +1385,7 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   void dispose() {
+    _stop();
     widget.api.linkEpoch.removeListener(_onLinkChanged);
     chatBackfillTick.removeListener(_onChatBackfill);
     inboxProgressHint.removeListener(_onInboxProgressHint);
