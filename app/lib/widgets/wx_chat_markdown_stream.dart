@@ -253,10 +253,8 @@ class _WxChatMarkdownStreamState extends State<WxChatMarkdownStream> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
-        // Blank lines are the block boundary, so the markdown paragraph gap
-        // never reaches the screen. One extra line (16px body) still looked
-        // like a single block; keep a clear band between paragraphs.
-        spacing: 28,
+        // Blank lines only split blocks. Paragraphs stay on the next line;
+        // the two-character indent marks the break, without an extra blank line.
         children: [
           for (var i = 0; i < _parser.completed.length; i++)
             _BlockView(
