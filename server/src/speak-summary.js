@@ -1,6 +1,6 @@
 import { mkdirSync } from "node:fs";
 
-import { AcpChannel, detectCursorEngine } from "./acp.js";
+import { AcpChannel, claudeCodeCurrentModel, resolveClaudeAgentCommand } from "./acp.js";
 import { isCancelled, requestSignal } from "./http-signal.js";
 import { noteServerLog } from "./server-logs.js";
 import { openSse, writeSse } from "./sse.js";
@@ -81,6 +81,13 @@ function defaultCreateChannel({ command, cwd }) {
   return new AcpChannel({ command, cwd, idleMs: 2 * 60 * 1000 });
 }
 
+/** Spoken summary always uses Claude Code's own model, not the repo chat engine. */
+export function speakSummaryCommand() {
+  const command = resolveClaudeAgentCommand("claude");
+  if (!command) return null;
+  return { ...command, model: claudeCodeCurrentModel() };
+}
+
 export async function handleSpeakSummary(
   req,
   res,
@@ -88,7 +95,7 @@ export async function handleSpeakSummary(
     store,
     resolveConfig = resolveVoiceConfig,
     createProviders = createVoiceProviders,
-    detectEngine = () => detectCursorEngine("repo"),
+    detectEngine = speakSummaryCommand,
     createChannel = defaultCreateChannel,
     signalOf = requestSignal,
   } = {},
@@ -118,7 +125,7 @@ export async function handleSpeakSummary(
   const command = source ? detectEngine() : null;
   if (source && !command) {
     res.status(503).json({
-      error: "口语总结需要本机 Claude Code 或 Cursor Agent（ACP）。请安装并登录所选助手。",
+      error: "口语总结使用本机 Claude Code 当前的模型。请安装并登录 Claude Code。",
       code: "acp_unconfigured",
     });
     return;

@@ -12,6 +12,7 @@ import {
   setCursorModelPreference,
   acpPromptTimeoutMs,
   claudeConfiguredModel,
+  claudeCodeCurrentModel,
   acpActivityLabelFromFsRead,
   acpActivityLabelFromUpdate,
   pushAcpToolActivity,
@@ -94,7 +95,17 @@ describe("acpModelId", () => {
     const settings = { env: { ANTHROPIC_MODEL: "mimo-v2.6-flash", ANTHROPIC_AUTH_TOKEN: "secret" } };
     try {
       assert.equal(claudeConfiguredModel(settings), "mimo-v2.6-flash");
-      assert.equal(acpModelId(process.env, settings), "mimo-v2.6-flash");
+      assert.equal(claudeCodeCurrentModel(settings), "mimo-v2.6-flash");
+      assert.equal(
+        claudeCodeCurrentModel({ model: "claude-sonnet-4-6", env: { ANTHROPIC_MODEL: "MiniMax-M3" } }),
+        "MiniMax-M3",
+      );
+      assert.equal(claudeCodeCurrentModel({ model: "claude-sonnet-4-6" }), "claude-sonnet-4-6");
+      assert.equal(claudeCodeCurrentModel({}), "MiniMax-M3");
+      process.env.WENXIANG_ACP_MODEL = "grok-4.7-high-fast";
+      assert.equal(claudeCodeCurrentModel(settings), "mimo-v2.6-flash");
+      assert.equal(acpModelId(process.env, settings), "grok-4.7-high-fast");
+      delete process.env.WENXIANG_ACP_MODEL;
       process.env.WENXIANG_CLAUDE_MODEL = "MiniMax-M3";
       assert.equal(acpModelId(process.env, settings), "MiniMax-M3");
     } finally {

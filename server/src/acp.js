@@ -101,6 +101,17 @@ export function claudeConfiguredModel(settings) {
   return String(settings?.env?.ANTHROPIC_MODEL || "").trim();
 }
 
+/** Model a new Claude Code session starts on. Same order as the CLI:
+ * settings env `ANTHROPIC_MODEL`, then `settings.model`, then the fallback.
+ * 问象 pins (`WENXIANG_ACP_MODEL`) are ignored. */
+export function claudeCodeCurrentModel(settings) {
+  const file = settings === undefined ? readClaudeUserSettings() : settings;
+  const fromEnv = claudeConfiguredModel(file);
+  if (fromEnv) return fromEnv;
+  const picked = String(file?.model || "").trim();
+  return picked || CLAUDE_DEFAULT_MODEL;
+}
+
 export function readClaudeUserSettings(filePath = path.join(os.homedir(), ".claude", "settings.json")) {
   try {
     return JSON.parse(readFileSync(filePath, "utf8"));
