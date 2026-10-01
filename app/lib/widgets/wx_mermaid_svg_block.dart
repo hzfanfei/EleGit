@@ -315,7 +315,7 @@ class _WxMermaidSvgBlockState extends State<WxMermaidSvgBlock> {
   }
 }
 
-/// Full-screen diagram. Scale 1 fits the screen; pinch or the buttons zoom,
+/// Full-screen diagram. A tap closes it. Pinch or the buttons zoom,
 /// and a drag moves the picture.
 class _DiagramStage extends StatefulWidget {
   const _DiagramStage({this.png, this.svg});
@@ -330,13 +330,54 @@ class _DiagramStage extends StatefulWidget {
 class _DiagramStageState extends State<_DiagramStage> {
   static const _minScale = 0.35;
   static const _maxScale = 6.0;
+  static const _tapSlop = 18.0;
 
   final _transform = TransformationController();
+  int _pointers = 0;
+  Offset? _down;
+  var _dragged = false;
+  var _closing = false;
 
   @override
   void dispose() {
     _transform.dispose();
     super.dispose();
+  }
+
+  void _close() {
+    if (_closing || !mounted) return;
+    _closing = true;
+    Navigator.of(context).pop();
+  }
+
+  void _onPointerDown(PointerDownEvent event) {
+    _pointers++;
+    if (_pointers == 1) {
+      _down = event.position;
+      _dragged = false;
+    } else {
+      _dragged = true;
+    }
+  }
+
+  void _onPointerMove(PointerMoveEvent event) {
+    final origin = _down;
+    if (origin != null && (event.position - origin).distance > _tapSlop) {
+      _dragged = true;
+    }
+  }
+
+  void _onPointerUp(PointerUpEvent _) {
+    final wasTap = _pointers == 1 && !_dragged && _down != null;
+    _pointers = (_pointers - 1).clamp(0, 16);
+    if (_pointers == 0) _down = null;
+    if (wasTap) _close();
+  }
+
+  void _onPointerCancel(PointerCancelEvent _) {
+    _pointers = (_pointers - 1).clamp(0, 16);
+    _dragged = true;
+    if (_pointers == 0) _down = null;
   }
 
   void _zoomBy(double factor) {
@@ -359,24 +400,32 @@ class _DiagramStageState extends State<_DiagramStage> {
     final png = widget.png;
     final svg = widget.svg;
     return Scaffold(
+      key: const Key('wx-diagram-stage'),
       backgroundColor: Wx.bg,
       body: Stack(
         children: [
           Positioned.fill(
-            child: InteractiveViewer(
-              transformationController: _transform,
-              minScale: _minScale,
-              maxScale: _maxScale,
-              panEnabled: true,
-              scaleEnabled: true,
-              boundaryMargin: const EdgeInsets.all(160),
-              child: png != null
-                  ? Image.memory(png, fit: BoxFit.contain, filterQuality: FilterQuality.high)
-                  : SvgPicture.string(
-                      svg ?? '',
-                      fit: BoxFit.contain,
-                      theme: const SvgTheme(currentColor: Wx.text),
-                    ),
+            child: Listener(
+              behavior: HitTestBehavior.opaque,
+              onPointerDown: _onPointerDown,
+              onPointerMove: _onPointerMove,
+              onPointerUp: _onPointerUp,
+              onPointerCancel: _onPointerCancel,
+              child: InteractiveViewer(
+                transformationController: _transform,
+                minScale: _minScale,
+                maxScale: _maxScale,
+                panEnabled: true,
+                scaleEnabled: true,
+                boundaryMargin: const EdgeInsets.all(160),
+                child: png != null
+                    ? Image.memory(png, fit: BoxFit.contain, filterQuality: FilterQuality.high)
+                    : SvgPicture.string(
+                        svg ?? '',
+                        fit: BoxFit.contain,
+                        theme: const SvgTheme(currentColor: Wx.text),
+                      ),
+              ),
             ),
           ),
           SafeArea(
@@ -387,7 +436,7 @@ class _DiagramStageState extends State<_DiagramStage> {
                 child: _StageButton(
                   tooltip: '关闭',
                   icon: Icons.close,
-                  onPressed: () => Navigator.of(context).pop(),
+                  onPressed: _close,
                 ),
               ),
             ),
@@ -427,6 +476,9 @@ class _DiagramStageState extends State<_DiagramStage> {
     );
   }
 }
+
+@visibleForTesting
+Widget wxDiagramStageForTest({Uint8List? png, String? svg}) => _DiagramStage(png: png, svg: svg);
 
 class _StageButton extends StatelessWidget {
   const _StageButton({required this.tooltip, required this.icon, required this.onPressed});
