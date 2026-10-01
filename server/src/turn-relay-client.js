@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import net from "node:net";
 import readline from "node:readline";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
@@ -54,11 +54,29 @@ export function relaySourceStamp() {
   }
 }
 
-/** Idle relay running old code should be replaced. Never replace one that still owns an agent. */
-export function relayNeedsRecycle({ alive, runningStamp, sourceStamp, busy }) {
+/**
+ * Replace a relay whose code stamp does not match, even if agents are still
+ * attached. Leftover children used to keep a stale relay forever, so script
+ * progress never picked up the publisher that survives a companion restart.
+ * A matching stamp stays up, busy or not.
+ */
+export function relayNeedsRecycle({ alive, runningStamp, sourceStamp }) {
   if (!alive) return false;
   if (runningStamp && runningStamp === sourceStamp) return false;
-  return !busy;
+  return true;
+}
+
+function stopProcess(pid) {
+  if (!pid) return;
+  if (process.platform === "win32") {
+    spawnSync("taskkill", ["/PID", String(pid), "/F"], { windowsHide: true });
+    return;
+  }
+  try {
+    process.kill(pid, "SIGTERM");
+  } catch {
+    // Already gone.
+  }
 }
 
 function relayProcessBusy(pid) {
@@ -102,23 +120,21 @@ export async function ensureTurnRelay() {
       try {
         const info = JSON.parse(readFileSync(file, "utf8"));
         if (pidAlive(info.pid) && info.port) {
-          const stampStale = String(info.sourceStamp || "") !== sourceStamp;
+          const runningStamp = String(info.sourceStamp || "");
+          const stampStale = runningStamp !== sourceStamp;
           if (!stampStale && Date.now() < busyRelayUntil) return info.port;
-          const busy = relayProcessBusy(info.pid);
-          if (busy) busyRelayUntil = Date.now() + (stampStale ? 2_000 : 60_000);
+          if (!stampStale) {
+            const busy = relayProcessBusy(info.pid);
+            if (busy) busyRelayUntil = Date.now() + 60_000;
+          }
           const recycle = relayNeedsRecycle({
             alive: true,
-            runningStamp: String(info.sourceStamp || ""),
+            runningStamp,
             sourceStamp,
-            busy,
           });
           if (!recycle) return info.port;
           replacedPid = info.pid;
-          try {
-            process.kill(info.pid);
-          } catch {
-            // Already gone.
-          }
+          stopProcess(info.pid);
           const deadline = Date.now() + 3000;
           while (pidAlive(info.pid) && Date.now() < deadline) await sleep(50);
           if (pidAlive(info.pid)) return info.port;

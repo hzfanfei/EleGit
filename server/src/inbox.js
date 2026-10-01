@@ -90,6 +90,26 @@ export async function appendInboxItem(workspaceRoot, item) {
   return stamped;
 }
 
+/** Replace one partial row's activity only when it still matches. */
+export async function patchInboxActivity(workspaceRoot, id, expectedActivity, activity) {
+  const items = await readInbox(workspaceRoot);
+  const index = items.findIndex((it) => it.id === id);
+  if (index < 0) return null;
+  const prev = items[index];
+  if (prev.partial !== true || prev.activity !== expectedActivity) return null;
+  const next = {
+    ...prev,
+    activity,
+    createdAt: new Date().toISOString(),
+    read: false,
+  };
+  items.splice(index, 1);
+  items.unshift(next);
+  if (items.length > INBOX_CAP) items.length = INBOX_CAP;
+  await writeInbox(workspaceRoot, items);
+  return next;
+}
+
 export async function markInboxRead(workspaceRoot, id) {
   const items = await readInbox(workspaceRoot);
   let changed = false;

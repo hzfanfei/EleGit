@@ -112,6 +112,7 @@ import { downloadBookFromUrl, importEpubBuffer, searchBooks } from "./books-sear
 import { getBookDownloadJob, startBookDownloadJob } from "./book-download-jobs.js";
 import { beginHandoff, handoffActive, publishLiveTurnSnapshots } from "./live-turns.js";
 import { attachNotifications, publishInboxNotice } from "./notifications.js";
+import { startScriptActivityTicker } from "./script-activity-ticker.js";
 import { stat } from "node:fs/promises";
 
 loadLocalEnv();
@@ -1742,6 +1743,7 @@ async function startCompanion() {
     }, 15_000);
     relayRefresh.unref?.();
   }
+  startScriptActivityTicker({ workspaceRoot: store.config.workspaceRoot });
   await ensureStaticDir(store.config.workspaceRoot);
   const bound = await bindCompanion(httpServer, PORT, BIND);
   if (bound === "busy") {

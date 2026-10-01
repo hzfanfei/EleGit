@@ -81,24 +81,26 @@ describe("unwatched inbox mirror", () => {
 });
 
 describe("relay recycle", () => {
-  it("replaces an idle relay running older code and keeps a busy one", () => {
+  it("replaces a stale relay even when agents are still attached", () => {
     assert.equal(relayNeedsRecycle({
       alive: true,
       runningStamp: "",
       sourceStamp: "2",
-      busy: false,
     }), true);
     assert.equal(relayNeedsRecycle({
       alive: true,
-      runningStamp: "",
+      runningStamp: "1",
       sourceStamp: "2",
-      busy: true,
+    }), true);
+    assert.equal(relayNeedsRecycle({
+      alive: false,
+      runningStamp: "1",
+      sourceStamp: "2",
     }), false);
     assert.equal(relayNeedsRecycle({
       alive: true,
       runningStamp: "2",
       sourceStamp: "2",
-      busy: false,
     }), false);
   });
 });
