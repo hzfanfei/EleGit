@@ -27,6 +27,7 @@ import '../widgets/wx_motion.dart';
 import '../widgets/wx_link_route.dart';
 import '../widgets/wx_hold_to_speak.dart';
 import '../widgets/wx_rich_text.dart';
+import '../widgets/wx_speak_answer.dart';
 import '../widgets/wx_typewriter_stream.dart';
 import 'call_page.dart';
 
@@ -1499,6 +1500,7 @@ class _ChatPageState extends State<ChatPage> {
                         return _FinishedTurn(
                           key: ValueKey('m-$chronological-${message.role}'),
                           api: widget.api,
+                          ttsVoice: widget.memory?.ttsVoice(),
                           appear: message.role == 'user' &&
                               _appearUserKey == '${_sessionId ?? ''}:$chronological',
                           message: message,
@@ -1844,6 +1846,7 @@ class _FinishedTurn extends StatelessWidget {
     super.key,
     required this.api,
     required this.message,
+    this.ttsVoice,
     this.appear = false,
     this.queued = false,
     this.editing = false,
@@ -1855,6 +1858,7 @@ class _FinishedTurn extends StatelessWidget {
   });
   final WenxiangApi api;
   final ChatMessage message;
+  final String? ttsVoice;
   final bool appear;
   final bool queued;
   final bool editing;
@@ -1904,7 +1908,11 @@ class _FinishedTurn extends StatelessWidget {
               note,
               style: Theme.of(context).textTheme.labelSmall,
             ),
-          WxCopyAnswerButton(text: message.content),
+          WxAnswerActions(
+            text: message.content,
+            api: api,
+            ttsVoice: ttsVoice,
+          ),
         ],
       ),
       child: GestureDetector(

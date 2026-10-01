@@ -303,10 +303,12 @@ class WenxiangApi {
   http.Client? _chatClient;
   http.Client? _bookVoiceClient;
   http.Client? _repoVoiceClient;
+  http.Client? _speakClient;
   bool _checkoutCancelled = false;
   bool _chatCancelled = false;
   bool _bookVoiceCancelled = false;
   bool _repoVoiceCancelled = false;
+  bool _speakCancelled = false;
 
   void cancelCheckout() {
     _checkoutCancelled = true;
@@ -370,6 +372,67 @@ class WenxiangApi {
     _repoVoiceCancelled = true;
     _repoVoiceClient?.close();
     _repoVoiceClient = null;
+  }
+
+  void cancelSpeakSummary() {
+    _speakCancelled = true;
+    _speakClient?.close();
+    _speakClient = null;
+  }
+
+  Stream<ChatStreamEvent> speakSummaryStream({
+    required String text,
+    String? ttsVoice,
+  }) {
+    _speakCancelled = false;
+    return _speakSummaryOnce(text: text, ttsVoice: ttsVoice);
+  }
+
+  Stream<ChatStreamEvent> _speakSummaryOnce({
+    required String text,
+    String? ttsVoice,
+  }) async* {
+    final client = http.Client();
+    _speakClient = client;
+    try {
+      final request = http.Request('POST', _uri('/v1/voice/speak-summary'))
+        ..headers.addAll({
+          ..._headers,
+          'Accept': 'text/event-stream',
+        })
+        ..body = jsonEncode({
+          'text': text,
+          if (ttsVoice != null && ttsVoice.isNotEmpty) 'ttsVoice': ttsVoice,
+        });
+      final res = await client.send(request).timeout(const Duration(seconds: 25));
+      if (res.statusCode >= 400) {
+        final raw = await res.stream.bytesToString();
+        String error = '没能朗读这段回答';
+        try {
+          final decoded = jsonDecode(raw);
+          error = (decoded['hint'] ?? decoded['error'] ?? error).toString();
+        } catch (_) {}
+        throw ApiException(error);
+      }
+      yield* streamWenxiangSseEvents(
+        byteStream: res.stream,
+        client: client,
+        throwIfCancelled: () {
+          if (_speakCancelled) throw const OperationCancelled();
+        },
+      );
+    } catch (err) {
+      if (_speakCancelled || err is OperationCancelled) {
+        throw const OperationCancelled();
+      }
+      if (err is SseHeartbeatStale) {
+        throw ApiException('朗读中断了，请再试一次。');
+      }
+      rethrow;
+    } finally {
+      if (identical(_speakClient, client)) _speakClient = null;
+      client.close();
+    }
   }
 
   Future<Map<String, dynamic>> _json(

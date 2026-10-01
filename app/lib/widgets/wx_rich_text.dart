@@ -660,9 +660,12 @@ class _CodeBlock extends StatelessWidget {
 
 /// Sits at the end of a finished answer so the whole reply can be copied.
 class WxCopyAnswerButton extends StatelessWidget {
-  const WxCopyAnswerButton({super.key, required this.text});
+  const WxCopyAnswerButton({super.key, required this.text, this.bare = false});
 
   final String text;
+
+  /// Icon only, so a parent row can place a speaker button beside it.
+  final bool bare;
 
   Future<void> _copy(BuildContext context) async {
     final value = text.trim();
@@ -677,16 +680,18 @@ class WxCopyAnswerButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (text.trim().isEmpty) return const SizedBox.shrink();
+    final button = IconButton(
+      tooltip: '复制回答',
+      onPressed: () => _copy(context),
+      icon: const Icon(Icons.copy_outlined, size: 16, color: Wx.muted),
+      visualDensity: VisualDensity.compact,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+    );
+    if (bare) return button;
     return Align(
       alignment: Alignment.centerRight,
-      child: IconButton(
-        tooltip: '复制回答',
-        onPressed: () => _copy(context),
-        icon: const Icon(Icons.copy_outlined, size: 16, color: Wx.muted),
-        visualDensity: VisualDensity.compact,
-        padding: EdgeInsets.zero,
-        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-      ),
+      child: button,
     );
   }
 }

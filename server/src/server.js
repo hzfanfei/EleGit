@@ -17,6 +17,7 @@ import {
 } from "./acp.js";
 import { askBookOnCall, handleBookVoiceTurn, prepareBookTurnContext } from "./book-voice-turn.js";
 import { handleRepoVoiceTurn } from "./repo-voice-turn.js";
+import { handleSpeakSummary } from "./speak-summary.js";
 import { streamAnswer, synthesizeBookAnswer, answerReadyNotice, shouldPublishFinishedAnswer } from "./ask.js";
 import { ensureTurnRelay, relaySpawn, turnRelayEnabled } from "./turn-relay-client.js";
 import { setPhoneForeground, phoneInForeground } from "./phone-presence.js";
@@ -1195,6 +1196,14 @@ app.post("/v1/chat/voice-turn", async (req, res) => {
       sessions,
       checkoutRepo: (owner, repo, signal) => checkoutRepo(owner, repo, signal, { fast: true }),
     });
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.post("/v1/voice/speak-summary", async (req, res) => {
+  try {
+    await handleSpeakSummary(req, res, { store });
   } catch (err) {
     sendError(res, err);
   }

@@ -3,6 +3,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wenxiang/theme.dart';
 import 'package:wenxiang/widgets/wx_rich_text.dart';
+import 'package:wenxiang/widgets/wx_speak_answer.dart';
+
+import 'support/fake_api.dart';
 
 void main() {
   test('splits fenced code from prose', () {
@@ -227,6 +230,23 @@ void main() {
     await tester.pump();
     expect(copied, '仓库最近在修登录。');
     expect(find.text('已复制回答'), findsOneWidget);
+  });
+
+  testWidgets('speaker sits to the left of the answer copy button', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: Scaffold(
+          body: WxAnswerActions(
+            text: '登录已经修好。',
+            api: FakeWenxiangApi(),
+          ),
+        ),
+      ),
+    );
+    final speak = tester.getCenter(find.byTooltip('朗读总结'));
+    final copy = tester.getCenter(find.byTooltip('复制回答'));
+    expect(speak.dx, lessThan(copy.dx));
   });
 
   testWidgets('renders table columns without raw pipes', (tester) async {

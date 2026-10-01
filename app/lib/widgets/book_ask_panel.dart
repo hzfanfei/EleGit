@@ -22,6 +22,7 @@ import 'wx_hold_to_speak.dart';
 import 'wx_motion.dart';
 import 'agent_decision_card.dart';
 import 'wx_rich_text.dart';
+import 'wx_speak_answer.dart';
 import 'wx_typewriter_stream.dart';
 
 enum BookAskScope { chapter, all }
@@ -903,6 +904,8 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
                           ? _AllQaHistoryList(
                               scrollController: widget.scrollController,
                               turns: listAllBookQaTurns(_store),
+                              api: widget.api,
+                              ttsVoice: widget.memory?.ttsVoice(),
                               live: _live,
                               typewriter: _typewriter,
                               phase: _livePhase,
@@ -937,7 +940,11 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
                                       ? () =>
                                           unawaited(_confirmDeleteTurn(_turnAtChapterIndex(msgIndex)))
                                       : null,
-                                  child: _MessageBody(message: msg),
+                                  child: _MessageBody(
+                                    message: msg,
+                                    api: widget.api,
+                                    ttsVoice: widget.memory?.ttsVoice(),
+                                  ),
                                 );
                                 if (msg.role == 'user' && msgIndex == _appearUserAt) {
                                   return WxAppear(child: row);
@@ -1572,9 +1579,11 @@ class _ScopeChip extends StatelessWidget {
 }
 
 class _MessageBody extends StatelessWidget {
-  const _MessageBody({required this.message});
+  const _MessageBody({required this.message, required this.api, this.ttsVoice});
 
   final ChatMessage message;
+  final WenxiangApi api;
+  final String? ttsVoice;
 
   @override
   Widget build(BuildContext context) {
@@ -1603,7 +1612,8 @@ class _MessageBody extends StatelessWidget {
             ),
           ),
         WxReadableText(message.content),
-        if (message.role == 'assistant') WxCopyAnswerButton(text: message.content),
+        if (message.role == 'assistant')
+          WxAnswerActions(text: message.content, api: api, ttsVoice: ttsVoice),
       ],
     );
   }
@@ -1644,6 +1654,8 @@ class _AllQaHistoryList extends StatelessWidget {
   const _AllQaHistoryList({
     required this.scrollController,
     required this.turns,
+    required this.api,
+    this.ttsVoice,
     required this.live,
     required this.typewriter,
     required this.phase,
@@ -1655,6 +1667,8 @@ class _AllQaHistoryList extends StatelessWidget {
 
   final ScrollController scrollController;
   final List<BookQaTurn> turns;
+  final WenxiangApi api;
+  final String? ttsVoice;
   final bool live;
   final WxTypewriterStream typewriter;
   final ValueNotifier<String> phase;
@@ -1720,6 +1734,8 @@ class _AllQaHistoryList extends StatelessWidget {
               ),
             _QaTurnCard(
               turn: turn,
+              api: api,
+              ttsVoice: ttsVoice,
               onDelete: () => onDeleteTurn(turn),
             ),
           ],
@@ -1732,10 +1748,14 @@ class _AllQaHistoryList extends StatelessWidget {
 class _QaTurnCard extends StatefulWidget {
   const _QaTurnCard({
     required this.turn,
+    required this.api,
+    this.ttsVoice,
     required this.onDelete,
   });
 
   final BookQaTurn turn;
+  final WenxiangApi api;
+  final String? ttsVoice;
   final VoidCallback onDelete;
 
   @override
@@ -1776,7 +1796,7 @@ class _QaTurnCardState extends State<_QaTurnCard> {
                       children: [
                         _AskBubble(
                           role: 'user',
-                          child: _MessageBody(message: turn.user),
+                          child: _MessageBody(message: turn.user, api: widget.api),
                         ),
                         AnimatedSize(
                           duration: Wx.motion,
@@ -1789,7 +1809,11 @@ class _QaTurnCardState extends State<_QaTurnCard> {
                                 for (final reply in turn.replies)
                                   _AskBubble(
                                     role: reply.role,
-                                    child: _MessageBody(message: reply),
+                                    child: _MessageBody(
+                                      message: reply,
+                                      api: widget.api,
+                                      ttsVoice: widget.ttsVoice,
+                                    ),
                                   )
                               else if (turn.replies.isNotEmpty)
                                 Padding(
