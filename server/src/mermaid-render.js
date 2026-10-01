@@ -66,7 +66,15 @@ function glueErTypes(source) {
 }
 
 function glueTypesInBlocks(source) {
-  return source.replace(/(?<![o|])\{([^{}]*)\}/g, (_full, inner) => `{${glueErTypes(inner)}}`);
+  const boundary = new RegExp(`(?<=\\S)(?<![A-Za-z0-9_])(?=(?:${ER_TYPE_ALT})\\b)`, "gi");
+  const suffix =
+    /\b([A-Za-z_][A-Za-z0-9_]*?)(string|integer|datetime|boolean|varchar|double|float|number)\b(?=\s+(?!PK\b|FK\b|UK\b)[A-Za-z_])/gi;
+  return source.replace(/(?<![o|])\{([^{}]*)\}/g, (_full, inner) => {
+    let body = glueErTypes(inner);
+    body = body.replace(suffix, (_match, prefix, type) => `${prefix}\n${type}`);
+    body = body.replace(boundary, "\n");
+    return `{${body}}`;
+  });
 }
 
 /** Put class, ER, and pie statements back on their own lines. */

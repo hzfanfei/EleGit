@@ -165,6 +165,28 @@ const diagramCases = [
   },
 ];
 
+const phoneGapCases = [
+  {
+    name: "类图继承箭头已从中间折断",
+    code: "classDiagram\nclass Animal {\n+int age\n+String gender\n+isMammal()\n}class Dog {\n+bark()\n}Animal <|-\n- Dog:是",
+    parts: ["+int age", "+isMammal()", "+bark()", "Animal <|-- Dog:是"],
+    marker: "是",
+  },
+  {
+    name: "关系图注释粘住下一个类型",
+    code: 'erDiagramUSER ||--o{ LOGIN :recordsUSER {string name "姓名"string email PK "邮箱"int orgId FK}LOGIN {datetime whenstring ip}',
+    parts: [
+      "USER ||--o{ LOGIN :records",
+      'string name "姓名"',
+      'string email PK "邮箱"',
+      "int orgId FK",
+      "datetime when",
+      "string ip",
+    ],
+    marker: "邮箱",
+  },
+];
+
 function assertInOrder(source, parts) {
   let at = 0;
   for (const part of parts) {
@@ -321,6 +343,33 @@ describe("mermaid-render", () => {
     const failed = [];
     for (let i = 0; i < diagramCases.length; i += 1) {
       const sample = diagramCases[i];
+      const result = results[i];
+      if (!result?.ok || !String(result.svg || "").includes(sample.marker)) {
+        failed.push(
+          `${sample.name}: ${result?.error || "rendered without marker"}\n${result?.source || ""}`,
+        );
+      }
+    }
+    assert.equal(failed.length, 0, failed.join("\n\n"));
+  });
+
+  it("normalizes diagrams the way a returned answer arrives", () => {
+    const failed = [];
+    for (const sample of phoneGapCases) {
+      try {
+        assertInOrder(normalizeMermaidSource(sample.code), sample.parts);
+      } catch (err) {
+        failed.push(`${sample.name}: ${err.message}`);
+      }
+    }
+    assert.equal(failed.length, 0, failed.join("\n\n"));
+  });
+
+  it("renders diagrams the way a returned answer arrives", { timeout: 60_000 }, async () => {
+    const results = await probeMermaidSources(phoneGapCases.map((sample) => sample.code));
+    const failed = [];
+    for (let i = 0; i < phoneGapCases.length; i += 1) {
+      const sample = phoneGapCases[i];
       const result = results[i];
       if (!result?.ok || !String(result.svg || "").includes(sample.marker)) {
         failed.push(
