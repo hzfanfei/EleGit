@@ -53,6 +53,29 @@ void main() {
     ]);
   });
 
+  test('splits a table whose newlines were removed', () {
+    const src =
+        '**早市水果**| 水果 | 单价 | 剩多少 || --- | ---: | ---: || 苹果 | 6.5 | 18 斤 || 香蕉 | 4 | 9 把 |';
+    final out = normalizeChatMarkdownTables(src);
+    expect(out, contains('**早市水果**'));
+    expect(out, contains('\n| 水果 | 单价 | 剩多少 |'));
+    expect(out, contains('\n| --- | ---: | ---: |'));
+    expect(out, contains('\n| 苹果 | 6.5 | 18 斤 |'));
+    expect(out, contains('\n| 香蕉 | 4 | 9 把 |'));
+    expect(out, isNot(contains('||')));
+  });
+
+  test('puts a blank line before a table glued to the line above', () {
+    const src = '**早市水果**\n| 水果 | 单价 |\n| --- | --- |\n| 苹果 | 6.5 |';
+    final out = normalizeChatMarkdownTables(src);
+    expect(out, contains('**早市水果**\n\n| 水果 | 单价 |'));
+  });
+
+  test('leaves a fenced sample and an already split table alone', () {
+    const src = '```\n| a | b || --- | --- |\n```\n\n| 名称 | 状态 |\n| --- | --- |\n| 登录 | 完成 |';
+    expect(normalizeChatMarkdownTables(src), src);
+  });
+
   test('keeps a header-only table while it is still streaming', () {
     const src = '| 名称 | 状态 |';
     final table = parseMarkdownTable(src);

@@ -215,7 +215,7 @@ class _WxChatMarkdownStreamState extends State<WxChatMarkdownStream> {
     final raw = widget.source.value;
     if (raw == _lastSource) return;
     _lastSource = raw;
-    final stripped = _stripTaskMarker(raw);
+    final stripped = normalizeChatMarkdownTables(_stripTaskMarker(raw));
     _parser.update(stripped);
     final newHashes = [
       for (final block in _parser.completed) block.hashCode,

@@ -45,6 +45,19 @@ void main() {
       expect(find.byType(GptMarkdown), findsWidgets);
     });
 
+    testWidgets('换行被吃掉的表格仍画成表，不出现裸 |', (tester) async {
+      await _pumpWithSource(
+        tester,
+        '**早市水果**| 水果 | 单价 || --- | ---: || 苹果 | 6.5 || 香蕉 | 4 |',
+      );
+      expect(tester.takeException(), isNull);
+      expect(find.textContaining('早市水果'), findsWidgets);
+      expect(find.textContaining('苹果'), findsWidgets);
+      expect(find.textContaining('香蕉'), findsWidgets);
+      expect(find.textContaining('| ---'), findsNothing);
+      expect(find.textContaining('||'), findsNothing);
+    });
+
     testWidgets('表格列名与单元格，不出现裸 |', (tester) async {
       await _pumpWithSource(
         tester,

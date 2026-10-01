@@ -127,6 +127,97 @@ WxTableData? parseMarkdownTable(String src) {
   );
 }
 
+final _gluedTableSep = RegExp(r'\|\s*:?-{3,}:?\s*\|');
+
+/// ACP text sometimes arrives with newlines removed. A pipe table then sits
+/// on one line (`| 水果 | 单价 || --- | --- || 苹果 | 6 |`) and the markdown
+/// parser prints it as prose. Split those rows back apart, and keep a table
+/// from being swallowed by the paragraph above it.
+String normalizeChatMarkdownTables(String input) {
+  if (input.isEmpty || !input.contains('|')) return input;
+  final text = input.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+  final expanded = <String>[];
+  var inFence = false;
+  for (final line in text.split('\n')) {
+    if (line.trimLeft().startsWith('```')) {
+      inFence = !inFence;
+      expanded.add(line);
+      continue;
+    }
+    if (inFence) {
+      expanded.add(line);
+      continue;
+    }
+    expanded.addAll(_reflowFlattenedTableLine(line).split('\n'));
+  }
+  final out = <String>[];
+  var fence = false;
+  for (final line in expanded) {
+    if (line.trimLeft().startsWith('```')) {
+      fence = !fence;
+      out.add(line);
+      continue;
+    }
+    if (!fence &&
+        out.isNotEmpty &&
+        out.last.trim().isNotEmpty &&
+        !isMarkdownTableLine(out.last) &&
+        isMarkdownTableLine(line)) {
+      out.add('');
+    }
+    out.add(line);
+  }
+  return out.join('\n');
+}
+
+String _reflowFlattenedTableLine(String line) {
+  if (!_gluedTableSep.hasMatch(line)) return line;
+  final firstPipe = line.indexOf('|');
+  if (firstPipe < 0) return line;
+  final prefix = line.substring(0, firstPipe).trimRight();
+  var table = line.substring(firstPipe);
+  var suffix = '';
+  final lastPipe = table.lastIndexOf('|');
+  if (lastPipe >= 0 && lastPipe < table.length - 1) {
+    suffix = table.substring(lastPipe + 1).trim();
+    table = table.substring(0, lastPipe + 1);
+  }
+  final raw = table.split('|');
+  var start = 0;
+  var end = raw.length;
+  if (start < end && raw[start].isEmpty) start += 1;
+  if (end > start && raw[end - 1].isEmpty) end -= 1;
+  final rows = <List<String>>[];
+  var current = <String>[];
+  for (var i = start; i < end; i++) {
+    if (raw[i].trim().isEmpty) {
+      if (current.isNotEmpty) {
+        rows.add(current);
+        current = <String>[];
+      }
+      continue;
+    }
+    current.add(raw[i].trim());
+  }
+  if (current.isNotEmpty) rows.add(current);
+  final sep = rows.indexWhere(_isSeparatorRow);
+  if (sep <= 0) return line;
+  final width = rows[sep].length;
+  if (width < 2 || rows[sep - 1].length != width) return line;
+  final buf = StringBuffer();
+  if (prefix.isNotEmpty) {
+    buf
+      ..writeln(prefix)
+      ..writeln();
+  }
+  for (final row in rows) {
+    buf.writeln('| ${row.join(' | ')} |');
+  }
+  var text = buf.toString().trimRight();
+  if (suffix.isNotEmpty) text = '$text\n\n$suffix';
+  return text;
+}
+
 class WxReadableText extends StatelessWidget {
   const WxReadableText(
     this.text, {
