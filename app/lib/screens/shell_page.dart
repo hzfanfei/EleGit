@@ -11,6 +11,7 @@ import '../copy/errors.dart';
 import '../diagnostics/client_error_log.dart';
 import '../models.dart';
 import '../persist/app_memory.dart';
+import '../persist/book_reading_progress.dart';
 import '../theme.dart';
 import '../utils/background_sync.dart';
 import '../utils/notification_center.dart';
@@ -243,6 +244,10 @@ class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
     if (!mounted) return;
     setState(() => _bookOpening = true);
     try {
+      final prefs = _memory?.prefs;
+      if (prefs != null) {
+        await BookReadingProgress(prefs).markOpened(book.id);
+      }
       if (!mounted) return;
       setState(() {
         _book = book;
@@ -393,6 +398,7 @@ class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
             onBack: _backFromBooks,
             onRead: _openBookRead,
             opening: _bookOpening,
+            prefs: _memory?.prefs,
           )),
         ),
       if (_step == AppStep.bookRead && _book != null)

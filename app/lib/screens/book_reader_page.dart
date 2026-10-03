@@ -196,6 +196,9 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
       setState(() {});
     }
     try {
+      await _progress?.markOpened(widget.book.id);
+    } catch (_) {}
+    try {
       if (mounted) setState(() => _openingHint = '正在读取目录…');
       final manifest = await widget.api.fetchBookReadingManifest(widget.book.id);
       if (!mounted) return;

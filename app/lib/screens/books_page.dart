@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
 import '../api/wenxiang_api.dart';
 import '../models.dart';
+import '../persist/book_reading_progress.dart';
 import '../theme.dart';
 import 'annas_browser_page.dart';
 import '../widgets/wx_chrome.dart';
@@ -12,12 +15,14 @@ class BooksPage extends StatefulWidget {
     required this.onBack,
     required this.onRead,
     this.opening = false,
+    this.prefs,
   });
 
   final WenxiangApi api;
   final VoidCallback onBack;
   final Future<void> Function(BookItem book, {bool expandAsk}) onRead;
   final bool opening;
+  final SharedPreferences? prefs;
 
   @override
   State<BooksPage> createState() => _BooksPageState();
@@ -43,8 +48,13 @@ class _BooksPageState extends State<BooksPage> {
     });
     try {
       final books = await widget.api.listBooks();
+      final prefs = await _prefs();
+      final progress = prefs == null ? null : BookReadingProgress(prefs);
+      final sorted = progress == null
+          ? books
+          : sortByLastOpened(books, (book) => progress.openedAt(book.id));
       if (!mounted) return;
-      setState(() => _books = books);
+      setState(() => _books = sorted);
     } catch (err) {
       if (!mounted) return;
       setState(() => _error = err);
@@ -74,6 +84,10 @@ class _BooksPageState extends State<BooksPage> {
     if (ok != true || !mounted) return;
     try {
       await widget.api.deleteBook(book.id);
+      final prefs = await _prefs();
+      if (prefs != null) {
+        await BookReadingProgress(prefs).clear(book.id);
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('已删除《${book.title}》')),
@@ -84,6 +98,16 @@ class _BooksPageState extends State<BooksPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(err.toString())),
       );
+    }
+  }
+
+  Future<SharedPreferences?> _prefs() async {
+    final given = widget.prefs;
+    if (given != null) return given;
+    try {
+      return await SharedPreferences.getInstance();
+    } catch (_) {
+      return null;
     }
   }
 

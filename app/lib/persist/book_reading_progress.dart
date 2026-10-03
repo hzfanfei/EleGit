@@ -44,6 +44,20 @@ class BookReadingProgress {
   final SharedPreferences prefs;
 
   static String _posKey(String bookId) => 'wx.bookPos.$bookId';
+  static String _openedKey(String bookId) => 'wx.bookOpened.$bookId';
+
+  DateTime? openedAt(String bookId) {
+    final raw = prefs.getString(_openedKey(bookId));
+    if (raw == null || raw.isEmpty) return null;
+    return DateTime.tryParse(raw);
+  }
+
+  Future<void> markOpened(String bookId) {
+    return prefs.setString(
+      _openedKey(bookId),
+      DateTime.now().toUtc().toIso8601String(),
+    );
+  }
 
   BookReadingResume? resume(String bookId) {
     final raw = prefs.getString(_posKey(bookId));
@@ -63,5 +77,27 @@ class BookReadingProgress {
 
   Future<void> clear(String bookId) async {
     await prefs.remove(_posKey(bookId));
+    await prefs.remove(_openedKey(bookId));
   }
+}
+
+/// Newest open time first. Books never opened keep their previous order at the end.
+List<T> sortByLastOpened<T>(
+  List<T> items,
+  DateTime? Function(T item) openedAt,
+) {
+  final indexed = [
+    for (var i = 0; i < items.length; i++) (index: i, item: items[i]),
+  ];
+  indexed.sort((a, b) {
+    final ao = openedAt(a.item);
+    final bo = openedAt(b.item);
+    if (ao == null && bo == null) return a.index.compareTo(b.index);
+    if (ao == null) return 1;
+    if (bo == null) return -1;
+    final cmp = bo.compareTo(ao);
+    if (cmp != 0) return cmp;
+    return a.index.compareTo(b.index);
+  });
+  return [for (final row in indexed) row.item];
 }
