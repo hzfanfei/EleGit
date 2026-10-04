@@ -117,6 +117,50 @@ rl.on("line", (line) => {
       askResume = () => answerPrompt(msg);
       return;
     }
+    const progress = String(process.env.FAKE_ACP_PROGRESS || "");
+    if (progress) {
+      const gap = Number(process.env.FAKE_ACP_PROGRESS_GAP_MS || 200);
+      const ticks = Number(process.env.FAKE_ACP_PROGRESS_TICKS || 3);
+      let n = 0;
+      const step = () => {
+        n += 1;
+        if (n >= ticks) {
+          answerPrompt(msg);
+          return;
+        }
+        const update =
+          progress === "usage"
+            ? { sessionUpdate: "usage_update", cost: { input: n } }
+            : progress === "text"
+              ? {
+                  sessionUpdate: "agent_message_chunk",
+                  content: { type: "text", text: `tick:${n}` },
+                }
+              : n === 1
+                ? {
+                    sessionUpdate: "tool_call",
+                    toolCallId: "tool-1",
+                    title: "Read",
+                    kind: "read",
+                    status: "in_progress",
+                    locations: [{ path: "a.js" }],
+                  }
+                : {
+                    sessionUpdate: "tool_call_update",
+                    toolCallId: "tool-1",
+                    status: "in_progress",
+                    rawOutput: `line ${n}`,
+                  };
+        write({
+          jsonrpc: "2.0",
+          method: "session/update",
+          params: { sessionId, update },
+        });
+        setTimeout(step, gap);
+      };
+      setTimeout(step, gap);
+      return;
+    }
     const delayMs = Number(process.env.FAKE_ACP_PROMPT_DELAY_MS || 0);
     if (delayMs > 0 && !(process.env.FAKE_ACP_SLOW_ONCE === "1" && slowUsed)) {
       slowUsed = true;

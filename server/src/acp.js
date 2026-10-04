@@ -1061,6 +1061,7 @@ export class AcpChannel {
     this.onActivity = null;
     this._toolLog = { items: [] };
     this._promptId = null;
+    this._promptTimeout = null;
     this._lastDeltaAt = 0;
     this._usageAt = 0;
   }
@@ -1212,6 +1213,7 @@ export class AcpChannel {
     try {
       // Wait for session/prompt to finish. Do not cancel on short SSE idle: Claude Code
       // often goes silent for seconds while listing/reading files during code review.
+      // Text or tool progress restarts this deadline; a quiet stretch still times out.
       return await this.request(
         "session/prompt",
         {
@@ -1366,13 +1368,27 @@ export class AcpChannel {
         reject(new Error("ACP process is not running"));
         return;
       }
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        if (this._promptId === id) this._promptId = null;
-        reject(new Error(`ACP ${method} timed out`));
-      }, timeoutMs);
-      const finish = (fn, value) => {
+      let settled = false;
+      let timer = null;
+      const arm = () => {
+        if (settled) return;
         clearTimeout(timer);
+        timer = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          this.pending.delete(id);
+          if (this._promptId === id) this._promptId = null;
+          if (this._promptTimeout?.id === id) this._promptTimeout = null;
+          reject(new Error(`ACP ${method} timed out`));
+        }, timeoutMs);
+        timer.unref?.();
+      };
+      arm();
+      if (method === "session/prompt") this._promptTimeout = { id, arm };
+      const finish = (fn, value) => {
+        settled = true;
+        clearTimeout(timer);
+        if (this._promptTimeout?.id === id) this._promptTimeout = null;
         if (this._promptId === id) this._promptId = null;
         fn(value);
       };
@@ -1382,6 +1398,11 @@ export class AcpChannel {
       });
       this.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
     });
+  }
+
+  /** Start the prompt deadline over. Quiet time with no text or tool progress still expires. */
+  _notePromptProgress() {
+    this._promptTimeout?.arm?.();
   }
 
   respond(id, result) {
@@ -1399,9 +1420,10 @@ export class AcpChannel {
   _armActivityPulse() {
     this._stopActivityPulse();
     this._activityPulse = setInterval(() => {
-      if (!this.onActivity) return;
       const running = (this._toolLog?.items || []).some((item) => item.script && item.running !== false);
       if (!running) return;
+      this._notePromptProgress();
+      if (!this.onActivity) return;
       const text = renderToolLog(this._toolLog);
       if (text) this.onActivity(text);
     }, 2000);
@@ -1453,6 +1475,7 @@ export class AcpChannel {
       }
       const traced = pushAcpToolActivity(this._toolLog, update);
       if (traced) this.onActivity?.(traced);
+      if (text || traced) this._notePromptProgress();
       return;
     }
     if (msg.method === "fs/read_text_file") {
@@ -1464,6 +1487,7 @@ export class AcpChannel {
         rawInput: { path: msg.params?.path || "" },
       });
       if (traced) this.onActivity?.(traced);
+      this._notePromptProgress();
       try {
         this.respond(msg.id, readTextUnderCwd(this.cwd, msg.params?.path));
       } catch (err) {
@@ -1476,6 +1500,7 @@ export class AcpChannel {
         this.respond(msg.id, { error: "write disabled in ask mode" });
         return;
       }
+      this._notePromptProgress();
       try {
         this.respond(msg.id, writeTextUnderCwd(this.cwd, msg.params?.path, msg.params?.content));
       } catch (err) {
@@ -1484,6 +1509,7 @@ export class AcpChannel {
       return;
     }
     if (msg.method === "session/request_permission") {
+      this._notePromptProgress();
       this.respond(msg.id, {
         outcome: {
           outcome: "selected",
@@ -1493,10 +1519,12 @@ export class AcpChannel {
       return;
     }
     if (msg.method === "cursor/ask_question") {
+      this._notePromptProgress();
       this._relayInteraction(msg, "ask");
       return;
     }
     if (msg.method === "cursor/create_plan") {
+      this._notePromptProgress();
       if (!this.agentMode) {
         this.respond(msg.id, { outcome: { outcome: "rejected", reason: "ask mode" } });
         return;

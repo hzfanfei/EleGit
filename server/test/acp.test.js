@@ -903,6 +903,64 @@ describe("AcpChannel", () => {
     }
   });
 
+  it("restarts the prompt timeout when text or tools arrive", async () => {
+    for (const progress of ["text", "tool"]) {
+      const channel = new AcpChannel({
+        command: { path: process.execPath, args: [fakeAcp] },
+        cwd: process.cwd(),
+        spawnImpl: (file, args, opts) =>
+          spawn(file, args, {
+            ...opts,
+            env: {
+              ...opts.env,
+              FAKE_ACP_PROGRESS: progress,
+              FAKE_ACP_PROGRESS_GAP_MS: "300",
+              FAKE_ACP_PROGRESS_TICKS: "4",
+            },
+          }),
+        idleMs: 0,
+      });
+      try {
+        await channel.start();
+        const started = Date.now();
+        await channel.prompt("keep going", { timeoutMs: 500 });
+        const elapsed = Date.now() - started;
+        assert.ok(elapsed >= 900, `${progress} finished too soon (${elapsed}ms)`);
+      } finally {
+        await channel.close();
+      }
+    }
+  });
+
+  it("still times out when only usage updates arrive", async () => {
+    const channel = new AcpChannel({
+      command: { path: process.execPath, args: [fakeAcp] },
+      cwd: process.cwd(),
+      spawnImpl: (file, args, opts) =>
+        spawn(file, args, {
+          ...opts,
+          env: {
+            ...opts.env,
+            FAKE_ACP_PROGRESS: "usage",
+            FAKE_ACP_PROGRESS_GAP_MS: "300",
+            FAKE_ACP_PROGRESS_TICKS: "4",
+          },
+        }),
+      idleMs: 0,
+    });
+    try {
+      await channel.start();
+      const started = Date.now();
+      await assert.rejects(
+        channel.prompt("quiet", { timeoutMs: 500 }),
+        /ACP session\/prompt timed out/,
+      );
+      assert.ok(Date.now() - started < 1000);
+    } finally {
+      await channel.close();
+    }
+  });
+
   it("does not speak the cancelled turn's tail as the next answer", async () => {
     const channel = new AcpChannel({
       command: { path: process.execPath, args: [fakeAcp] },
