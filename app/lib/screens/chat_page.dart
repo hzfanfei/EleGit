@@ -12,6 +12,7 @@ import '../persist/app_memory.dart';
 import '../persist/chat_backfill.dart';
 import '../persist/book_reader_prefs.dart';
 import '../theme.dart';
+import '../utils/notification_center.dart';
 import '../voice/device_media.dart';
 import '../voice/repo_quick_voice_session.dart';
 import '../voice/volc_tts_voices.dart';
@@ -1178,6 +1179,7 @@ class _ChatPageState extends State<ChatPage> {
       } else {
         final answer = (picked['answer'] ?? '').toString().trim();
         if (answer.isNotEmpty) await _placeHeldAnswer(userIndex, answer);
+        await NotificationCenter.instance.notifyPolledFinish(picked);
       }
     }
     _mergeBackfill();

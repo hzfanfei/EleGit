@@ -100,6 +100,17 @@ class NotificationCenter {
   bool _starting = false;
   final Set<String> _alertedTurns = {};
 
+  /// How many finished turns this process decided to alert. Tests read this
+  /// because the system toast itself only posts on Android.
+  @visibleForTesting
+  int debugAlertCount = 0;
+
+  @visibleForTesting
+  void debugResetAlerts() {
+    _alertedTurns.clear();
+    debugAlertCount = 0;
+  }
+
   final ValueNotifier<int> unreadCount = ValueNotifier<int>(0);
   final ValueNotifier<bool> enabled = ValueNotifier<bool>(false);
   final ValueNotifier<Connectivity> connectivity =
@@ -269,6 +280,18 @@ class NotificationCenter {
     _scheduleRetry();
   }
 
+  /// The in-app inbox poll found a finished turn. Alert once for that turn id.
+  Future<void> notifyPolledFinish(Map<String, dynamic> json) async {
+    if (!enabled.value) return;
+    if (json['partial'] == true) return;
+    final raw = Map<String, dynamic>.from(json);
+    final body = (raw['body'] ?? '').toString().trim();
+    final answer = (raw['answer'] ?? '').toString().trim();
+    if (body.isEmpty && answer.isEmpty) return;
+    if (body.isEmpty) raw['body'] = answer;
+    await _showItem(InboxItem.fromJson(raw));
+  }
+
   Future<void> fetchAndShowUnread() async {
     final api = _api;
     if (api == null) return;
@@ -354,6 +377,7 @@ class NotificationCenter {
       debugPrint('Chat backfill failed: $err');
     }
     if (!toast) return;
+    debugAlertCount++;
     if (!Platform.isAndroid) return;
     final plugin = FlutterLocalNotificationsPlugin();
     final details = AndroidNotificationDetails(

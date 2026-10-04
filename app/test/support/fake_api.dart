@@ -70,7 +70,9 @@ class FakeWenxiangApi extends WenxiangApi {
   List<ChatStreamEvent>? bookVoiceTurnEvents;
   List<ChatStreamEvent>? repoVoiceTurnEvents;
   List<Map<String, dynamic>> inboxItems;
+  List<Map<String, dynamic>> Function()? inboxBuilder;
   int fetchInboxCalls = 0;
+  String? lastTurnId;
   String? lastSessionId;
   String? lastChatMessage;
   final List<String> chatMessages = <String>[];
@@ -422,7 +424,8 @@ class FakeWenxiangApi extends WenxiangApi {
   @override
   Future<Map<String, dynamic>> fetchInbox() async {
     fetchInboxCalls += 1;
-    return {'items': List<Object>.from(inboxItems)};
+    final items = inboxBuilder?.call() ?? inboxItems;
+    return {'items': List<Object>.from(items)};
   }
 
   @override
@@ -510,6 +513,7 @@ class FakeWenxiangApi extends WenxiangApi {
   }) async* {
     lastSessionId = sessionId;
     lastChatMessage = message;
+    lastTurnId = turnId;
     chatMessages.add(message);
     chatHistories.add(List<ChatMessage>.from(history));
     if (streamThrows != null) throw streamThrows!;

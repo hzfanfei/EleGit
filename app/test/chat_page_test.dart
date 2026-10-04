@@ -6,6 +6,7 @@ import 'package:wenxiang/models.dart';
 import 'package:wenxiang/persist/app_memory.dart';
 import 'package:wenxiang/screens/chat_page.dart';
 import 'package:wenxiang/theme.dart';
+import 'package:wenxiang/utils/notification_center.dart';
 import 'package:wenxiang/widgets/wx_chrome.dart';
 import 'package:wenxiang/voice/voice_client.dart';
 import 'package:wenxiang/voice/voice_media.dart';
@@ -369,6 +370,73 @@ void main() {
     await tester.pump();
 
     expect(find.textContaining('inbox-hold'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('hold poll notifies once when the polled turn finishes', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    const asked = '这个仓库最近在做什么？';
+    var finished = false;
+    final notes = NotificationCenter.instance;
+    notes.debugResetAlerts();
+    notes.enabled.value = true;
+    addTearDown(() {
+      notes.enabled.value = false;
+      notes.debugResetAlerts();
+    });
+    final api = FakeWenxiangApi(
+      streamEvents: [
+        ChatStreamEvent(type: 'start', engine: 'local-progress', sessionId: 's-hold'),
+        ChatStreamEvent(type: 'status', phase: 'activity', detail: '思考·旧进度'),
+      ],
+    );
+    api.inboxBuilder = () => [
+          {
+            'id': 'inb-hold',
+            'kind': 'agent-notification',
+            'partial': !finished,
+            'read': false,
+            'turnId': api.lastTurnId,
+            'sessionId': 's-hold',
+            'question': asked,
+            'owner': 'octo',
+            'repo': 'demo',
+            'activity': finished ? '' : '读·还在写',
+            'answer': finished ? '这一问答完了。' : '',
+            'body': finished ? '这一问答完了。' : '读·还在写',
+            'createdAt': '2026-10-04T04:00:00.000Z',
+          },
+        ];
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: ChatPage(
+          api: api,
+          repo: sampleRepo(),
+          onBack: () {},
+        ),
+      ),
+    );
+    await _pumpUntilChatReady(tester);
+    await tester.tap(find.text(asked));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump();
+
+    expect(find.textContaining('还在写'), findsOneWidget);
+    expect(notes.debugAlertCount, 0);
+
+    finished = true;
+    await tester.pump(const Duration(milliseconds: 1200));
+    await tester.pump();
+
+    expect(find.textContaining('这一问答完了'), findsOneWidget);
+    expect(notes.debugAlertCount, 1);
+
+    await tester.pump(const Duration(milliseconds: 1200));
+    await tester.pump();
+    expect(notes.debugAlertCount, 1);
 
     await tester.pumpWidget(const SizedBox.shrink());
   });
