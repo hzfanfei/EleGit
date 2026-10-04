@@ -1126,46 +1126,38 @@ class _ChatPageState extends State<ChatPage> {
   Future<void> _pullInboxIntoChat(int userIndex) async {
     final res = await widget.api.fetchInbox();
     final list = (res['items'] as List?) ?? const [];
-    Map<String, dynamic>? latestPartial;
-    DateTime? latestPartialAt;
+    final rows = <Map<String, dynamic>>[];
     for (final entry in list) {
       if (entry is! Map) continue;
       final item = Map<String, dynamic>.from(entry);
+      rows.add(item);
       final answer = (item['answer'] ?? '').toString().trim();
-      final activity = (item['activity'] ?? '').toString();
-      if (answer.isEmpty && activity.trim().isEmpty) continue;
-      final sessionId = (item['sessionId'] ?? '').toString();
-      final question = (item['question'] ?? '').toString();
-      if (answer.isNotEmpty && item['partial'] != true) {
-        await backfillChatFromNotice(
-          sessionId: sessionId,
-          answer: answer,
-          question: question,
-          owner: (item['owner'] ?? '').toString(),
-          repo: (item['repo'] ?? '').toString(),
-          bookId: (item['bookId'] ?? '').toString(),
-        );
-      }
-      if (!_messagesMatchNotice(
-        userIndex,
-        sessionId: sessionId,
-        question: question,
-        holdLoose: _holdForAnswer,
-      )) {
-        continue;
-      }
-      if (item['partial'] == true) {
-        final at = DateTime.tryParse((item['createdAt'] ?? '').toString());
-        final stamp = at ?? DateTime.fromMillisecondsSinceEpoch(0);
-        if (latestPartialAt != null && !stamp.isAfter(latestPartialAt)) continue;
-        latestPartialAt = stamp;
-        latestPartial = item;
-      } else if (answer.isNotEmpty) {
-        await _placeHeldAnswer(userIndex, answer);
-      }
+      if (answer.isEmpty || item['partial'] == true) continue;
+      await backfillChatFromNotice(
+        sessionId: (item['sessionId'] ?? '').toString(),
+        answer: answer,
+        question: (item['question'] ?? '').toString(),
+        owner: (item['owner'] ?? '').toString(),
+        repo: (item['repo'] ?? '').toString(),
+        bookId: (item['bookId'] ?? '').toString(),
+      );
     }
-    if (latestPartial != null) {
-      _applyPartialInboxRow(latestPartial);
+    final asked = userIndex >= 0 && userIndex < _messages.length
+        ? _messages[userIndex].content
+        : '';
+    final picked = pickHeldInboxItem(
+      rows,
+      sessionId: _sessionId ?? '',
+      asked: asked,
+      holdLoose: _holdForAnswer,
+    );
+    if (picked != null) {
+      if (picked['partial'] == true) {
+        _applyPartialInboxRow(picked);
+      } else {
+        final answer = (picked['answer'] ?? '').toString().trim();
+        if (answer.isNotEmpty) await _placeHeldAnswer(userIndex, answer);
+      }
     }
     _mergeBackfill();
   }

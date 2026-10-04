@@ -32,23 +32,55 @@ String stripTaskMarker(String text) {
 
 bool sameChatText(String a, String b) => stripTaskMarker(a) == stripTaskMarker(b);
 
-/// The saved transcript's latest question is this held turn.
+/// Inbox notices keep only this many characters of the question.
+const inboxQuestionCap = 200;
+
+/// The saved transcript already has an assistant reply after this ask.
 bool transcriptAnswersAsk(List<ChatMessage> messages, String asked) {
-  ChatMessage? lastUser;
-  for (final message in messages) {
-    if (message.role == 'user') lastUser = message;
+  var lastUser = -1;
+  for (var i = 0; i < messages.length; i++) {
+    if (messages[i].role == 'user') lastUser = i;
   }
-  if (lastUser == null) return false;
+  if (lastUser < 0) return false;
+  final answered = messages.skip(lastUser + 1).any(
+        (message) => message.role == 'assistant' && message.content.trim().isNotEmpty,
+      );
+  if (!answered) return false;
   return heldTurnMatchesNotice(
     sessionId: '',
     currentSessionId: '',
-    question: lastUser.content,
+    question: messages[lastUser].content,
     asked: asked,
   );
 }
 
+/// Newest inbox row for this held turn. Older finals stay in the list and
+/// must not finish the question once a later row is the one that matches.
+Map<String, dynamic>? pickHeldInboxItem(
+  List<Map<String, dynamic>> items, {
+  required String sessionId,
+  required String asked,
+  bool holdLoose = false,
+}) {
+  for (final item in items) {
+    final answer = (item['answer'] ?? '').toString().trim();
+    final activity = (item['activity'] ?? '').toString().trim();
+    if (answer.isEmpty && activity.isEmpty) continue;
+    final matched = heldTurnMatchesNotice(
+      sessionId: (item['sessionId'] ?? '').toString(),
+      currentSessionId: sessionId,
+      question: (item['question'] ?? '').toString(),
+      asked: asked,
+      holdLoose: holdLoose,
+    );
+    if (!matched) continue;
+    return item;
+  }
+  return null;
+}
+
 /// A dropped turn should take the inbox item for this session. The server
-/// stores only the first 200 characters of the question.
+/// stores only the first [inboxQuestionCap] characters of the question.
 bool heldTurnMatchesNotice({
   required String sessionId,
   required String currentSessionId,
@@ -60,12 +92,16 @@ bool heldTurnMatchesNotice({
   final incoming = sessionId.trim();
   final q = question.trim();
   final text = asked.trim();
-  final questionMatches = q.isNotEmpty && (text == q || text.startsWith(q));
+  final questionMatches = q.isNotEmpty &&
+      (text == q || (q.length >= inboxQuestionCap && text.startsWith(q)));
   if (current.isNotEmpty && incoming.isNotEmpty && incoming != current) {
     if (!(holdLoose && questionMatches)) return false;
   }
-  if (q.isNotEmpty) return questionMatches;
-  return current.isNotEmpty && incoming == current;
+  if (q.isEmpty) {
+    if (holdLoose) return false;
+    return current.isNotEmpty && incoming == current;
+  }
+  return questionMatches;
 }
 
 /// Append a finished answer into the saved repo or book chat.

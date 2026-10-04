@@ -290,7 +290,19 @@ export function startTurnRelay({
       return;
     }
     if (msg.op === "meta") {
-      turn.meta = msg.meta || null;
+      const next = msg.meta || null;
+      const hadMeta = turn.meta != null;
+      const prevQuestion = String(turn.meta?.question || "");
+      const nextQuestion = String(next?.question || "");
+      turn.meta = next;
+      // noteTurn for the next question arrives before session/prompt. The
+      // previous prompt is still done and still holds its answer. Publishing
+      // now would file that answer under the new question. Freeze until the
+      // new prompt clears it.
+      if (hadMeta && prevQuestion !== nextQuestion) {
+        turn.publishedFinal = true;
+        return;
+      }
       maybePublish(turn);
       return;
     }
