@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -1906,67 +1905,24 @@ Uri? chatAnswerLinkUri(String href) {
   }
 }
 
-/// Long-press copies the whole answer. Link taps open in the browser.
-///
-/// A [GestureDetector] would join the same arena as the link recognizers and
-/// the list scroll, so neither the hold nor the tap would win. [Listener]
-/// stays out of that arena.
-class _AnswerMarkdown extends StatefulWidget {
+/// System long-press selects the answer text. Link taps open in the browser.
+/// The whole reply is copied from the button under the answer.
+class _AnswerMarkdown extends StatelessWidget {
   const _AnswerMarkdown({
     required this.api,
     required this.source,
-    required this.copyText,
     required this.mdStyle,
     this.openLink,
   });
 
   final WenxiangApi api;
   final ValueListenable<String> source;
-  final String copyText;
   final WxMarkdownStyle mdStyle;
   final Future<bool> Function(Uri uri)? openLink;
 
-  @override
-  State<_AnswerMarkdown> createState() => _AnswerMarkdownState();
-}
-
-class _AnswerMarkdownState extends State<_AnswerMarkdown> {
-  Timer? _hold;
-  int? _pointer;
-  Offset? _origin;
-  bool _copiedThisGesture = false;
-
-  @override
-  void dispose() {
-    _hold?.cancel();
-    super.dispose();
-  }
-
-  void _clearPointer() {
-    _hold?.cancel();
-    _hold = null;
-    _pointer = null;
-    _origin = null;
-  }
-
-  Future<void> _copy() async {
-    final value = widget.copyText;
-    if (value.trim().isEmpty) return;
-    _copiedThisGesture = true;
-    await Clipboard.setData(ClipboardData(text: value));
-    if (!mounted) return;
-    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-      const SnackBar(content: Text('已复制回答')),
-    );
-  }
-
-  Future<void> _openLink(String href) async {
-    if (_copiedThisGesture) {
-      _copiedThisGesture = false;
-      return;
-    }
+  Future<void> _openLink(BuildContext context, String href) async {
     final uri = chatAnswerLinkUri(href);
-    if (!mounted) return;
+    if (!context.mounted) return;
     final messenger = ScaffoldMessenger.maybeOf(context);
     if (uri == null) {
       messenger?.showSnackBar(const SnackBar(content: Text('无法打开链接')));
@@ -1974,56 +1930,27 @@ class _AnswerMarkdownState extends State<_AnswerMarkdown> {
     }
     var opened = false;
     try {
-      final open = widget.openLink;
+      final open = openLink;
       opened = open != null
           ? await open(uri)
           : await launchUrl(uri, mode: LaunchMode.externalApplication);
     } catch (_) {
       opened = false;
     }
-    if (!opened && mounted) {
+    if (!opened && context.mounted) {
       messenger?.showSnackBar(const SnackBar(content: Text('无法打开链接')));
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Listener(
-      behavior: HitTestBehavior.translucent,
-      onPointerDown: (event) {
-        if (_pointer != null) return;
-        _pointer = event.pointer;
-        _origin = event.position;
-        _copiedThisGesture = false;
-        _hold?.cancel();
-        _hold = Timer(kLongPressTimeout, () {
-          _hold = null;
-          unawaited(_copy());
-        });
-      },
-      onPointerMove: (event) {
-        if (event.pointer != _pointer) return;
-        final origin = _origin;
-        if (origin == null) return;
-        if ((event.position - origin).distance > kTouchSlop) {
-          _hold?.cancel();
-          _hold = null;
-        }
-      },
-      onPointerUp: (event) {
-        if (event.pointer != _pointer) return;
-        _clearPointer();
-      },
-      onPointerCancel: (event) {
-        if (event.pointer != _pointer) return;
-        _clearPointer();
-      },
+    return SelectionArea(
       child: WxChatMarkdownStream(
-        source: widget.source,
-        mdStyle: widget.mdStyle,
-        api: widget.api,
+        source: source,
+        mdStyle: mdStyle,
+        api: api,
         onTapLink: (href, text) {
-          unawaited(_openLink(href));
+          unawaited(_openLink(context, href));
         },
       ),
     );
@@ -2109,7 +2036,6 @@ class _FinishedTurn extends StatelessWidget {
       child: _AnswerMarkdown(
         api: api,
         source: ValueNotifier<String>(message.content),
-        copyText: message.content,
         mdStyle: chatMarkdownStyle(Theme.of(context)),
         openLink: openAnswerLink,
       ),
@@ -2179,7 +2105,6 @@ class _LiveTurn extends StatelessWidget {
               : _AnswerMarkdown(
                   api: api,
                   source: text,
-                  copyText: value,
                   mdStyle: chatMarkdownStyle(Theme.of(context)),
                   openLink: openAnswerLink,
                 );

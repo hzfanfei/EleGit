@@ -653,7 +653,7 @@ void main() {
     expect(chatAnswerLinkUri('wx-footnote:note'), isNull);
   });
 
-  testWidgets('long-press copies the answer and a link tap tries to open it', (tester) async {
+  testWidgets('answer text keeps system selection and a link tap opens it', (tester) async {
     String? copied;
     SharedPreferences.setMockInitialValues({});
     final memory = AppMemory(await SharedPreferences.getInstance());
@@ -722,12 +722,15 @@ void main() {
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null);
     });
 
+    expect(find.byType(SelectionArea), findsWidgets);
+    expect(find.byTooltip('复制回答'), findsWidgets);
+
     final prose = find.textContaining('最近在修登录', findRichText: true);
     expect(prose, findsOneWidget);
     await tester.longPress(prose);
     await tester.pump();
-    expect(copied, answer);
-    expect(find.text('已复制回答'), findsOneWidget);
+    expect(copied, isNull);
+    expect(find.text('已复制回答'), findsNothing);
 
     final url = find.textContaining('https://', findRichText: true);
     expect(url, findsOneWidget);
@@ -737,11 +740,10 @@ void main() {
     await tester.pump();
     expect(opened, [Uri.parse(link)]);
     expect(find.text('无法打开链接'), findsNothing);
-    expect(copied, answer);
 
     await tester.longPress(url);
     await tester.pump();
-    expect(copied, link);
+    expect(copied, isNull);
     expect(opened, [Uri.parse(link)]);
   });
 

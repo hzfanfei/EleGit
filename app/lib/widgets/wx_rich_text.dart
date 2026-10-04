@@ -720,6 +720,14 @@ class WxFencedCode extends StatelessWidget {
     );
   }
 
+  /// Inside an answer [SelectionArea], the system selection covers this block.
+  /// A nested [SelectableText] would take the long-press away from that area.
+  Widget _codeBody(BuildContext context) {
+    final span = wxHighlightedCode(code, base: style);
+    if (SelectionContainer.maybeOf(context) != null) return Text.rich(span);
+    return SelectableText.rich(span);
+  }
+
   @override
   Widget build(BuildContext context) {
     final body = Column(
@@ -758,7 +766,7 @@ class WxFencedCode extends StatelessWidget {
         Padding(
           key: blockKey,
           padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
-          child: SelectableText.rich(wxHighlightedCode(code, base: style)),
+          child: _codeBody(context),
         ),
       ],
     );
