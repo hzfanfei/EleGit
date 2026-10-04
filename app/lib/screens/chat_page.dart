@@ -1146,17 +1146,13 @@ class _ChatPageState extends State<ChatPage> {
         owner: (item['owner'] ?? '').toString(),
         repo: (item['repo'] ?? '').toString(),
         bookId: (item['bookId'] ?? '').toString(),
+        turnId: (item['turnId'] ?? '').toString(),
       );
     }
-    final asked = userIndex >= 0 && userIndex < _messages.length
-        ? _messages[userIndex].content
+    final askedTurnId = userIndex >= 0 && userIndex < _messages.length
+        ? (_messages[userIndex].turnId ?? '')
         : '';
-    final picked = pickHeldInboxItem(
-      rows,
-      sessionId: _sessionId ?? '',
-      asked: asked,
-      holdLoose: _holdForAnswer,
-    );
+    final picked = pickHeldInboxItem(rows, turnId: askedTurnId);
     if (picked != null) {
       if (picked['partial'] == true) {
         _applyPartialInboxRow(picked);
@@ -1178,19 +1174,11 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
-  bool _messagesMatchNotice(
-    int userIndex, {
-    required String sessionId,
-    required String question,
-    bool holdLoose = false,
-  }) {
+  bool _messagesMatchNotice(int userIndex, {required String turnId}) {
     if (userIndex < 0 || userIndex >= _messages.length) return false;
     return heldTurnMatchesNotice(
-      sessionId: sessionId,
-      currentSessionId: _sessionId ?? '',
-      question: question,
-      asked: _messages[userIndex].content,
-      holdLoose: holdLoose,
+      turnId: turnId,
+      askedTurnId: _messages[userIndex].turnId ?? '',
     );
   }
 
@@ -1240,12 +1228,7 @@ class _ChatPageState extends State<ChatPage> {
     if (hint == null) return;
     final userIndex = _processingUserIndex;
     if (userIndex == null) return;
-    if (!_messagesMatchNotice(
-      userIndex,
-      sessionId: hint.sessionId,
-      question: hint.question,
-      holdLoose: _holdForAnswer,
-    )) {
+    if (!_messagesMatchNotice(userIndex, turnId: hint.turnId)) {
       return;
     }
     final activity = hint.activity.trim();
@@ -1264,6 +1247,17 @@ class _ChatPageState extends State<ChatPage> {
     for (final entry in stored.transcripts.entries) {
       final incoming = entry.value.where((message) => message.role == 'assistant');
       if (incoming.isEmpty) continue;
+      final holdingThis =
+          _holdForAnswer && entry.key == (_sessionId ?? '') && _processingUserIndex != null;
+      if (holdingThis) {
+        final askedTurnId = _messages[_processingUserIndex!].turnId ?? '';
+        final held = answerAfterTurn(entry.value, askedTurnId);
+        if (held != null) {
+          _placeHeldAnswer(_processingUserIndex!, held);
+          changed = true;
+        }
+        continue;
+      }
       final last = incoming.last;
       final local = _transcripts[entry.key];
       final have = local?.any(
@@ -1271,16 +1265,6 @@ class _ChatPageState extends State<ChatPage> {
           ) ??
           false;
       if (have) continue;
-      final holdingThis =
-          _holdForAnswer && entry.key == (_sessionId ?? '') && _processingUserIndex != null;
-      if (holdingThis) {
-        final asked = _messages[_processingUserIndex!].content;
-        if (transcriptAnswersAsk(entry.value, asked)) {
-          _placeHeldAnswer(_processingUserIndex!, last.content);
-          changed = true;
-        }
-        continue;
-      }
       _transcripts[entry.key] = List<ChatMessage>.from(entry.value);
       changed = true;
     }

@@ -13,12 +13,14 @@ class InboxProgressHint {
   InboxProgressHint({
     required this.sessionId,
     required this.question,
+    this.turnId = '',
     this.activity = '',
     this.answer = '',
   });
 
   final String sessionId;
   final String question;
+  final String turnId;
   final String activity;
   final String answer;
 }
@@ -32,76 +34,86 @@ String stripTaskMarker(String text) {
 
 bool sameChatText(String a, String b) => stripTaskMarker(a) == stripTaskMarker(b);
 
-/// Inbox notices keep only this many characters of the question.
-const inboxQuestionCap = 200;
-
-/// The saved transcript already has an assistant reply after this ask.
-bool transcriptAnswersAsk(List<ChatMessage> messages, String asked) {
-  var lastUser = -1;
-  for (var i = 0; i < messages.length; i++) {
-    if (messages[i].role == 'user') lastUser = i;
+/// Assistant text stored on this turn, before the next user message.
+String? answerAfterTurn(List<ChatMessage> messages, String turnId) {
+  final userAt = indexOfTurn(messages, turnId);
+  if (userAt < 0) return null;
+  for (var i = userAt + 1; i < messages.length; i++) {
+    final message = messages[i];
+    if (message.role == 'user') return null;
+    if (message.role == 'assistant' && message.content.trim().isNotEmpty) {
+      return message.content;
+    }
   }
-  if (lastUser < 0) return false;
-  final answered = messages.skip(lastUser + 1).any(
-        (message) => message.role == 'assistant' && message.content.trim().isNotEmpty,
-      );
-  if (!answered) return false;
-  return heldTurnMatchesNotice(
-    sessionId: '',
-    currentSessionId: '',
-    question: messages[lastUser].content,
-    asked: asked,
-  );
+  return null;
 }
 
-/// Newest inbox row for this held turn. Older finals stay in the list and
-/// must not finish the question once a later row is the one that matches.
+/// The saved transcript already has an assistant reply after this turn.
+bool transcriptAnswersAsk(List<ChatMessage> messages, String askedTurnId) {
+  return answerAfterTurn(messages, askedTurnId) != null;
+}
+
+/// Newest inbox row for this turn id. Question text is not a match.
 Map<String, dynamic>? pickHeldInboxItem(
   List<Map<String, dynamic>> items, {
-  required String sessionId,
-  required String asked,
-  bool holdLoose = false,
+  required String turnId,
 }) {
+  final id = turnId.trim();
+  if (id.isEmpty) return null;
   for (final item in items) {
     final answer = (item['answer'] ?? '').toString().trim();
     final activity = (item['activity'] ?? '').toString().trim();
     if (answer.isEmpty && activity.isEmpty) continue;
-    final matched = heldTurnMatchesNotice(
-      sessionId: (item['sessionId'] ?? '').toString(),
-      currentSessionId: sessionId,
-      question: (item['question'] ?? '').toString(),
-      asked: asked,
-      holdLoose: holdLoose,
-    );
-    if (!matched) continue;
+    if (!heldTurnMatchesNotice(
+      turnId: (item['turnId'] ?? '').toString(),
+      askedTurnId: id,
+    )) {
+      continue;
+    }
     return item;
   }
   return null;
 }
 
-/// A dropped turn should take the inbox item for this session. The server
-/// stores only the first [inboxQuestionCap] characters of the question.
+/// A held turn takes only the inbox row that carries the same turn id.
 bool heldTurnMatchesNotice({
-  required String sessionId,
-  required String currentSessionId,
-  required String question,
-  required String asked,
-  bool holdLoose = false,
+  required String turnId,
+  required String askedTurnId,
 }) {
-  final current = currentSessionId.trim();
-  final incoming = sessionId.trim();
-  final q = question.trim();
-  final text = asked.trim();
-  final questionMatches = q.isNotEmpty &&
-      (text == q || (q.length >= inboxQuestionCap && text.startsWith(q)));
-  if (current.isNotEmpty && incoming.isNotEmpty && incoming != current) {
-    if (!(holdLoose && questionMatches)) return false;
+  final current = askedTurnId.trim();
+  final incoming = turnId.trim();
+  if (current.isEmpty || incoming.isEmpty) return false;
+  return current == incoming;
+}
+
+int indexOfTurn(List<ChatMessage> messages, String turnId) {
+  final id = turnId.trim();
+  if (id.isEmpty) return -1;
+  var found = -1;
+  for (var i = 0; i < messages.length; i++) {
+    if (messages[i].role == 'user' && (messages[i].turnId ?? '').trim() == id) {
+      found = i;
+    }
   }
-  if (q.isEmpty) {
-    if (holdLoose) return false;
-    return current.isNotEmpty && incoming == current;
+  return found;
+}
+
+/// Places [text] after the user message at [userAt]. False when that reply
+/// is already stored on this turn.
+bool insertTurnAnswer(List<ChatMessage> messages, int userAt, String text) {
+  var insertAt = userAt + 1;
+  while (insertAt < messages.length && messages[insertAt].role != 'user') {
+    final message = messages[insertAt];
+    if (message.role == 'assistant' && sameChatText(message.content, text)) {
+      return false;
+    }
+    insertAt++;
   }
-  return questionMatches;
+  messages.insert(
+    insertAt,
+    ChatMessage(role: 'assistant', content: text, engine: 'acp'),
+  );
+  return true;
 }
 
 /// Append a finished answer into the saved repo or book chat.
@@ -113,14 +125,15 @@ Future<bool> backfillChatFromNotice({
   String owner = '',
   String repo = '',
   String bookId = '',
+  String turnId = '',
 }) async {
   final text = stripTaskMarker(answer);
   final id = sessionId.trim();
   if (text.isEmpty || id.isEmpty) return false;
   final prefs = await SharedPreferences.getInstance();
   final wrote = bookId.trim().isNotEmpty
-      ? await _backfillBook(prefs, bookId.trim(), id, question.trim(), text)
-      : await _backfillRepo(prefs, owner.trim(), repo.trim(), id, question.trim(), text);
+      ? await _backfillBook(prefs, bookId.trim(), id, question.trim(), text, turnId.trim())
+      : await _backfillRepo(prefs, owner.trim(), repo.trim(), id, question.trim(), text, turnId.trim());
   if (wrote) chatBackfillTick.value = chatBackfillTick.value + 1;
   return wrote;
 }
@@ -132,6 +145,7 @@ Future<bool> _backfillRepo(
   String sessionId,
   String question,
   String answer,
+  String turnId,
 ) async {
   final memory = AppMemory(prefs);
   final names = <String>[];
@@ -153,6 +167,7 @@ Future<bool> _backfillRepo(
       sessionId: sessionId,
       answer: answer,
       question: question,
+      turnId: turnId,
     );
     if (next == null) {
       if (names.length == 1) return false;
@@ -170,23 +185,22 @@ RepoChatStore? appendRepoTranscript(
   required String sessionId,
   required String answer,
   String question = '',
+  String turnId = '',
 }) {
   final text = stripTaskMarker(answer);
   if (text.isEmpty) return null;
   final list = List<ChatMessage>.from(store.transcripts[sessionId] ?? const []);
-  if (list.any((message) => message.role == 'assistant' && sameChatText(message.content, text))) {
-    return null;
-  }
-  if (question.isNotEmpty) {
-    ChatMessage? lastUser;
-    for (final message in list) {
-      if (message.role == 'user') lastUser = message;
+  final id = turnId.trim();
+  if (id.isEmpty) return null;
+  final userAt = indexOfTurn(list, id);
+  if (userAt >= 0) {
+    if (!insertTurnAnswer(list, userAt, text)) return null;
+  } else {
+    if (question.isNotEmpty) {
+      list.add(ChatMessage(role: 'user', content: question, turnId: id));
     }
-    if (lastUser == null || lastUser.content.trim() != question) {
-      list.add(ChatMessage(role: 'user', content: question));
-    }
+    list.add(ChatMessage(role: 'assistant', content: text, engine: 'acp'));
   }
-  list.add(ChatMessage(role: 'assistant', content: text, engine: 'acp'));
   final transcripts = Map<String, List<ChatMessage>>.from(store.transcripts);
   transcripts[sessionId] = list;
   var sessions = store.sessions;
@@ -217,6 +231,7 @@ Future<bool> _backfillBook(
   String sessionId,
   String question,
   String answer,
+  String turnId,
 ) async {
   final memory = AppMemory(prefs);
   final store = memory.loadBookChats(bookId);
@@ -225,6 +240,7 @@ Future<bool> _backfillBook(
     sessionId: sessionId,
     answer: answer,
     question: question,
+    turnId: turnId,
   );
   if (next == null) return false;
   await memory.saveBookChats(bookId, next);
@@ -236,6 +252,7 @@ BookChatStore? appendBookTranscript(
   required String sessionId,
   required String answer,
   String question = '',
+  String turnId = '',
 }) {
   final text = stripTaskMarker(answer);
   if (text.isEmpty) return null;
@@ -255,19 +272,17 @@ BookChatStore? appendBookTranscript(
   }
   anchorId ??= 'start';
   final list = List<ChatMessage>.from(anchor?.messages ?? const []);
-  if (list.any((message) => message.role == 'assistant' && sameChatText(message.content, text))) {
-    return null;
-  }
-  if (question.isNotEmpty) {
-    ChatMessage? lastUser;
-    for (final message in list) {
-      if (message.role == 'user') lastUser = message;
+  final id = turnId.trim();
+  if (id.isEmpty) return null;
+  final userAt = indexOfTurn(list, id);
+  if (userAt >= 0) {
+    if (!insertTurnAnswer(list, userAt, text)) return null;
+  } else {
+    if (question.isNotEmpty) {
+      list.add(ChatMessage(role: 'user', content: question, turnId: id));
     }
-    if (lastUser == null || lastUser.content.trim() != question) {
-      list.add(ChatMessage(role: 'user', content: question));
-    }
+    list.add(ChatMessage(role: 'assistant', content: text, engine: 'acp'));
   }
-  list.add(ChatMessage(role: 'assistant', content: text, engine: 'acp'));
   final updated = store.upsertAnchorMessages(
     anchorId: anchorId,
     place: anchor?.place ?? const BookReadingPlace(),

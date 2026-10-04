@@ -295,12 +295,16 @@ export function startTurnRelay({
       const hadMeta = turn.meta != null;
       const prevQuestion = String(turn.meta?.question || "");
       const nextQuestion = String(next?.question || "");
+      const prevTurn = String(turn.meta?.turnId || "");
+      const nextTurn = String(next?.turnId || "");
       turn.meta = next;
       // noteTurn for the next question arrives before session/prompt. The
       // previous prompt is still done and still holds its answer. Publishing
-      // now would file that answer under the new question. Freeze until the
-      // new prompt clears it.
-      if (hadMeta && prevQuestion !== nextQuestion) {
+      // now would file that answer under the new turn. Freeze until the new
+      // prompt clears it. The same question text still counts as a new turn
+      // when the phone minted a different id.
+      const turnChanged = nextTurn && prevTurn !== nextTurn;
+      if (hadMeta && (prevQuestion !== nextQuestion || turnChanged)) {
         turn.publishedFinal = true;
         return;
       }

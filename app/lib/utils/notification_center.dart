@@ -300,6 +300,7 @@ class NotificationCenter {
             owner: item.owner ?? '',
             repo: item.repo ?? '',
             bookId: item.bookId ?? '',
+            turnId: item.turnId ?? '',
           );
         } catch (err) {
           debugPrint('Chat backfill failed: $err');
@@ -329,6 +330,7 @@ class NotificationCenter {
         inboxProgressHint.value = InboxProgressHint(
           sessionId: item.sessionId ?? '',
           question: item.question ?? '',
+          turnId: item.turnId ?? '',
           activity: activity,
           answer: answer,
         );
@@ -346,6 +348,7 @@ class NotificationCenter {
         owner: item.owner ?? '',
         repo: item.repo ?? '',
         bookId: item.bookId ?? '',
+        turnId: item.turnId ?? '',
       );
     } catch (err) {
       debugPrint('Chat backfill failed: $err');
