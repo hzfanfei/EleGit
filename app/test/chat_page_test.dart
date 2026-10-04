@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wenxiang/api/wenxiang_api.dart';
@@ -640,6 +641,108 @@ void main() {
     expect(find.text('你问'), findsOneWidget);
     expect(find.textContaining('从进度问起'), findsNothing);
     expect(find.byTooltip('复制回答'), findsOneWidget);
+  });
+
+  test('answer links only accept http, https, mailto, and tel', () {
+    expect(
+      chatAnswerLinkUri('https://example.com/guide'),
+      Uri.parse('https://example.com/guide'),
+    );
+    expect(chatAnswerLinkUri('mailto:a@b.c'), Uri.parse('mailto:a@b.c'));
+    expect(chatAnswerLinkUri('javascript:alert(1)'), isNull);
+    expect(chatAnswerLinkUri('wx-footnote:note'), isNull);
+  });
+
+  testWidgets('long-press copies the answer and a link tap tries to open it', (tester) async {
+    String? copied;
+    SharedPreferences.setMockInitialValues({});
+    final memory = AppMemory(await SharedPreferences.getInstance());
+    const answer = '最近在修登录。';
+    const link = 'https://example.com/guide';
+    final opened = <Uri>[];
+    await memory.saveChats(
+      'octo/demo',
+      RepoChatStore(
+        activeId: 'local-1',
+        sessions: [
+          ChatSession(
+            id: 'local-1',
+            title: '链接',
+            createdAt: '2026-09-16T00:00:00Z',
+            updatedAt: '2026-09-16T00:00:00Z',
+            active: true,
+          ),
+        ],
+        transcripts: {
+          'local-1': [
+            ChatMessage(role: 'assistant', content: answer),
+            ChatMessage(role: 'assistant', content: link),
+          ],
+        },
+      ),
+    );
+    final api = FakeWenxiangApi();
+    api.sessions
+      ..clear()
+      ..add(
+        ChatSession(
+          id: 'server-new',
+          title: '新会话',
+          createdAt: '2026-09-16T01:00:00Z',
+          updatedAt: '2026-09-16T01:00:00Z',
+          active: true,
+        ),
+      );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: ChatPage(
+          api: api,
+          repo: sampleRepo(),
+          memory: memory,
+          onBack: () {},
+          openAnswerLink: (uri) async {
+            opened.add(uri);
+            return true;
+          },
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.setData') {
+        copied = (call.arguments as Map)['text'] as String?;
+      }
+      return null;
+    });
+    addTearDown(() {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null);
+    });
+
+    final prose = find.textContaining('最近在修登录', findRichText: true);
+    expect(prose, findsOneWidget);
+    await tester.longPress(prose);
+    await tester.pump();
+    expect(copied, answer);
+    expect(find.text('已复制回答'), findsOneWidget);
+
+    final url = find.textContaining('https://', findRichText: true);
+    expect(url, findsOneWidget);
+    await tester.ensureVisible(url);
+    await tester.tap(url);
+    await tester.pump();
+    await tester.pump();
+    expect(opened, [Uri.parse(link)]);
+    expect(find.text('无法打开链接'), findsNothing);
+    expect(copied, answer);
+
+    await tester.longPress(url);
+    await tester.pump();
+    expect(copied, link);
+    expect(opened, [Uri.parse(link)]);
   });
 
   testWidgets('opens a restored repo chat at the latest message', (tester) async {
