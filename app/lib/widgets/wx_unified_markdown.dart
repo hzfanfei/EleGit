@@ -26,6 +26,11 @@ class WxMarkdownImageConfig {
 
 typedef WxMarkdownImageBuilder = Widget Function(WxMarkdownImageConfig config);
 
+bool _bareUrlLabel(String label) {
+  final plain = label.replaceAll('\u200b', '');
+  return plain.contains('://') || RegExp(r'^www\.', caseSensitive: false).hasMatch(plain);
+}
+
 /// One markdown pipeline for chat and book reader ([GptMarkdown]).
 class WxUnifiedMarkdownBody extends StatelessWidget {
   const WxUnifiedMarkdownBody({
@@ -100,6 +105,16 @@ class WxUnifiedMarkdownBody extends StatelessWidget {
           if (href.isEmpty) return;
           final label = title.trim().isNotEmpty ? title.trim() : href;
           onTapLink?.call(label, href, title);
+        },
+        inlineLinkBuilder: (link) {
+          final bare = link.isAutolink || _bareUrlLabel(link.label);
+          if (!bare) return link.defaultSpan();
+          final shown = link.isAutolink ? link.label : link.url;
+          return link.defaultSpan(
+            children: [
+              TextSpan(text: breakLongRuns(shown), style: link.style),
+            ],
+          );
         },
         imageBuilder: sizedImageBuilder == null
             ? null

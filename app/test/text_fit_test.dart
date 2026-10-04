@@ -5,15 +5,16 @@ import 'package:wenxiang/widgets/wx_rich_text.dart';
 void main() {
   test('prepareChatMarkdownForDisplay skips table and fence lines', () {
     const table = '| a | b |\n| --- | --- |\n';
-    const fence = '```dart\nlongline\n```\n';
-    final prose = 'https://example.com/${'x' * 40}\n';
+    const fence = '```dart\nhttps://example.com/keep-me\n```\n';
+    final prose = '${'abcdefghij' * 3}\n';
     final src = '$prose$table$fence';
     final out = prepareChatMarkdownForDisplay(src, isTableLine: isMarkdownTableLine);
     expect(out, contains('\u200b'));
     expect(out, contains('| --- | --- |'));
     expect(out.split('\u200b').length, greaterThan(1));
     final fencePart = out.substring(out.indexOf('```'));
-    expect(fencePart, contains('longline'));
+    expect(fencePart, contains('https://example.com/keep-me'));
+    expect(fencePart, isNot(contains('](https://')));
     expect(fencePart, isNot(contains('\u200b')));
   });
 
@@ -68,5 +69,30 @@ void main() {
     expect(out, contains(image));
     expect(out, contains(link));
     expect(out, contains('\u200b'));
+  });
+
+  test('bare urls become links and stay out of the following sentence', () {
+    const url = 'https://wenxiang.ngrok.app/files/问象-v0.1.0-151.apk?token=abc';
+    final out = prepareChatMarkdownForDisplay('下载$url下一句。');
+    expect(out, contains('[$url]($url)'));
+    expect(out, endsWith('下一句。'));
+    expect(out, isNot(contains('\u200b')));
+    final href = RegExp(r'\]\(([^)]*)\)').firstMatch(out)!.group(1);
+    expect(href, url);
+  });
+
+  test('a url glued to Chinese punctuation keeps the mark outside the link', () {
+    const url = 'https://example.com/a_b_c';
+    final out = prepareChatMarkdownForDisplay('见$url。');
+    expect(out, '见[$url]($url)。');
+  });
+
+  test('an existing markdown link is not rewritten around a bare url', () {
+    const link = '[官网](https://vuejs.org/guide/introduction.html)';
+    const bare = 'https://example.com/docs';
+    final out = prepareChatMarkdownForDisplay('见 $bare 与 $link');
+    expect(out, contains('[$bare]($bare)'));
+    expect(out, contains(link));
+    expect(out.indexOf('[$bare]'), lessThan(out.indexOf(link)));
   });
 }

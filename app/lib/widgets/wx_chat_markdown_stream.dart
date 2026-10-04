@@ -364,7 +364,7 @@ class _PendingView extends StatelessWidget {
           fontFamilyFallback: Wx.fontFallback,
         );
     return WxInlineMarkdown(
-      text,
+      prepareChatMarkdownForDisplay(text, isTableLine: isMarkdownTableLine),
       color: style?.color ?? Wx.text,
       size: style?.fontSize ?? 16,
     );

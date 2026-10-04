@@ -262,6 +262,8 @@ List<String> _cutChatSentences(String text) {
 
 /// Soft-wrap long ASCII in chat markdown prose without touching tables,
 /// fenced code, or link and image targets (those must stay byte-for-byte).
+/// Bare URLs become markdown links here so a wrap mark cannot land inside
+/// the target and knock the link back into the surrounding sentence.
 String prepareChatMarkdownForDisplay(
   String data, {
   bool Function(String line)? isTableLine,
@@ -293,10 +295,170 @@ String _breakOutsideProtected(String line) {
   final out = StringBuffer();
   var last = 0;
   for (final match in _protectedMarkdown.allMatches(line)) {
-    out.write(breakLongRuns(line.substring(last, match.start)));
+    out.write(_breakAndLink(line.substring(last, match.start)));
     out.write(match.group(0));
     last = match.end;
   }
-  out.write(breakLongRuns(line.substring(last)));
+  out.write(_breakAndLink(line.substring(last)));
   return out.toString();
+}
+
+final _urlStart = RegExp(
+  r'(?<![A-Za-z0-9@/+.\-])(?:https?://|www\.)',
+  caseSensitive: false,
+);
+
+const _urlTrailingAscii = '?!.,:*_~\'"';
+
+/// Wrap breaks are U+200B. The link scanner treats that code point as a space,
+/// so a bare URL chopped every eight letters never becomes a link and sits in
+/// the sentence as ordinary text. Turn the URL into a real link first. The
+/// visible label is wrapped later, when it is painted, so the target stays intact.
+String _breakAndLink(String text) {
+  if (text.isEmpty) return text;
+  final lower = text.toLowerCase();
+  if (!lower.contains('://') && !lower.contains('www.')) return breakLongRuns(text);
+  final out = StringBuffer();
+  var cursor = 0;
+  for (final match in _urlStart.allMatches(text)) {
+    if (match.start < cursor) continue;
+    final end = _tightUrlEnd(text, match.start);
+    if (end <= match.end) continue;
+    out.write(breakLongRuns(text.substring(cursor, match.start)));
+    if (_keepUrlLiteral(text, match.start)) {
+      final literalEnd = _gptUrlEnd(text, match.start);
+      out.write(text.substring(match.start, literalEnd));
+      cursor = literalEnd;
+      continue;
+    }
+    final split = _splitUrlTrailing(text.substring(match.start, end));
+    if (!_usableBareUrl(split.url, match.group(0)!)) {
+      out.write(breakLongRuns(text.substring(match.start, end)));
+      cursor = end;
+      continue;
+    }
+    final href = split.url.toLowerCase().startsWith('www.') ? 'http://${split.url}' : split.url;
+    out.write('[');
+    out.write(_markdownLabel(split.url));
+    out.write('](');
+    out.write(href);
+    out.write(')');
+    out.write(split.trailing);
+    cursor = end;
+  }
+  out.write(breakLongRuns(text.substring(cursor)));
+  return out.toString();
+}
+
+bool _usableBareUrl(String url, String scheme) {
+  if (url.length <= scheme.length) return false;
+  if (scheme.toLowerCase().startsWith('www.')) return url.contains('.');
+  return true;
+}
+
+String _markdownLabel(String url) {
+  return url
+      .replaceAll('[', '%5B')
+      .replaceAll(']', '%5D')
+      .replaceAll('*', '＊')
+      .replaceAll('~', '～');
+}
+
+bool _keepUrlLiteral(String text, int index) {
+  if (index > 0 && text[index - 1] == '<') return true;
+  final open = text.lastIndexOf('](', index);
+  if (open < 0) return false;
+  if (text.lastIndexOf('[', open) < 0) return false;
+  return !text.substring(open + 2, index).contains(')');
+}
+
+int _tightUrlEnd(String text, int start) {
+  var i = start;
+  final n = text.length;
+  while (i < n) {
+    final c = text.codeUnitAt(i);
+    if (c == 0x3C || c == 0x3E || _isUrlSpace(c)) break;
+    if (_isUrlAscii(c)) {
+      i++;
+      continue;
+    }
+    if (_isCjkLetter(c)) {
+      final runStart = i;
+      while (i < n && _isCjkLetter(text.codeUnitAt(i))) {
+        i++;
+      }
+      final prev = text.codeUnitAt(runStart - 1);
+      final pathish = prev == 0x2F || prev == 0x3D || prev == 0x2D || prev == 0x5F || prev == 0x2E;
+      final nextUrl = i < n && _isUrlAscii(text.codeUnitAt(i));
+      if (pathish || nextUrl) continue;
+      return runStart;
+    }
+    break;
+  }
+  return i;
+}
+
+int _gptUrlEnd(String text, int start) {
+  var i = start;
+  final n = text.length;
+  while (i < n) {
+    final c = text.codeUnitAt(i);
+    if (c == 0x3C || _isUrlSpace(c)) break;
+    i++;
+  }
+  return i;
+}
+
+bool _isUrlAscii(int c) => c >= 0x21 && c <= 0x7E && c != 0x3C && c != 0x3E;
+
+bool _isCjkLetter(int c) =>
+    (c >= 0x3400 && c <= 0x4DBF) || (c >= 0x4E00 && c <= 0x9FFF);
+
+bool _isUrlSpace(int c) {
+  if (c <= 0x20) return c == 0x20 || (c >= 0x09 && c <= 0x0D);
+  return c == 0xA0 ||
+      c == 0x1680 ||
+      (c >= 0x2000 && c <= 0x200A) ||
+      c == 0x2028 ||
+      c == 0x2029 ||
+      c == 0x202F ||
+      c == 0x205F ||
+      c == 0x3000 ||
+      c == 0xFEFF;
+}
+
+class _UrlSplit {
+  const _UrlSplit(this.url, this.trailing);
+  final String url;
+  final String trailing;
+}
+
+_UrlSplit _splitUrlTrailing(String raw) {
+  var url = raw;
+  var trailing = '';
+  var trimming = true;
+  while (trimming && url.isNotEmpty) {
+    trimming = false;
+    final last = url[url.length - 1];
+    if (_urlTrailingAscii.contains(last)) {
+      trailing = '$last$trailing';
+      url = url.substring(0, url.length - 1);
+      trimming = true;
+      continue;
+    }
+    if (last == ')' && _countChar(url, ')') > _countChar(url, '(')) {
+      trailing = ')$trailing';
+      url = url.substring(0, url.length - 1);
+      trimming = true;
+    }
+  }
+  return _UrlSplit(url, trailing);
+}
+
+int _countChar(String text, String ch) {
+  var count = 0;
+  for (final rune in text.runes) {
+    if (String.fromCharCode(rune) == ch) count++;
+  }
+  return count;
 }

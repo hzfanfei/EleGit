@@ -237,7 +237,9 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 250));
       expect(tester.takeException(), isNull);
-      expect(find.textContaining('见'), findsOneWidget);
+      expect(_mdText('见'), findsWidgets);
+      expect(_mdText('https://'), findsWidgets);
+      expect(_mdText('[https://'), findsNothing);
       expect(find.textContaining('const token'), findsOneWidget);
       expect(find.byType(GptMarkdown), findsWidgets);
     });
