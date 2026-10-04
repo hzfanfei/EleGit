@@ -100,7 +100,7 @@ class _BookChatPageState extends State<BookChatPage> {
     HapticFeedback.lightImpact();
     _input.clear();
     setState(() {
-      _messages.add(ChatMessage(role: 'user', content: message));
+      _messages.add(ChatMessage(role: 'user', content: message, turnId: mintTurnId()));
       _busy = true;
       _live = true;
       _decision = null;
@@ -114,6 +114,7 @@ class _BookChatPageState extends State<BookChatPage> {
         message: message,
         history: _messages.where((m) => m.role != 'error').toList(),
         sessionId: _sessionId,
+        turnId: _messages.last.turnId,
       )) {
         if (!mounted) return;
         if (event.sessionId != null && event.sessionId!.isNotEmpty) {

@@ -462,7 +462,7 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
     _phaseElapsed.value = 0;
     _startLivePhaseFallback();
     setState(() {
-      _messages.add(ChatMessage(role: 'user', content: raw));
+      _messages.add(ChatMessage(role: 'user', content: raw, turnId: mintTurnId()));
       _appearUserAt = _messages.length - 1;
       _busy = true;
       _live = true;
@@ -479,6 +479,7 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
         history: _messages.where((m) => m.role != 'error').toList(),
         sessionId: _sessionId,
         chapter: _place.chapter.trim().isEmpty ? null : _place.chapter.trim(),
+        turnId: _messages.last.turnId,
       )) {
         if (!mounted) return;
         if (event.sessionId != null && event.sessionId!.isNotEmpty) {

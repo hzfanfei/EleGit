@@ -29,6 +29,7 @@ export function noteLiveTurn(snapshot) {
     bookId: snapshot.bookId ?? prev.bookId,
     answer: snapshot.answer ?? prev.answer ?? "",
     activity: snapshot.activity ?? prev.activity ?? "",
+    turnId: snapshot.turnId !== undefined ? String(snapshot.turnId || "") : (prev.turnId || ""),
   });
 }
 
@@ -48,6 +49,7 @@ export async function publishLiveTurnSnapshots(workspaceRoot, { noticeFor, publi
       session: snap.session,
       question: snap.question,
       bookId: snap.bookId,
+      turnId: snap.turnId,
       partial: true,
       activity: snap.activity,
     });
@@ -116,6 +118,7 @@ export function createUnwatchedInboxMirror({
       session: snap.session,
       question: snap.question,
       bookId: snap.bookId,
+      turnId: snap.turnId,
       partial: true,
       activity,
     });

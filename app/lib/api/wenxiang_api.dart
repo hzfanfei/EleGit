@@ -1182,6 +1182,7 @@ class WenxiangApi {
     required List<ChatMessage> history,
     String? sessionId,
     String? chapter,
+    String? turnId,
   }) {
     _chatCancelled = false;
     return _retryBeforeVisible(
@@ -1191,6 +1192,7 @@ class WenxiangApi {
         history: history,
         sessionId: sessionId,
         chapter: chapter,
+        turnId: turnId,
       ),
       cancelled: () => _chatCancelled,
     );
@@ -1202,6 +1204,7 @@ class WenxiangApi {
     required List<ChatMessage> history,
     String? sessionId,
     String? chapter,
+    String? turnId,
   }) async* {
     final client = http.Client();
     _chatClient = client;
@@ -1216,6 +1219,7 @@ class WenxiangApi {
           'bookId': bookId,
           'message': message,
           if (sessionId != null && sessionId.isNotEmpty) 'sessionId': sessionId,
+          if (turnId != null && turnId.isNotEmpty) 'turnId': turnId,
           if (chapter != null && chapter.isNotEmpty) 'chapter': chapter,
           'history': history
               .map((m) => {'role': m.role, 'content': m.content})
@@ -1329,6 +1333,7 @@ class WenxiangApi {
     required List<ChatMessage> history,
     String? sessionId,
     bool agentMode = false,
+    String? turnId,
   }) {
     _chatCancelled = false;
     return _retryBeforeVisible(
@@ -1339,6 +1344,7 @@ class WenxiangApi {
         history: history,
         sessionId: sessionId,
         agentMode: agentMode,
+        turnId: turnId,
       ),
       cancelled: () => _chatCancelled,
     );
@@ -1351,6 +1357,7 @@ class WenxiangApi {
     required List<ChatMessage> history,
     String? sessionId,
     bool agentMode = false,
+    String? turnId,
   }) async* {
     final client = http.Client();
     _chatClient = client;
@@ -1367,6 +1374,7 @@ class WenxiangApi {
           'repo': repo,
           'message': message,
           if (sessionId != null && sessionId.isNotEmpty) 'sessionId': sessionId,
+          if (turnId != null && turnId.isNotEmpty) 'turnId': turnId,
           if (agentMode) 'agentMode': true,
           'history': history
               .map((m) => {'role': m.role, 'content': m.content})

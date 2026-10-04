@@ -27,6 +27,7 @@ class InboxItem {
     this.owner,
     this.repo,
     this.bookId,
+    this.turnId,
     this.partial = false,
     this.activity,
   });
@@ -43,6 +44,7 @@ class InboxItem {
   final String? owner;
   final String? repo;
   final String? bookId;
+  final String? turnId;
   final bool partial;
   final String? activity;
 
@@ -66,6 +68,7 @@ class InboxItem {
       owner: json['owner']?.toString(),
       repo: json['repo']?.toString(),
       bookId: json['bookId']?.toString(),
+      turnId: json['turnId']?.toString(),
       partial: json['partial'] == true,
       activity: json['activity']?.toString(),
     );
@@ -95,6 +98,7 @@ class NotificationCenter {
   Timer? _heartbeatTimer;
   bool _permissionGranted = false;
   bool _starting = false;
+  final Set<String> _alertedTurns = {};
 
   final ValueNotifier<int> unreadCount = ValueNotifier<int>(0);
   final ValueNotifier<bool> enabled = ValueNotifier<bool>(false);
@@ -307,6 +311,16 @@ class NotificationCenter {
     }
   }
 
+  bool _claimAlert(String key) {
+    final token = key.trim();
+    if (token.isEmpty) return true;
+    if (!_alertedTurns.add(token)) return false;
+    if (_alertedTurns.length > 200) {
+      _alertedTurns.remove(_alertedTurns.first);
+    }
+    return true;
+  }
+
   Future<void> _showItem(InboxItem item) async {
     if (item.partial) {
       final activity = (item.activity ?? '').trim();
@@ -321,6 +335,9 @@ class NotificationCenter {
       }
       return;
     }
+    final turnId = (item.turnId ?? '').trim();
+    final alertKey = turnId.isNotEmpty ? turnId : item.id.trim();
+    final toast = !item.read && _claimAlert(alertKey);
     try {
       await backfillChatFromNotice(
         sessionId: item.sessionId ?? '',
@@ -333,7 +350,7 @@ class NotificationCenter {
     } catch (err) {
       debugPrint('Chat backfill failed: $err');
     }
-    if (item.read) return;
+    if (!toast) return;
     if (!Platform.isAndroid) return;
     final plugin = FlutterLocalNotificationsPlugin();
     final details = AndroidNotificationDetails(
@@ -345,11 +362,12 @@ class NotificationCenter {
       importance: Importance.high,
       priority: Priority.high,
       category: AndroidNotificationCategory.message,
+      onlyAlertOnce: true,
       styleInformation: BigTextStyleInformation(item.body),
     );
     try {
       await plugin.show(
-        _stableId(item.id),
+        _stableId(alertKey),
         item.title,
         item.body,
         NotificationDetails(android: details),
@@ -360,6 +378,7 @@ class NotificationCenter {
         await _api?.markInboxRead(id);
       }
     } catch (err) {
+      _alertedTurns.remove(alertKey);
       debugPrint('Show notification failed: $err');
     }
   }

@@ -11,6 +11,21 @@ export { detectCursorEngine } from "./acp.js";
 export { whichSync } from "./which.js";
 export { buildAcpPrompt, buildBookAcpPrompt } from "./acp.js";
 
+const TURN_ID_RE = /^[\w.-]{1,80}$/;
+
+/** Phone-minted id for one question. Empty when missing or not a safe token. */
+export function cleanTurnId(value) {
+  const id = String(value || "").trim();
+  return TURN_ID_RE.test(id) ? id : "";
+}
+
+function withTurnId(notice, turnId) {
+  const id = cleanTurnId(turnId);
+  if (!notice || !id) return notice;
+  notice.turnId = id;
+  return notice;
+}
+
 /**
  * Marker the agent emits when a previously-deferred / background answer is now
  * ready. Anything after this marker (on its own line) becomes the inbox body.
@@ -23,7 +38,7 @@ const CHAT_ANSWER_CAP = 20000;
  * When a finished reply contains the task marker, split the toast preview
  * from the full text that should be written back into the chat.
  */
-export function taskCompletionNotice(full, { session, question, bookId } = {}) {
+export function taskCompletionNotice(full, { session, question, bookId, turnId } = {}) {
   const text = String(full || "");
   const match = text.match(TASK_COMPLETED_RE);
   if (!match) return null;
@@ -43,7 +58,7 @@ export function taskCompletionNotice(full, { session, question, bookId } = {}) {
     notice.owner = session.owner;
     notice.repo = session.repo;
   }
-  return notice;
+  return withTurnId(notice, turnId);
 }
 
 /** Publish when the phone will not see the SSE `done` event. */
@@ -81,7 +96,7 @@ export function answerReadyNotice(full, ctx = {}) {
     notice.title = "回答编写中";
   }
   if (ctx.activity) notice.activity = String(ctx.activity).slice(0, 4000);
-  return notice;
+  return withTurnId(notice, ctx.turnId);
 }
 
 export function streamOptsFromEnv() {
@@ -253,6 +268,7 @@ export async function* streamAnswer({
   taskSettleMs = 1500,
   partialBackfill = false,
   isUnwatched,
+  turnId = "",
 }) {
   const opts = { ...streamOpts, signal };
   const engine = detectEngine();
@@ -267,6 +283,8 @@ export async function* streamAnswer({
           })
         : null;
     const touchInboxMirror = () => inboxMirror?.schedule(session.id);
+    const turnCtx = { session, question, bookId, turnId };
+    noteLiveTurn({ ...turnCtx, answer: "", activity: "" });
     try {
     yield { type: "start", engine: "acp" };
     yield { type: "status", phase: "agent", detail: "正在调用本机 Agent…" };
@@ -281,7 +299,7 @@ export async function* streamAnswer({
     let taskNotified = false;
     function maybePublishTaskNotice() {
       if (taskNotified || !workspaceRoot) return;
-      const notice = taskCompletionNotice(full, { session, question, bookId });
+      const notice = taskCompletionNotice(full, turnCtx);
       if (!notice) return;
       taskNotified = true;
       publishInboxNotice(workspaceRoot, notice)
@@ -299,7 +317,7 @@ export async function* streamAnswer({
       settleTimer = null;
     }
     function armSettle() {
-      const notice = taskCompletionNotice(full, { session, question, bookId });
+      const notice = taskCompletionNotice(full, turnCtx);
       if (!notice || !sessions?.interrupt) {
         clearSettle();
         return;
@@ -331,9 +349,10 @@ export async function* streamAnswer({
         workspaceRoot,
         bookId,
         partialBackfill,
+        turnId,
         onDelta: (chunk) => {
           full += chunk;
-          noteLiveTurn({ session, question, bookId, answer: full, activity: lastActivity });
+          noteLiveTurn({ ...turnCtx, answer: full, activity: lastActivity });
           touchInboxMirror();
           queue.push({ kind: "delta", text: chunk });
           notify?.();
@@ -344,7 +363,7 @@ export async function* streamAnswer({
           const label = String(detail ?? "").trim();
           if (label) {
             lastActivity = label;
-            noteLiveTurn({ session, question, bookId, answer: full, activity: lastActivity });
+            noteLiveTurn({ ...turnCtx, answer: full, activity: lastActivity });
             touchInboxMirror();
           }
           if (hintCleared) return;
@@ -406,7 +425,7 @@ export async function* streamAnswer({
     if (!fail && full) {
       clearLiveTurn(session?.id);
       if (workspaceRoot && !taskNotified) {
-        const notice = taskCompletionNotice(full, { session, question, bookId });
+        const notice = taskCompletionNotice(full, turnCtx);
         if (notice) {
           try {
             const item = await publishInboxNotice(workspaceRoot, notice);

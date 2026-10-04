@@ -97,6 +97,7 @@ class SyncService : Service() {
                 for (i in 0 until items.length()) {
                     val item = items.optJSONObject(i) ?: continue
                     if (item.optBoolean("read")) continue
+                    if (item.optBoolean("partial")) continue
                     showInbox(item)
                 }
             } catch (_: Exception) {
@@ -108,9 +109,15 @@ class SyncService : Service() {
 
     private fun showInbox(item: JSONObject) {
         val id = item.optString("id")
+        val turnId = item.optString("turnId").trim()
         val title = item.optString("title").ifBlank { "问象" }
         val text = item.optString("body")
         if (text.isBlank()) return
+        val key = if (turnId.isNotEmpty()) turnId else id
+        if (!claimAlert(key)) {
+            if (id.isNotBlank()) markInboxRead(id)
+            return
+        }
         val manager = getSystemService(NotificationManager::class.java)
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, INBOX_CHANNEL_ID)
@@ -125,10 +132,11 @@ class SyncService : Service() {
             .setSmallIcon(R.drawable.ic_stat_wenxiang)
             .setLargeIcon(NotificationIcons.largeIconBitmap(this))
             .setAutoCancel(true)
+            .setOnlyAlertOnce(true)
             .setPriority(Notification.PRIORITY_HIGH)
             .setCategory(Notification.CATEGORY_MESSAGE)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
-        manager.notify(noteId(id), builder.build())
+        manager.notify(noteId(key), builder.build())
         if (id.isNotBlank()) {
             markInboxRead(id)
         }
@@ -231,9 +239,29 @@ class SyncService : Service() {
         private const val POLL_MS = 4_000L
         private const val RESTART_INTERVAL_MS: Long = 5 * 60 * 60 * 1000L
 
+        private val alerted = LinkedHashSet<String>()
+
+        private fun claimAlert(key: String): Boolean {
+            val token = key.trim()
+            if (token.isEmpty()) return true
+            synchronized(alerted) {
+                if (!alerted.add(token)) return false
+                val it = alerted.iterator()
+                while (alerted.size > 200 && it.hasNext()) {
+                    it.next()
+                    it.remove()
+                }
+                return true
+            }
+        }
+
         private fun noteId(id: String): Int {
-            val h = id.hashCode() and 0x7fffffff
-            return if (h == 0 || h == ONGOING_ID) 1 else h
+            var h = 0
+            for (c in id) {
+                h = (h * 31 + c.code) and 0x7fffffff
+            }
+            val hashed = if (h == 0) 1 else h
+            return if (hashed == ONGOING_ID) 1 else hashed
         }
     }
 }

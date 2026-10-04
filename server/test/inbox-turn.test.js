@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
-import { appendInboxItem, listInbox, patchInboxActivity } from "../src/inbox.js";
+import { appendInboxItem, listInbox, markInboxRead, patchInboxActivity } from "../src/inbox.js";
 
 describe("inbox turn progress", () => {
   it("replaces the open partial with the finished answer", async () => {
@@ -96,6 +96,78 @@ describe("inbox turn progress", () => {
       });
       assert.match(revived.activity, /已结束/);
       assert.doesNotMatch(revived.activity, /已跑/);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps progress unread-free and alerts a turn only once", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "wx-inbox-"));
+    try {
+      const partial = await appendInboxItem(root, {
+        kind: "agent-notification",
+        title: "回答编写中",
+        body: "先写",
+        answer: "先写",
+        sessionId: "s1",
+        question: "进度如何",
+        turnId: "turn-a",
+        partial: true,
+      });
+      assert.equal(partial.partial, true);
+      assert.equal(partial.read, true);
+      assert.equal(partial.alert, false);
+      const done = await appendInboxItem(root, {
+        kind: "agent-notification",
+        title: "回答已就绪",
+        body: "写完了",
+        answer: "写完了",
+        sessionId: "s1",
+        question: "进度如何",
+        turnId: "turn-a",
+      });
+      assert.equal(done.id, partial.id);
+      assert.equal(done.partial, false);
+      assert.equal(done.read, false);
+      assert.equal(done.alert, true);
+      await markInboxRead(root, done.id);
+      const again = await appendInboxItem(root, {
+        kind: "agent-notification",
+        title: "回答已就绪",
+        body: "又写了一遍",
+        answer: "又写了一遍",
+        sessionId: "s1",
+        question: "进度如何",
+        turnId: "turn-a",
+      });
+      assert.equal(again.alert, false);
+      assert.equal(again.read, true);
+      const late = await appendInboxItem(root, {
+        kind: "agent-notification",
+        title: "回答编写中",
+        body: "还在写",
+        answer: "还在写",
+        sessionId: "s1",
+        question: "进度如何",
+        turnId: "turn-a",
+        partial: true,
+      });
+      assert.equal(late.answer, "又写了一遍");
+      assert.equal(late.partial, false);
+      const items = await listInbox(root);
+      assert.equal(items.length, 1);
+      assert.equal(items[0].read, true);
+      const other = await appendInboxItem(root, {
+        kind: "agent-notification",
+        title: "回答已就绪",
+        body: "另一问",
+        answer: "另一问",
+        sessionId: "s1",
+        question: "进度如何",
+        turnId: "turn-b",
+      });
+      assert.equal(other.alert, true);
+      assert.equal((await listInbox(root)).length, 2);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

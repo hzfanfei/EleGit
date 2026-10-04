@@ -835,7 +835,12 @@ class _ChatPageState extends State<ChatPage> {
     late int userIndex;
     setState(() {
       _rememberInputMode(voice);
-      _messages.add(ChatMessage(role: 'user', content: text, via: voice ? 'voice' : null));
+      _messages.add(ChatMessage(
+        role: 'user',
+        content: text,
+        via: voice ? 'voice' : null,
+        turnId: mintTurnId(),
+      ));
       userIndex = _messages.length - 1;
       _appearUserKey = '${_sessionId ?? ''}:$userIndex';
     });
@@ -908,6 +913,7 @@ class _ChatPageState extends State<ChatPage> {
         sessionId: _sessionId,
         history: history,
         agentMode: _agentMode,
+        turnId: _messages[userIndex].turnId,
       )) {
         if (!mounted) return;
         accepted = true;

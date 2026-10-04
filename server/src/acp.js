@@ -1793,6 +1793,7 @@ export function createSessionStore({
     workspaceRoot,
     bookId,
     partialBackfill = false,
+    turnId = "",
   }) {
     const command = resolveCommand();
     if (!command) {
@@ -1863,6 +1864,7 @@ export function createSessionStore({
           session: { id: session.id, owner: session.owner, repo: session.repo },
           question,
           bookId,
+          turnId,
           partial: Boolean(partialBackfill),
         });
         await channel.applySessionMode();

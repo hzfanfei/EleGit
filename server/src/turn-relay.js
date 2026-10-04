@@ -181,6 +181,7 @@ export function startTurnRelay({
       session: turn.meta.session,
       question: turn.meta.question,
       bookId: turn.meta.bookId,
+      turnId: turn.meta.turnId,
       partial: !final,
       activity,
     });

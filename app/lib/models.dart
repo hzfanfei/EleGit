@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'voice/tts_voice_catalog.dart';
@@ -178,6 +179,13 @@ class ChatSession {
       };
 }
 
+/// Id for one sent question. Minted on the phone before the request goes out.
+String mintTurnId() {
+  final now = DateTime.now().microsecondsSinceEpoch.toRadixString(16);
+  final rand = Random().nextInt(0x7fffffff).toRadixString(16);
+  return 't$now$rand';
+}
+
 class ChatMessage {
   ChatMessage({
     required this.role,
@@ -185,6 +193,7 @@ class ChatMessage {
     this.engine,
     this.streaming = false,
     this.via,
+    this.turnId,
   });
 
   final String role;
@@ -193,13 +202,17 @@ class ChatMessage {
   bool streaming;
   /// `voice` for quick-voice turns; null for typed chat.
   final String? via;
+  /// Set on the user message that opened this turn.
+  final String? turnId;
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) {
+    final rawTurn = json['turnId']?.toString().trim() ?? '';
     return ChatMessage(
       role: (json['role'] ?? '').toString(),
       content: (json['content'] ?? '').toString(),
       engine: json['engine']?.toString(),
       via: json['via']?.toString(),
+      turnId: rawTurn.isEmpty ? null : rawTurn,
     );
   }
 
@@ -208,6 +221,7 @@ class ChatMessage {
         'content': content,
         if (engine != null && engine!.isNotEmpty) 'engine': engine,
         if (via != null && via!.isNotEmpty) 'via': via,
+        if (turnId != null && turnId!.isNotEmpty) 'turnId': turnId,
       };
 }
 

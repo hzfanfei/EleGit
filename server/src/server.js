@@ -18,7 +18,7 @@ import {
 import { askBookOnCall, handleBookVoiceTurn, prepareBookTurnContext } from "./book-voice-turn.js";
 import { handleRepoVoiceTurn } from "./repo-voice-turn.js";
 import { handleSpeakSummary } from "./speak-summary.js";
-import { streamAnswer, synthesizeBookAnswer, answerReadyNotice, shouldPublishFinishedAnswer } from "./ask.js";
+import { streamAnswer, synthesizeBookAnswer, answerReadyNotice, shouldPublishFinishedAnswer, cleanTurnId } from "./ask.js";
 import { ensureTurnRelay, relaySpawn, turnRelayEnabled } from "./turn-relay-client.js";
 import { setPhoneForeground, phoneInForeground } from "./phone-presence.js";
 import { openSse, sseClientGone, writeSse, writeSseSafe } from "./sse.js";
@@ -178,12 +178,12 @@ function trackUnwatched(res) {
   return () => gone || !phoneInForeground() || sseClientGone(res);
 }
 
-async function notifyFinishedAnswer({ notified, aborted, unwatched, delivered, answer, session, question, bookId }) {
+async function notifyFinishedAnswer({ notified, aborted, unwatched, delivered, answer, session, question, bookId, turnId }) {
   if (!shouldPublishFinishedAnswer({ notified, aborted, unwatched, delivered })) return;
   try {
     await publishInboxNotice(
       store.config.workspaceRoot,
-      answerReadyNotice(answer, { session, question, bookId }),
+      answerReadyNotice(answer, { session, question, bookId, turnId }),
     );
   } catch {
     /* notification is best-effort */
@@ -1218,6 +1218,7 @@ app.post("/v1/books/chat", async (req, res) => {
     const sessionId = String(req.body?.sessionId || "").trim();
     const chapter = String(req.body?.chapter || "").trim();
     const history = Array.isArray(req.body?.history) ? req.body.history : [];
+    const turnId = cleanTurnId(req.body?.turnId);
     if (!bookId || !message) {
       res.status(400).json({ error: "bookId and message are required" });
       return;
@@ -1285,6 +1286,7 @@ app.post("/v1/books/chat", async (req, res) => {
       workspaceRoot: store.config.workspaceRoot,
       bookId: book.id,
       isUnwatched: unwatched,
+      turnId,
     })) {
       if (event.type === "notification") notified = true;
       if (event.type === "done") {
@@ -1314,6 +1316,7 @@ app.post("/v1/books/chat", async (req, res) => {
         session,
         question: message,
         bookId: book.id,
+        turnId,
       });
       bookSessions.ackTurn?.(session);
     }
@@ -1390,6 +1393,7 @@ app.post("/v1/chat", async (req, res) => {
     const sessionId = String(req.body?.sessionId || "").trim();
     const history = Array.isArray(req.body?.history) ? req.body.history : [];
     const agentMode = req.body?.agentMode === true;
+    const turnId = cleanTurnId(req.body?.turnId);
     if (!owner || !repo || !message) {
       res.status(400).json({ error: "owner, repo, and message are required" });
       return;
@@ -1471,6 +1475,7 @@ app.post("/v1/chat", async (req, res) => {
       detectEngine: () => detectCursorEngine("repo"),
       partialBackfill: String(req.headers["x-wenxiang-backfill"] || "") === "partial",
       isUnwatched: unwatched,
+      turnId,
     })) {
       if (event.type === "notification") notified = true;
       if (event.type === "done") {
@@ -1498,6 +1503,7 @@ app.post("/v1/chat", async (req, res) => {
         answer: finalAnswer,
         session,
         question: message,
+        turnId,
       });
       sessions.ackTurn?.(session);
     }

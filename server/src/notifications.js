@@ -104,11 +104,20 @@ export function broadcastInboxItem(item) {
   return delivered;
 }
 
-/** Store a notice, push it, and mark it read once a phone is listening. */
+/** Progress updates stay on the socket. A finished turn is pushed once. */
+export function shouldPushNotice(notice, item) {
+  if (!item) return false;
+  if (notice?.partial === true) return item.partial === true;
+  return item.alert !== false;
+}
+
+/** Store a notice. Push progress live, and push a finished answer once per turn. */
 export async function publishInboxNotice(workspaceRoot, notice) {
   if (!workspaceRoot || !notice) return null;
-  const item = await appendInboxItem(workspaceRoot, notice);
-  if (!item) return null;
+  const stored = await appendInboxItem(workspaceRoot, notice);
+  if (!stored) return null;
+  const { alert, ...item } = stored;
+  if (!shouldPushNotice(notice, { ...item, alert })) return item;
   broadcastInboxItem(item);
   return item;
 }
