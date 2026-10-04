@@ -241,6 +241,7 @@ class FakeWenxiangApi extends WenxiangApi {
     required List<ChatMessage> history,
     String? sessionId,
     String? chapter,
+    String? turnId,
   }) =>
       chatStream(
         owner: '_book',
@@ -248,6 +249,7 @@ class FakeWenxiangApi extends WenxiangApi {
         message: message,
         history: history,
         sessionId: sessionId,
+        turnId: turnId,
       );
 
   @override
@@ -504,6 +506,7 @@ class FakeWenxiangApi extends WenxiangApi {
     required List<ChatMessage> history,
     String? sessionId,
     bool agentMode = false,
+    String? turnId,
   }) async* {
     lastSessionId = sessionId;
     lastChatMessage = message;

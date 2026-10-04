@@ -788,4 +788,63 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
     }
   });
+
+  testWidgets('queued turn can be edited and still waits its turn', (tester) async {
+    final api = FakeWenxiangApi(
+      streamPace: const Duration(milliseconds: 200),
+      streamEvents: [
+        ChatStreamEvent(type: 'start', engine: 'local-progress'),
+        ChatStreamEvent(type: 'delta', text: '按顺序答。'),
+        ChatStreamEvent(type: 'done', engine: 'local-progress', sessionId: 's1'),
+      ],
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: ChatPage(
+          api: api,
+          repo: sampleRepo(),
+          onBack: () {},
+        ),
+      ),
+    );
+    await _pumpUntilChatReady(tester);
+    await tester.tap(find.text('这个仓库最近在做什么？'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 40));
+
+    await tester.enterText(find.byType(TextField), '旧问题');
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('wx-chat-send')));
+    await tester.pump();
+    expect(find.text('旧问题'), findsOneWidget);
+    expect(find.text('排队中'), findsOneWidget);
+    final sessionsBefore = api.createSessionCalls;
+
+    await tester.tap(find.byKey(const Key('wx-queue-edit')));
+    await tester.pump();
+    expect(find.byKey(const Key('wx-edit-field')), findsOneWidget);
+    await tester.enterText(find.byKey(const Key('wx-edit-field')), '改过的问题');
+    await tester.tap(find.byKey(const Key('wx-queue-edit-save')));
+    await tester.pump();
+
+    expect(find.text('改过的问题'), findsOneWidget);
+    expect(find.text('旧问题'), findsNothing);
+    expect(find.text('排队中'), findsOneWidget);
+    expect(api.chatMessages, ['这个仓库最近在做什么？']);
+    expect(api.createSessionCalls, sessionsBefore);
+
+    for (var i = 0; i < 40; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+      if (api.chatMessages.length >= 2) break;
+    }
+    expect(api.chatMessages, [
+      '这个仓库最近在做什么？',
+      '改过的问题',
+    ]);
+    expect(find.text('排队中'), findsNothing);
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+  });
 }

@@ -730,7 +730,10 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   void _beginEdit(int index) {
-    if (_busy || _live) return;
+    if (index < 0 || index >= _messages.length) return;
+    if (_processingUserIndex == index) return;
+    final queued = _isQueuedUserMessage(index, _messages[index]);
+    if (!queued && (_busy || _live)) return;
     setState(() => _editingIndex = index);
   }
 
@@ -741,7 +744,22 @@ class _ChatPageState extends State<ChatPage> {
 
   Future<void> _commitEdit(int index, String text) async {
     final next = text.trim();
-    if (next.isEmpty || _busy) return;
+    if (next.isEmpty) return;
+    if (index < 0 || index >= _messages.length) return;
+    final message = _messages[index];
+    final queued = _isQueuedUserMessage(index, message) && _processingUserIndex != index;
+    if (queued) {
+      setState(() {
+        message.content = next;
+        _editingIndex = null;
+      });
+      await _persist();
+      return;
+    }
+    if (_busy || _live) {
+      if (mounted) setState(() => _editingIndex = null);
+      return;
+    }
     final prefix = List<ChatMessage>.from(_messages.take(index));
     try {
       final created = await widget.api.createSession(widget.repo.owner, widget.repo.name);
@@ -892,6 +910,7 @@ class _ChatPageState extends State<ChatPage> {
     _decision = null;
     _startLivePhaseFallback();
     setState(() {
+      if (_editingIndex == userIndex) _editingIndex = null;
       _live = true;
       _busy = true;
     });
@@ -1489,9 +1508,9 @@ class _ChatPageState extends State<ChatPage> {
                           queued: _isQueuedUserMessage(chronological, message),
                           editing: _editingIndex == chronological,
                           onEdit: message.role == 'user' &&
-                                  !_busy &&
-                                  !_live &&
-                                  !_isQueuedUserMessage(chronological, message)
+                                  _processingUserIndex != chronological &&
+                                  (_isQueuedUserMessage(chronological, message) ||
+                                      (!_busy && !_live))
                               ? () => _beginEdit(chronological)
                               : null,
                           onCancelEdit: _cancelEdit,
@@ -1710,6 +1729,33 @@ class _SuggestRow extends StatelessWidget {
   }
 }
 
+Widget? _queuedTurnActions({
+  required VoidCallback? onEdit,
+  required VoidCallback? onRemove,
+}) {
+  final edit = onEdit == null
+      ? null
+      : IconButton(
+          key: const Key('wx-queue-edit'),
+          tooltip: '编辑',
+          visualDensity: VisualDensity.compact,
+          onPressed: onEdit,
+          icon: const Icon(Icons.edit_outlined, size: 18),
+        );
+  final remove = onRemove == null
+      ? null
+      : IconButton(
+          key: const Key('wx-queue-remove'),
+          tooltip: '移出队列',
+          visualDensity: VisualDensity.compact,
+          onPressed: onRemove,
+          icon: const Icon(Icons.close, size: 18, color: Wx.muted),
+        );
+  if (edit == null) return remove;
+  if (remove == null) return edit;
+  return Row(mainAxisSize: MainAxisSize.min, children: [edit, remove]);
+}
+
 class _EditableUserTurn extends StatefulWidget {
   const _EditableUserTurn({
     required this.message,
@@ -1767,22 +1813,19 @@ class _EditableUserTurnState extends State<_EditableUserTurn> {
           : null,
       trailing: widget.editing
           ? null
-          : widget.queued && widget.onRemoveQueue != null
-              ? IconButton(
-                  key: const Key('wx-queue-remove'),
-                  tooltip: '移出队列',
-                  visualDensity: VisualDensity.compact,
-                  onPressed: widget.onRemoveQueue,
-                  icon: const Icon(Icons.close, size: 18, color: Wx.muted),
+          : widget.queued
+              ? _queuedTurnActions(
+                  onEdit: widget.onEdit,
+                  onRemove: widget.onRemoveQueue,
                 )
               : widget.onEdit == null
                   ? null
                   : IconButton(
-              tooltip: '编辑',
-              visualDensity: VisualDensity.compact,
-              onPressed: widget.onEdit,
-              icon: const Icon(Icons.edit_outlined, size: 18),
-            ),
+                      tooltip: '编辑',
+                      visualDensity: VisualDensity.compact,
+                      onPressed: widget.onEdit,
+                      icon: const Icon(Icons.edit_outlined, size: 18),
+                    ),
       child: widget.editing
           ? Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1805,8 +1848,9 @@ class _EditableUserTurnState extends State<_EditableUserTurn> {
                     TextButton(onPressed: widget.onCancel, child: const Text('取消')),
                     const Spacer(),
                     FilledButton(
+                      key: Key(widget.queued ? 'wx-queue-edit-save' : 'wx-edit-send'),
                       onPressed: () => widget.onSubmit?.call(_edit.text),
-                      child: const Text('发送'),
+                      child: Text(widget.queued ? '保存' : '发送'),
                     ),
                   ],
                 ),
