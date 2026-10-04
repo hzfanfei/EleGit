@@ -490,9 +490,45 @@ void main() {
     await tester.pump();
 
     expect(find.textContaining('连接断了'), findsNothing);
+    expect(find.textContaining('连接中断'), findsNothing);
     expect(find.text('重试上一问'), findsNothing);
     final mark = tester.widget<WxLoading>(find.byKey(const Key('wx-working-mark')));
     expect(mark.color, Wx.holdPoll);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 1));
+  });
+
+  testWidgets('hold ending without an answer does not show the connection error', (tester) async {
+    final api = FakeWenxiangApi(
+      streamThrows: AcceptedChatDrop(
+        Exception(
+          'ClientException: Connection closed while receiving data, uri=http://192.168.110.169:8787/v1/chat',
+        ),
+      ),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme(),
+        home: ChatPage(
+          api: api,
+          repo: sampleRepo(),
+          onBack: () {},
+        ),
+      ),
+    );
+    await _pumpUntilChatReady(tester);
+    await tester.tap(find.text('这个仓库最近在做什么？'));
+    await tester.pump();
+    await tester.pump();
+
+    await tester.pump(const Duration(minutes: 13));
+    await tester.pump();
+
+    expect(find.textContaining('连接中断'), findsNothing);
+    expect(find.textContaining('Connection closed'), findsNothing);
+    expect(find.text('重试上一问'), findsNothing);
+    expect(find.byKey(const Key('wx-working-mark')), findsNothing);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 1));

@@ -1023,26 +1023,9 @@ class _ChatPageState extends State<ChatPage> {
         if (landed) {
           _typewriter.reset();
           await _persist();
-        } else if (_stopped) {
-          _typewriter.flushNow();
-          final partial = _typewriter.fullText;
-          setState(() {
-            if (partial.isNotEmpty) {
-              _insertMessageAfterUser(
-                userIndex,
-                ChatMessage(
-                  role: 'assistant',
-                  content: partial,
-                  engine: _liveEngine.value,
-                ),
-              );
-            }
-            _live = false;
-          });
-          _typewriter.reset();
-          await _persist();
         } else {
-          _showSendError(userIndex, cause);
+          // Hold already covers the drop. Do not surface "连接中断，请重试".
+          await _finishDroppedTurn(userIndex);
         }
       } else {
         _showSendError(userIndex, cause);
@@ -1078,6 +1061,26 @@ class _ChatPageState extends State<ChatPage> {
     _stopped = true;
     _holdForAnswer = false;
     widget.api.cancelChat(sessionId: _sessionId);
+  }
+
+  Future<void> _finishDroppedTurn(int userIndex) async {
+    _typewriter.flushNow();
+    final partial = _typewriter.fullText;
+    setState(() {
+      if (partial.isNotEmpty) {
+        _insertMessageAfterUser(
+          userIndex,
+          ChatMessage(
+            role: 'assistant',
+            content: partial,
+            engine: _liveEngine.value,
+          ),
+        );
+      }
+      _live = false;
+    });
+    _typewriter.reset();
+    await _persist();
   }
 
   void _showSendError(int userIndex, Object err) {
@@ -1124,19 +1127,27 @@ class _ChatPageState extends State<ChatPage> {
     _stopLivePhaseFallback();
     _holdPollOk.value = true;
     _setLivePhase('hold');
-    final deadline = DateTime.now().add(const Duration(minutes: 12));
-    while (mounted && _holdForAnswer && DateTime.now().isBefore(deadline)) {
-      if (_answerAfter(userIndex)) return true;
-      try {
-        await _pullInboxIntoChat(userIndex);
-        if (mounted && _holdForAnswer) _holdPollOk.value = true;
-      } catch (_) {
-        if (mounted && _holdForAnswer) _holdPollOk.value = false;
+    var expired = false;
+    final timer = Timer(const Duration(minutes: 12), () {
+      expired = true;
+    });
+    try {
+      while (mounted && _holdForAnswer && !expired) {
+        if (_answerAfter(userIndex)) return true;
+        try {
+          await _pullInboxIntoChat(userIndex);
+          if (mounted && _holdForAnswer) _holdPollOk.value = true;
+        } catch (_) {
+          if (mounted && _holdForAnswer) _holdPollOk.value = false;
+        }
+        if (_answerAfter(userIndex)) return true;
+        if (expired) break;
+        await _waitWhileHolding(const Duration(milliseconds: 400));
       }
-      if (_answerAfter(userIndex)) return true;
-      await _waitWhileHolding(const Duration(milliseconds: 400));
+      return _answerAfter(userIndex);
+    } finally {
+      timer.cancel();
     }
-    return _answerAfter(userIndex);
   }
 
   Future<void> _waitWhileHolding(Duration total) async {
