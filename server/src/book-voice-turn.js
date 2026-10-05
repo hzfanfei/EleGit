@@ -1,6 +1,5 @@
 import { buildBookAcpPrompt, detectCursorEngine } from "./acp.js";
 import { streamAnswer, synthesizeBookAnswer } from "./ask.js";
-import { bookKnowledgeConfig, streamBookKnowledge, streamBookOrAgent } from "./book-kb.js";
 import {
   bookLocalView,
   bookSessionOwner,
@@ -62,39 +61,25 @@ export function createBookAskIterator({
     const local = bookLocalView(materialized, book);
     const progress = emptyBookProgress(book);
     const mergedSignal = askSignal || signal;
-    const kb = bookKnowledgeConfig();
-    yield* streamBookOrAgent({
-      knowledge: () => streamBookKnowledge({
-        book,
-        materialized,
-        question,
-        history,
-        currentChapter: chapter,
-        session,
-        spoken: true,
-        signal: mergedSignal,
-        config: kb,
-      }),
-      agent: () => streamAnswer({
-        question,
-        history,
-        progress,
-        context: bookContext,
-        bookContext,
-        local,
-        session,
-        sessions: bookSessions,
-        buildPrompt: (opts) =>
-          buildBookAcpPrompt({
-            ...opts,
-            currentChapter: chapter || undefined,
-            spokenAnswer: true,
-          }),
-        synthesize: (opts) =>
-          synthesizeBookAnswer({ ...opts, question, book, bookContext, local }),
-        signal: mergedSignal,
-        detectEngine: () => detectCursorEngine("book"),
-      }),
+    yield* streamAnswer({
+      question,
+      history,
+      progress,
+      context: bookContext,
+      bookContext,
+      local,
+      session,
+      sessions: bookSessions,
+      buildPrompt: (opts) =>
+        buildBookAcpPrompt({
+          ...opts,
+          currentChapter: chapter || undefined,
+          spokenAnswer: true,
+        }),
+      synthesize: (opts) =>
+        synthesizeBookAnswer({ ...opts, question, book, bookContext, local }),
+      signal: mergedSignal,
+      detectEngine: () => detectCursorEngine("book"),
     });
   };
 }
@@ -137,7 +122,7 @@ export async function handleBookVoiceTurn(
   }
 
   const acp = detectEngine();
-  if (!acp && !bookKnowledgeConfig()) {
+  if (!acp) {
     res.status(503).json({
       error: "问书需要本机 Claude Code 或 Cursor Agent（ACP）。请安装并登录所选助手。",
       code: "acp_unconfigured",
@@ -163,6 +148,7 @@ export async function handleBookVoiceTurn(
     req.on("close", () => {
       bookSessions.cancel?.(session).catch(() => {});
     });
+    await bookSessions.warm(session, prepared.materialized.cacheDir).catch(() => {});
     if (signal.aborted) {
       res.end();
       return;
