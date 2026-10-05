@@ -19,6 +19,7 @@ import { askBookOnCall, handleBookVoiceTurn, prepareBookTurnContext } from "./bo
 import { handleRepoVoiceTurn } from "./repo-voice-turn.js";
 import { handleSpeakSummary } from "./speak-summary.js";
 import { streamAnswer, synthesizeBookAnswer, answerReadyNotice, shouldPublishFinishedAnswer, cleanTurnId } from "./ask.js";
+import { bookKnowledgeConfig, streamBookKnowledge, streamBookOrAgent } from "./book-kb.js";
 import { ensureTurnRelay, relaySpawn, turnRelayEnabled } from "./turn-relay-client.js";
 import { setPhoneForeground, phoneInForeground } from "./phone-presence.js";
 import { openSse, sseClientGone, writeSse, writeSseSafe } from "./sse.js";
@@ -1234,7 +1235,8 @@ app.post("/v1/books/chat", async (req, res) => {
     turnSessionId = session.id;
     const signal = turn.signal;
     const acp = detectCursorEngine("book");
-    if (!acp) {
+    const kb = bookKnowledgeConfig();
+    if (!acp && !kb) {
       res.status(503).json({
         error: "问书需要本机 Claude Code 或 Cursor Agent（ACP）。请安装并登录所选助手。",
         code: "acp_unconfigured",
@@ -1252,7 +1254,6 @@ app.post("/v1/books/chat", async (req, res) => {
       return;
     }
 
-    await bookSessions.warm(session, materialized.cacheDir).catch(() => {});
     const bookContext = await formatBookAcpContext(book, materialized);
     const local = bookLocalView(materialized, book);
     const progress = emptyBookProgress(book);
@@ -1264,32 +1265,47 @@ app.post("/v1/books/chat", async (req, res) => {
       workspace: materialized.cacheDir,
       chaptersDir: materialized.chaptersDir,
       sessionId: session.id,
-      model: acp.model || null,
+      model: kb?.model || acp?.model || null,
     });
     writeSse(res, { type: "status", phase: "generate" });
     let finalEngine = "local-progress";
     let finalAnswer = "";
     let notified = false;
     let deliveredDone;
-    for await (const event of streamAnswer({
-      question: message,
-      history,
-      progress,
-      context: bookContext,
-      bookContext,
-      local,
-      session,
-      sessions: bookSessions,
-      buildPrompt: (opts) =>
-        buildBookAcpPrompt({ ...opts, currentChapter: chapter || undefined }),
-      synthesize: (opts) =>
-        synthesizeBookAnswer({ ...opts, question: message, book, bookContext, local }),
-      detectEngine: () => detectCursorEngine("book"),
-      signal,
-      workspaceRoot: store.config.workspaceRoot,
-      bookId: book.id,
-      isUnwatched: unwatched,
-      turnId,
+    for await (const event of streamBookOrAgent({
+      knowledge: () => streamBookKnowledge({
+        book,
+        materialized,
+        question: message,
+        history,
+        currentChapter: chapter,
+        session,
+        signal,
+        config: kb,
+      }),
+      agent: async function* agent() {
+        await bookSessions.warm(session, materialized.cacheDir).catch(() => {});
+        yield* streamAnswer({
+          question: message,
+          history,
+          progress,
+          context: bookContext,
+          bookContext,
+          local,
+          session,
+          sessions: bookSessions,
+          buildPrompt: (opts) =>
+            buildBookAcpPrompt({ ...opts, currentChapter: chapter || undefined }),
+          synthesize: (opts) =>
+            synthesizeBookAnswer({ ...opts, question: message, book, bookContext, local }),
+          detectEngine: () => detectCursorEngine("book"),
+          signal,
+          workspaceRoot: store.config.workspaceRoot,
+          bookId: book.id,
+          isUnwatched: unwatched,
+          turnId,
+        });
+      },
     })) {
       if (event.type === "notification") notified = true;
       if (event.type === "done") {
@@ -1298,7 +1314,7 @@ app.post("/v1/books/chat", async (req, res) => {
         deliveredDone = writeSseSafe(res, {
           type: "done",
           engine: finalEngine,
-          model: acp.model || null,
+          model: event.model || kb?.model || acp?.model || null,
           answer: finalAnswer,
           bookId: book.id,
           cache: materialized.cacheDir,
