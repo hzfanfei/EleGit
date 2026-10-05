@@ -153,6 +153,7 @@ const bookSessions = createSessionStore({
   resolveCommand: () => resolveAgentCommand("book"),
   relay: turnRelay,
   spawnImpl: turnRelay ? relaySpawn : undefined,
+  readOnly: true,
 });
 const chatCancels = new Map();
 

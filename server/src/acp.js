@@ -83,16 +83,32 @@ export function applyAcpEnginePreference(engine) {
   return value;
 }
 
-export function claudeCodeSessionOptions(model) {
+const BOOK_DISABLED_PLUGINS = [
+  "superpowers@claude-plugins-official",
+  "playwright@claude-plugins-official",
+  "frontend-design@claude-plugins-official",
+  "code-review@claude-plugins-official",
+];
+
+/** Read and search only. Ask mode still rejects writes; this keeps them out of the prompt. */
+const BOOK_READ_TOOLS = ["Read", "Grep", "Glob"];
+
+export function claudeCodeSessionOptions(model, { readOnly = false } = {}) {
+  const enabledPlugins = {
+    "superpowers@claude-plugins-official": false,
+  };
+  if (readOnly) {
+    for (const id of BOOK_DISABLED_PLUGINS) enabledPlugins[id] = false;
+  }
   return {
     model,
     permissionMode: "ask",
     allowDangerouslySkipPermissions: true,
     settingSources: ["user"],
+    ...(readOnly ? { tools: BOOK_READ_TOOLS, skills: [] } : {}),
     settings: {
-      enabledPlugins: {
-        "superpowers@claude-plugins-official": false,
-      },
+      enabledPlugins,
+      ...(readOnly ? { disableBundledSkills: true } : {}),
     },
   };
 }
@@ -1042,12 +1058,13 @@ function claudeClaudeCodeExecutable() {
 }
 
 export class AcpChannel {
-  constructor({ command, cwd, spawnImpl = spawn, idleMs = 30 * 60 * 1000, relayKey = "" } = {}) {
+  constructor({ command, cwd, spawnImpl = spawn, idleMs = 30 * 60 * 1000, relayKey = "", readOnly = false } = {}) {
     this.command = command;
     this.cwd = cwd;
     this.spawnImpl = spawnImpl;
     this.idleMs = idleMs;
     this.relayKey = relayKey;
+    this.readOnly = Boolean(readOnly);
     this.agentMode = false;
     this.availableModes = [];
     this.child = null;
@@ -1112,7 +1129,7 @@ export class AcpChannel {
         clientCapabilities: {
           fs: {
             readTextFile: this.isClaudeProvider(),
-            writeTextFile: this.isClaudeProvider(),
+            writeTextFile: this.isClaudeProvider() && !this.readOnly,
           },
           terminal: false,
           _meta: { parameterizedModelPicker: !this.isClaudeProvider() },
@@ -1135,7 +1152,9 @@ export class AcpChannel {
               mcpServers: [],
               _meta: {
                 claudeCode: {
-                  options: claudeCodeSessionOptions(this.command?.model || acpModelId()),
+                  options: claudeCodeSessionOptions(this.command?.model || acpModelId(), {
+                    readOnly: this.readOnly,
+                  }),
                 },
               },
             }
@@ -1584,6 +1603,7 @@ export function createSessionStore({
   now = () => new Date().toISOString(),
   resolveCommand = resolveAgentCommand,
   relay = false,
+  readOnly = false,
 } = {}) {
   const sessions = new Map();
   const activeByRepo = new Map();
@@ -1745,6 +1765,7 @@ export function createSessionStore({
           spawnImpl,
           idleMs,
           relayKey: relay ? `${session.id}:${randomUUID()}` : "",
+          readOnly,
         });
         await channel.start();
         if (epoch !== channelEpoch) {

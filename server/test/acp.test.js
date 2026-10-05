@@ -74,6 +74,23 @@ describe("claudeCodeSessionOptions", () => {
     assert.deepEqual(options.settingSources, ["user"]);
     assert.equal(options.settings.enabledPlugins["superpowers@claude-plugins-official"], false);
     assert.equal(options.permissionMode, "ask");
+    assert.equal(options.tools, undefined);
+    assert.equal(options.skills, undefined);
+  });
+
+  it("limits book sessions to read and search", () => {
+    const options = claudeCodeSessionOptions("MiniMax-M3", { readOnly: true });
+    assert.deepEqual(options.tools, ["Read", "Grep", "Glob"]);
+    assert.deepEqual(options.skills, []);
+    assert.equal(options.settings.disableBundledSkills, true);
+    for (const id of [
+      "superpowers@claude-plugins-official",
+      "playwright@claude-plugins-official",
+      "frontend-design@claude-plugins-official",
+      "code-review@claude-plugins-official",
+    ]) {
+      assert.equal(options.settings.enabledPlugins[id], false);
+    }
   });
 });
 
