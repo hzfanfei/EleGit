@@ -90,6 +90,10 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
   // Set by BookMarkdownBody#onTapLink before our pointer-up Listener fires.
   // Stops the chrome from toggling when the tap was actually a link click.
   bool _linkTappedThisGesture = false;
+  // Chapter text lives in a SelectionArea. A tap that clears a selection
+  // must not also toggle the chrome.
+  bool _textSelected = false;
+  bool _selectionAtPointerDown = false;
   // Tap detection for chrome toggle. Listener doesn't join the gesture arena,
   // so it doesn't compete with the markdown link recognizers (which would
   // otherwise swallow link clicks when wrapped in a GestureDetector).
@@ -743,6 +747,7 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
                       // Reset before each gesture; _onBookLink will set this
                       // back to true if the tap lands on a markdown link.
                       _linkTappedThisGesture = false;
+                      _selectionAtPointerDown = _textSelected;
                       _chromeTapDown = event.localPosition;
                       _chromeTapDownAt = event.timeStamp;
                     },
@@ -764,7 +769,7 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
                       // pointer-up Listener runs synchronously before the
                       // arena resolves.
                       WidgetsBinding.instance.addPostFrameCallback((_) {
-                        if (_linkTappedThisGesture) return;
+                        if (_linkTappedThisGesture || _selectionAtPointerDown) return;
                         _toggleChrome();
                       });
                     },
@@ -787,7 +792,11 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
                               kQuickVoiceFabClearance,
                             ),
                           )
-                        : ListView.builder(
+                        : SelectionArea(
+                            onSelectionChanged: (content) {
+                              _textSelected = content != null;
+                            },
+                            child: ListView.builder(
                             controller: _scrollController,
                             cacheExtent: 2400,
                             padding: EdgeInsets.fromLTRB(
@@ -847,6 +856,7 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
                                 ),
                               );
                             },
+                            ),
                           ),
                     ),
                   ),
