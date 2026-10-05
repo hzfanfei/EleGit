@@ -1,4 +1,5 @@
 import 'cosyvoice_tts_voices.dart';
+import 'minimax_tts_voices.dart';
 import 'volc_tts_voices.dart';
 import 'xiaomi_tts_voices.dart';
 
@@ -22,7 +23,7 @@ class TtsVoiceOption {
   }
 }
 
-enum VoiceStackChoice { local, volc, xiaomi }
+enum VoiceStackChoice { local, volc, xiaomi, minimax }
 
 VoiceStackChoice parseVoiceStack(String? raw) {
   switch (raw?.trim().toLowerCase()) {
@@ -30,6 +31,8 @@ VoiceStackChoice parseVoiceStack(String? raw) {
       return VoiceStackChoice.local;
     case 'xiaomi':
       return VoiceStackChoice.xiaomi;
+    case 'minimax':
+      return VoiceStackChoice.minimax;
     default:
       return VoiceStackChoice.volc;
   }
@@ -41,6 +44,8 @@ String voiceStackId(VoiceStackChoice choice) {
       return 'local';
     case VoiceStackChoice.xiaomi:
       return 'xiaomi';
+    case VoiceStackChoice.minimax:
+      return 'minimax';
     case VoiceStackChoice.volc:
       return 'volc';
   }
@@ -52,6 +57,8 @@ String voiceStackLabel(VoiceStackChoice choice) {
       return '本地';
     case VoiceStackChoice.xiaomi:
       return '小米';
+    case VoiceStackChoice.minimax:
+      return 'MiniMax';
     case VoiceStackChoice.volc:
       return '火山';
   }
@@ -63,6 +70,8 @@ String voiceStackBlurb(VoiceStackChoice choice) {
       return 'FunASR 识别，CosyVoice 合成。';
     case VoiceStackChoice.xiaomi:
       return '小米识别，小米合成。';
+    case VoiceStackChoice.minimax:
+      return 'MiniMax 识别，MiniMax 合成。';
     case VoiceStackChoice.volc:
       return '火山识别，火山合成。';
   }
@@ -95,8 +104,13 @@ class VoiceServiceProfile {
 
   bool get usesXiaomiTts => ttsProvider == 'xiaomi';
 
+  bool get usesMinimaxTts => ttsProvider == 'minimax';
+
   String get activeVoiceStack {
-    if (voiceStack == 'local' || voiceStack == 'volc' || voiceStack == 'xiaomi') return voiceStack;
+    if (voiceStack == 'local' || voiceStack == 'volc' || voiceStack == 'xiaomi' || voiceStack == 'minimax') {
+      return voiceStack;
+    }
+    if (ttsProvider == 'minimax' && asrProvider == 'minimax') return 'minimax';
     if (ttsProvider == 'xiaomi' && asrProvider == 'xiaomi') return 'xiaomi';
     if (ttsProvider == 'cosyvoice' && asrProvider == 'funasr') return 'local';
     return 'volc';
@@ -117,7 +131,9 @@ class VoiceServiceProfile {
         ? kDefaultCosyvoiceTtsVoice
         : ttsProvider == 'xiaomi'
             ? kDefaultXiaomiTtsVoice
-            : kDefaultVolcTtsVoice;
+            : ttsProvider == 'minimax'
+                ? kDefaultMinimaxTtsVoice
+                : kDefaultVolcTtsVoice;
     return VoiceServiceProfile(
       ready: map['ready'] == true,
       hint: (map['hint'] ?? '').toString(),
@@ -145,6 +161,10 @@ class VoiceServiceProfile {
       final xiaomi = resolveXiaomiTtsVoice(id);
       return TtsVoiceOption(id: xiaomi.id, name: xiaomi.name, scene: xiaomi.scene);
     }
+    if (usesMinimaxTts) {
+      final minimax = resolveMinimaxTtsVoice(id);
+      return TtsVoiceOption(id: minimax.id, name: minimax.name, scene: minimax.scene);
+    }
     final volc = resolveVolcTtsVoice(id);
     return TtsVoiceOption(id: volc.id, name: volc.name, scene: volc.scene);
   }
@@ -164,6 +184,10 @@ class VoiceServiceProfile {
       final v = resolveXiaomiTtsVoice(ttsVoice);
       return TtsVoiceOption(id: v.id, name: v.name, scene: v.scene);
     }
+    if (usesMinimaxTts) {
+      final v = resolveMinimaxTtsVoice(ttsVoice);
+      return TtsVoiceOption(id: v.id, name: v.name, scene: v.scene);
+    }
     final v = resolveVolcTtsVoice(ttsVoice);
     return TtsVoiceOption(id: v.id, name: v.name, scene: v.scene);
   }
@@ -173,6 +197,13 @@ class VoiceServiceProfile {
     for (final voice in voices) {
       final key = voice.scene.isNotEmpty ? voice.scene : '音色';
       groups.putIfAbsent(key, () => []).add(voice);
+    }
+    if (groups.isEmpty && usesMinimaxTts) {
+      for (final voice in kMinimaxTtsVoices) {
+        groups.putIfAbsent(voice.scene, () => []).add(
+              TtsVoiceOption(id: voice.id, name: voice.name, scene: voice.scene),
+            );
+      }
     }
     if (groups.isEmpty && usesXiaomiTts) {
       for (final voice in kXiaomiTtsVoices) {
@@ -200,6 +231,7 @@ class VoiceServiceProfile {
 }
 
 String voiceEngineSummary(VoiceServiceProfile profile) {
+  if (profile.usesMinimaxTts) return 'MiniMax 合成 · MiniMax 识别';
   if (profile.usesXiaomiTts) return '小米合成 · 小米识别';
   final tts = profile.ttsEngine == 'Fun-CosyVoice3' ? 'CosyVoice3 本地' : '火山合成';
   final asr = profile.asrEngine.contains('FunASR') ? 'FunASR 本地' : '火山识别';

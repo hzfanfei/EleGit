@@ -172,6 +172,43 @@ describe("resolveVoiceConfig", () => {
     }
   });
 
+  it("switches both sides to MiniMax when the key is set", () => {
+    setPreferredVoiceStack("minimax");
+    try {
+      const missing = resolveVoiceConfig({ VOLC_API_KEY: "ak-only" });
+      assert.equal(missing.ready, false);
+      assert.equal(missing.ttsProvider, "minimax");
+      assert.equal(missing.asrProvider, "minimax");
+      assert.match(missing.hint, /MINIMAX_API_KEY/);
+      assert.equal(publicVoiceStatus(missing).voiceStack, "minimax");
+
+      const cfg = resolveVoiceConfig({
+        VOLC_API_KEY: "ak-only",
+        MINIMAX_API_KEY: "sk-test-token",
+      });
+      assert.equal(cfg.ready, true);
+      assert.equal(cfg.provider, "minimax");
+      assert.equal(cfg.ttsProvider, "minimax");
+      assert.equal(cfg.asrProvider, "minimax");
+      assert.equal(cfg.minimax.apiKey, "sk-test-token");
+      assert.equal(cfg.minimax.ttsUrl, "wss://api.minimax.cn/ws/v1/t2a_v2_bidi");
+      assert.equal(cfg.minimax.asrUrl, "https://api.minimax.cn/v1/speech_to_text");
+      assert.equal(cfg.cosyvoice, null);
+      assert.equal(cfg.funasr, null);
+      const pub = publicVoiceStatus(withTtsVoice(cfg, "female-yujie"));
+      assert.equal(pub.voiceStack, "minimax");
+      assert.equal(pub.ttsEngine, "speech-2.8-turbo");
+      assert.equal(pub.asrEngine, "asr-1.0");
+      assert.equal(pub.ttsVoice, "female-yujie");
+      assert.ok(pub.voices.some((v) => v.id === "female-shaonv" && v.name === "少女音色"));
+      assert.equal(JSON.stringify(pub).includes("sk-test-token"), false);
+      assert.equal(voiceAfterStackSwitch(cfg, "male-qn-qingse", "zh_female_xiaohe_uranus_bigtts"), "male-qn-qingse");
+      assert.equal(voiceAfterStackSwitch(cfg, "", "zh_female_xiaohe_uranus_bigtts"), "female-shaonv");
+    } finally {
+      setPreferredVoiceStack("");
+    }
+  });
+
   it("keeps an explicit VOLC_TTS_VOICE", () => {
     const cfg = resolveVoiceConfig({
       VOLC_API_KEY: "ak-only",

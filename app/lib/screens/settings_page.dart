@@ -12,6 +12,7 @@ import '../theme.dart';
 import '../utils/app_version.dart';
 import '../utils/notification_center.dart';
 import '../voice/cosyvoice_tts_voices.dart';
+import '../voice/minimax_tts_voices.dart';
 import '../voice/device_media.dart';
 import '../voice/tts_voice_catalog.dart';
 import '../voice/volc_tts_voices.dart';
@@ -345,7 +346,9 @@ class _SettingsPageState extends State<SettingsPage> {
         ? kDefaultCosyvoiceTtsVoice
         : _voiceProfile.usesXiaomiTts
             ? kDefaultXiaomiTtsVoice
-            : kDefaultVolcTtsVoice;
+            : _voiceProfile.usesMinimaxTts
+                ? kDefaultMinimaxTtsVoice
+                : kDefaultVolcTtsVoice;
     return WxEdgeBack(
       onBack: widget.onBack ?? () => Navigator.of(context).maybePop(),
       child: Scaffold(
@@ -505,7 +508,9 @@ class _SettingsPageState extends State<SettingsPage> {
                 Text(
                   _voiceProfile.usesXiaomiTts
                       ? '快问快答使用小米 MiMo 语音。'
-                      : _voiceProfile.usesCosyvoiceTts
+                      : _voiceProfile.usesMinimaxTts
+                          ? '快问快答使用 MiniMax 语音。'
+                          : _voiceProfile.usesCosyvoiceTts
                           ? '快问快答使用本机 ${_voiceProfile.ttsEngine} 合成。'
                           : '快问快答使用火山引擎音色。',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.muted),

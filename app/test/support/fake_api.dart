@@ -8,6 +8,7 @@ import 'package:wenxiang/models/diagnostics.dart';
 import 'package:wenxiang/voice/cosyvoice_tts_voices.dart';
 import 'package:wenxiang/voice/tts_voice_catalog.dart';
 import 'package:wenxiang/voice/volc_tts_voices.dart';
+import 'package:wenxiang/voice/minimax_tts_voices.dart';
 import 'package:wenxiang/voice/xiaomi_tts_voices.dart';
 
 class FakeWenxiangApi extends WenxiangApi {
@@ -145,6 +146,8 @@ class FakeWenxiangApi extends WenxiangApi {
       voiceTtsProvider = 'cosyvoice';
     } else if (stack == 'xiaomi') {
       voiceTtsProvider = 'xiaomi';
+    } else if (stack == 'minimax') {
+      voiceTtsProvider = 'minimax';
     } else {
       voiceTtsProvider = 'volc';
     }
@@ -262,6 +265,21 @@ class FakeWenxiangApi extends WenxiangApi {
   }) async {}
 
   VoiceServiceProfile _voiceProfileForFake() {
+    if (voiceTtsProvider == 'minimax') {
+      return VoiceServiceProfile(
+        ready: voiceReady,
+        hint: voiceReady ? '' : voiceHint,
+        voiceStack: 'minimax',
+        ttsProvider: 'minimax',
+        ttsEngine: 'speech-2.8-turbo',
+        asrProvider: 'minimax',
+        asrEngine: 'asr-1.0',
+        ttsVoice: kDefaultMinimaxTtsVoice,
+        voices: kMinimaxTtsVoices
+            .map((v) => TtsVoiceOption(id: v.id, name: v.name, scene: v.scene))
+            .toList(),
+      );
+    }
     if (voiceTtsProvider == 'xiaomi') {
       return VoiceServiceProfile(
         ready: voiceReady,

@@ -1080,7 +1080,7 @@ app.put("/v1/settings/voice-stack", async (req, res) => {
   try {
     const stack = sanitizeVoiceStack(req.body?.stack ?? req.body?.voiceStack);
     if (!stack) {
-      res.status(400).json({ error: "stack must be local, volc, or xiaomi" });
+      res.status(400).json({ error: "stack must be local, volc, xiaomi, or minimax" });
       return;
     }
     if (stack === "local") {
@@ -1092,6 +1092,7 @@ app.put("/v1/settings/voice-stack", async (req, res) => {
     const previousLocal = store.config.ttsVoiceLocal;
     const previousVolc = store.config.ttsVoiceVolc;
     const previousXiaomi = store.config.ttsVoiceXiaomi;
+    const previousMinimax = store.config.ttsVoiceMinimax;
     const leaving = sanitizeVoiceStack(previousStack) || voiceStackOf(resolveVoiceConfig());
     const leavingKey = voiceMemoryKey(leaving || "volc");
     store.config[leavingKey] = previousVoice || store.config[leavingKey];
@@ -1110,6 +1111,7 @@ app.put("/v1/settings/voice-stack", async (req, res) => {
       store.config.ttsVoiceLocal = previousLocal;
       store.config.ttsVoiceVolc = previousVolc;
       store.config.ttsVoiceXiaomi = previousXiaomi;
+      store.config.ttsVoiceMinimax = previousMinimax;
       setPreferredVoiceStack(previousStack);
       throw err;
     }
@@ -1710,14 +1712,18 @@ function logCompanionStartup() {
       ? "Voice ASR: FunASR (local, preloaded)"
       : voice.asrProvider === "xiaomi"
         ? "Voice ASR: Xiaomi MiMo"
-        : "Voice ASR: Volcengine",
+        : voice.asrProvider === "minimax"
+          ? "Voice ASR: MiniMax"
+          : "Voice ASR: Volcengine",
   );
   console.log(
     voice.ttsProvider === "cosyvoice"
       ? "Voice TTS: CosyVoice3 (local, preloaded)"
       : voice.ttsProvider === "xiaomi"
         ? "Voice TTS: Xiaomi MiMo"
-        : "Voice TTS: Volcengine",
+        : voice.ttsProvider === "minimax"
+          ? "Voice TTS: MiniMax"
+          : "Voice TTS: Volcengine",
   );
   console.log(
     isVoiceCallEnabled()

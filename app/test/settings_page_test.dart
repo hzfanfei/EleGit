@@ -99,6 +99,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(api.lastSetVoiceStack, 'volc');
+    await _reveal(tester, find.textContaining('火山引擎音色'));
     expect(find.textContaining('火山引擎音色'), findsOneWidget);
     expect(find.textContaining('CosyVoice3'), findsNothing);
   });
@@ -127,6 +128,31 @@ void main() {
     expect(find.textContaining('小米 MiMo 语音'), findsOneWidget);
     await _reveal(tester, find.text('冰糖'));
     expect(find.text('冰糖'), findsWidgets);
+  });
+
+  testWidgets('settings page switches to the MiniMax voice stack', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final memory = AppMemory(await SharedPreferences.getInstance());
+    final api = FakeWenxiangApi(voiceReady: true);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wenxiangTheme().copyWith(splashFactory: NoSplash.splashFactory),
+        home: SettingsPage(api: api, memory: memory),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await _reveal(tester, find.text('MiniMax'));
+    expect(find.text('MiniMax'), findsOneWidget);
+    expect(find.text('MiniMax 识别，MiniMax 合成。'), findsOneWidget);
+
+    await tester.tap(find.text('MiniMax'));
+    await tester.pumpAndSettle();
+
+    expect(api.lastSetVoiceStack, 'minimax');
+    expect(find.textContaining('MiniMax 语音'), findsOneWidget);
+    await _reveal(tester, find.text('少女音色'));
+    expect(find.text('少女音色'), findsWidgets);
   });
 
   testWidgets('settings page saves ask engine choice', (tester) async {

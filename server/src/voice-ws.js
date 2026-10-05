@@ -7,6 +7,7 @@ import { createVoiceSession } from "./voice-session.js";
 import { createOpenAiAsr, openAiTts } from "./voice-openai.js";
 import { cosyvoiceTts } from "./cosyvoice-tts.js";
 import { createFunasrAsr } from "./funasr-asr.js";
+import { createMinimaxAsr, minimaxTts, minimaxTtsStream } from "./minimax-speech.js";
 import { createXiaomiAsr, xiaomiTts, xiaomiTtsStream } from "./xiaomi-speech.js";
 import { createVolcAsr, volcTts, volcTtsCanStream, volcTtsStreamPcm } from "./voice-volc.js";
 import { formatLocalContext } from "./workspace.js";
@@ -74,6 +75,18 @@ export function createDefaultAsk() {
 }
 
 function resolveAsr(config, hooks) {
+  if (config?.asrProvider === "minimax" && config.minimax?.enabled) {
+    return createMinimaxAsr({
+      minimax: config.minimax,
+      pushToTalk: hooks.pushToTalk === true,
+      endpointSilenceMs: hooks.pushToTalk === true ? undefined : 520,
+      minEndpointBytes: hooks.pushToTalk === true ? undefined : 16000 * 2 * 0.55,
+      onPartial: hooks.onPartial,
+      onFinal: hooks.onFinal,
+      onSpeechStart: hooks.onSpeechStart,
+      onError: (detail) => hooks.onAsrError?.({ message: detail?.message, err: detail }),
+    });
+  }
   if (config?.asrProvider === "xiaomi" && config.xiaomi?.enabled) {
     return createXiaomiAsr({
       xiaomi: config.xiaomi,
@@ -118,6 +131,12 @@ function resolveAsr(config, hooks) {
 }
 
 function resolveTtsFn(config) {
+  if (config?.ttsProvider === "minimax" && config.minimax?.enabled) {
+    const minimax = { ...config.minimax, ttsVoice: config.ttsVoice || config.minimax?.ttsVoice };
+    const tts = (text, signal) => minimaxTts(minimax, text, signal);
+    tts.stream = (text, signal, onPcm) => minimaxTtsStream(minimax, text, { signal, onPcm });
+    return tts;
+  }
   if (config?.ttsProvider === "xiaomi" && config.xiaomi?.enabled) {
     const xiaomi = { ...config.xiaomi, ttsVoice: config.ttsVoice || config.xiaomi?.ttsVoice };
     const tts = (text, signal) => xiaomiTts(xiaomi, text, signal);
@@ -146,7 +165,7 @@ function resolveTtsFn(config) {
 }
 
 export function createVoiceProviders(config, hooks = {}) {
-  if (config?.ready && (config.provider === "volc" || config.provider === "openai" || config.provider === "xiaomi")) {
+  if (config?.ready && (config.provider === "volc" || config.provider === "openai" || config.provider === "xiaomi" || config.provider === "minimax")) {
     return {
       asr: resolveAsr(config, hooks),
       tts: resolveTtsFn(config),

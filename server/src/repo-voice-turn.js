@@ -228,7 +228,9 @@ export async function handleRepoVoiceTurn(
         hint =
           voiceConfig.ttsProvider === "xiaomi"
             ? "语音合成失败，请检查本机 .env 里的 XIAOMI_MIMO_TOKEN。"
-            : "语音合成失败，请检查本机 .env 里的火山 TTS 配置。";
+            : voiceConfig.ttsProvider === "minimax"
+              ? "语音合成失败，请检查本机 .env 里的 MINIMAX_API_KEY。"
+              : "语音合成失败，请检查本机 .env 里的火山 TTS 配置。";
       } else if (/asr|stt|recogn/i.test(hint)) {
         code = code || "stt_failed";
       } else if (hint.length > 200 || !/[\u4e00-\u9fff]/.test(hint)) {
