@@ -794,7 +794,9 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
                           )
                         : SelectionArea(
                             onSelectionChanged: (content) {
-                              _textSelected = content != null;
+                              // A tap collapses the caret and still reports content.
+                              // Only a real selection should swallow the next tap.
+                              _textSelected = (content?.plainText ?? '').isNotEmpty;
                             },
                             child: ListView.builder(
                             controller: _scrollController,

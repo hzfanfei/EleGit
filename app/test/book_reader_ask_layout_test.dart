@@ -357,6 +357,25 @@ void main() {
     }
   });
 
+  testWidgets('a later tap still brings the reader chrome back', (tester) async {
+    await _pumpBookReader(tester, expandAsk: false);
+    await tester.pump(const Duration(seconds: 5));
+    expect(_readerChromeOpacity(tester), 0);
+
+    await tester.tap(find.byKey(const Key('book-reader-body')));
+    await tester.pump();
+    await tester.pump();
+    expect(_readerChromeOpacity(tester), 1);
+
+    await tester.pump(const Duration(seconds: 5));
+    expect(_readerChromeOpacity(tester), 0);
+
+    await tester.tap(find.byKey(const Key('book-reader-body')));
+    await tester.pump();
+    await tester.pump();
+    expect(_readerChromeOpacity(tester), 1);
+  });
+
   testWidgets('toggling the reader chrome does not move the chapter', (tester) async {
     await _pumpBookReader(tester, expandAsk: false);
     final before = tester.getTopLeft(find.text('第一章').first).dy;
@@ -529,6 +548,16 @@ SystemUiOverlayStyle _overlayStyle(WidgetTester tester) {
         find.byType(AnnotatedRegion<SystemUiOverlayStyle>),
       )
       .value;
+}
+
+double _readerChromeOpacity(WidgetTester tester) {
+  final opacity = tester.widget<AnimatedOpacity>(
+    find.ancestor(
+      of: find.byType(BookReaderChrome),
+      matching: find.byType(AnimatedOpacity),
+    ).first,
+  );
+  return opacity.opacity;
 }
 
 Future<void> _pumpBookReader(
