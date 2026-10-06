@@ -176,7 +176,9 @@ async function supervise() {
     }
     announcedHolding = false;
     publicTunnelFailStreak = 0;
-    if (tunnelError) return;
+    if (tunnelError) {
+      console.error("[keep-alive] tunnel is down; still starting companion");
+    }
     boot();
   } finally {
     supervising = false;
@@ -210,14 +212,10 @@ function boot() {
       return;
     }
     if (!shouldRestartCompanion(code, signal)) {
-      if (ngrokChild && !ngrokChild.killed) {
-        try {
-          ngrokChild.kill();
-        } catch {
-          // ignore
-        }
-      }
-      process.exit(code ?? 0);
+      console.error(
+        `[keep-alive] companion exited code=${code ?? "null"} signal=${signal || "-"} — not restarting`,
+      );
+      setTimeout(supervise, pollMs);
       return;
     }
     if (Date.now() - started > 60_000) attempt = 0;
@@ -241,3 +239,10 @@ function boot() {
 
 setInterval(supervise, pollMs);
 supervise();
+
+process.on("uncaughtException", (err) => {
+  console.error(`[keep-alive] uncaughtException: ${err?.stack || err}`);
+});
+process.on("unhandledRejection", (err) => {
+  console.error(`[keep-alive] unhandledRejection: ${err?.stack || err}`);
+});

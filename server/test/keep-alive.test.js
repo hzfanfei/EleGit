@@ -11,8 +11,8 @@ import {
 } from "../src/keep-alive-policy.js";
 
 describe("keep-alive policy", () => {
-  it("does not restart a clean exit", () => {
-    assert.equal(shouldRestartCompanion(0, null), false);
+  it("restarts after a clean exit so the supervisor stays up", () => {
+    assert.equal(shouldRestartCompanion(0, null), true);
     assert.equal(shouldRestartCompanion(1, null), true);
     assert.equal(shouldRestartCompanion(null, "SIGTERM"), true);
   });

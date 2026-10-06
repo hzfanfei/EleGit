@@ -1,4 +1,7 @@
 import { createServer } from "node:http";
+import { appendFileSync, mkdirSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import express from "express";
 import cors from "cors";
 import { corsOptions } from "./cors.js";
@@ -1789,3 +1792,24 @@ function shutdownVoiceWorkers() {
 
 process.on("SIGINT", () => shutdownVoiceWorkers());
 process.on("SIGTERM", () => shutdownVoiceWorkers());
+
+function noteCompanionCrash(kind, err) {
+  const line = `[${new Date().toISOString()}] ${kind} ${err?.stack || err}\n`;
+  console.error(line.trim());
+  try {
+    const dir = path.join(os.homedir(), ".wenxiang");
+    mkdirSync(dir, { recursive: true });
+    appendFileSync(path.join(dir, "companion-crash.log"), line);
+  } catch {
+    // Logging must not hide the original crash.
+  }
+}
+
+process.on("uncaughtException", (err) => {
+  noteCompanionCrash("uncaughtException", err);
+  process.exit(1);
+});
+process.on("unhandledRejection", (err) => {
+  noteCompanionCrash("unhandledRejection", err);
+  process.exit(1);
+});

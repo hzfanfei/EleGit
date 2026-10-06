@@ -4,10 +4,10 @@ export function isCompanionAlreadyRunning(code) {
   return code === COMPANION_ALREADY_RUNNING;
 }
 
-export function shouldRestartCompanion(code, signal) {
+export function shouldRestartCompanion(code, _signal) {
   if (isCompanionAlreadyRunning(code)) return false;
-  if (signal) return true;
-  return code !== 0 && code != null;
+  // Code 0 used to exit this supervisor, so a normal companion exit left 8787 down.
+  return true;
 }
 
 export async function companionIsHealthy(url, { fetchImpl = fetch, timeoutMs = 2000 } = {}) {

@@ -234,6 +234,9 @@ export async function ensureNgrok({
     windowsHide: true,
     env,
   });
+  child.on("error", (err) => {
+    console.error(`[ngrok] ${err.message || err}`);
+  });
   child.stderr?.on("data", (chunk) => {
     const text = String(chunk || "").trim();
     if (text) console.error(`[ngrok] ${text}`);
