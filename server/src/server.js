@@ -1129,7 +1129,7 @@ app.put("/v1/settings/cursor-model", async (req, res) => {
   try {
     const model = sanitizeCursorModel(req.body?.model);
     if (!model) {
-      res.status(400).json({ error: "model must be composer-2.5-fast or grok-4.7-high-fast" });
+      res.status(400).json({ error: "unknown cursor model" });
       return;
     }
     store.config.cursorModel = model;

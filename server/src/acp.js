@@ -28,7 +28,25 @@ export const DEFAULT_ACP_MODEL = "grok-4.7-high-fast";
 export const CURSOR_MODEL_COMPOSER_FAST = "composer-2.5-fast";
 export const CURSOR_MODEL_GROK_HIGH_FAST = "grok-4.7-high-fast";
 
-const CURSOR_MODEL_IDS = new Set([CURSOR_MODEL_COMPOSER_FAST, CURSOR_MODEL_GROK_HIGH_FAST]);
+/** Phone settings allowlist. Ids come from `agent --list-models`. */
+export const CURSOR_MODEL_IDS = new Set([
+  CURSOR_MODEL_GROK_HIGH_FAST,
+  "grok-4.7-xhigh-fast",
+  "grok-4.7-medium-fast",
+  "grok-4.7-high",
+  CURSOR_MODEL_COMPOSER_FAST,
+  "composer-2.5",
+  "cursor-grok-4.6-high-fast",
+  "cursor-grok-4.5-high-fast",
+  "auto",
+  "gpt-5.5-high",
+  "gpt-5.6-sol-high",
+  "gpt-5.3-codex-high",
+  "claude-opus-5-5-high",
+  "claude-sonnet-5-thinking-high",
+  "gemini-3.8-flash-high",
+  "kimi-k3-high",
+]);
 
 /** Phone settings choice. Empty means fall through to env, then the default. */
 let cursorModelChoice = "";

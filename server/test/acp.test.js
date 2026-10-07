@@ -150,6 +150,10 @@ describe("acpModelId", () => {
       assert.equal(DEFAULT_ACP_MODEL, "grok-4.7-high-fast");
       setCursorModelPreference("composer-2.5-fast");
       assert.equal(acpModelId(), "composer-2.5-fast");
+      setCursorModelPreference("gpt-5.5-high");
+      assert.equal(acpModelId(), "gpt-5.5-high");
+      setCursorModelPreference("claude-opus-5-5-high");
+      assert.equal(acpModelId(), "claude-opus-5-5-high");
       setCursorModelPreference("nope");
       assert.equal(acpModelId(), "grok-4.7-high-fast");
     } finally {
