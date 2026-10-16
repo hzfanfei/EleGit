@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
+import { promptImageRefs, sanitizeImageRefs } from "./chat-images.js";
 import { envWithNodeOnPath, resolveNodeExecutable, whichSync } from "./which.js";
 
 const CURSOR_ACP_CANDIDATES = [
@@ -334,6 +335,48 @@ export function selectPermissionOption(params, { agentMode = false } = {}) {
   return options[0]?.optionId || wanted;
 }
 
+function visibleHistoryMessage(message) {
+  if (message?.role !== "user" && message?.role !== "assistant") return false;
+  if (String(message?.content || "").trim()) return true;
+  return message.role === "user" && sanitizeImageRefs(message.images).length > 0;
+}
+
+function formatHistoryLine(message) {
+  const images = message.role === "user" ? sanitizeImageRefs(message.images) : [];
+  const body = String(message.content || "").trim() || (images.length ? "（附图）" : "");
+  const tag = images.length ? ` [附图${images.length}张]` : "";
+  return `${message.role === "user" ? "User" : "Assistant"}: ${body}${tag}`;
+}
+
+export function questionWithImages(question, images) {
+  const list = (images || []).filter((image) => image?.mimeType && (image.data || image.path));
+  const text = String(question || "").trim();
+  if (!list.length) return text;
+  const lines = [];
+  if (text) lines.push(text, "");
+  lines.push(`（附图 ${list.length} 张，按顺序附在本提示末尾。请看图后再回答。）`);
+  const paths = list.map((image) => String(image.path || "").trim()).filter(Boolean);
+  if (paths.length) {
+    lines.push("若提示里的图片内容没有显示，请直接读取这些文件：");
+    for (const file of paths) lines.push(`- ${file}`);
+  }
+  return lines.join("\n");
+}
+
+export function acpPromptBlocks(text, images) {
+  const blocks = [];
+  const body = String(text ?? "");
+  if (body) blocks.push({ type: "text", text: body });
+  for (const image of images || []) {
+    const data = String(image?.data || "");
+    const mimeType = String(image?.mimeType || "");
+    if (!data || !mimeType) continue;
+    blocks.push({ type: "image", mimeType, data });
+  }
+  if (!blocks.length) blocks.push({ type: "text", text: "" });
+  return blocks;
+}
+
 export function buildAcpPrompt({
   question,
   history,
@@ -383,9 +426,9 @@ export function buildAcpPrompt({
   }
   if (seedHistory) {
     const historyText = (history || [])
-      .filter((m) => m?.content && (m.role === "user" || m.role === "assistant"))
+      .filter(visibleHistoryMessage)
       .slice(-16)
-      .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
+      .map(formatHistoryLine)
       .join("\n");
     if (historyText) {
       lines.push(
@@ -1225,19 +1268,19 @@ export class AcpChannel {
     }
   }
 
-  async prompt(text, { onDelta, onActivity, timeoutMs = acpPromptTimeoutMs() } = {}) {
+  async prompt(text, { onDelta, onActivity, timeoutMs = acpPromptTimeoutMs(), images } = {}) {
     if (!this.alive) await this.start();
     this.prompting += 1;
     this._touch();
     try {
-      return await this._promptStream(text, { onDelta, onActivity, timeoutMs });
+      return await this._promptStream(text, { onDelta, onActivity, timeoutMs, images });
     } finally {
       this.prompting = Math.max(0, this.prompting - 1);
       this._touch();
     }
   }
 
-  async _promptStream(text, { onDelta, onActivity, timeoutMs = acpPromptTimeoutMs() }) {
+  async _promptStream(text, { onDelta, onActivity, timeoutMs = acpPromptTimeoutMs(), images }) {
     if (this._settling) await this._settling;
     this._toolLog = { items: [] };
     this.onDelta = (chunk) => {
@@ -1255,7 +1298,7 @@ export class AcpChannel {
         "session/prompt",
         {
           sessionId: this.sessionId,
-          prompt: [{ type: "text", text }],
+          prompt: acpPromptBlocks(text, images),
         },
         timeoutMs,
       );
@@ -1861,6 +1904,8 @@ export function createSessionStore({
     bookId,
     partialBackfill = false,
     turnId = "",
+    images = [],
+    loadImages,
   }) {
     const command = resolveCommand();
     if (!command) {
@@ -1883,16 +1928,20 @@ export function createSessionStore({
       throw err;
     }
     const hasHistory = (history || []).some(
-      (m) => m?.content && (m.role === "user" || m.role === "assistant"),
+      (m) => visibleHistoryMessage(m),
     );
     const makePrompt =
       buildPrompt ||
       (bookContext ? buildBookAcpPrompt : buildAcpPrompt);
     const write = Boolean(agentMode) && !bookContext;
+    const primed = Boolean(entry.primed);
+    const refs = bookContext ? [] : promptImageRefs({ history, images, primed });
+    const loaded = refs.length && typeof loadImages === "function" ? await loadImages(refs) : [];
+    const questionText = bookContext ? String(question || "") : questionWithImages(question, loaded);
     let text;
-    if (!entry.primed) {
+    if (!primed) {
       text = makePrompt({
-        question,
+        question: questionText,
         history,
         githubContext,
         bookContext,
@@ -1909,7 +1958,7 @@ export function createSessionStore({
           : "You are now in ask mode. Do not edit files or change the working tree.");
       }
       if (turnNote) notes.push(turnNote);
-      text = notes.length ? `${notes.join("\n")}\n\n${question}` : String(question || "");
+      text = notes.length ? `${notes.join("\n")}\n\n${questionText}` : questionText;
     }
     await withRepoLock(entry, async () => {
       channel.agentMode = write;
@@ -1935,7 +1984,7 @@ export function createSessionStore({
           partial: Boolean(partialBackfill),
         });
         await channel.applySessionMode();
-        await channel.prompt(text, { onDelta, onActivity });
+        await channel.prompt(text, { onDelta, onActivity, images: loaded });
         entry.primed = true;
         entry.announcedAgentMode = write;
       } finally {

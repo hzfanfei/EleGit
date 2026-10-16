@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import '../chat/chat_image.dart';
 import '../copy/ask_engine.dart';
 import '../copy/errors.dart';
 import '../models.dart';
@@ -1326,6 +1327,46 @@ class WenxiangApi {
     }
   }
 
+  Future<ChatImageAttachment> uploadChatImage({
+    required Uint8List bytes,
+    required String mimeType,
+  }) async {
+    final res = await http
+        .post(
+          _uri('/v1/chat/images'),
+          headers: {
+            'X-Wenxiang-Key': apiKey,
+            'ngrok-skip-browser-warning': 'true',
+            'Content-Type': mimeType,
+          },
+          body: bytes,
+        )
+        .timeout(const Duration(seconds: 60));
+    final body = await _json(res, fallback: '上传图片失败');
+    final id = (body['id'] ?? '').toString().trim();
+    if (id.isEmpty) throw ApiException('上传图片失败');
+    ChatImageCache.put(id, bytes);
+    return ChatImageAttachment(
+      id: id,
+      mimeType: (body['mimeType'] ?? mimeType).toString(),
+    );
+  }
+
+  Future<Uint8List> fetchChatImage(String id) async {
+    final cached = ChatImageCache.get(id);
+    if (cached != null) return Uint8List.fromList(cached);
+    final res = await http.get(
+      _uri('/v1/chat/images/${Uri.encodeComponent(id)}'),
+      headers: {
+        'X-Wenxiang-Key': apiKey,
+        'ngrok-skip-browser-warning': 'true',
+      },
+    ).timeout(const Duration(seconds: 30));
+    if (res.statusCode >= 400) throw ApiException('图片加载失败');
+    ChatImageCache.put(id, res.bodyBytes);
+    return res.bodyBytes;
+  }
+
   Stream<ChatStreamEvent> chatStream({
     required String owner,
     required String repo,
@@ -1334,6 +1375,7 @@ class WenxiangApi {
     String? sessionId,
     bool agentMode = false,
     String? turnId,
+    List<ChatImageAttachment> images = const [],
   }) {
     _chatCancelled = false;
     return _retryBeforeVisible(
@@ -1345,6 +1387,7 @@ class WenxiangApi {
         sessionId: sessionId,
         agentMode: agentMode,
         turnId: turnId,
+        images: images,
       ),
       cancelled: () => _chatCancelled,
     );
@@ -1358,6 +1401,7 @@ class WenxiangApi {
     String? sessionId,
     bool agentMode = false,
     String? turnId,
+    List<ChatImageAttachment> images = const [],
   }) async* {
     final client = http.Client();
     _chatClient = client;
@@ -1376,8 +1420,19 @@ class WenxiangApi {
           if (sessionId != null && sessionId.isNotEmpty) 'sessionId': sessionId,
           if (turnId != null && turnId.isNotEmpty) 'turnId': turnId,
           if (agentMode) 'agentMode': true,
+          if (images.isNotEmpty)
+            'images': images
+                .map((image) => {'id': image.id, 'mimeType': image.mimeType})
+                .toList(),
           'history': history
-              .map((m) => {'role': m.role, 'content': m.content})
+              .map((m) => {
+                    'role': m.role,
+                    'content': m.content,
+                    if (m.images.isNotEmpty)
+                      'images': m.images
+                          .map((image) => {'id': image.id, 'mimeType': image.mimeType})
+                          .toList(),
+                  })
               .toList(),
         });
       final res = await client.send(request).timeout(const Duration(seconds: 25));

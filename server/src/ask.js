@@ -269,6 +269,8 @@ export async function* streamAnswer({
   partialBackfill = false,
   isUnwatched,
   turnId = "",
+  images = [],
+  loadImages,
 }) {
   const opts = { ...streamOpts, signal };
   const engine = detectEngine();
@@ -350,6 +352,8 @@ export async function* streamAnswer({
         bookId,
         partialBackfill,
         turnId,
+        images,
+        loadImages,
         onDelta: (chunk) => {
           full += chunk;
           noteLiveTurn({ ...turnCtx, answer: full, activity: lastActivity });

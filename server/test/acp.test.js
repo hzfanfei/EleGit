@@ -23,6 +23,8 @@ import {
   setAcpEnginePreferences,
   sanitizeAcpUserVisibleText,
   buildAcpPrompt,
+  acpPromptBlocks,
+  questionWithImages,
   buildBookAcpPrompt,
   createSessionStore,
   sanitizeAcpEngine,
@@ -534,6 +536,31 @@ describe("buildAcpPrompt", () => {
     });
     assert.doesNotMatch(live, /Prior conversation/);
     assert.match(live, /再说一遍/);
+  });
+
+  it("marks attached images in seeded history and the prompt blocks", () => {
+    const imageId = "ab".repeat(16);
+    const seeded = buildAcpPrompt({
+      question: "这是什么报错",
+      history: [
+        { role: "user", content: "", images: [{ id: imageId }] },
+        { role: "assistant", content: "像是空指针" },
+      ],
+      seedHistory: true,
+    });
+    assert.match(seeded, /User: （附图） \[附图1张\]/);
+    assert.match(seeded, /这是什么报错/);
+    const blocks = acpPromptBlocks("看图", [
+      { mimeType: "image/png", data: "abc", path: "C:\\img.png" },
+    ]);
+    assert.equal(blocks[0].type, "text");
+    assert.equal(blocks[1].type, "image");
+    assert.equal(blocks[1].mimeType, "image/png");
+    assert.equal(blocks[1].data, "abc");
+    assert.match(questionWithImages("看图", blocks.slice(1).map((block) => ({
+      ...block,
+      path: "C:\\img.png",
+    }))), /C:\\img.png/);
   });
 });
 

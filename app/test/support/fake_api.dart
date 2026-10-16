@@ -528,6 +528,7 @@ class FakeWenxiangApi extends WenxiangApi {
     String? sessionId,
     bool agentMode = false,
     String? turnId,
+    List<ChatImageAttachment> images = const [],
   }) async* {
     lastSessionId = sessionId;
     lastChatMessage = message;

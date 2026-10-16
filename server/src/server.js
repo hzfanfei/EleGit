@@ -22,6 +22,12 @@ import { askBookOnCall, handleBookVoiceTurn, prepareBookTurnContext } from "./bo
 import { handleRepoVoiceTurn } from "./repo-voice-turn.js";
 import { handleSpeakSummary } from "./speak-summary.js";
 import { streamAnswer, synthesizeBookAnswer, answerReadyNotice, shouldPublishFinishedAnswer, cleanTurnId } from "./ask.js";
+import {
+  loadChatImages,
+  readChatImage,
+  sanitizeImageRefs,
+  saveChatImage,
+} from "./chat-images.js";
 import { ensureTurnRelay, relaySpawn, turnRelayEnabled } from "./turn-relay-client.js";
 import { setPhoneForeground, phoneInForeground } from "./phone-presence.js";
 import { openSse, sseClientGone, writeSse, writeSseSafe } from "./sse.js";
@@ -1389,6 +1395,36 @@ app.post("/v1/chat/interact", (req, res) => {
   res.json({ ok: true });
 });
 
+app.post(
+  "/v1/chat/images",
+  express.raw({ type: () => true, limit: 5 * 1024 * 1024 }),
+  async (req, res) => {
+    try {
+      const mime = String(req.get("content-type") || "");
+      const saved = await saveChatImage(req.body, mime);
+      res.json(saved);
+    } catch (err) {
+      sendError(res, err);
+    }
+  },
+);
+
+app.get("/v1/chat/images/:id", async (req, res) => {
+  try {
+    const image = await readChatImage(req.params.id);
+    if (!image) {
+      res.status(404).json({ error: "图片不存在" });
+      return;
+    }
+    res.setHeader("Content-Type", image.mimeType);
+    res.setHeader("Cache-Control", "private, max-age=86400");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.end(image.bytes);
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
 app.post("/v1/chat", async (req, res) => {
   let turn;
   let turnSessionId = "";
@@ -1398,12 +1434,14 @@ app.post("/v1/chat", async (req, res) => {
     const message = String(req.body?.message || "").trim();
     const sessionId = String(req.body?.sessionId || "").trim();
     const history = Array.isArray(req.body?.history) ? req.body.history : [];
+    const images = sanitizeImageRefs(req.body?.images);
     const agentMode = req.body?.agentMode === true;
     const turnId = cleanTurnId(req.body?.turnId);
-    if (!owner || !repo || !message) {
+    if (!owner || !repo || (!message && !images.length)) {
       res.status(400).json({ error: "owner, repo, and message are required" });
       return;
     }
+    const question = message || "请看附图。";
     const session = sessions.resolveForChat(owner, repo, sessionId);
     turn = beginChatTurn(session.id);
     turnSessionId = session.id;
@@ -1466,7 +1504,7 @@ app.post("/v1/chat", async (req, res) => {
     let notified = false;
     let deliveredDone;
     for await (const event of streamAnswer({
-      question: message,
+      question,
       history,
       progress,
       context,
@@ -1482,6 +1520,8 @@ app.post("/v1/chat", async (req, res) => {
       partialBackfill: String(req.headers["x-wenxiang-backfill"] || "") === "partial",
       isUnwatched: unwatched,
       turnId,
+      images,
+      loadImages: (refs) => loadChatImages(refs),
     })) {
       if (event.type === "notification") notified = true;
       if (event.type === "done") {
@@ -1508,7 +1548,7 @@ app.post("/v1/chat", async (req, res) => {
         delivered: deliveredDone,
         answer: finalAnswer,
         session,
-        question: message,
+        question,
         turnId,
       });
       sessions.ackTurn?.(session);

@@ -3,9 +3,12 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../api/wenxiang_api.dart';
+import '../chat/chat_image.dart';
 import '../copy/engine.dart';
 import '../copy/errors.dart';
 import '../copy/time.dart';
@@ -25,6 +28,7 @@ import '../voice/voice_stt_client.dart';
 import '../widgets/book_quick_voice_fab.dart';
 import '../widgets/wx_chat_markdown_stream.dart';
 import '../widgets/agent_decision_card.dart';
+import '../widgets/chat_image_strip.dart';
 import '../widgets/wx_chrome.dart';
 import '../widgets/wx_motion.dart';
 import '../widgets/wx_link_route.dart';
@@ -38,6 +42,7 @@ import 'call_page.dart';
 /// (8 + 48 + 8). The list keeps the same gap so the last line is not under the button.
 const _kChatFabLift = 92.0;
 const _kChatComposerBody = 64.0;
+const _kChatDraftStrip = 84.0;
 const _kChatListBottomInset =
     _kChatFabLift + kQuickVoiceFabBottomPad + kQuickVoiceMicSize - _kChatComposerBody + 8;
 
@@ -112,6 +117,9 @@ class _ChatPageState extends State<ChatPage> {
   String? _appearUserKey;
   int? _editingIndex;
   String? _lastUser;
+  List<ChatImageAttachment> _lastImages = const [];
+  final List<_DraftImage> _draftImages = [];
+  bool _uploadingImages = false;
   bool _voiceReady = false;
   bool _voiceCall = false;
   String _voiceHint = '还没配语音密钥。请在本机问象服务的 .env 里配置。';
@@ -751,9 +759,9 @@ class _ChatPageState extends State<ChatPage> {
 
   Future<void> _commitEdit(int index, String text) async {
     final next = text.trim();
-    if (next.isEmpty) return;
     if (index < 0 || index >= _messages.length) return;
     final message = _messages[index];
+    if (next.isEmpty && message.images.isEmpty) return;
     final queued = _isQueuedUserMessage(index, message) && _processingUserIndex != index;
     if (queued) {
       setState(() {
@@ -787,7 +795,7 @@ class _ChatPageState extends State<ChatPage> {
       });
     }
     await _persist();
-    await _send(next);
+    await _send(next, List<ChatImageAttachment>.from(message.images));
   }
 
   int get _queuedCount => _queuedUserIndices.length;
@@ -847,24 +855,143 @@ class _ChatPageState extends State<ChatPage> {
     unawaited(widget.memory?.saveChatVoiceInput(voice));
   }
 
-  Future<void> _send([String? preset]) async {
+  Future<void> _pickImages() async {
+    if (_uploadingImages || _preparingChat || _holding || _sttBusy) return;
+    final room = chatImageMaxCount - _draftImages.length;
+    if (room <= 0) {
+      _snack('最多带 4 张图');
+      return;
+    }
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: Wx.raised,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('从相册选择'),
+              onTap: () => Navigator.pop(context, ImageSource.gallery),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: const Text('拍照'),
+              onTap: () => Navigator.pop(context, ImageSource.camera),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (source == null || !mounted) return;
+    if (source == ImageSource.camera) {
+      final status = await Permission.camera.request();
+      if (!status.isGranted) {
+        if (mounted) _snack('需要相机权限才能拍照');
+        return;
+      }
+    }
+    try {
+      final picker = ImagePicker();
+      final files = <XFile>[];
+      if (source == ImageSource.gallery) {
+        files.addAll(await picker.pickMultiImage(
+          maxWidth: 1600,
+          maxHeight: 1600,
+          imageQuality: 82,
+          limit: room,
+        ));
+      } else {
+        final shot = await picker.pickImage(
+          source: ImageSource.camera,
+          maxWidth: 1600,
+          maxHeight: 1600,
+          imageQuality: 82,
+        );
+        if (shot != null) files.add(shot);
+      }
+      if (!mounted || files.isEmpty) return;
+      final stored = <_DraftImage>[];
+      var skipped = false;
+      for (final file in files.take(room)) {
+        final bytes = await file.readAsBytes();
+        if (bytes.length > chatImageMaxBytes) {
+          skipped = true;
+          continue;
+        }
+        stored.add(_DraftImage(
+          bytes: bytes,
+          mimeType: chatImageMime(mimeType: file.mimeType, path: file.path),
+        ));
+      }
+      if (!mounted) return;
+      if (skipped) _snack('有图片太大，已跳过');
+      if (stored.isEmpty) return;
+      setState(() => _draftImages.addAll(stored));
+    } catch (_) {
+      if (mounted) _snack('没能读取图片');
+    }
+  }
+
+  void _snack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
+    );
+  }
+
+  Future<void> _send([String? preset, List<ChatImageAttachment>? reuseImages]) async {
+    if (_uploadingImages) return;
     final text = (preset ?? _input.text).trim();
     final voice = _composeFromVoice;
     _composeFromVoice = false;
-    if (text.isEmpty) return;
+    final usingDrafts = reuseImages == null;
+    final draftCount = usingDrafts ? _draftImages.length : reuseImages.length;
+    if (text.isEmpty && draftCount == 0) return;
+
+    List<ChatImageAttachment> images;
+    if (!usingDrafts) {
+      images = reuseImages;
+    } else if (_draftImages.isEmpty) {
+      images = const [];
+    } else {
+      setState(() => _uploadingImages = true);
+      try {
+        final uploaded = <ChatImageAttachment>[];
+        for (final draft in List<_DraftImage>.from(_draftImages)) {
+          uploaded.add(await widget.api.uploadChatImage(
+            bytes: draft.bytes,
+            mimeType: draft.mimeType,
+          ));
+        }
+        images = uploaded;
+      } catch (err) {
+        if (mounted) {
+          setState(() => _uploadingImages = false);
+          _snack(humanizeError(err));
+        }
+        return;
+      }
+      if (!mounted) return;
+    }
+
     _editingIndex = null;
     _input.clear();
     _lastUser = text;
+    _lastImages = images;
     HapticFeedback.selectionClick();
 
     late int userIndex;
     setState(() {
+      _uploadingImages = false;
+      if (usingDrafts) _draftImages.clear();
       _rememberInputMode(voice);
       _messages.add(ChatMessage(
         role: 'user',
         content: text,
         via: voice ? 'voice' : null,
         turnId: mintTurnId(),
+        images: images,
       ));
       userIndex = _messages.length - 1;
       _appearUserKey = '${_sessionId ?? ''}:$userIndex';
@@ -907,7 +1034,8 @@ class _ChatPageState extends State<ChatPage> {
       _finishSendQueue();
       return;
     }
-    final text = _messages[userIndex].content;
+    final userMessage = _messages[userIndex];
+    final text = userMessage.content.trim().isEmpty ? '请看附图。' : userMessage.content;
     _processingUserIndex = userIndex;
     _cancelStreamScrollFollow();
     _typewriter.reset();
@@ -936,6 +1064,7 @@ class _ChatPageState extends State<ChatPage> {
         owner: widget.repo.owner,
         repo: widget.repo.name,
         message: text,
+        images: userMessage.images,
         sessionId: _sessionId,
         history: history,
         agentMode: _agentMode,
@@ -1511,7 +1640,12 @@ class _ChatPageState extends State<ChatPage> {
                           key: const Key('wx-chat-list'),
                           controller: _scroll,
                           reverse: true,
-                          padding: const EdgeInsets.fromLTRB(4, 12, 4, _kChatListBottomInset),
+                          padding: EdgeInsets.fromLTRB(
+                            4,
+                            12,
+                            4,
+                            _kChatListBottomInset + (_draftImages.isEmpty ? 0 : _kChatDraftStrip),
+                          ),
                           itemCount: itemCount,
                           itemBuilder: (context, index) {
                       final chronological = itemCount - 1 - index;
@@ -1538,8 +1672,8 @@ class _ChatPageState extends State<ChatPage> {
                           onRemoveQueue: _isQueuedUserMessage(chronological, message)
                               ? () => _removeQueuedTurn(chronological)
                               : null,
-                          onRetry: message.role == 'error' && _lastUser != null && !_busy
-                              ? () => _send(_lastUser)
+                          onRetry: message.role == 'error' && _lastUser != null && !_busy && !_uploadingImages
+                              ? () => _send(_lastUser, _lastImages)
                               : null,
                         );
                       }
@@ -1598,6 +1732,13 @@ class _ChatPageState extends State<ChatPage> {
             onCancelRecognize: _cancelSttRecognition,
             onSend: _send,
             onStop: _stop,
+            draftBytes: [for (final draft in _draftImages) draft.bytes],
+            uploadingImages: _uploadingImages,
+            onPickImages: _pickImages,
+            onRemoveDraft: (index) {
+              if (index < 0 || index >= _draftImages.length) return;
+              setState(() => _draftImages.removeAt(index));
+            },
           ),
             ],
           ),
@@ -1605,7 +1746,9 @@ class _ChatPageState extends State<ChatPage> {
             Positioned(
               left: 8,
               right: 0,
-              bottom: MediaQuery.of(context).padding.bottom + _kChatFabLift,
+              bottom: MediaQuery.of(context).padding.bottom +
+                  _kChatFabLift +
+                  (_draftImages.isEmpty ? 0 : _kChatDraftStrip),
               child: Align(
                 alignment: Alignment.bottomRight,
                 child: BookQuickVoiceFab(
@@ -1780,6 +1923,7 @@ Widget? _queuedTurnActions({
 class _EditableUserTurn extends StatefulWidget {
   const _EditableUserTurn({
     required this.message,
+    required this.api,
     this.queued = false,
     required this.editing,
     this.onEdit,
@@ -1789,6 +1933,7 @@ class _EditableUserTurn extends StatefulWidget {
   });
 
   final ChatMessage message;
+  final WenxiangApi api;
   final bool queued;
   final bool editing;
   final VoidCallback? onEdit;
@@ -1847,8 +1992,15 @@ class _EditableUserTurnState extends State<_EditableUserTurn> {
                       onPressed: widget.onEdit,
                       icon: const Icon(Icons.edit_outlined, size: 18),
                     ),
-      child: widget.editing
-          ? Column(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (widget.message.images.isNotEmpty) ...[
+            ChatImageStrip(images: widget.message.images, api: widget.api),
+            const SizedBox(height: 8),
+          ],
+          if (widget.editing)
+            Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 TextField(
@@ -1877,13 +2029,16 @@ class _EditableUserTurnState extends State<_EditableUserTurn> {
                 ),
               ],
             )
-          : SelectableText(
+          else if (widget.message.content.trim().isNotEmpty)
+            SelectableText(
               widget.message.content,
               style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                     color: Wx.text,
                     height: 1.5,
                   ),
             ),
+        ],
+      ),
     );
   }
 }
@@ -1991,6 +2146,7 @@ class _FinishedTurn extends StatelessWidget {
     if (message.role == 'user') {
       final turn = _EditableUserTurn(
         message: message,
+        api: api,
         queued: queued,
         editing: editing,
         onEdit: onEdit,
@@ -2531,6 +2687,10 @@ class _Composer extends StatelessWidget {
     required this.onCancelRecognize,
     required this.onSend,
     required this.onStop,
+    required this.draftBytes,
+    required this.uploadingImages,
+    required this.onPickImages,
+    required this.onRemoveDraft,
   });
 
   final TextEditingController controller;
@@ -2554,6 +2714,16 @@ class _Composer extends StatelessWidget {
   final VoidCallback onCancelRecognize;
   final Future<void> Function() onSend;
   final VoidCallback onStop;
+  final List<Uint8List> draftBytes;
+  final bool uploadingImages;
+  final Future<void> Function() onPickImages;
+  final ValueChanged<int> onRemoveDraft;
+
+  bool _canSend(String draft) {
+    if (preparing || uploadingImages) return false;
+    if (voiceInputMode) return draftBytes.isNotEmpty;
+    return draft.trim().isNotEmpty || draftBytes.isNotEmpty;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -2570,6 +2740,14 @@ class _Composer extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              if (draftBytes.isNotEmpty) ...[
+                ChatImageStrip(
+                  images: const [],
+                  draftBytes: draftBytes,
+                  onRemove: uploadingImages ? null : onRemoveDraft,
+                ),
+                const SizedBox(height: 8),
+              ],
               Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
@@ -2585,6 +2763,20 @@ class _Composer extends StatelessWidget {
                       voiceInputMode ? Icons.keyboard_outlined : Icons.mic_none_outlined,
                       color: !voiceReady ? Wx.faint : null,
                     ),
+                  ),
+                  IconButton(
+                    key: const Key('wx-chat-attach'),
+                    tooltip: draftBytes.length >= chatImageMaxCount ? '最多 4 张' : '上传图片',
+                    onPressed: preparing || uploadingImages || holding || sttBusy
+                        ? null
+                        : () => onPickImages(),
+                    icon: uploadingImages
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.image_outlined),
                   ),
                   Expanded(
                     child: AnimatedSize(
@@ -2650,7 +2842,7 @@ class _Composer extends StatelessWidget {
                           child: IconButton.filled(
                             key: const Key('wx-chat-send'),
                             tooltip: '发送',
-                            onPressed: voiceInputMode || preparing ? null : onSend,
+                            onPressed: _canSend(controller.text) ? onSend : null,
                             icon: const Icon(Icons.arrow_upward, size: 20),
                           ),
                         );
@@ -2690,7 +2882,7 @@ class _Composer extends StatelessWidget {
                           const SizedBox(width: 4),
                           FilledButton.icon(
                             key: const Key('wx-chat-send'),
-                            onPressed: draft.isEmpty || preparing ? null : onSend,
+                            onPressed: _canSend(draft) ? onSend : null,
                             icon: const Icon(Icons.arrow_upward, size: 18),
                             label: const Text('排队'),
                           ),
@@ -2765,4 +2957,11 @@ class _NewMessagesPill extends StatelessWidget {
       ),
     );
   }
+}
+
+class _DraftImage {
+  _DraftImage({required this.bytes, required this.mimeType});
+
+  final Uint8List bytes;
+  final String mimeType;
 }

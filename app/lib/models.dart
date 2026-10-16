@@ -186,6 +186,40 @@ String mintTurnId() {
   return 't$now$rand';
 }
 
+class ChatImageAttachment {
+  const ChatImageAttachment({
+    required this.id,
+    required this.mimeType,
+  });
+
+  final String id;
+  final String mimeType;
+
+  factory ChatImageAttachment.fromJson(Map<String, dynamic> json) {
+    return ChatImageAttachment(
+      id: (json['id'] ?? '').toString().trim(),
+      mimeType: (json['mimeType'] ?? 'image/jpeg').toString(),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'mimeType': mimeType,
+      };
+}
+
+List<ChatImageAttachment> chatImagesFromJson(Object? raw) {
+  if (raw is! List) return const [];
+  final out = <ChatImageAttachment>[];
+  for (final item in raw) {
+    if (item is! Map) continue;
+    final image = ChatImageAttachment.fromJson(Map<String, dynamic>.from(item));
+    if (image.id.isEmpty) continue;
+    out.add(image);
+  }
+  return List<ChatImageAttachment>.unmodifiable(out);
+}
+
 class ChatMessage {
   ChatMessage({
     required this.role,
@@ -194,7 +228,8 @@ class ChatMessage {
     this.streaming = false,
     this.via,
     this.turnId,
-  });
+    List<ChatImageAttachment> images = const [],
+  }) : images = List<ChatImageAttachment>.unmodifiable(images);
 
   final String role;
   String content;
@@ -204,6 +239,7 @@ class ChatMessage {
   final String? via;
   /// Set on the user message that opened this turn.
   final String? turnId;
+  final List<ChatImageAttachment> images;
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) {
     final rawTurn = json['turnId']?.toString().trim() ?? '';
@@ -213,6 +249,7 @@ class ChatMessage {
       engine: json['engine']?.toString(),
       via: json['via']?.toString(),
       turnId: rawTurn.isEmpty ? null : rawTurn,
+      images: chatImagesFromJson(json['images']),
     );
   }
 
@@ -222,6 +259,7 @@ class ChatMessage {
         if (engine != null && engine!.isNotEmpty) 'engine': engine,
         if (via != null && via!.isNotEmpty) 'via': via,
         if (turnId != null && turnId!.isNotEmpty) 'turnId': turnId,
+        if (images.isNotEmpty) 'images': images.map((image) => image.toJson()).toList(),
       };
 }
 
