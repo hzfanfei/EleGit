@@ -312,6 +312,11 @@ app.get("/oauth/github/callback", async (req, res) => {
     res.type("html").send(callbackHtml({ ok: true, message: `已登录 ${user.login}。` }));
   } catch (err) {
     oauth.fail(state, err.message);
+    noteServerLog({
+      message: `GitHub 登录换票失败：${err.message}`,
+      summary: err.code || err.cause?.code || "",
+      stack: err.stack || "",
+    });
     res.status(400).type("html").send(callbackHtml({ ok: false, message: err.message }));
   }
 });

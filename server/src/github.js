@@ -1,5 +1,7 @@
+import { fetchWithRetry } from "./fetch-retry.js";
+import { postGithubWeb, toFetchResponse } from "./github-web.js";
+
 const GITHUB_API = "https://api.github.com";
-const GITHUB_LOGIN = "https://github.com/login";
 
 function headers(token) {
   return {
@@ -33,13 +35,13 @@ export async function githubGet(token, pathname, query = {}) {
   for (const [key, value] of Object.entries(query)) {
     if (value !== undefined && value !== "") url.searchParams.set(key, String(value));
   }
-  const res = await fetch(url, { headers: headers(token) });
+  const res = await fetchWithRetry(url, { headers: headers(token) });
   return readGithub(res);
 }
 
 async function githubPost(token, pathname, body) {
   const url = new URL(pathname.startsWith("http") ? pathname : `${GITHUB_API}${pathname}`);
-  const res = await fetch(url, {
+  const res = await fetchWithRetry(url, {
     method: "POST",
     headers: { ...headers(token), "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -258,30 +260,20 @@ export async function startDeviceFlow(clientId) {
     err.status = 400;
     throw err;
   }
-  const res = await fetch(`${GITHUB_LOGIN}/device/code`, {
-    method: "POST",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ client_id: clientId, scope: "repo read:user" }),
-  });
+  const res = toFetchResponse(
+    await postGithubWeb("/login/device/code", { client_id: clientId, scope: "repo read:user" }),
+  );
   return readGithub(res);
 }
 
 export async function pollDeviceFlow(clientId, deviceCode) {
-  const res = await fetch(`${GITHUB_LOGIN}/oauth/access_token`, {
-    method: "POST",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
+  const res = toFetchResponse(
+    await postGithubWeb("/login/oauth/access_token", {
       client_id: clientId,
       device_code: deviceCode,
       grant_type: "urn:ietf:params:oauth:grant-type:device_code",
     }),
-  });
+  );
   const body = await readGithub(res);
   if (body.error) {
     const err = new Error(body.error_description || body.error);

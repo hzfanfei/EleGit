@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
+import { postGithubWeb } from "./github-web.js";
 
 const GITHUB_AUTHORIZE = "https://github.com/login/oauth/authorize";
-const GITHUB_TOKEN = "https://github.com/login/oauth/access_token";
 const OAUTH_SCOPE = "repo read:user";
 const STATE_TTL_MS = 15 * 60 * 1000;
 
@@ -106,20 +106,13 @@ export async function exchangeCode({ clientId, clientSecret, code, redirectUri }
     err.status = 400;
     throw err;
   }
-  const res = await fetch(GITHUB_TOKEN, {
-    method: "POST",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      client_id: clientId,
-      client_secret: clientSecret,
-      code,
-      redirect_uri: redirectUri,
-    }),
+  const res = await postGithubWeb("/login/oauth/access_token", {
+    client_id: clientId,
+    client_secret: clientSecret,
+    code,
+    redirect_uri: redirectUri,
   });
-  const body = await res.json().catch(() => ({}));
+  const body = res.json || {};
   if (!res.ok || body.error || !body.access_token) {
     const err = new Error(body.error_description || body.error || `GitHub token exchange HTTP ${res.status}`);
     err.status = 400;
