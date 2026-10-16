@@ -37,6 +37,99 @@ export async function githubGet(token, pathname, query = {}) {
   return readGithub(res);
 }
 
+async function githubPost(token, pathname, body) {
+  const url = new URL(pathname.startsWith("http") ? pathname : `${GITHUB_API}${pathname}`);
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { ...headers(token), "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return readGithub(res);
+}
+
+const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
+
+export function validateNewRepoName(raw) {
+  const name = String(raw || "").trim();
+  if (!name) {
+    const err = new Error("请填写仓库名");
+    err.status = 400;
+    err.code = "repo_name_required";
+    throw err;
+  }
+  const bad =
+    name.length > 100 ||
+    name.startsWith(".") ||
+    name.startsWith("-") ||
+    name.endsWith(".") ||
+    name.includes("..") ||
+    /\.git$/i.test(name) ||
+    WINDOWS_RESERVED.test(name) ||
+    /[\s\\/?#%*:|"<>]/.test(name) ||
+    /[\u0000-\u001f]/.test(name);
+  if (bad) {
+    const err = new Error("仓库名请用字母、数字或中文，可加点、下划线和连字符");
+    err.status = 400;
+    err.code = "repo_name_invalid";
+    throw err;
+  }
+  return name;
+}
+
+export function validateNewRepoDescription(raw) {
+  const description = String(raw || "").trim();
+  if (description.length > 350) {
+    const err = new Error("简介最多 350 个字");
+    err.status = 400;
+    err.code = "repo_description_invalid";
+    throw err;
+  }
+  return description;
+}
+
+function mapCreateRepoError(err) {
+  const errors = Array.isArray(err.body?.errors) ? err.body.errors : [];
+  const detail = errors.map((item) => String(item.message || "")).join(" ");
+  const blob = `${err.message || ""} ${detail}`.toLowerCase();
+  if (blob.includes("already exists")) {
+    const mapped = new Error("这个仓库名已经有了，换一个名字");
+    mapped.status = 409;
+    mapped.code = "repo_exists";
+    return mapped;
+  }
+  if (err.status === 401 || err.status === 403) {
+    const mapped = new Error("GitHub 没有创建仓库的权限。请重新登录，并允许仓库读写。");
+    mapped.status = err.status;
+    mapped.code = "repo_forbidden";
+    return mapped;
+  }
+  if (err.status === 422) {
+    const mapped = new Error("GitHub 没有接受这个仓库名");
+    mapped.status = 422;
+    mapped.code = "repo_rejected";
+    return mapped;
+  }
+  return err;
+}
+
+/** Create an empty repo on the signed-in user's GitHub account. */
+export async function createUserRepo(token, input = {}) {
+  const name = validateNewRepoName(input.name);
+  const description = validateNewRepoDescription(input.description);
+  const isPrivate = !(input.private === false || input.private === "false");
+  try {
+    const repo = await githubPost(token, "/user/repos", {
+      name,
+      description,
+      private: isPrivate,
+      auto_init: true,
+    });
+    return summarizeRepo(repo);
+  } catch (err) {
+    throw mapCreateRepoError(err);
+  }
+}
+
 export async function verifyToken(token) {
   const user = await githubGet(token, "/user");
   return {

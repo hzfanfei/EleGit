@@ -215,6 +215,29 @@ class ReposPageState extends State<ReposPage> {
     });
   }
 
+  Future<void> _createRepo() async {
+    if (_cloning != null && _cloneError == null) return;
+    HapticFeedback.lightImpact();
+    if (!widget.githubConnected) {
+      setState(() => _reauth = true);
+      return;
+    }
+    final created = await showModalBottomSheet<RepoItem>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Wx.surface,
+      builder: (context) => _NewRepoSheet(api: widget.api),
+    );
+    if (created == null || !mounted) return;
+    setState(() {
+      _repos = [
+        created,
+        ..._repos.where((repo) => repo.fullName != created.fullName),
+      ];
+    });
+    await _open(created);
+  }
+
   @override
   void dispose() {
     _debounce?.cancel();
@@ -259,6 +282,12 @@ class ReposPageState extends State<ReposPage> {
             status: WxLinkQualityMark(api: widget.api),
             onBrandTap: blocked ? null : widget.onOpenSettings,
             trailing: [
+              IconButton(
+                key: const Key('wx-home-new-repo'),
+                tooltip: '新建仓库',
+                onPressed: blocked ? null : _createRepo,
+                icon: const Icon(Icons.add),
+              ),
               if (widget.onOpenFiles != null)
                 IconButton(
                   key: const Key('wx-home-files'),
@@ -384,6 +413,131 @@ class ReposPageState extends State<ReposPage> {
             onTap: () => _open(repo),
           );
         },
+      ),
+    );
+  }
+}
+
+class _NewRepoSheet extends StatefulWidget {
+  const _NewRepoSheet({required this.api});
+
+  final WenxiangApi api;
+
+  @override
+  State<_NewRepoSheet> createState() => _NewRepoSheetState();
+}
+
+class _NewRepoSheetState extends State<_NewRepoSheet> {
+  final _name = TextEditingController();
+  final _description = TextEditingController();
+  bool _private = true;
+  bool _busy = false;
+  String _error = '';
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _description.dispose();
+    super.dispose();
+  }
+
+  String? _nameError(String raw) {
+    final name = raw.trim();
+    if (name.isEmpty) return '请填写仓库名';
+    final bad = name.length > 100 ||
+        name.startsWith('.') ||
+        name.startsWith('-') ||
+        name.endsWith('.') ||
+        name.contains('..') ||
+        name.toLowerCase().endsWith('.git') ||
+        RegExp(r'^(con|prn|aux|nul|com[1-9]|lpt[1-9])$', caseSensitive: false).hasMatch(name) ||
+        RegExp(r'[\s\\/?#%*:|"<>]').hasMatch(name);
+    if (bad) return '仓库名请用字母、数字或中文，可加点、下划线和连字符';
+    return null;
+  }
+
+  Future<void> _submit() async {
+    final nameError = _nameError(_name.text);
+    final description = _description.text.trim();
+    if (nameError != null) {
+      setState(() => _error = nameError);
+      return;
+    }
+    if (description.length > 350) {
+      setState(() => _error = '简介最多 350 个字');
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = '';
+    });
+    try {
+      final repo = await widget.api.createRepo(
+        name: _name.text.trim(),
+        description: description,
+        privateRepo: _private,
+      );
+      if (!mounted) return;
+      Navigator.pop(context, repo);
+    } catch (err) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = err.toString();
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottom = MediaQuery.viewInsetsOf(context).bottom;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(Wx.inset, 8, Wx.inset, 16 + bottom),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const SizedBox(height: 8),
+          Text('在 GitHub 新建', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 6),
+          Text(
+            '建在当前登录的账号下，带一份 README。建好后拉到本机打开。',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Wx.muted),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            key: const Key('wx-new-repo-name'),
+            controller: _name,
+            enabled: !_busy,
+            autofocus: true,
+            textInputAction: TextInputAction.next,
+            decoration: const InputDecoration(hintText: '仓库名'),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            key: const Key('wx-new-repo-description'),
+            controller: _description,
+            enabled: !_busy,
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => _submit(),
+            decoration: const InputDecoration(hintText: '简介，可选'),
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('私有仓库'),
+            value: _private,
+            onChanged: _busy ? null : (value) => setState(() => _private = value),
+          ),
+          if (_error.isNotEmpty) ...[
+            Text(_error, style: const TextStyle(color: Wx.danger, height: 1.35)),
+            const SizedBox(height: 8),
+          ],
+          FilledButton(
+            key: const Key('wx-new-repo-submit'),
+            onPressed: _busy ? null : _submit,
+            child: Text(_busy ? '正在创建' : '创建'),
+          ),
+        ],
       ),
     );
   }

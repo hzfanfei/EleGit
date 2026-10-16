@@ -46,6 +46,11 @@ class FakeWenxiangApi extends WenxiangApi {
   String githubLogin;
   List<RepoItem>? reposResult;
   Object? reposThrows;
+  RepoItem? createdRepo;
+  Object? createRepoThrows;
+  int createRepoCalls = 0;
+  String? lastCreatedName;
+  bool? lastCreatedPrivate;
   List<RepoItem>? localReposResult;
   Object? localReposThrows;
   String checkoutPath;
@@ -381,6 +386,28 @@ class FakeWenxiangApi extends WenxiangApi {
         ];
     if (query.isEmpty) return all;
     return all.where((r) => r.fullName.contains(query)).toList();
+  }
+
+  @override
+  Future<RepoItem> createRepo({
+    required String name,
+    String description = '',
+    bool privateRepo = true,
+  }) async {
+    createRepoCalls += 1;
+    lastCreatedName = name;
+    lastCreatedPrivate = privateRepo;
+    if (createRepoThrows != null) throw createRepoThrows!;
+    return createdRepo ??
+        RepoItem(
+          owner: githubLogin.isEmpty ? 'octo' : githubLogin,
+          name: name,
+          fullName: '${githubLogin.isEmpty ? 'octo' : githubLogin}/$name',
+          description: description,
+          privateRepo: privateRepo,
+          language: '',
+          pushedAt: '',
+        );
   }
 
   @override

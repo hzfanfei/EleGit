@@ -32,6 +32,7 @@ import { ensureTurnRelay, relaySpawn, turnRelayEnabled } from "./turn-relay-clie
 import { setPhoneForeground, phoneInForeground } from "./phone-presence.js";
 import { openSse, sseClientGone, writeSse, writeSseSafe } from "./sse.js";
 import {
+  createUserRepo,
   emptyRepoProgress,
   formatProgressContext,
   listRepos,
@@ -508,6 +509,15 @@ app.get("/v1/repos", requireGithub, async (req, res) => {
   try {
     const repos = await listRepos(githubToken(), String(req.query.q || ""));
     res.json({ repos, source: "github" });
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.post("/v1/repos", requireGithub, async (req, res) => {
+  try {
+    const repo = await createUserRepo(githubToken(), req.body || {});
+    res.status(201).json({ repo });
   } catch (err) {
     sendError(res, err);
   }

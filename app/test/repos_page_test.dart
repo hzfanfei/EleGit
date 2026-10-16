@@ -230,4 +230,68 @@ void main() {
     expect(status.left, lessThan(title.right + 20));
     expect(trail.left - status.right, greaterThan(24));
   });
+
+  testWidgets('new repo button creates on GitHub then opens the checkout', (tester) async {
+    final api = FakeWenxiangApi(
+      checkoutStatusResult: CheckoutSyncStatus(
+        present: false,
+        upToDate: false,
+        syncState: 'missing',
+        behind: 0,
+        path: '/home/fei/问象/octo/fresh',
+      ),
+    );
+    RepoItem? opened;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: _theme(),
+        home: ReposPage(
+          api: api,
+          githubLogin: 'octo',
+          onOpen: (repo) => opened = repo,
+          onAuthorized: () async {},
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('wx-home-new-repo')));
+    await tester.pumpAndSettle();
+    expect(find.text('在 GitHub 新建'), findsOneWidget);
+
+    await tester.enterText(find.byKey(const Key('wx-new-repo-name')), 'fresh');
+    await tester.tap(find.byKey(const Key('wx-new-repo-submit')));
+    await tester.pumpAndSettle();
+
+    expect(api.createRepoCalls, 1);
+    expect(api.lastCreatedName, 'fresh');
+    expect(api.lastCreatedPrivate, isTrue);
+    expect(api.checkoutCalls, 1);
+    expect(opened?.fullName, 'octo/fresh');
+  });
+
+  testWidgets('empty repo name stays on the sheet', (tester) async {
+    final api = FakeWenxiangApi();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: _theme(),
+        home: ReposPage(
+          api: api,
+          githubConnected: true,
+          onOpen: (_) {},
+          onAuthorized: () async {},
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('新建仓库'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('wx-new-repo-submit')));
+    await tester.pump();
+    expect(find.text('请填写仓库名'), findsOneWidget);
+    expect(api.createRepoCalls, 0);
+  });
 }

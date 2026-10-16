@@ -743,6 +743,28 @@ class WenxiangApi {
         .toList();
   }
 
+  Future<RepoItem> createRepo({
+    required String name,
+    String description = '',
+    bool privateRepo = true,
+  }) async {
+    final res = await http
+        .post(
+          _uri('/v1/repos'),
+          headers: _headers,
+          body: jsonEncode({
+            'name': name,
+            'description': description,
+            'private': privateRepo,
+          }),
+        )
+        .timeout(const Duration(seconds: 30));
+    final body = await _json(res, fallback: '新建仓库失败');
+    final repo = body['repo'];
+    if (repo is! Map) throw ApiException('新建仓库失败');
+    return RepoItem.fromJson(Map<String, dynamic>.from(repo));
+  }
+
   Future<List<RepoItem>> localRepos(String query) async {
     final res = await http
         .get(_uri('/v1/repos/local', {'q': query}), headers: _headers)
