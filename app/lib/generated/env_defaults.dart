@@ -1,2 +1,2 @@
-const kDefaultPublicUrl = 'https://wenxiang.ngrok.app';
+const kDefaultPublicUrl = 'https://wenxiang.cpolar.cn';
 const kDefaultApiKey = '';

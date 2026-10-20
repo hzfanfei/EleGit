@@ -1,19 +1,20 @@
 import { loadLocalEnv } from "../src/env.js";
-import { ensureNgrok } from "../src/ngrok.js";
+import { ensurePublicTunnel, publicTunnelKind } from "../src/public-tunnel.js";
 
 loadLocalEnv();
 
-const ngrok = await ensureNgrok();
-if (ngrok.reason === "already") {
-  console.log("ngrok already running.");
-} else if (ngrok.started) {
-  console.log(`ngrok started for port ${process.env.WENXIANG_PORT || 8787}.`);
+const tunnel = await ensurePublicTunnel();
+const kind = tunnel.kind || publicTunnelKind() || "tunnel";
+if (tunnel.reason === "already") {
+  console.log(`${kind} already running.`);
+} else if (tunnel.started) {
+  console.log(`${kind} started for port ${process.env.WENXIANG_PORT || 8787}.`);
 }
 
 const stop = () => {
-  if (ngrok.child && !ngrok.child.killed) {
+  if (tunnel.child && !tunnel.child.killed) {
     try {
-      ngrok.child.kill();
+      tunnel.child.kill();
     } catch {
       // ignore
     }

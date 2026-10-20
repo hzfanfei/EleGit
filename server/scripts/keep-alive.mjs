@@ -12,14 +12,14 @@ import {
   shouldRestartStaleTunnel,
 } from "../src/keep-alive-policy.js";
 import {
-  ensureNgrok,
-  fetchNgrokTunnels,
-  killWenxiangNgrok,
-  ngrokTunnelReady,
+  ensurePublicTunnel,
+  inspectPublicTunnel,
+  killPublicTunnel,
   probePublicHealth,
-  recoverNgrok,
-  shouldAutostartNgrok,
-} from "../src/ngrok.js";
+  publicTunnelKind,
+  recoverPublicTunnel,
+  shouldAutostartPublicTunnel,
+} from "../src/public-tunnel.js";
 import { queueRestartNoticeFile } from "../src/restart-notice.js";
 import { ensureTurnRelay, turnRelayEnabled } from "../src/turn-relay-client.js";
 import { configuredWorkspaceRoot } from "../src/workspace.js";
@@ -39,7 +39,7 @@ const tunnelFailThreshold = Math.max(
 );
 const healthUrl = `http://127.0.0.1:${port}/health`;
 let attempt = 0;
-let ngrokChild = null;
+let tunnelChild = null;
 let announcedHolding = false;
 let booting = false;
 let supervising = false;
@@ -65,33 +65,35 @@ async function ensureTurnRelayProcess() {
 }
 
 async function ensureTunnel() {
-  if (!shouldAutostartNgrok(process.env)) return;
-  const tunnels = await fetchNgrokTunnels();
-  if (tunnels !== null && !ngrokTunnelReady(tunnels, { publicUrl, port })) {
-    await killWenxiangNgrok({ child: ngrokChild, env: process.env });
-    ngrokChild = null;
+  if (!shouldAutostartPublicTunnel(process.env)) return;
+  const state = await inspectPublicTunnel({ publicUrl, port, env: process.env });
+  if (state === "mismatch") {
+    await killPublicTunnel({ child: tunnelChild, env: process.env });
+    tunnelChild = null;
   }
-  const ngrok = await ensureNgrok({ port, publicUrl, env: process.env });
-  attachNgrokChild(ngrok.child);
-  if (ngrok.reason === "already") {
-    if (!announcedHolding) console.log("ngrok already running.");
-  } else if (ngrok.started) console.log("ngrok started.");
+  const tunnel = await ensurePublicTunnel({ port, publicUrl, env: process.env });
+  attachTunnelChild(tunnel.child);
+  const kind = tunnel.kind || publicTunnelKind(process.env) || "tunnel";
+  if (tunnel.reason === "already") {
+    if (!announcedHolding) console.log(`${kind} already running.`);
+  } else if (tunnel.started) console.log(`${kind} started.`);
   lastTunnelError = "";
 }
 
-function attachNgrokChild(child) {
-  if (!child || child === ngrokChild) return;
-  ngrokChild = child;
-  ngrokChild.on("exit", () => {
-    ngrokChild = null;
-    console.error("[keep-alive] ngrok exited — starting it again");
+function attachTunnelChild(child) {
+  if (!child || child === tunnelChild) return;
+  tunnelChild = child;
+  const kind = publicTunnelKind(process.env) || "tunnel";
+  tunnelChild.on("exit", () => {
+    tunnelChild = null;
+    console.error(`[keep-alive] ${kind} exited — starting it again`);
     publicTunnelFailStreak = 0;
     supervise();
   });
 }
 
 async function maintainPublicTunnel(localHealthy) {
-  if (!shouldAutostartNgrok(process.env) || !localHealthy || !publicUrl) return;
+  if (!shouldAutostartPublicTunnel(process.env) || !localHealthy || !publicUrl) return;
 
   const probe = await probePublicHealth(publicUrl);
   if (probe.ok) {
@@ -113,7 +115,7 @@ async function maintainPublicTunnel(localHealthy) {
     const now = Date.now();
     if (now - lastNetworkDownLog > 60_000) {
       lastNetworkDownLog = now;
-      console.error("[keep-alive] outbound network down — waiting (not restarting ngrok yet)");
+      console.error("[keep-alive] outbound network down — waiting (not restarting the tunnel yet)");
     }
     return;
   }
@@ -130,14 +132,20 @@ async function maintainPublicTunnel(localHealthy) {
     return;
   }
 
-  console.error("[keep-alive] public tunnel stale while companion is up — restarting ngrok");
+  const kind = publicTunnelKind(process.env) || "tunnel";
+  console.error(`[keep-alive] public tunnel stale while companion is up — restarting ${kind}`);
   publicTunnelFailStreak = 0;
   lastPublicTunnelReason = "";
   try {
-    const ngrok = await recoverNgrok({ child: ngrokChild, port, publicUrl, env: process.env });
-    attachNgrokChild(ngrok.child);
-    if (ngrok.started) console.log("ngrok started.");
-    else if (ngrok.reason === "already") console.log("ngrok already running.");
+    const tunnel = await recoverPublicTunnel({
+      child: tunnelChild,
+      port,
+      publicUrl,
+      env: process.env,
+    });
+    attachTunnelChild(tunnel.child);
+    if (tunnel.started) console.log(`${kind} started.`);
+    else if (tunnel.reason === "already") console.log(`${kind} already running.`);
   } catch (err) {
     const message = err.message || String(err);
     if (message !== lastTunnelError) {
