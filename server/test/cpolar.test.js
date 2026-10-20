@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   cpolarHttpArgs,
+  cpolarLaunchArgs,
   cpolarTargetFromPublicUrl,
   cpolarTunnelReady,
   shouldAutostartCpolar,
@@ -43,6 +44,19 @@ describe("cpolar public host", () => {
         env: {},
       }),
       ["http", "8787", "-log=stdout", "-subdomain=wenxiang", "-region=cn"],
+    );
+  });
+
+  it("starts every tunnel in the shared config with one process", () => {
+    const shared = "authtoken: token\ntunnels:\n  wenxiang:\n    addr: 8787\n";
+    assert.deepEqual(
+      cpolarLaunchArgs({
+        port: 8787,
+        publicUrl: "https://wenxiang.cpolar.cn",
+        env: {},
+        configText: shared,
+      }),
+      ["start-all", "-log=stdout"],
     );
   });
 

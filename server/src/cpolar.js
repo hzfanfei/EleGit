@@ -1,5 +1,6 @@
 import { execFile, spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { publicHostFromUrl } from "./ngrok.js";
@@ -8,7 +9,8 @@ import { whichSync } from "./which.js";
 const execFileAsync = promisify(execFile);
 
 const CPOLAR_HOST = /(^|\.)cpolar\.(cn|top|io)$/i;
-export const CPOLAR_INSPECTOR = "http://127.0.0.1:4041";
+export const CPOLAR_INSPECTOR = "http://127.0.0.1:4040";
+const CPOLAR_INSPECTORS = [CPOLAR_INSPECTOR, "http://127.0.0.1:4041"];
 
 export function shouldAutostartCpolar(env = process.env) {
   const flag = String(env.WENXIANG_CPOLAR || "").trim().toLowerCase();
@@ -31,6 +33,17 @@ export function cpolarTargetFromPublicUrl(publicUrl) {
   return null;
 }
 
+export function cpolarConfigPath(env = process.env) {
+  const home = env.USERPROFILE || env.HOME || os.homedir();
+  return path.join(home, ".cpolar", "cpolar.yml");
+}
+
+/** When the user config lists tunnels, one process must serve all of them. */
+export function cpolarLaunchArgs({ port, publicUrl, env = process.env, configText = "" } = {}) {
+  if (/^\s*tunnels\s*:/m.test(String(configText || ""))) return ["start-all", "-log=stdout"];
+  return cpolarHttpArgs({ port, publicUrl, env });
+}
+
 export function cpolarHttpArgs({ port, publicUrl, env = process.env } = {}) {
   const fromUrl = cpolarTargetFromPublicUrl(publicUrl);
   const subdomain = String(env.WENXIANG_CPOLAR_SUBDOMAIN || fromUrl?.subdomain || "").trim();
@@ -51,20 +64,26 @@ export function resolveCpolarBin(env = process.env, whichImpl = whichSync) {
 
 export async function fetchCpolarPublicUrls({
   fetchImpl = fetch,
-  inspectorUrl = CPOLAR_INSPECTOR,
+  inspectorUrl = "",
 } = {}) {
-  try {
-    const res = await fetchImpl(inspectorUrl, { signal: AbortSignal.timeout(1500) });
-    if (!res?.ok) return null;
-    const html = await res.text();
-    const found = new Set();
-    for (const match of String(html).matchAll(/https?:\/\/[a-z0-9.-]+\.cpolar\.(?:cn|top|io)/gi)) {
-      found.add(match[0]);
+  const targets = inspectorUrl ? [inspectorUrl] : CPOLAR_INSPECTORS;
+  let sawInspector = false;
+  const found = new Set();
+  for (const target of targets) {
+    try {
+      const res = await fetchImpl(target, { signal: AbortSignal.timeout(1500) });
+      if (!res?.ok) continue;
+      const html = await res.text();
+      if (!/cpolar/i.test(html)) continue;
+      sawInspector = true;
+      for (const match of html.matchAll(/https?:\/\/[a-z0-9.-]+\.cpolar\.(?:cn|top|io)/gi)) {
+        found.add(match[0]);
+      }
+    } catch {
+      // try the next inspector port
     }
-    return [...found];
-  } catch {
-    return null;
   }
+  return sawInspector ? [...found] : null;
 }
 
 export function cpolarTunnelReady(urls, { publicUrl } = {}) {
@@ -74,9 +93,28 @@ export function cpolarTunnelReady(urls, { publicUrl } = {}) {
   return urls.some((url) => publicHostFromUrl(url) === host);
 }
 
+async function cpolarProcessAlive(execFileImpl = execFileAsync) {
+  if (process.platform !== "win32") return false;
+  try {
+    const { stdout } = await execFileImpl(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "@(Get-Process cpolar -ErrorAction SilentlyContinue).Count",
+      ],
+      { windowsHide: true },
+    );
+    return Number(String(stdout || "").trim()) > 0;
+  } catch {
+    return false;
+  }
+}
+
 export async function cpolarAlreadyOpen({
   fetchImpl = fetch,
-  inspectorUrl = CPOLAR_INSPECTOR,
+  inspectorUrl = "",
   publicUrl = process.env.WENXIANG_PUBLIC_URL,
 } = {}) {
   const urls = await fetchCpolarPublicUrls({ fetchImpl, inspectorUrl });
@@ -96,7 +134,7 @@ export function cpolarStopScript(host) {
   const pattern = escapeForPsRegex(host).replace(/'/g, "''");
   const list =
     "$procs = @(Get-CimInstance Win32_Process -Filter \"Name='cpolar.exe'\" -ErrorAction SilentlyContinue" +
-    ` | Where-Object { $_.CommandLine -match '${pattern}' })`;
+    ` | Where-Object { $_.CommandLine -match '${pattern}' -or $_.CommandLine -match 'start-all' })`;
   const stop =
     "if ($procs) { $procs | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } }";
   return `${list}; ${stop}`;
@@ -181,8 +219,13 @@ export async function ensureCpolar({
   if (!shouldAutostartCpolar(env)) {
     return { started: false, reason: "disabled", kind: "cpolar" };
   }
-  if (await cpolarAlreadyOpen({ fetchImpl, publicUrl })) {
-    return { started: false, reason: "already", kind: "cpolar" };
+  const readyDeadline = Date.now() + readyTimeoutMs;
+  while (Date.now() < readyDeadline) {
+    if (await cpolarAlreadyOpen({ fetchImpl, publicUrl })) {
+      return { started: false, reason: "already", kind: "cpolar" };
+    }
+    if (!(await cpolarProcessAlive(execFileAsync))) break;
+    await sleep(250);
   }
   const target = cpolarTargetFromPublicUrl(publicUrl);
   const subdomain = String(env.WENXIANG_CPOLAR_SUBDOMAIN || target?.subdomain || "").trim();
@@ -199,7 +242,13 @@ export async function ensureCpolar({
     err.code = "CPOLAR_MISSING";
     throw err;
   }
-  const args = cpolarHttpArgs({ port, publicUrl, env });
+  let configText = "";
+  try {
+    configText = readFileSync(cpolarConfigPath(env), "utf8");
+  } catch {
+    configText = "";
+  }
+  const args = cpolarLaunchArgs({ port, publicUrl, env, configText });
   const child = spawnImpl(bin, args, {
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
