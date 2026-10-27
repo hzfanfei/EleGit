@@ -10,6 +10,10 @@ import {
 
 describe("cpolar public host", () => {
   it("maps reserved China hostnames to subdomain and region", () => {
+    assert.deepEqual(cpolarTargetFromPublicUrl("https://wenxiang.nas.cpolar.cn"), {
+      subdomain: "wenxiang",
+      region: "cn_nas",
+    });
     assert.deepEqual(cpolarTargetFromPublicUrl("https://wenxiang.cpolar.cn"), {
       subdomain: "wenxiang",
       region: "cn",
@@ -44,6 +48,14 @@ describe("cpolar public host", () => {
         env: {},
       }),
       ["http", "8787", "-log=stdout", "-subdomain=wenxiang", "-region=cn"],
+    );
+    assert.deepEqual(
+      cpolarHttpArgs({
+        port: 8787,
+        publicUrl: "https://wenxiang.nas.cpolar.cn",
+        env: {},
+      }),
+      ["http", "8787", "-log=stdout", "-subdomain=wenxiang", "-region=cn_nas"],
     );
   });
 

@@ -1,2 +1,2 @@
-const kDefaultPublicUrl = 'https://wenxiang.cpolar.cn';
+const kDefaultPublicUrl = 'https://wenxiang.nas.cpolar.cn';
 const kDefaultApiKey = '';

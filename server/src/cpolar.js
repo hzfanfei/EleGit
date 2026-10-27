@@ -22,6 +22,8 @@ export function shouldAutostartCpolar(env = process.env) {
 /** Map a reserved cpolar hostname to CLI -subdomain / -region. */
 export function cpolarTargetFromPublicUrl(publicUrl) {
   const host = publicHostFromUrl(publicUrl).toLowerCase();
+  const nas = host.match(/^([a-z0-9-]+)\.nas\.cpolar\.cn$/);
+  if (nas) return { subdomain: nas[1], region: "cn_nas" };
   const vip = host.match(/^([a-z0-9-]+)\.vip\.cpolar\.cn$/);
   if (vip) return { subdomain: vip[1], region: "cn_vip" };
   const cn = host.match(/^([a-z0-9-]+)\.cpolar\.cn$/);
