@@ -67,6 +67,8 @@ describe("static files", () => {
     assert.equal(contentTypeForStatic("app.apk"), "application/vnd.android.package-archive");
     assert.match(staticContentDisposition("问象.apk", "问象.apk"), /^attachment;/);
     assert.match(staticContentDisposition("shot.png", "shot.png"), /^inline;/);
+    assert.equal(contentTypeForStatic("page.html"), "text/html; charset=utf-8");
+    assert.match(staticContentDisposition("page.html", "page.html"), /^inline;/);
   });
 
   it("lists nested files and skips hidden ones", async () => {
