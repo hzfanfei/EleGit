@@ -587,16 +587,49 @@ class WenxiangApi {
   }
 
   Future<void> setAskEngine(String engine, {required AskEngineScope scope}) async {
-    final res = await http
-        .put(
-          _uri('/v1/settings/ask-engine'),
-          headers: _headers,
-          body: jsonEncode({'engine': engine, 'scope': askEngineScopeId(scope)}),
-        )
-        .timeout(const Duration(seconds: 20));
+    final body = jsonEncode({'engine': engine, 'scope': askEngineScopeId(scope)});
+    final current = normalizeBaseUrl(baseUrl);
+    final tunnel = normalizeBaseUrl(_tunnelUrl);
+    final onDeadLanRisk = current != tunnel && isLanBaseUrl(current);
+    http.Response res;
+    try {
+      res = await _putSettings(
+        current,
+        '/v1/settings/ask-engine',
+        body,
+        timeout: onDeadLanRisk ? const Duration(seconds: 8) : const Duration(seconds: 20),
+      );
+    } catch (err) {
+      if (!onDeadLanRisk || !_linkFailed(err)) rethrow;
+      _useBase(tunnel);
+      res = await _putSettings(tunnel, '/v1/settings/ask-engine', body);
+    }
     if (res.statusCode >= 400) {
       await _json(res, fallback: '保存问答方式失败');
     }
+  }
+
+  Future<http.Response> _putSettings(
+    String root,
+    String path,
+    String body, {
+    Duration timeout = const Duration(seconds: 20),
+  }) {
+    final uri = Uri.parse('${normalizeBaseUrl(root)}$path');
+    return http.put(uri, headers: _headers, body: body).timeout(timeout);
+  }
+
+  bool _linkFailed(Object error) {
+    final lower = error.toString().toLowerCase();
+    return lower.contains('timeout') ||
+        lower.contains('timed out') ||
+        lower.contains('socketexception') ||
+        lower.contains('connection refused') ||
+        lower.contains('connection reset') ||
+        lower.contains('failed host lookup') ||
+        lower.contains('network is unreachable') ||
+        lower.contains('no route to host') ||
+        lower.contains('clientexception');
   }
 
   Future<ServerStatus> status() async {

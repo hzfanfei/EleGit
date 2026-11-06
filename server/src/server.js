@@ -1186,10 +1186,6 @@ app.put("/v1/settings/ask-engine", async (req, res) => {
     }
     syncAcpEngineConfig(store.config);
     await store.save();
-    const resets = [];
-    if (!scope || scope === "repo") resets.push(sessions.resetAllChannels());
-    if (!scope || scope === "book") resets.push(bookSessions.resetAllChannels());
-    await Promise.all(resets);
     const activeScope = scope === "book" ? "book" : "repo";
     const active = detectCursorEngine(activeScope);
     res.json({
@@ -1203,6 +1199,10 @@ app.put("/v1/settings/ask-engine", async (req, res) => {
       activeEngine: active?.provider || active?.id || null,
       model: active?.model || null,
     });
+    const resets = [];
+    if (!scope || scope === "repo") resets.push(sessions.resetAllChannels());
+    if (!scope || scope === "book") resets.push(bookSessions.resetAllChannels());
+    void Promise.all(resets).catch(() => {});
   } catch (err) {
     sendError(res, err);
   }
