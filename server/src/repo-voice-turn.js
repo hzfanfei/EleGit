@@ -141,7 +141,7 @@ export async function handleRepoVoiceTurn(
   const acp = detectEngine();
   if (!acp) {
     res.status(503).json({
-      error: "问仓库需要本机 Claude Code 或 Cursor Agent（ACP）。请安装并登录所选助手。",
+      error: "问仓库需要本机 Claude Code、Cursor 或 Codex（ACP）。请安装并登录所选助手。",
       code: "acp_unconfigured",
     });
     return;

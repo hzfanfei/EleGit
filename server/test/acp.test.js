@@ -28,6 +28,8 @@ import {
   buildBookAcpPrompt,
   createSessionStore,
   sanitizeAcpEngine,
+  codexModelFromConfigText,
+  resolveCodexAgentCommand,
   pickCursorVersionName,
   claudeCodeSessionOptions,
   preferredAcpModeIds,
@@ -51,9 +53,10 @@ describe("pickCursorVersionName", () => {
 });
 
 describe("sanitizeAcpEngine", () => {
-  it("accepts claude and cursor only", () => {
+  it("accepts claude, cursor, and codex", () => {
     assert.equal(sanitizeAcpEngine("claude"), "claude");
     assert.equal(sanitizeAcpEngine("Cursor"), "cursor");
+    assert.equal(sanitizeAcpEngine("Codex"), "codex");
     assert.equal(sanitizeAcpEngine("other"), null);
     assert.equal(applyAcpEnginePreference("cursor"), "cursor");
     assert.equal(process.env.WENXIANG_ACP_ENGINE, "cursor");
@@ -167,6 +170,27 @@ describe("acpModelId", () => {
       if (prevAcpModel !== undefined) process.env.WENXIANG_ACP_MODEL = prevAcpModel;
     }
   });
+
+  it("keeps a Cursor model pin off the Codex engine", () => {
+    const prevEngine = process.env.WENXIANG_ACP_ENGINE;
+    const prevAcpModel = process.env.WENXIANG_ACP_MODEL;
+    const prevCodex = process.env.WENXIANG_CODEX_MODEL;
+    process.env.WENXIANG_ACP_ENGINE = "codex";
+    process.env.WENXIANG_ACP_MODEL = "grok-4.7-high-fast";
+    process.env.WENXIANG_CODEX_MODEL = "k3.1-pro-highspeed";
+    try {
+      assert.equal(acpModelId(), "k3.1-pro-highspeed");
+      delete process.env.WENXIANG_CODEX_MODEL;
+      assert.notEqual(acpModelId(), "grok-4.7-high-fast");
+    } finally {
+      if (prevEngine !== undefined) process.env.WENXIANG_ACP_ENGINE = prevEngine;
+      else delete process.env.WENXIANG_ACP_ENGINE;
+      if (prevAcpModel !== undefined) process.env.WENXIANG_ACP_MODEL = prevAcpModel;
+      else delete process.env.WENXIANG_ACP_MODEL;
+      if (prevCodex !== undefined) process.env.WENXIANG_CODEX_MODEL = prevCodex;
+      else delete process.env.WENXIANG_CODEX_MODEL;
+    }
+  });
 });
 
 describe("whichSync", () => {
@@ -183,10 +207,35 @@ describe("whichSync", () => {
   });
 });
 
+describe("resolveCodexAgentCommand", () => {
+  it("points at the installed adapter and the local Codex binary", () => {
+    const command = resolveCodexAgentCommand();
+    assert.ok(command);
+    assert.equal(command.provider, "codex");
+    assert.match(command.args[0], /codex-acp[\\/]dist[\\/]index\.js$/);
+    assert.match(command.codexPath, /codex\.exe$/i);
+  });
+});
+
+describe("codexModelFromConfigText", () => {
+  it("reads the model line and ignores provider secrets", () => {
+    const text = [
+      'model = "k3.1-pro-highspeed"',
+      "model_provider = \"custom\"",
+      "[model_providers.custom]",
+      'experimental_bearer_token = "sk-secret"',
+    ].join("\n");
+    assert.equal(codexModelFromConfigText(text), "k3.1-pro-highspeed");
+    assert.equal(codexModelFromConfigText("model_provider = \"custom\"\n"), "");
+  });
+});
+
 describe("preferredAcpModeIds", () => {
   it("picks each engine's write mode first and never a write mode for read", () => {
     assert.deepEqual(preferredAcpModeIds(true, true), ["bypassPermissions", "acceptEdits"]);
     assert.equal(preferredAcpModeIds(true, false)[0], "agent");
+    assert.deepEqual(preferredAcpModeIds(false, false, "codex"), ["read-only"]);
+    assert.equal(preferredAcpModeIds(true, false, "codex")[0], "agent-full-access");
     for (const claude of [true, false]) {
       const read = preferredAcpModeIds(false, claude);
       assert.deepEqual(read, ["ask"]);

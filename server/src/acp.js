@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, readdirSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import os from "node:os";
@@ -77,7 +77,7 @@ export function cursorModelId(env = process.env) {
 
 export function sanitizeAcpEngine(raw) {
   const value = String(raw || "").trim().toLowerCase();
-  if (value === "claude" || value === "cursor") return value;
+  if (value === "claude" || value === "cursor" || value === "codex") return value;
   return null;
 }
 
@@ -161,11 +161,30 @@ export function readClaudeUserSettings(filePath = path.join(os.homedir(), ".clau
   }
 }
 
+/** Top-level `model = "..."` in Codex config. Ignores provider secrets. */
+export function codexModelFromConfigText(text) {
+  const match = String(text || "").match(/^model\s*=\s*"([^"]+)"/m);
+  return match?.[1]?.trim() || "";
+}
+
+export function readCodexConfiguredModel(filePath = path.join(os.homedir(), ".codex", "config.toml")) {
+  try {
+    return codexModelFromConfigText(readFileSync(filePath, "utf8"));
+  } catch {
+    return "";
+  }
+}
+
 export function acpModelId(env = process.env, settings, engineOverride) {
   const engine =
     sanitizeAcpEngine(engineOverride) ||
     sanitizeAcpEngine(env.WENXIANG_ACP_ENGINE) ||
     "claude";
+  if (engine === "codex") {
+    const pinned = String(env.WENXIANG_CODEX_MODEL || "").trim();
+    if (pinned) return pinned;
+    return readCodexConfiguredModel() || "";
+  }
   const explicit = String(env.WENXIANG_ACP_MODEL || "").trim();
   if (explicit) return explicit;
   if (engine === "claude") {
@@ -188,6 +207,62 @@ function claudeAgentAcpScriptPath() {
     path.join(npmRoot, "@zed-industries", "claude-agent-acp", "dist", "index.js"),
   ];
   return candidates.find((script) => existsSync(script)) || "";
+}
+
+export function resolveCodexExecutable(env = process.env) {
+  const explicit = String(env.CODEX_PATH || "").trim();
+  if (explicit && existsSync(explicit)) return explicit;
+  const root = path.join(env.LOCALAPPDATA || "", "OpenAI", "Codex", "bin");
+  let best = "";
+  let bestMtime = 0;
+  if (existsSync(root)) {
+    let names = [];
+    try {
+      names = readdirSync(root, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name);
+    } catch {
+      names = [];
+    }
+    for (const name of names) {
+      const exe = path.join(root, name, process.platform === "win32" ? "codex.exe" : "codex");
+      if (!existsSync(exe)) continue;
+      let mtime = 0;
+      try {
+        mtime = statSync(exe).mtimeMs;
+      } catch {
+        mtime = 0;
+      }
+      if (!best || mtime >= bestMtime) {
+        best = exe;
+        bestMtime = mtime;
+      }
+    }
+  }
+  return best || whichSync("codex") || whichSync("codex.exe") || "";
+}
+
+function codexAgentAcpScriptPath() {
+  const npmRoot = path.join(process.env.APPDATA || "", "npm", "node_modules");
+  const script = path.join(npmRoot, "@agentclientprotocol", "codex-acp", "dist", "index.js");
+  return existsSync(script) ? script : "";
+}
+
+export function resolveCodexAgentCommand() {
+  const script = codexAgentAcpScriptPath();
+  const node = resolveNodeExecutable();
+  if (!script || !node) return null;
+  return {
+    id: "codex-acp",
+    bin: "codex-acp",
+    path: node,
+    args: [script],
+    mode: "ask",
+    model: acpModelId(process.env, undefined, "codex"),
+    codexPath: resolveCodexExecutable(),
+    transport: "stdio",
+    provider: "codex",
+  };
 }
 
 export function resolveClaudeAgentCommand(enginePref = "claude") {
@@ -288,6 +363,7 @@ export function resolveCursorAgentCommand(enginePref = "cursor") {
 /** @param {"book"|"repo"} [scope] */
 export function resolveAgentCommand(scope = "repo") {
   const pref = acpEnginePreference(scope);
+  if (pref === "codex") return resolveCodexAgentCommand();
   const claude = resolveClaudeAgentCommand("claude");
   const cursor = resolveCursorAgentCommand("cursor");
   if (pref === "cursor") return cursor || claude;
@@ -309,7 +385,10 @@ export function detectCursorEngine(scope = "repo") {
   return resolveAgentCommand(scope);
 }
 
-export function preferredAcpModeIds(agentMode, isClaude) {
+export function preferredAcpModeIds(agentMode, isClaude, provider) {
+  if (provider === "codex") {
+    return agentMode ? ["agent-full-access", "agent", "workspace-write"] : ["read-only"];
+  }
   if (agentMode) {
     if (isClaude) return ["bypassPermissions", "acceptEdits"];
     return ["agent", "code", "default", "bypassPermissions", "acceptEdits", "dontAsk"];
@@ -1169,6 +1248,10 @@ export class AcpChannel {
         env.npm_node_execpath = nodeExe;
       }
     }
+    if (this.command?.provider === "codex") {
+      if (this.command.codexPath) env.CODEX_PATH = this.command.codexPath;
+      if (!env.NO_BROWSER) env.NO_BROWSER = "1";
+    }
     const spawnOpts = {
       cwd: this.cwd,
       stdio: ["pipe", "pipe", "pipe"],
@@ -1199,7 +1282,7 @@ export class AcpChannel {
             writeTextFile: this.isClaudeProvider() && !this.readOnly,
           },
           terminal: false,
-          _meta: { parameterizedModelPicker: !this.isClaudeProvider() },
+          _meta: { parameterizedModelPicker: this.command?.provider === "cursor" },
         },
         clientInfo: { name: "wenxiang", version: "0.1.0" },
       });
@@ -1250,7 +1333,11 @@ export class AcpChannel {
 
   async applySessionMode() {
     if (!this.sessionId) return;
-    const order = preferredAcpModeIds(this.agentMode, this.isClaudeProvider());
+    const order = preferredAcpModeIds(
+      this.agentMode,
+      this.isClaudeProvider(),
+      this.command?.provider,
+    );
     const advertised = this.availableModes
       .map((m) => String(m.id || m.modeId || ""))
       .filter(Boolean);
@@ -1343,7 +1430,10 @@ export class AcpChannel {
   }
 
   async _applyModel(created) {
-    const model = this.command?.model || acpModelId();
+    const model =
+      String(this.command?.model || "").trim() ||
+      (this.command?.provider === "codex" ? "" : acpModelId());
+    if (!model) return;
     const options = created?.configOptions || [];
     const modelOpt = options.find((opt) => opt.category === "model" || opt.configId === "model");
     const configId = modelOpt?.configId || "model";

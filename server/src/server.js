@@ -860,7 +860,7 @@ app.post("/v1/books/:bookId/sessions/warm", async (req, res) => {
   try {
     if (!detectCursorEngine("book")) {
       res.status(503).json({
-        error: "问书需要本机 Claude Code 或 Cursor Agent（ACP）。请安装并登录所选助手。",
+        error: "问书需要本机 Claude Code、Cursor 或 Codex（ACP）。请安装并登录所选助手。",
         code: "acp_unconfigured",
       });
       return;
@@ -1170,7 +1170,7 @@ app.put("/v1/settings/ask-engine", async (req, res) => {
   try {
     const engine = sanitizeAcpEngine(req.body?.engine ?? req.body?.acpEngine);
     if (!engine) {
-      res.status(400).json({ error: "engine must be claude or cursor" });
+      res.status(400).json({ error: "engine must be claude, cursor, or codex" });
       return;
     }
     const scope = String(req.body?.scope || "").trim().toLowerCase();
@@ -1260,7 +1260,7 @@ app.post("/v1/books/chat", async (req, res) => {
     const acp = detectCursorEngine("book");
     if (!acp) {
       res.status(503).json({
-        error: "问书需要本机 Claude Code 或 Cursor Agent（ACP）。请安装并登录所选助手。",
+        error: "问书需要本机 Claude Code、Cursor 或 Codex（ACP）。请安装并登录所选助手。",
         code: "acp_unconfigured",
       });
       return;

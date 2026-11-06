@@ -381,7 +381,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 Text('智能问答', style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 6),
                 Text(
-                  '问书与问象可分别选择 Claude Code 或 Cursor，由本机服务调用。',
+                  '问书与问象可分别选择 Claude Code、Cursor 或 Codex，由本机服务调用。',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.muted),
                 ),
                 const SizedBox(height: 16),
