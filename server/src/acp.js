@@ -267,13 +267,16 @@ export function resolveCodexAgentCommand(scope = "repo") {
   const script = codexAgentAcpScriptPath();
   const node = resolveNodeExecutable();
   if (!script || !node) return null;
+  const selected = acpModelId(process.env, undefined, "codex", scope);
   return {
     id: "codex-acp",
     bin: "codex-acp",
     path: node,
     args: [script],
     mode: "ask",
-    model: acpModelId(process.env, undefined, "codex", scope),
+    model: selected === "auto" ? "" : selected,
+    autoModel: selected === "auto",
+    scope,
     codexPath: resolveCodexExecutable(),
     modelOptions: codexOptionsFor(scope),
     transport: "stdio",
@@ -1336,6 +1339,7 @@ export class AcpChannel {
         created?.modes?.availableModes ||
         init?.agentCapabilities?.sessionCapabilities?.modes?.availableModes ||
         [];
+      this.modelConfig = created;
       await this.applySessionMode();
       await this._applyModel(created);
       this.alive = true;
@@ -1445,7 +1449,7 @@ export class AcpChannel {
     waiter.resolve({ stopReason: "end_turn" });
   }
 
-  async _applyModel(created) {
+  async _applyModel(created, strict = false) {
     const model =
       String(this.command?.model || "").trim() ||
       (this.command?.provider === "codex" ? "" : acpModelId());
@@ -1465,7 +1469,8 @@ export class AcpChannel {
           sessionId: this.sessionId,
           modelId: model,
         });
-      } catch {
+      } catch (err) {
+        if (strict) throw err;
         // Startup --model is the reliable pin.
       }
     }
@@ -2097,6 +2102,31 @@ export function createSessionStore({
           }
         : null;
       try {
+        if (channel.command?.provider === "codex" && channel.command.autoModel) {
+          onActivity?.("Auto 正在选择模型…");
+          const { selectAutoModel } = await import("./codex-auto.js");
+          let route = await selectAutoModel({
+            question, history, hasImages: loaded.length > 0,
+            codexPath: channel.command.codexPath,
+            previous: entry.autoRoute,
+          });
+          const previousCommand = channel.command;
+          channel.command = { ...previousCommand, model: route.model, modelOptions: { ...codexOptionsFor(previousCommand.scope, route.model), effort: route.effort } };
+          try {
+            try {
+              await channel._applyModel(channel.modelConfig, true);
+            } catch (err) {
+              if (route.fallback) throw err;
+              route = await selectAutoModel({ question, codexPath: previousCommand.codexPath, classifier: { classify: async () => { throw err; } } });
+              channel.command = { ...previousCommand, model: route.model, modelOptions: { ...codexOptionsFor(previousCommand.scope, route.model), effort: route.effort } };
+              await channel._applyModel(channel.modelConfig, true);
+            }
+          } finally {
+            channel.command = previousCommand;
+          }
+          entry.autoRoute = route;
+          onActivity?.(`Auto：${route.model}（${route.effort}）${route.fallback ? " · 判断失败，使用默认模型" : ""}`);
+        }
         channel.noteTurn?.({
           workspaceRoot,
           session: { id: session.id, owner: session.owner, repo: session.repo },

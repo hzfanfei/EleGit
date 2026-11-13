@@ -263,6 +263,12 @@ class _CodexScopeSettingsState extends State<CodexScopeSettings> {
           onTap:
               _saving.contains(scope) ? null : () => _choose(scope, selected),
         ),
+        if (selected == 'auto')
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: Text('每次提问先判断任务难度并选择模型，会增加等待时间和额度消耗。分类失败时使用默认模型。',
+                style: TextStyle(fontSize: 12, color: Wx.muted)),
+          ),
         if (model != null &&
             (model['supportsFast'] == true ||
                 (model['reasoningEfforts'] as List? ?? []).toSet().length > 1))
@@ -284,7 +290,7 @@ class _CodexScopeSettingsState extends State<CodexScopeSettings> {
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Row(children: [
               TextButton.icon(
-                onPressed: enabled ? () => _testSpeed(scope) : null,
+                onPressed: enabled && selected != 'auto' ? () => _testSpeed(scope) : null,
                 icon: const Icon(Icons.speed_rounded, size: 18),
                 label: Text(_testing == scope ? '正在测速…' : '模型测速'),
               ),
