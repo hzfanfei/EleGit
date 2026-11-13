@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:wenxiang/copy/ask_engine.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -269,6 +270,31 @@ void main() {
     expect(find.textContaining('42.5 token/秒'), findsOneWidget);
   });
 
+  testWidgets(
+      'dragging and saving one scope leaves the other slider unchanged and enabled',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final api = _PendingSaveApi();
+    await tester.pumpWidget(
+        MaterialApp(theme: wenxiangTheme(), home: SettingsPage(api: api)));
+    await tester.pumpAndSettle();
+    Finder slider(String scope) => find.descendant(
+        of: find.byKey(Key('codex-$scope')), matching: find.byType(Slider));
+    final repoValue = tester.widget<Slider>(slider('repo')).value;
+    tester.widget<Slider>(slider('book')).onChanged!(1);
+    await tester.pump();
+    expect(tester.widget<Slider>(slider('book')).value, 1);
+    expect(tester.widget<Slider>(slider('repo')).value, repoValue);
+    tester.widget<Slider>(slider('book')).onChangeEnd!(1);
+    await tester.pump();
+    expect(tester.widget<Slider>(slider('book')).onChanged, isNull);
+    expect(tester.widget<Slider>(slider('repo')).onChanged, isNotNull);
+    expect(tester.widget<Slider>(slider('repo')).value, repoValue);
+    api.saved.complete();
+    await tester.pumpAndSettle();
+    expect(tester.widget<Slider>(slider('repo')).value, repoValue);
+  });
+
   testWidgets('failed model save preserves the previous selection',
       (tester) async {
     SharedPreferences.setMockInitialValues({});
@@ -302,5 +328,19 @@ class _CapabilityApi extends FakeWenxiangApi {
     }
     model['supportsFast'] = fast;
     return result;
+  }
+}
+
+class _PendingSaveApi extends FakeWenxiangApi {
+  final saved = Completer<void>();
+  @override
+  Future<void> setCodexModel(String model,
+      {required AskEngineScope scope,
+      String? effort,
+      bool? fast,
+      bool select = true}) async {
+    await saved.future;
+    await super.setCodexModel(model,
+        scope: scope, effort: effort, fast: fast, select: select);
   }
 }

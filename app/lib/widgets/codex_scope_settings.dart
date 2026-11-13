@@ -15,7 +15,7 @@ class _CodexScopeSettingsState extends State<CodexScopeSettings> {
   List<Map<String, dynamic>> _models = [];
   Map<String, dynamic> _scopes = {};
   bool _loading = false;
-  AskEngineScope? _saving;
+  final _saving = <AskEngineScope>{};
   AskEngineScope? _saved;
   AskEngineScope? _failed;
   String? _error;
@@ -23,7 +23,7 @@ class _CodexScopeSettingsState extends State<CodexScopeSettings> {
   final _speedResults = <String, String>{};
 
   Future<void> _testSpeed(AskEngineScope scope) async {
-    if (_testing != null || _saving != null || widget.api == null) return;
+    if (_testing != null || _saving.isNotEmpty || widget.api == null) return;
     final key = askEngineScopeId(scope);
     setState(() {
       _testing = scope;
@@ -68,7 +68,7 @@ class _CodexScopeSettingsState extends State<CodexScopeSettings> {
   }
 
   Future<void> _refresh() async {
-    if (_loading || _saving != null || widget.api == null) return;
+    if (_loading || _saving.isNotEmpty || widget.api == null) return;
     setState(() {
       _loading = true;
       _error = null;
@@ -92,9 +92,9 @@ class _CodexScopeSettingsState extends State<CodexScopeSettings> {
 
   Future<void> _save(AskEngineScope scope, String model,
       {String? effort, bool? fast, bool select = true}) async {
-    if (_saving != null || widget.api == null) return;
+    if (_saving.contains(scope) || widget.api == null) return;
     setState(() {
-      _saving = scope;
+      _saving.add(scope);
       _speedResults.remove(askEngineScopeId(scope));
       _saved = null;
       _failed = null;
@@ -129,7 +129,7 @@ class _CodexScopeSettingsState extends State<CodexScopeSettings> {
         });
       }
     } finally {
-      if (mounted) setState(() => _saving = null);
+      if (mounted) setState(() => _saving.remove(scope));
     }
   }
 
@@ -178,8 +178,10 @@ class _CodexScopeSettingsState extends State<CodexScopeSettings> {
     final model = matches.isEmpty ? null : matches.first;
     final preferences = Map<String, dynamic>.from(config['preferences'] ?? {});
     final prefs = Map<String, dynamic>.from(preferences[selected] ?? {});
-    final enabled =
-        !_loading && _saving == null && _testing == null && widget.api != null;
+    final enabled = !_loading &&
+        !_saving.contains(scope) &&
+        _testing == null &&
+        widget.api != null;
     final muted =
         Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.muted);
     return Material(
@@ -252,7 +254,7 @@ class _CodexScopeSettingsState extends State<CodexScopeSettings> {
         Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
             child: Text(
-                _saving == scope
+                _saving.contains(scope)
                     ? '正在保存…'
                     : _failed == scope
                         ? '保存失败，当前配置未更改。$_error'
