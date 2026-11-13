@@ -173,6 +173,10 @@ class FakeWenxiangApi extends WenxiangApi {
   bool? lastCodexFast;
   int codexRefreshes = 0;
 
+  Map<String, dynamic> usage = {'primary': null, 'secondary': null};
+  @override
+  Future<Map<String, dynamic>> codexUsage() async => usage;
+
   @override
   Future<Map<String, dynamic>> codexModels() async {
     codexRefreshes++;

@@ -7,6 +7,7 @@ import 'package:wenxiang/persist/app_memory.dart';
 import 'package:wenxiang/screens/log_center_page.dart';
 import 'package:wenxiang/screens/settings_page.dart';
 import 'package:wenxiang/theme.dart';
+import 'package:wenxiang/widgets/codex_scope_settings.dart';
 
 import 'support/fake_api.dart';
 
@@ -31,6 +32,20 @@ Future<void> _reveal(WidgetTester tester, Finder finder) async {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  testWidgets('shows Codex remaining usage', (tester) async {
+    final api = FakeWenxiangApi();
+    api.usage = {
+      'primary': {'usedPercent': 25, 'windowDurationMins': 10080},
+      'secondary': null,
+    };
+    await tester.pumpWidget(MaterialApp(
+      theme: wenxiangTheme(),
+      home: Scaffold(body: SingleChildScrollView(child: CodexScopeSettings(api: api))),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('7天额度剩余 75%'), findsOneWidget);
+  });
 
   testWidgets('settings page lists Volcengine voices and saves the pick',
       (tester) async {
@@ -287,12 +302,99 @@ void main() {
     expect(tester.widget<Slider>(slider('repo')).value, repoValue);
     tester.widget<Slider>(slider('book')).onChangeEnd!(1);
     await tester.pump();
-    expect(tester.widget<Slider>(slider('book')).onChanged, isNull);
+    expect(tester.widget<Slider>(slider('book')).onChanged, isNotNull);
+    expect(tester.widget<Slider>(slider('book')).value, 1);
     expect(tester.widget<Slider>(slider('repo')).onChanged, isNotNull);
     expect(tester.widget<Slider>(slider('repo')).value, repoValue);
     api.saved.complete();
     await tester.pumpAndSettle();
+    expect(tester.widget<Slider>(slider('book')).value, 1);
     expect(tester.widget<Slider>(slider('repo')).value, repoValue);
+  });
+
+  testWidgets('tapping a slider keeps the card stable throughout saving',
+      (tester) async {
+    final api = _PendingSaveApi();
+    await tester.pumpWidget(MaterialApp(
+        theme: wenxiangTheme(),
+        home: Scaffold(
+            body: SingleChildScrollView(child: CodexScopeSettings(api: api)))));
+    await tester.pumpAndSettle();
+    final card = find.byKey(const Key('codex-book'));
+    final slider = find.descendant(of: card, matching: find.byType(Slider));
+    final bounds = tester.getRect(card);
+    final element = tester.element(slider);
+    await tester.tapAt(tester.getCenter(slider) + const Offset(100, 0));
+    await tester.pump();
+    expect(tester.widget<Slider>(slider).value, 1);
+    expect(tester.widget<Slider>(slider).onChanged, isNotNull);
+    expect(tester.getRect(card), bounds);
+    expect(tester.element(slider), same(element));
+    expect(
+        tester
+            .widget<ListTile>(find.byKey(const Key('codex-book-model')))
+            .enabled,
+        isTrue);
+    expect(
+        tester
+            .widget<Switch>(
+                find.descendant(of: card, matching: find.byType(Switch)))
+            .onChanged,
+        isNotNull);
+    api.saved.complete();
+    await tester.pumpAndSettle();
+    expect(tester.widget<Slider>(slider).value, 1);
+    expect(tester.getRect(card), bounds);
+    expect(api.lastCodexEffort, 'high');
+  });
+
+  testWidgets('rapid tuning edits are queued and preserve the latest values',
+      (tester) async {
+    final api = _PendingSaveApi();
+    await tester.pumpWidget(
+        MaterialApp(theme: wenxiangTheme(), home: SettingsPage(api: api)));
+    await tester.pumpAndSettle();
+    final card = find.byKey(const Key('codex-book'));
+    final slider = find.descendant(of: card, matching: find.byType(Slider));
+    final toggle = find.descendant(of: card, matching: find.byType(Switch));
+    tester.widget<Slider>(slider).onChangeEnd!(1);
+    await tester.pump();
+    tester.widget<Slider>(slider).onChangeEnd!(0);
+    tester.widget<Switch>(toggle).onChanged!(true);
+    await tester.pump();
+    expect(tester.widget<Slider>(slider).value, 0);
+    expect(tester.widget<Switch>(toggle).value, isTrue);
+    expect(api.calls, hasLength(1));
+    api.saved.complete();
+    await tester.pumpAndSettle();
+    expect(api.calls, hasLength(2));
+    expect(api.lastCodexEffort, 'low');
+    expect(api.lastCodexFast, isTrue);
+    expect(tester.widget<Slider>(slider).value, 0);
+    expect(tester.widget<Switch>(toggle).value, isTrue);
+  });
+
+  testWidgets('failed tuning save rolls back and allows retry', (tester) async {
+    final api = _PendingSaveApi()..failCodexSave = true;
+    await tester.pumpWidget(
+        MaterialApp(theme: wenxiangTheme(), home: SettingsPage(api: api)));
+    await tester.pumpAndSettle();
+    final card = find.byKey(const Key('codex-book'));
+    final slider = find.descendant(of: card, matching: find.byType(Slider));
+    final toggle = find.descendant(of: card, matching: find.byType(Switch));
+    tester.widget<Slider>(slider).onChangeEnd!(1);
+    tester.widget<Switch>(toggle).onChanged!(true);
+    await tester.pump();
+    api.saved.complete();
+    await tester.pumpAndSettle();
+    expect(tester.widget<Slider>(slider).value, 0);
+    expect(tester.widget<Switch>(toggle).value, isFalse);
+    expect(find.textContaining('保存失败，当前配置未更改'), findsOneWidget);
+    api.failCodexSave = false;
+    tester.widget<Slider>(slider).onChangeEnd!(1);
+    await tester.pumpAndSettle();
+    expect(tester.widget<Slider>(slider).value, 1);
+    expect(api.lastCodexEffort, 'high');
   });
 
   testWidgets('failed model save preserves the previous selection',
@@ -333,12 +435,14 @@ class _CapabilityApi extends FakeWenxiangApi {
 
 class _PendingSaveApi extends FakeWenxiangApi {
   final saved = Completer<void>();
+  final calls = <({String? effort, bool? fast})>[];
   @override
   Future<void> setCodexModel(String model,
       {required AskEngineScope scope,
       String? effort,
       bool? fast,
       bool select = true}) async {
+    calls.add((effort: effort, fast: fast));
     await saved.future;
     await super.setCodexModel(model,
         scope: scope, effort: effort, fast: fast, select: select);

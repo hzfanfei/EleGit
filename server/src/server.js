@@ -1,5 +1,5 @@
 import { measureModelSpeed } from "./model-speed.js";
-import { listCodexModels } from "./codex-models.js";
+import { listCodexModels, readCodexRateLimits } from "./codex-models.js";
 import { createServer } from "node:http";
 import { appendFileSync, mkdirSync } from "node:fs";
 import os from "node:os";
@@ -1172,6 +1172,11 @@ app.post("/v1/settings/model-speed", async (req, res) => {
   try { res.json(await measureModelSpeed(scope)); }
   catch (err) { sendError(res, err); }
   finally { speedTestRunning = false; }
+});
+
+app.get("/v1/settings/codex-usage", async (req, res) => {
+  try { res.json(await readCodexRateLimits()); }
+  catch (err) { sendError(res, err); }
 });
 
 app.get("/v1/settings/codex-models", async (req, res) => {

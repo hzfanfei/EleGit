@@ -595,6 +595,13 @@ class WenxiangApi {
     return await _json(res, fallback: 'Model speed test failed');
   }
 
+  Future<Map<String, dynamic>> codexUsage() async {
+    final res = await http
+        .get(_uri('/v1/settings/codex-usage'), headers: _headers)
+        .timeout(const Duration(seconds: 20));
+    return await _json(res, fallback: '获取 Codex 用量失败');
+  }
+
   Future<Map<String, dynamic>> codexModels() async {
     final res = await http
         .get(_uri('/v1/settings/codex-models'), headers: _headers)
