@@ -113,6 +113,9 @@ class _ChatPageState extends State<ChatPage> {
   int? _processingUserIndex;
   final List<int> _queuedUserIndices = <int>[];
   bool _agentMode = false;
+  Map<String, dynamic>? _codexUsage;
+  bool _usageLoading = false;
+  Timer? _usageTimer;
   ChatStreamEvent? _decision;
   String? _appearUserKey;
   int? _editingIndex;
@@ -159,6 +162,8 @@ class _ChatPageState extends State<ChatPage> {
   void initState() {
     super.initState();
     widget.api.linkEpoch.addListener(_onLinkChanged);
+    _refreshCodexUsage();
+    _usageTimer = Timer.periodic(const Duration(minutes: 5), (_) => _refreshCodexUsage());
     _voiceInputMode = widget.memory?.chatVoiceInput() ?? false;
     _typewriter = WxTypewriterStream(
       onReveal: () {
@@ -1189,6 +1194,7 @@ class _ChatPageState extends State<ChatPage> {
       _live = false;
     });
     _mergeBackfill();
+    _refreshCodexUsage();
   }
 
   void _stop() {
@@ -1529,13 +1535,30 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
+  Future<void> _refreshCodexUsage() async {
+    if (_usageLoading) return;
+    _usageLoading = true;
+    try {
+      final usage = await widget.api.codexUsage();
+      if (mounted) setState(() => _codexUsage = usage);
+    } catch (_) {
+      if (mounted) setState(() => _codexUsage = null);
+    } finally {
+      _usageLoading = false;
+    }
+  }
+
   void _onLinkChanged() {
-    if (mounted) setState(() {});
+    if (mounted) {
+      setState(() => _codexUsage = null);
+      _refreshCodexUsage();
+    }
   }
 
   @override
   void dispose() {
     _stop();
+    _usageTimer?.cancel();
     widget.api.linkEpoch.removeListener(_onLinkChanged);
     chatBackfillTick.removeListener(_onChatBackfill);
     inboxProgressHint.removeListener(_onInboxProgressHint);
@@ -1584,6 +1607,8 @@ class _ChatPageState extends State<ChatPage> {
             trailing: [
               _AgentModeChip(
                 agentMode: _agentMode,
+                usage: _codexUsage,
+                onRefreshUsage: _refreshCodexUsage,
                 repoName: widget.repo.name,
                 enabled: !_busy && !_preparingChat,
                 onChanged: (value) {
@@ -2615,12 +2640,16 @@ class _StepDot extends StatelessWidget {
 class _AgentModeChip extends StatelessWidget {
   const _AgentModeChip({
     required this.agentMode,
+    required this.usage,
+    required this.onRefreshUsage,
     required this.repoName,
     required this.enabled,
     required this.onChanged,
   });
 
   final bool agentMode;
+  final Map<String, dynamic>? usage;
+  final VoidCallback onRefreshUsage;
   final String repoName;
   final bool enabled;
   final ValueChanged<bool> onChanged;
@@ -2628,6 +2657,28 @@ class _AgentModeChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final label = agentMode ? 'Agent' : '只读';
+    final windows = [usage?['primary'], usage?['secondary']]
+        .whereType<Map>()
+        .where((window) => window['usedPercent'] is num)
+        .toList()
+      ..sort((a, b) => ((b['windowDurationMins'] as num?) ?? 0)
+          .compareTo((a['windowDurationMins'] as num?) ?? 0));
+    final window = windows.isEmpty ? null : windows.first;
+    final used = ((window?['usedPercent'] as num?) ?? 0).clamp(0, 100).toDouble();
+    final remaining = (100 - used).round();
+    final reset = window?['resetsAt'];
+    final date = reset is num && reset > 0
+        ? DateTime.fromMillisecondsSinceEpoch((reset * 1000).round()).toLocal()
+        : null;
+    final left = date?.difference(DateTime.now());
+    final countdown = left == null ? '—' : left.isNegative ? '0h'
+        : left.inDays > 0 ? '${left.inDays}d${left.inHours % 24}h'
+        : left.inHours > 0 ? '${left.inHours}h${left.inMinutes % 60}m'
+        : '${left.inMinutes}m';
+    final minutes = window?['windowDurationMins'];
+    final period = minutes is num && minutes > 0
+        ? (minutes % 1440 == 0 ? '${minutes ~/ 1440}天' : '${minutes ~/ 60}小时')
+        : '当前';
     return Tooltip(
       message: agentMode ? '只改 $repoName' : '$repoName 只读',
       child: Material(
@@ -2635,6 +2686,17 @@ class _AgentModeChip extends StatelessWidget {
         child: InkWell(
           key: const Key('wx-agent-mode'),
           onTap: enabled ? () => onChanged(!agentMode) : null,
+          onLongPress: () {
+            onRefreshUsage();
+            showDialog<void>(context: context, builder: (context) => AlertDialog(
+              title: const Text('Codex 用量'),
+              content: Text(window == null ? '用量暂不可用，请稍后重试。'
+                  : '$period额度：已用 ${used.toStringAsFixed(0)}%，剩余 $remaining%\n'
+                    '重置：${date == null ? '未知' : '${date.month}月${date.day}日 ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}'}\n'
+                    '月度额度数据未提供。'),
+              actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('关闭'))],
+            ));
+          },
           borderRadius: BorderRadius.circular(8),
           child: AnimatedContainer(
             duration: Wx.motion,
@@ -2655,7 +2717,19 @@ class _AgentModeChip extends StatelessWidget {
                 height: 1,
                 color: agentMode ? Wx.accent : Wx.muted,
               ),
-              child: Text(label),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Text(label),
+                if (window != null) ...[
+                  const SizedBox(width: 5),
+                  SizedBox(width: 17, height: 17, child: CircularProgressIndicator(
+                    value: used / 100, strokeWidth: 2.5,
+                    backgroundColor: Wx.hairline, color: used >= 90 ? Wx.danger : Wx.accent,
+                  )),
+                  const SizedBox(width: 3),
+                  Text('$remaining% · $countdown', key: const Key('wx-codex-usage'),
+                      style: const TextStyle(fontSize: 10)),
+                ],
+              ]),
             ),
           ),
         ),

@@ -33,6 +33,28 @@ Future<void> _pumpUntilChatReady(WidgetTester tester) async {
 }
 
 void main() {
+  testWidgets('agent button shows usage and keeps mode toggle', (tester) async {
+    final api = FakeWenxiangApi();
+    api.usage = {
+      'primary': {'usedPercent': 25, 'windowDurationMins': 10080,
+        'resetsAt': DateTime.now().add(const Duration(hours: 3)).millisecondsSinceEpoch ~/ 1000},
+      'secondary': null,
+    };
+    await tester.pumpWidget(MaterialApp(theme: wenxiangTheme(), home: ChatPage(
+      api: api, repo: sampleRepo(), onBack: () {},
+    )));
+    await _pumpUntilChatReady(tester);
+    expect(find.textContaining('75%'), findsOneWidget);
+    await tester.longPress(find.byKey(const Key('wx-agent-mode')));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.textContaining('7天额度：已用 25%，剩余 75%'), findsOneWidget);
+    await tester.tap(find.text('关闭'));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.byKey(const Key('wx-agent-mode')));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('Agent'), findsOneWidget);
+  });
+
   testWidgets('empty chat is a short prompt, not a chip wall', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
