@@ -1,3 +1,4 @@
+import { measureModelSpeed } from "./model-speed.js";
 import { listCodexModels } from "./codex-models.js";
 import { createServer } from "node:http";
 import { appendFileSync, mkdirSync } from "node:fs";
@@ -1160,6 +1161,17 @@ app.put("/v1/settings/voice-stack", async (req, res) => {
   } catch (err) {
     sendError(res, err);
   }
+});
+
+let speedTestRunning = false;
+app.post("/v1/settings/model-speed", async (req, res) => {
+  const scope = req.body?.scope;
+  if (scope !== "book" && scope !== "repo") return res.status(400).json({error: "scope must be book or repo"});
+  if (speedTestRunning) return res.status(409).json({error: "A model speed test is already running"});
+  speedTestRunning = true;
+  try { res.json(await measureModelSpeed(scope)); }
+  catch (err) { sendError(res, err); }
+  finally { speedTestRunning = false; }
 });
 
 app.get("/v1/settings/codex-models", async (req, res) => {

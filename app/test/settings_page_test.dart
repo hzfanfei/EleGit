@@ -1,3 +1,4 @@
+import 'package:wenxiang/copy/ask_engine.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -250,6 +251,23 @@ void main() {
           capability.fast ? findsOneWidget : findsNothing);
     });
   }
+
+  testWidgets(
+      'model speed test uses the chosen scope and displays tokens per second',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final api = FakeWenxiangApi();
+    await tester.pumpWidget(
+        MaterialApp(theme: wenxiangTheme(), home: SettingsPage(api: api)));
+    await tester.pumpAndSettle();
+    final button = find.descendant(
+        of: find.byKey(const Key('codex-book')), matching: find.text('模型测速'));
+    await _reveal(tester, button);
+    await tester.tap(button);
+    await tester.pumpAndSettle();
+    expect(api.lastSpeedScope, AskEngineScope.book);
+    expect(find.textContaining('42.5 token/秒'), findsOneWidget);
+  });
 
   testWidgets('failed model save preserves the previous selection',
       (tester) async {

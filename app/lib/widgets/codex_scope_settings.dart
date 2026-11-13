@@ -19,6 +19,30 @@ class _CodexScopeSettingsState extends State<CodexScopeSettings> {
   AskEngineScope? _saved;
   AskEngineScope? _failed;
   String? _error;
+  AskEngineScope? _testing;
+  final _speedResults = <String, String>{};
+
+  Future<void> _testSpeed(AskEngineScope scope) async {
+    if (_testing != null || _saving != null || widget.api == null) return;
+    final key = askEngineScopeId(scope);
+    setState(() {
+      _testing = scope;
+      _speedResults.remove(key);
+    });
+    try {
+      final result = await widget.api!.measureModelSpeed(scope);
+      if (!mounted) return;
+      final rate = result['tokensPerSecond'] as num?;
+      final first = (result['firstTokenMs'] as num) / 1000;
+      setState(() => _speedResults[key] = rate == null
+          ? '首字 ${first.toStringAsFixed(2)} 秒 · 供应商未返回 token 用量，无法计算 token/秒'
+          : '${rate.toStringAsFixed(1)} token/秒 · 首字 ${first.toStringAsFixed(2)} 秒 · ${result['outputTokens']} 输出 token');
+    } catch (err) {
+      if (mounted) setState(() => _speedResults[key] = '测速失败：$err');
+    } finally {
+      if (mounted) setState(() => _testing = null);
+    }
+  }
 
   @override
   void initState() {
@@ -71,6 +95,7 @@ class _CodexScopeSettingsState extends State<CodexScopeSettings> {
     if (_saving != null || widget.api == null) return;
     setState(() {
       _saving = scope;
+      _speedResults.remove(askEngineScopeId(scope));
       _saved = null;
       _failed = null;
       _error = null;
@@ -153,7 +178,8 @@ class _CodexScopeSettingsState extends State<CodexScopeSettings> {
     final model = matches.isEmpty ? null : matches.first;
     final preferences = Map<String, dynamic>.from(config['preferences'] ?? {});
     final prefs = Map<String, dynamic>.from(preferences[selected] ?? {});
-    final enabled = !_loading && _saving == null && widget.api != null;
+    final enabled =
+        !_loading && _saving == null && _testing == null && widget.api != null;
     final muted =
         Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.muted);
     return Material(
@@ -207,6 +233,22 @@ class _CodexScopeSettingsState extends State<CodexScopeSettings> {
                     _save(scope, selected!, effort: v, select: false),
                 onFast: (v) => _save(scope, selected!, fast: v, select: false),
               )),
+        Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(children: [
+              TextButton.icon(
+                onPressed: enabled ? () => _testSpeed(scope) : null,
+                icon: const Icon(Icons.speed_rounded, size: 18),
+                label: Text(_testing == scope ? '正在测速…' : '模型测速'),
+              ),
+              const Expanded(
+                  child: Text('会生成一段测试文字，消耗模型额度',
+                      style: TextStyle(fontSize: 11, color: Wx.muted))),
+            ])),
+        if (_speedResults[key] != null)
+          Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: Text(_speedResults[key]!, style: muted)),
         Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
             child: Text(

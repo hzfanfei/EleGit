@@ -157,6 +157,13 @@ class FakeWenxiangApi extends WenxiangApi {
     }
   }
 
+  AskEngineScope? lastSpeedScope;
+  @override
+  Future<Map<String, dynamic>> measureModelSpeed(AskEngineScope scope) async {
+    lastSpeedScope = scope;
+    return {'tokensPerSecond': 42.5, 'firstTokenMs': 250, 'outputTokens': 170};
+  }
+
   String codexModel = 'codex-test-a';
   final codexModelsByScope = {'book': 'codex-test-a', 'repo': 'codex-test-a'};
   final codexOptionsByScope = <String, Map<String, dynamic>>{};

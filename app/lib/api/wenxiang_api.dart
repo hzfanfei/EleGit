@@ -19,7 +19,9 @@ import 'sse_stream.dart';
 bool chatEventHasVisibleText(ChatStreamEvent event) {
   if (event.pcm != null && event.pcm!.isNotEmpty) return true;
   if (event.text.isEmpty) return false;
-  return event.type == 'delta' || event.type == 'done' || event.type == 'caption';
+  return event.type == 'delta' ||
+      event.type == 'done' ||
+      event.type == 'caption';
 }
 
 Duration chatStreamRetryDelay(int failures) {
@@ -50,7 +52,8 @@ bool shouldRetryChatStreamBeforeText({
   required Object error,
   bool sawEvent = false,
 }) {
-  if (cancelled || error is OperationCancelled || error is AcceptedChatDrop) return false;
+  if (cancelled || error is OperationCancelled || error is AcceptedChatDrop)
+    return false;
   if (error is ApiException) return false;
   // A second POST aborts the turn already running on the server.
   if (sawText || sawEvent) return false;
@@ -210,9 +213,11 @@ class WenxiangApi {
     return _uri('/v1/books/$bookId/asset', {'path': cacheRelativePath});
   }
 
-  Future<Uint8List> fetchBookAssetBytes(String bookId, String cacheRelativePath) {
+  Future<Uint8List> fetchBookAssetBytes(
+      String bookId, String cacheRelativePath) {
     return bookAssetGate.run(() {
-      return retryTransient(() => _getAssetBytes(bookAssetUri(bookId, cacheRelativePath)));
+      return retryTransient(
+          () => _getAssetBytes(bookAssetUri(bookId, cacheRelativePath)));
     });
   }
 
@@ -244,9 +249,13 @@ class WenxiangApi {
   }
 
   Future<Uint8List> _getAssetBytes(Uri uri) async {
-    final res = await http.get(uri, headers: assetHeaders).timeout(const Duration(seconds: 20));
+    final res = await http
+        .get(uri, headers: assetHeaders)
+        .timeout(const Duration(seconds: 20));
     final type = res.headers['content-type'] ?? '';
-    if (res.statusCode >= 400 || res.bodyBytes.isEmpty || type.contains('text/html')) {
+    if (res.statusCode >= 400 ||
+        res.bodyBytes.isEmpty ||
+        type.contains('text/html')) {
       final html = type.contains('text/html') ? ' html interstitial' : '';
       throw ApiException('图片加载失败 HTTP ${res.statusCode}$html');
     }
@@ -405,7 +414,8 @@ class WenxiangApi {
           'text': text,
           if (ttsVoice != null && ttsVoice.isNotEmpty) 'ttsVoice': ttsVoice,
         });
-      final res = await client.send(request).timeout(const Duration(seconds: 25));
+      final res =
+          await client.send(request).timeout(const Duration(seconds: 25));
       if (res.statusCode >= 400) {
         final raw = await res.stream.bytesToString();
         String error = '没能朗读这段回答';
@@ -502,7 +512,9 @@ class WenxiangApi {
   }
 
   Future<void> ping() async {
-    final res = await http.get(_uri('/health'), headers: _headers).timeout(const Duration(seconds: 8));
+    final res = await http
+        .get(_uri('/health'), headers: _headers)
+        .timeout(const Duration(seconds: 8));
     if (res.statusCode != 200) {
       throw ApiException('无法连接问象服务（HTTP ${res.statusCode}）');
     }
@@ -527,7 +539,8 @@ class WenxiangApi {
   }
 
   /// Synthesizes a short preview phrase for [ttsVoice]; PCM at 24 kHz unless header says otherwise.
-  Future<TtsVoicePreview> previewTtsVoice(String ttsVoice, {String? text}) async {
+  Future<TtsVoicePreview> previewTtsVoice(String ttsVoice,
+      {String? text}) async {
     final res = await http
         .post(
           _uri('/v1/voice/tts-preview'),
@@ -573,6 +586,15 @@ class WenxiangApi {
     }
   }
 
+  Future<Map<String, dynamic>> measureModelSpeed(AskEngineScope scope) async {
+    final res = await http
+        .post(_uri('/v1/settings/model-speed'),
+            headers: _headers,
+            body: jsonEncode({'scope': askEngineScopeId(scope)}))
+        .timeout(const Duration(minutes: 4));
+    return await _json(res, fallback: 'Model speed test failed');
+  }
+
   Future<Map<String, dynamic>> codexModels() async {
     final res = await http
         .get(_uri('/v1/settings/codex-models'), headers: _headers)
@@ -612,8 +634,10 @@ class WenxiangApi {
     }
   }
 
-  Future<void> setAskEngine(String engine, {required AskEngineScope scope}) async {
-    final body = jsonEncode({'engine': engine, 'scope': askEngineScopeId(scope)});
+  Future<void> setAskEngine(String engine,
+      {required AskEngineScope scope}) async {
+    final body =
+        jsonEncode({'engine': engine, 'scope': askEngineScopeId(scope)});
     final current = normalizeBaseUrl(baseUrl);
     final tunnel = normalizeBaseUrl(_tunnelUrl);
     final onDeadLanRisk = current != tunnel && isLanBaseUrl(current);
@@ -623,7 +647,9 @@ class WenxiangApi {
         current,
         '/v1/settings/ask-engine',
         body,
-        timeout: onDeadLanRisk ? const Duration(seconds: 8) : const Duration(seconds: 20),
+        timeout: onDeadLanRisk
+            ? const Duration(seconds: 8)
+            : const Duration(seconds: 20),
       );
     } catch (err) {
       if (!onDeadLanRisk || !_linkFailed(err)) rethrow;
@@ -684,7 +710,8 @@ class WenxiangApi {
 
   Future<bool> pollOAuth(String state) async {
     final res = await http
-        .get(_uri('/v1/github/oauth/status', {'state': state}), headers: _headers)
+        .get(_uri('/v1/github/oauth/status', {'state': state}),
+            headers: _headers)
         .timeout(const Duration(seconds: 15));
     final body = await _json(res, fallback: '登录尚未完成');
     if ((body['status'] ?? '') == 'error') {
@@ -917,7 +944,8 @@ class WenxiangApi {
     if (trimmed.isEmpty) return [];
     final qp = <String, String>{
       'q': trimmed,
-      'sources': (sources == null || sources.isEmpty) ? 'annas' : sources.join(','),
+      'sources':
+          (sources == null || sources.isEmpty) ? 'annas' : sources.join(','),
     };
     if (limit != null) qp['limit'] = limit.toString();
     final res = await http
@@ -1072,7 +1100,8 @@ class WenxiangApi {
     return BookReadingManifest.fromJson(Map<String, dynamic>.from(body));
   }
 
-  Future<String> fetchBookChapterMarkdown(String bookId, String filename) async {
+  Future<String> fetchBookChapterMarkdown(
+      String bookId, String filename) async {
     final safe = Uri.encodeComponent(filename);
     final res = await http
         .get(_uri('/v1/books/$bookId/chapters/$safe'), headers: _headers)
@@ -1089,7 +1118,8 @@ class WenxiangApi {
           _uri('/v1/books/$bookId/sessions/warm'),
           headers: _headers,
           body: jsonEncode({
-            if (sessionId != null && sessionId.isNotEmpty) 'sessionId': sessionId,
+            if (sessionId != null && sessionId.isNotEmpty)
+              'sessionId': sessionId,
           }),
         )
         .timeout(const Duration(seconds: 45));
@@ -1146,7 +1176,8 @@ class WenxiangApi {
               .map((m) => {'role': m.role, 'content': m.content})
               .toList(),
         });
-      final res = await client.send(request).timeout(const Duration(seconds: 25));
+      final res =
+          await client.send(request).timeout(const Duration(seconds: 25));
       if (res.statusCode >= 400) {
         final raw = await res.stream.bytesToString();
         String error = '快问快答失败';
@@ -1228,7 +1259,8 @@ class WenxiangApi {
               .map((m) => {'role': m.role, 'content': m.content})
               .toList(),
         });
-      final res = await client.send(request).timeout(const Duration(seconds: 25));
+      final res =
+          await client.send(request).timeout(const Duration(seconds: 25));
       if (res.statusCode >= 400) {
         final raw = await res.stream.bytesToString();
         String error = '快问快答失败';
@@ -1307,7 +1339,8 @@ class WenxiangApi {
               .map((m) => {'role': m.role, 'content': m.content})
               .toList(),
         });
-      final res = await client.send(request).timeout(const Duration(seconds: 25));
+      final res =
+          await client.send(request).timeout(const Duration(seconds: 25));
       if (res.statusCode >= 400) {
         final raw = await res.stream.bytesToString();
         String error = '问书失败';
@@ -1349,7 +1382,8 @@ class WenxiangApi {
           _uri('/v1/repos/$owner/$repo/sessions/warm'),
           headers: _headers,
           body: jsonEncode({
-            if (sessionId != null && sessionId.isNotEmpty) 'sessionId': sessionId,
+            if (sessionId != null && sessionId.isNotEmpty)
+              'sessionId': sessionId,
           }),
         )
         .timeout(const Duration(seconds: 45));
@@ -1511,12 +1545,14 @@ class WenxiangApi {
                     'content': m.content,
                     if (m.images.isNotEmpty)
                       'images': m.images
-                          .map((image) => {'id': image.id, 'mimeType': image.mimeType})
+                          .map((image) =>
+                              {'id': image.id, 'mimeType': image.mimeType})
                           .toList(),
                   })
               .toList(),
         });
-      final res = await client.send(request).timeout(const Duration(seconds: 25));
+      final res =
+          await client.send(request).timeout(const Duration(seconds: 25));
       if (res.statusCode >= 400) {
         final raw = await res.stream.bytesToString();
         String error = '问答失败';
@@ -1583,7 +1619,8 @@ class WenxiangApi {
 
   Future<void> markInboxRead(String id) async {
     final res = await http
-        .post(_uri('/v1/inbox/${Uri.encodeComponent(id)}/read'), headers: _headers)
+        .post(_uri('/v1/inbox/${Uri.encodeComponent(id)}/read'),
+            headers: _headers)
         .timeout(const Duration(seconds: 12));
     if (res.statusCode >= 400) {
       await _json(res, fallback: '标记通知已读失败');
