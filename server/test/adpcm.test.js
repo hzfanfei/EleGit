@@ -44,7 +44,7 @@ describe("adpcm", () => {
       const sent = [];
       const msgs = [];
       const session = createVoiceSession({
-        config: { ready: true, provider: "xiaomi" },
+        config: { ready: true, provider: "minimax" },
         send: (m) => msgs.push(m),
         sendAudio: (buf) => sent.push(buf),
         asr: { async start() {}, push() {} },

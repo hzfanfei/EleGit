@@ -1,7 +1,7 @@
 import WebSocket from "ws";
 import { CALL_MIN_RMS, createUtteranceGate } from "./voice-call.js";
 import { isSpeakableTtsText } from "./spoken-tts.js";
-import { pcm16ToWav } from "./xiaomi-speech.js";
+import { pcm16ToWav } from "./pcm-wav.js";
 import { DEFAULT_MINIMAX_TTS_VOICE, isMinimaxTtsVoice } from "./minimax-tts-voices.js";
 
 export const MINIMAX_API_HOST = "api.minimax.cn";

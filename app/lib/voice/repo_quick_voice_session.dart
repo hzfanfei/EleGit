@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../api/wenxiang_api.dart';
 import '../copy/voice_stt_copy.dart';
+import '../diagnostics/client_error_log.dart';
 import '../models.dart';
 import 'book_quick_voice_session.dart';
 import 'device_media.dart';
@@ -64,6 +65,16 @@ class RepoQuickVoiceSession implements QuickVoiceFabHost {
   late final HoldToSpeakSession _hold;
   VoiceMedia? _media;
   bool _disposed = false;
+  void _reportPlaybackError(Object error, StackTrace stack) {
+    ClientErrorLog.instance.note(
+      kind: 'voice-playback',
+      message: error.toString(),
+      summary: '问象快问快答播放失败 · $_voiceFormat/$_voiceCodec · ${_voiceRate}Hz',
+      stack: stack.toString(),
+    );
+    onError?.call('播放失败：$error');
+  }
+
   @override
   BookQuickVoicePhase phase = BookQuickVoicePhase.idle;
   String _thinkStatusLabel = '思考中…';
@@ -121,7 +132,8 @@ class RepoQuickVoiceSession implements QuickVoiceFabHost {
 
   void _handleHoldChanged() {
     if (_replyActive &&
-        (phase == BookQuickVoicePhase.thinking || phase == BookQuickVoicePhase.speaking) &&
+        (phase == BookQuickVoicePhase.thinking ||
+            phase == BookQuickVoicePhase.speaking) &&
         _hold.holding) {
       interruptReply();
     }
@@ -279,15 +291,17 @@ class RepoQuickVoiceSession implements QuickVoiceFabHost {
           phase = BookQuickVoicePhase.speaking;
           onChanged();
           unawaited(
-            _media!.playPcm(
+            _media!
+                .playPcm(
               event.pcm!,
               sampleRate: _voiceRate,
               format: _voiceFormat,
               codec: _voiceCodec,
               segmentCaption: captionAtEnqueue,
               onPlaybackStart: _playbackStartForCaption(captionAtEnqueue),
-            ).catchError((Object err) {
-              if (_replyActive) onError?.call('播放失败：$err');
+            )
+                .catchError((Object err, StackTrace stack) {
+              if (_replyActive) _reportPlaybackError(err, stack);
             }),
           );
         } else if (event.type == 'done') {
@@ -318,8 +332,8 @@ class RepoQuickVoiceSession implements QuickVoiceFabHost {
         onChanged();
         try {
           await _media?.waitForPlaybackQueue();
-        } catch (err) {
-          if (!_disposed) onError?.call('播放失败：$err');
+        } catch (err, stack) {
+          if (!_disposed) _reportPlaybackError(err, stack);
         }
       }
       _replyActive = false;

@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 
 import '../api/wenxiang_api.dart';
 import '../copy/voice_stt_copy.dart';
+import '../diagnostics/client_error_log.dart';
 import '../models.dart';
 import '../persist/book_chat_store.dart';
 import 'device_media.dart';
@@ -21,6 +22,7 @@ abstract class QuickVoiceFabHost {
   HoldToSpeakSession get hold;
   bool get showsStatus;
   String get statusLabel;
+
   /// Spoken answer lines revealed in sync with TTS chunks (may be empty).
   String get voiceCaption;
   bool get showsVoiceCaption;
@@ -91,11 +93,22 @@ class BookQuickVoiceSession implements QuickVoiceFabHost {
   int _voiceRate = 24000;
   String _voiceFormat = 'pcm';
   String _voiceCodec = 'raw';
+
   /// Text for the TTS part whose audio is currently being received (server: caption then audio).
   String _segmentCaption = '';
   String _voiceCaption = '';
 
   HoldToSpeakSession get hold => _hold;
+
+  void _reportPlaybackError(Object error, StackTrace stack) {
+    ClientErrorLog.instance.note(
+      kind: 'voice-playback',
+      message: error.toString(),
+      summary: '问书快问快答播放失败 · $_voiceFormat/$_voiceCodec · ${_voiceRate}Hz',
+      stack: stack.toString(),
+    );
+    onError?.call('播放失败：$error');
+  }
 
   @override
   String get voiceCaption => _voiceCaption;
@@ -247,7 +260,8 @@ class BookQuickVoiceSession implements QuickVoiceFabHost {
     _resetVoiceFormat();
     await _media!.stopPlayback();
     final place = readingPlace();
-    final history = historyForVoice(place).where((m) => m.role != 'error').toList();
+    final history =
+        historyForVoice(place).where((m) => m.role != 'error').toList();
     try {
       await for (final event in api.bookVoiceTurnStream(
         bookId: bookId,
@@ -286,15 +300,17 @@ class BookQuickVoiceSession implements QuickVoiceFabHost {
           phase = BookQuickVoicePhase.speaking;
           onChanged();
           unawaited(
-            _media!.playPcm(
+            _media!
+                .playPcm(
               event.pcm!,
               sampleRate: _voiceRate,
               format: _voiceFormat,
               codec: _voiceCodec,
               segmentCaption: captionAtEnqueue,
               onPlaybackStart: _playbackStartForCaption(captionAtEnqueue),
-            ).catchError((Object err) {
-              if (_replyActive) onError?.call('播放失败：$err');
+            )
+                .catchError((Object err, StackTrace stack) {
+              if (_replyActive) _reportPlaybackError(err, stack);
             }),
           );
         } else if (event.type == 'done') {
@@ -325,8 +341,8 @@ class BookQuickVoiceSession implements QuickVoiceFabHost {
         onChanged();
         try {
           await _media?.waitForPlaybackQueue();
-        } catch (err) {
-          if (!_disposed) onError?.call('播放失败：$err');
+        } catch (err, stack) {
+          if (!_disposed) _reportPlaybackError(err, stack);
         }
       }
       _replyActive = false;

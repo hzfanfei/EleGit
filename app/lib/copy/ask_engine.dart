@@ -10,7 +10,7 @@ enum AskEngineScope {
   repo,
 }
 
-const kDefaultAskEngine = AskEngineChoice.claude;
+const kDefaultAskEngine = AskEngineChoice.codex;
 
 AskEngineChoice parseAskEngineChoice(String? raw) {
   switch (raw?.trim().toLowerCase()) {
@@ -19,8 +19,9 @@ AskEngineChoice parseAskEngineChoice(String? raw) {
     case 'codex':
       return AskEngineChoice.codex;
     case 'claude':
-    default:
       return AskEngineChoice.claude;
+    default:
+      return kDefaultAskEngine;
   }
 }
 

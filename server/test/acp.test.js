@@ -30,6 +30,9 @@ import {
   sanitizeAcpEngine,
   codexModelFromConfigText,
   resolveCodexAgentCommand,
+  setCodexModelPreference,
+  setCodexModelOptions,
+  codexOptionsFor,
   pickCursorVersionName,
   claudeCodeSessionOptions,
   preferredAcpModeIds,
@@ -709,6 +712,36 @@ describe("session store", () => {
     await store.close("hzfanfei", "fwechat", other.id);
   });
 
+  it("applies invalidation on the next turn without interrupting the current answer", async () => {
+    let spawns = 0;
+    const store = createSessionStore({
+      resolveCommand: () => ({ id: "acp", path: process.execPath, args: [fakeAcp], transport: "stdio" }),
+      spawnImpl: (file, args, opts) => {
+        spawns += 1;
+        return spawn(file, args, {
+          ...opts,
+          env: { ...opts.env, FAKE_ACP_PROGRESS: "text", FAKE_ACP_PROGRESS_GAP_MS: "30" },
+        });
+      },
+    });
+    const session = store.resolveForChat("owner", "repo", "");
+    let invalidated = false;
+    try {
+      await store.prompt(session, {
+        question: "first", cwd: process.cwd(),
+        onDelta: () => {
+          if (!invalidated) { invalidated = true; store.invalidateChannels(); }
+        },
+      });
+      assert.equal(invalidated, true);
+      assert.equal(spawns, 1);
+      await store.prompt(session, { question: "second", cwd: process.cwd(), onDelta: () => {} });
+      assert.equal(spawns, 2);
+    } finally {
+      await store.close("owner", "repo", session.id);
+    }
+  });
+
   it("starts a new channel after an engine switch, even if the old warm finishes late", async () => {
     let engine = "claude";
     let held = null;
@@ -1086,5 +1119,58 @@ describe("AcpChannel", () => {
     } finally {
       await channel.close();
     }
+  });
+});
+
+
+describe("Codex scoped preferences", () => {
+  it("keeps selections and tuning independent, including the same model", () => {
+    try {
+      setCodexModelPreference("shared");
+      setCodexModelPreference("book-model", "book");
+      assert.equal(acpModelId({}, undefined, "codex", "book"), "book-model");
+      assert.equal(acpModelId({}, undefined, "codex", "repo"), "shared");
+      setCodexModelPreference("shared", "book");
+      setCodexModelOptions({
+        book: { shared: { effort: "low", fast: true } },
+        repo: { shared: { effort: "high", fast: false } },
+      });
+      assert.deepEqual(codexOptionsFor("book"), { effort: "low", fast: true });
+      assert.deepEqual(codexOptionsFor("repo"), { effort: "high", fast: false });
+      const bookCommand = resolveCodexAgentCommand("book");
+      const repoCommand = resolveCodexAgentCommand("repo");
+      if (bookCommand && repoCommand) {
+        assert.equal(bookCommand.model, "shared");
+        assert.deepEqual(bookCommand.modelOptions, { effort: "low", fast: true });
+        assert.deepEqual(repoCommand.modelOptions, { effort: "high", fast: false });
+      }
+    } finally {
+      setCodexModelPreference("");
+      setCodexModelOptions({});
+    }
+  });
+});
+
+describe("Codex model configuration", () => {
+  it("applies the model, reasoning effort, and fast mode before a prompt", async () => {
+    const channel = new AcpChannel({ command: { provider: "codex", model: "test-model", modelOptions: { effort: "high", fast: true } } });
+    channel.sessionId = "test-session";
+    const requests = [];
+    channel.request = async (method, params) => { requests.push({ method, ...params }); return {}; };
+    await channel._applyModel({ configOptions: [] });
+    assert.deepEqual(requests.map(r => [r.method, r.configId, r.value]), [
+      ["session/set_config_option", "model", "test-model"],
+      ["session/set_config_option", "reasoning_effort", "high"],
+      ["session/set_config_option", "fast-mode", "on"],
+    ]);
+  });
+  it("explicitly turns fast mode off when the adapter advertises it", async () => {
+    const channel = new AcpChannel({ command: { provider: "codex", model: "test-model", modelOptions: { fast: false } } });
+    channel.sessionId = "test-session";
+    const requests = [];
+    channel.request = async (method, params) => { requests.push(params); return {}; };
+    await channel._applyModel({ configOptions: [{ configId: "fast-mode" }] });
+    assert.equal(requests.at(-1).configId, "fast-mode");
+    assert.equal(requests.at(-1).value, "off");
   });
 });

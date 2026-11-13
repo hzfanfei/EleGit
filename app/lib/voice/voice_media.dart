@@ -35,7 +35,7 @@ int pcm16Peak(Uint8List pcm) {
 /// Above this share of full scale, boosted samples are bent down instead of cut off.
 const double _limiterKnee = 0.8;
 
-/// Xiaomi TTS peaks at 70–86% of full scale, so [minGain] pushed loud syllables past int16.
+/// Loud TTS audio peaks at 70–86% of full scale, so [minGain] pushed loud syllables past int16.
 /// A hard clamp there crackles; this curve reaches full scale smoothly instead.
 int _softLimit(double sample) {
   const knee = 32767 * _limiterKnee;

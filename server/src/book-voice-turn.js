@@ -124,7 +124,7 @@ export async function handleBookVoiceTurn(
   const acp = detectEngine();
   if (!acp) {
     res.status(503).json({
-      error: "问书需要本机 Claude Code、Cursor 或 Codex（ACP）。请安装并登录所选助手。",
+      error: "问书需要本机 Codex。请安装并登录 Codex。",
       code: "acp_unconfigured",
     });
     return;
@@ -201,9 +201,7 @@ export async function handleBookVoiceTurn(
       } else if (/tts/i.test(hint) || err.status === 401 || err.status === 403) {
         code = "tts_failed";
         hint =
-          voiceConfig.ttsProvider === "xiaomi"
-            ? "语音合成失败，请检查本机 .env 里的 XIAOMI_MIMO_TOKEN。"
-            : voiceConfig.ttsProvider === "minimax"
+          voiceConfig.ttsProvider === "minimax"
               ? "语音合成失败，请检查本机 .env 里的 MINIMAX_API_KEY。"
               : "语音合成失败，请检查本机 .env 里的火山 TTS 配置。";
       } else if (/asr|stt|recogn/i.test(hint)) {

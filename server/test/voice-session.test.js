@@ -647,7 +647,7 @@ describe("createVoiceSession", () => {
     for (const floor of [420, undefined]) {
       const pushed = [];
       const session = createVoiceSession({
-        config: { ready: true, provider: "xiaomi" },
+        config: { ready: true, provider: "minimax" },
         send: () => {},
         sendAudio: () => {},
         asr: {
@@ -693,7 +693,7 @@ describe("createVoiceSession", () => {
 
   it("keyboard-like taps over the speaker do not barge in", async () => {
     const session = createVoiceSession({
-      config: { ready: true, provider: "xiaomi" },
+      config: { ready: true, provider: "minimax" },
       send: () => {},
       sendAudio: () => {},
       asr: { async start() {}, push() {} },

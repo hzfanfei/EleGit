@@ -573,6 +573,32 @@ class WenxiangApi {
     }
   }
 
+  Future<Map<String, dynamic>> codexModels() async {
+    final res = await http
+        .get(_uri('/v1/settings/codex-models'), headers: _headers)
+        .timeout(const Duration(seconds: 40));
+    return await _json(res, fallback: '刷新 Codex 模型失败');
+  }
+
+  Future<void> setCodexModel(String model,
+      {required AskEngineScope scope,
+      String? effort,
+      bool? fast,
+      bool select = true}) async {
+    final res = await http
+        .put(_uri('/v1/settings/codex-model'),
+            headers: _headers,
+            body: jsonEncode({
+              'model': model,
+              'select': select,
+              'scope': askEngineScopeId(scope),
+              if (effort != null) 'effort': effort,
+              if (fast != null) 'fast': fast
+            }))
+        .timeout(const Duration(seconds: 45));
+    await _json(res, fallback: '保存 Codex 模型失败');
+  }
+
   Future<void> setCursorModel(String model) async {
     final res = await http
         .put(

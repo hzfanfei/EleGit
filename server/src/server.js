@@ -1,3 +1,4 @@
+import { listCodexModels } from "./codex-models.js";
 import { createServer } from "node:http";
 import { appendFileSync, mkdirSync } from "node:fs";
 import os from "node:os";
@@ -9,6 +10,9 @@ import { loadLocalEnv } from "./env.js";
 import {
   setAcpEnginePreferences,
   setCursorModelPreference,
+  setCodexModelPreference,
+  setCodexModelOptions,
+  acpModelId,
   cursorModelId,
   sanitizeCursorModel,
   acpEnginePreference,
@@ -136,12 +140,8 @@ const store = await loadStore();
 configureServerLogs(store.config.workspaceRoot);
 
 function syncAcpEngineConfig(config) {
-  const legacy = sanitizeAcpEngine(config.acpEngine);
-  const envFallback = sanitizeAcpEngine(process.env.WENXIANG_ACP_ENGINE);
-  const book =
-    sanitizeAcpEngine(config.acpEngineBook) || legacy || envFallback || "claude";
-  const repo =
-    sanitizeAcpEngine(config.acpEngineRepo) || legacy || envFallback || "claude";
+  const book = "codex";
+  const repo = "codex";
   config.acpEngineBook = book;
   config.acpEngineRepo = repo;
   config.acpEngine = repo;
@@ -151,6 +151,24 @@ function syncAcpEngineConfig(config) {
 
 syncAcpEngineConfig(store.config);
 setCursorModelPreference(store.config.cursorModel);
+// Copy the former shared selection once; subsequent changes stay scoped.
+for (const scope of ["book", "repo"]) {
+  store.config.codexModels ??= {};
+  store.config.codexModels[scope] ??= store.config.codexModel || "";
+  store.config.codexOptions ??= {};
+  store.config.codexOptions[scope] ??= { ...(store.config.codexModelOptions || {}) };
+  setCodexModelPreference(store.config.codexModels[scope], scope);
+}
+setCodexModelOptions(store.config.codexOptions);
+await store.save();
+// Migrate the retired voice stack and its provider-specific voice.
+if (["xiaomi", "mimo"].includes(store.config.voiceStack)) {
+  store.config.voiceStack = "volc";
+  setPreferredVoiceStack("volc");
+  store.config.ttsVoice = voiceAfterStackSwitch(resolveVoiceConfig(), store.config.ttsVoiceVolc, "");
+  delete store.config.ttsVoiceXiaomi;
+  await store.save();
+}
 setPreferredVoiceStack(store.config.voiceStack);
 
 const turnRelay = turnRelayEnabled();
@@ -860,7 +878,7 @@ app.post("/v1/books/:bookId/sessions/warm", async (req, res) => {
   try {
     if (!detectCursorEngine("book")) {
       res.status(503).json({
-        error: "问书需要本机 Claude Code、Cursor 或 Codex（ACP）。请安装并登录所选助手。",
+        error: "问书需要本机 Codex。请安装并登录 Codex。",
         code: "acp_unconfigured",
       });
       return;
@@ -1105,7 +1123,7 @@ app.put("/v1/settings/voice-stack", async (req, res) => {
   try {
     const stack = sanitizeVoiceStack(req.body?.stack ?? req.body?.voiceStack);
     if (!stack) {
-      res.status(400).json({ error: "stack must be local, volc, xiaomi, or minimax" });
+      res.status(400).json({ error: "stack must be local, volc, or minimax" });
       return;
     }
     if (stack === "local") {
@@ -1116,7 +1134,6 @@ app.put("/v1/settings/voice-stack", async (req, res) => {
     const previousVoice = store.config.ttsVoice;
     const previousLocal = store.config.ttsVoiceLocal;
     const previousVolc = store.config.ttsVoiceVolc;
-    const previousXiaomi = store.config.ttsVoiceXiaomi;
     const previousMinimax = store.config.ttsVoiceMinimax;
     const leaving = sanitizeVoiceStack(previousStack) || voiceStackOf(resolveVoiceConfig());
     const leavingKey = voiceMemoryKey(leaving || "volc");
@@ -1135,7 +1152,6 @@ app.put("/v1/settings/voice-stack", async (req, res) => {
       store.config.ttsVoice = previousVoice;
       store.config.ttsVoiceLocal = previousLocal;
       store.config.ttsVoiceVolc = previousVolc;
-      store.config.ttsVoiceXiaomi = previousXiaomi;
       store.config.ttsVoiceMinimax = previousMinimax;
       setPreferredVoiceStack(previousStack);
       throw err;
@@ -1144,6 +1160,59 @@ app.put("/v1/settings/voice-stack", async (req, res) => {
   } catch (err) {
     sendError(res, err);
   }
+});
+
+app.get("/v1/settings/codex-models", async (req, res) => {
+  try {
+    res.json({
+      models: await listCodexModels(),
+      scopes: Object.fromEntries(["book", "repo"].map(scope => [scope, {
+        model: acpModelId(process.env, undefined, "codex", scope),
+        preferences: store.config.codexOptions?.[scope] || {},
+      }])),
+    });
+  } catch (err) { sendError(res, err); }
+});
+
+app.put("/v1/settings/codex-model", async (req, res) => {
+  try {
+    const scope = req.body?.scope;
+    if (scope !== "book" && scope !== "repo") return res.status(400).json({ error: "scope must be book or repo" });
+    const model = String(req.body?.model || "").trim();
+    const models = await listCodexModels();
+    const capability = models.find(m => m.id === model);
+    if (!capability) {
+      res.status(400).json({ error: "unknown codex model" });
+      return;
+    }
+    const previous = store.config.codexModels;
+    const previousOptions = store.config.codexOptions;
+    const prefs = { effort: capability.defaultReasoningEffort, fast: false, ...(previousOptions?.[scope]?.[model] || {}) };
+    if (req.body.effort !== undefined) {
+      if (!capability.reasoningEfforts.includes(req.body.effort)) return res.status(400).json({ error: "unsupported reasoning effort" });
+      prefs.effort = req.body.effort;
+    }
+    if (req.body.fast !== undefined) {
+      if (typeof req.body.fast !== "boolean" || (req.body.fast && !capability.supportsFast)) return res.status(400).json({ error: "unsupported fast mode" });
+      prefs.fast = req.body.fast;
+    }
+    store.config.codexOptions = {
+      ...previousOptions,
+      [scope]: { ...previousOptions?.[scope], [model]: prefs },
+    };
+    if (req.body.select !== false) store.config.codexModels = { ...previous, [scope]: model };
+    try { await store.save(); } catch (err) {
+      store.config.codexModels = previous;
+      store.config.codexOptions = previousOptions;
+      throw err;
+    }
+    setCodexModelPreference(store.config.codexModels[scope], scope);
+    setCodexModelOptions(store.config.codexOptions);
+    if (req.body.select !== false || store.config.codexModels[scope] === model) {
+      (scope === "book" ? bookSessions : sessions).invalidateChannels();
+    }
+    res.json({ model: store.config.codexModels[scope], scope });
+  } catch (err) { sendError(res, err); }
 });
 
 app.put("/v1/settings/cursor-model", async (req, res) => {
@@ -1169,8 +1238,8 @@ app.put("/v1/settings/cursor-model", async (req, res) => {
 app.put("/v1/settings/ask-engine", async (req, res) => {
   try {
     const engine = sanitizeAcpEngine(req.body?.engine ?? req.body?.acpEngine);
-    if (!engine) {
-      res.status(400).json({ error: "engine must be claude, cursor, or codex" });
+    if (engine !== "codex") {
+      res.status(400).json({ error: "only codex is supported" });
       return;
     }
     const scope = String(req.body?.scope || "").trim().toLowerCase();
@@ -1260,7 +1329,7 @@ app.post("/v1/books/chat", async (req, res) => {
     const acp = detectCursorEngine("book");
     if (!acp) {
       res.status(503).json({
-        error: "问书需要本机 Claude Code、Cursor 或 Codex（ACP）。请安装并登录所选助手。",
+        error: "问书需要本机 Codex。请安装并登录 Codex。",
         code: "acp_unconfigured",
       });
       return;
@@ -1769,18 +1838,14 @@ function logCompanionStartup() {
   console.log(
     voice.asrProvider === "funasr"
       ? "Voice ASR: FunASR (local, preloaded)"
-      : voice.asrProvider === "xiaomi"
-        ? "Voice ASR: Xiaomi MiMo"
-        : voice.asrProvider === "minimax"
+      : voice.asrProvider === "minimax"
           ? "Voice ASR: MiniMax"
           : "Voice ASR: Volcengine",
   );
   console.log(
     voice.ttsProvider === "cosyvoice"
       ? "Voice TTS: CosyVoice3 (local, preloaded)"
-      : voice.ttsProvider === "xiaomi"
-        ? "Voice TTS: Xiaomi MiMo"
-        : voice.ttsProvider === "minimax"
+      : voice.ttsProvider === "minimax"
           ? "Voice TTS: MiniMax"
           : "Voice TTS: Volcengine",
   );

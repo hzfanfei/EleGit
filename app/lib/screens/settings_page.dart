@@ -4,8 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api/wenxiang_api.dart';
-import '../copy/ask_engine.dart';
-import '../copy/cursor_model.dart';
+import '../widgets/codex_scope_settings.dart';
 import '../models/diagnostics.dart';
 import '../persist/app_memory.dart';
 import '../theme.dart';
@@ -16,7 +15,6 @@ import '../voice/minimax_tts_voices.dart';
 import '../voice/device_media.dart';
 import '../voice/tts_voice_catalog.dart';
 import '../voice/volc_tts_voices.dart';
-import '../voice/xiaomi_tts_voices.dart';
 import '../widgets/wx_chrome.dart';
 import '../widgets/wx_edge_back.dart';
 import 'log_center_page.dart';
@@ -36,18 +34,9 @@ class _SettingsPageState extends State<SettingsPage> {
   AppMemory? _memory;
   late String _voiceId;
   VoiceServiceProfile _voiceProfile = const VoiceServiceProfile();
-  late AskEngineChoice _askEngineBook;
-  late AskEngineChoice _askEngineRepo;
-  late CursorModelChoice _cursorModel;
   bool _saving = false;
-  bool _savingAskEngineBook = false;
-  bool _savingAskEngineRepo = false;
-  bool _savingCursorModel = false;
   bool _savingVoiceStack = false;
   String? _saveError;
-  String? _askEngineBookSaveError;
-  String? _askEngineRepoSaveError;
-  String? _cursorModelSaveError;
   String? _voiceStackError;
   bool _probing = false;
   DiagnosticsProbeResult? _probeResult;
@@ -64,9 +53,6 @@ class _SettingsPageState extends State<SettingsPage> {
     super.initState();
     _memory = widget.memory;
     _voiceId = _memory?.ttsVoice() ?? kDefaultVolcTtsVoice;
-    _askEngineBook = _memory?.askEngineBook() ?? kDefaultAskEngine;
-    _askEngineRepo = _memory?.askEngineRepo() ?? kDefaultAskEngine;
-    _cursorModel = _memory?.cursorModel() ?? kDefaultCursorModel;
     if (_memory == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) unawaited(_loadMemory());
@@ -74,20 +60,22 @@ class _SettingsPageState extends State<SettingsPage> {
     } else {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
-          unawaited(_alignAskEngineWithServer());
-          unawaited(_alignCursorModelWithServer());
           unawaited(_loadVoiceProfile());
         }
       });
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) unawaited(_loadAppVersion());
+      if (mounted) {
+        unawaited(_loadAppVersion());
+      }
     });
     widget.api?.linkEpoch.addListener(_onLinkChanged);
   }
 
   void _onLinkChanged() {
-    if (mounted) setState(() {});
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   Future<void> _loadAppVersion() async {
@@ -112,7 +100,9 @@ class _SettingsPageState extends State<SettingsPage> {
       final status = await widget.api!.status();
       if (!mounted) return;
       final profile = status.voiceProfile;
-      final preferred = adoptServerVoice ? profile.ttsVoice : (_memory?.ttsVoice() ?? profile.ttsVoice);
+      final preferred = adoptServerVoice
+          ? profile.ttsVoice
+          : (_memory?.ttsVoice() ?? profile.ttsVoice);
       final resolved = profile.resolveVoice(preferred);
       setState(() {
         _voiceProfile = profile;
@@ -135,119 +125,9 @@ class _SettingsPageState extends State<SettingsPage> {
       setState(() {
         _memory = AppMemory(prefs);
         _voiceId = _memory!.ttsVoice();
-        _askEngineBook = _memory!.askEngineBook();
-        _askEngineRepo = _memory!.askEngineRepo();
-        _cursorModel = _memory!.cursorModel();
       });
-      unawaited(_alignAskEngineWithServer());
-      unawaited(_alignCursorModelWithServer());
       unawaited(_loadVoiceProfile());
     } catch (_) {}
-  }
-
-  Future<void> _alignAskEngineWithServer() async {
-    if (widget.api == null || _memory == null) return;
-    try {
-      final status = await widget.api!.status();
-      final bookRemote = parseAskEngineChoice(status.askEngineBookPreference);
-      final repoRemote = parseAskEngineChoice(status.askEngineRepoPreference);
-      final bookLocal = _memory!.askEngineBook();
-      final repoLocal = _memory!.askEngineRepo();
-      if (!_memory!.askEngineBookIsExplicit()) {
-        if (bookRemote != bookLocal) {
-          await _memory!.saveAskEngineFor(AskEngineScope.book, bookRemote);
-          if (mounted) setState(() => _askEngineBook = bookRemote);
-        }
-      } else if (bookRemote != bookLocal) {
-        await widget.api!.setAskEngine(
-          askEngineChoiceId(bookLocal),
-          scope: AskEngineScope.book,
-        );
-      }
-      if (!_memory!.askEngineRepoIsExplicit()) {
-        if (repoRemote != repoLocal) {
-          await _memory!.saveAskEngineFor(AskEngineScope.repo, repoRemote);
-          if (mounted) setState(() => _askEngineRepo = repoRemote);
-        }
-      } else if (repoRemote != repoLocal) {
-        await widget.api!.setAskEngine(
-          askEngineChoiceId(repoLocal),
-          scope: AskEngineScope.repo,
-        );
-      }
-    } catch (_) {}
-  }
-
-  Future<void> _alignCursorModelWithServer() async {
-    if (widget.api == null || _memory == null) return;
-    try {
-      final status = await widget.api!.status();
-      final remote = parseCursorModelChoice(status.cursorModel);
-      final local = _memory!.cursorModel();
-      if (!_memory!.cursorModelIsExplicit()) {
-        if (remote != local) {
-          await _memory!.saveCursorModel(remote);
-          if (mounted) setState(() => _cursorModel = remote);
-        }
-      } else if (remote != local) {
-        await widget.api!.setCursorModel(cursorModelChoiceId(local));
-      }
-    } catch (_) {}
-  }
-
-  Future<void> _selectCursorModel(CursorModelChoice choice) async {
-    setState(() {
-      _cursorModel = choice;
-      _cursorModelSaveError = null;
-      _savingCursorModel = true;
-    });
-    await _memory?.saveCursorModel(choice);
-    try {
-      await widget.api?.setCursorModel(cursorModelChoiceId(choice));
-    } catch (err) {
-      if (mounted) setState(() => _cursorModelSaveError = err.toString());
-    } finally {
-      if (mounted) setState(() => _savingCursorModel = false);
-    }
-  }
-
-  Future<void> _selectAskEngine(AskEngineScope scope, AskEngineChoice choice) async {
-    final savingBook = scope == AskEngineScope.book;
-    setState(() {
-      if (savingBook) {
-        _askEngineBook = choice;
-        _askEngineBookSaveError = null;
-        _savingAskEngineBook = true;
-      } else {
-        _askEngineRepo = choice;
-        _askEngineRepoSaveError = null;
-        _savingAskEngineRepo = true;
-      }
-    });
-    await _memory?.saveAskEngineFor(scope, choice);
-    try {
-      await widget.api?.setAskEngine(askEngineChoiceId(choice), scope: scope);
-    } catch (err) {
-      if (mounted) {
-        setState(() {
-          if (savingBook) {
-            _askEngineBookSaveError = err.toString();
-          } else {
-            _askEngineRepoSaveError = err.toString();
-          }
-        });
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          if (savingBook) {
-            _savingAskEngineBook = false;
-          } else {
-            _savingAskEngineRepo = false;
-          }
-        });
-      }
-    }
   }
 
   Future<void> _runProbe() async {
@@ -344,211 +224,69 @@ class _SettingsPageState extends State<SettingsPage> {
     final voiceGroups = _voiceProfile.voiceGroups();
     final defaultVoiceId = _voiceProfile.usesCosyvoiceTts
         ? kDefaultCosyvoiceTtsVoice
-        : _voiceProfile.usesXiaomiTts
-            ? kDefaultXiaomiTtsVoice
-            : _voiceProfile.usesMinimaxTts
-                ? kDefaultMinimaxTtsVoice
-                : kDefaultVolcTtsVoice;
+        : _voiceProfile.usesMinimaxTts
+            ? kDefaultMinimaxTtsVoice
+            : kDefaultVolcTtsVoice;
     return WxEdgeBack(
       onBack: widget.onBack ?? () => Navigator.of(context).maybePop(),
       child: Scaffold(
-      body: Column(
-        children: [
-          WxPageHeader(
-            title: '设置',
-            onBack: widget.onBack ?? () => Navigator.of(context).maybePop(),
-            backTooltip: '返回',
-            trailing: [
-              IconButton(
-                key: const Key('wx-settings-log-center'),
-                tooltip: '日志中心',
-                onPressed: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => LogCenterPage(api: widget.api),
+        body: Column(
+          children: [
+            WxPageHeader(
+              title: '设置',
+              onBack: widget.onBack ?? () => Navigator.of(context).maybePop(),
+              backTooltip: '返回',
+              trailing: [
+                IconButton(
+                  key: const Key('wx-settings-log-center'),
+                  tooltip: '日志中心',
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => LogCenterPage(api: widget.api),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.receipt_long_outlined),
+                ),
+              ],
+            ),
+            const WxHairline(),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(Wx.inset, 18, Wx.inset, 32),
+                children: [
+                  CodexScopeSettings(api: widget.api),
+                  const SizedBox(height: 28),
+                  _SectionLabel(
+                    title: '语音',
+                    value: voiceEngineSummary(_voiceProfile),
+                    prominent: true,
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '识别和合成一起切换。',
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(color: Wx.muted),
+                  ),
+                  if (_savingVoiceStack) ...[
+                    const SizedBox(height: 10),
+                    Text('正在同步到本机服务…',
+                        style: Theme.of(context).textTheme.labelSmall),
+                  ],
+                  if (_voiceStackError != null) ...[
+                    const SizedBox(height: 10),
+                    Text(
+                      '还没换过去。$_voiceStackError',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: Wx.danger),
                     ),
-                  );
-                },
-                icon: const Icon(Icons.receipt_long_outlined),
-              ),
-            ],
-          ),
-          const WxHairline(),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(Wx.inset, 18, Wx.inset, 32),
-              children: [
-                Text('智能问答', style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(height: 6),
-                Text(
-                  '问书与问象可分别选择 Claude Code、Cursor 或 Codex，由本机服务调用。',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.muted),
-                ),
-                const SizedBox(height: 16),
-                _SectionLabel(
-                  title: askEngineScopeTitle(AskEngineScope.book),
-                  value: askEngineChoiceLabel(_askEngineBook),
-                ),
-                if (_savingAskEngineBook) ...[
-                  const SizedBox(height: 6),
-                  Text('正在同步问书…', style: Theme.of(context).textTheme.labelSmall),
-                ],
-                if (_askEngineBookSaveError != null) ...[
-                  const SizedBox(height: 6),
-                  Text(
-                    '问书已记在手机上，但还没同步到本机服务。$_askEngineBookSaveError',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.danger),
-                  ),
-                ],
-                const SizedBox(height: 8),
-                _AskEnginePicker(
-                  scope: AskEngineScope.book,
-                  selected: _askEngineBook,
-                  onSelect: (c) => _selectAskEngine(AskEngineScope.book, c),
-                ),
-                const SizedBox(height: 20),
-                _SectionLabel(
-                  title: askEngineScopeTitle(AskEngineScope.repo),
-                  value: askEngineChoiceLabel(_askEngineRepo),
-                ),
-                if (_savingAskEngineRepo) ...[
-                  const SizedBox(height: 6),
-                  Text('正在同步问象…', style: Theme.of(context).textTheme.labelSmall),
-                ],
-                if (_askEngineRepoSaveError != null) ...[
-                  const SizedBox(height: 6),
-                  Text(
-                    '问象已记在手机上，但还没同步到本机服务。$_askEngineRepoSaveError',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.danger),
-                  ),
-                ],
-                const SizedBox(height: 8),
-                _AskEnginePicker(
-                  scope: AskEngineScope.repo,
-                  selected: _askEngineRepo,
-                  onSelect: (c) => _selectAskEngine(AskEngineScope.repo, c),
-                ),
-                const SizedBox(height: 20),
-                _SectionLabel(
-                  title: 'Cursor 模型',
-                  value: cursorModelChoiceLabel(_cursorModel),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  '只影响 Cursor。下一条 Cursor 对话会换成所选模型。',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.muted),
-                ),
-                if (_savingCursorModel) ...[
-                  const SizedBox(height: 6),
-                  Text('正在同步 Cursor 模型…', style: Theme.of(context).textTheme.labelSmall),
-                ],
-                if (_cursorModelSaveError != null) ...[
-                  const SizedBox(height: 6),
-                  Text(
-                    '已记在手机上，但还没同步到本机服务。$_cursorModelSaveError',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.danger),
-                  ),
-                ],
-                const SizedBox(height: 8),
-                _CursorModelPicker(
-                  selected: _cursorModel,
-                  onSelect: _selectCursorModel,
-                ),
-                const SizedBox(height: 28),
-                _SectionLabel(
-                  title: '语音',
-                  value: voiceEngineSummary(_voiceProfile),
-                  prominent: true,
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  '识别和合成一起切换。',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.muted),
-                ),
-                if (_savingVoiceStack) ...[
-                  const SizedBox(height: 10),
-                  Text('正在同步到本机服务…', style: Theme.of(context).textTheme.labelSmall),
-                ],
-                if (_voiceStackError != null) ...[
-                  const SizedBox(height: 10),
-                  Text(
-                    '还没换过去。$_voiceStackError',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.danger),
-                  ),
-                ],
-                const SizedBox(height: 12),
-                Material(
-                  color: Wx.surface,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(Wx.radius),
-                    side: const BorderSide(color: Wx.hairline),
-                  ),
-                  clipBehavior: Clip.antiAlias,
-                  child: Column(
-                    children: [
-                      for (var i = 0; i < VoiceStackChoice.values.length; i++) ...[
-                        if (i > 0) const WxHairline(),
-                        _VoiceStackTile(
-                          choice: VoiceStackChoice.values[i],
-                          selected: voiceStackId(VoiceStackChoice.values[i]) ==
-                              _voiceProfile.activeVoiceStack,
-                          onTap: () => _selectVoiceStack(VoiceStackChoice.values[i]),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 28),
-                _SectionLabel(
-                  title: '语音音色',
-                  value: current.name,
-                  prominent: true,
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  _voiceProfile.usesXiaomiTts
-                      ? '快问快答使用小米 MiMo 语音。'
-                      : _voiceProfile.usesMinimaxTts
-                          ? '快问快答使用 MiniMax 语音。'
-                          : _voiceProfile.usesCosyvoiceTts
-                          ? '快问快答使用本机 ${_voiceProfile.ttsEngine} 合成。'
-                          : '快问快答使用火山引擎音色。',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.muted),
-                ),
-                if (_voiceProfile.usesCosyvoiceTts) ...[
-                  const SizedBox(height: 6),
-                  Text(
-                    '以下为 CosyVoice 中文 zero-shot 音色，companion 启动时会一并预载；切换后快问立即生效。',
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.faint),
-                  ),
-                ],
-                if (_saving) ...[
-                  const SizedBox(height: 10),
-                  Text('正在同步到本机服务…', style: Theme.of(context).textTheme.labelSmall),
-                ],
-                if (_saveError != null) ...[
-                  const SizedBox(height: 10),
-                  Text(
-                    '已记在手机上，但还没同步到本机服务。$_saveError',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.danger),
-                  ),
-                ],
-                if (_previewError != null) ...[
-                  const SizedBox(height: 10),
-                  Text(
-                    '试听失败：$_previewError',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.danger),
-                  ),
-                ],
-                const SizedBox(height: 16),
-                for (final group in voiceGroups) ...[
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8, bottom: 8),
-                    child: Text(
-                      group.key,
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.faint),
-                    ),
-                  ),
+                  ],
+                  const SizedBox(height: 12),
                   Material(
                     color: Wx.surface,
                     shape: RoundedRectangleBorder(
@@ -558,162 +296,276 @@ class _SettingsPageState extends State<SettingsPage> {
                     clipBehavior: Clip.antiAlias,
                     child: Column(
                       children: [
-                        for (var i = 0; i < group.value.length; i++) ...[
+                        for (var i = 0;
+                            i < VoiceStackChoice.values.length;
+                            i++) ...[
                           if (i > 0) const WxHairline(),
-                          _VoiceTile(
-                            voice: group.value[i],
-                            selected: group.value[i].id == _voiceId,
-                            defaultVoiceId: defaultVoiceId,
-                            onTap: () => _selectVoice(group.value[i]),
-                            onPreview: widget.api == null
-                                ? null
-                                : () => unawaited(_previewVoice(group.value[i])),
-                            previewLoading:
-                                _previewLoading && _previewVoiceId == group.value[i].id,
-                            previewDisabled: widget.api == null || _previewLoading,
+                          _VoiceStackTile(
+                            choice: VoiceStackChoice.values[i],
+                            selected:
+                                voiceStackId(VoiceStackChoice.values[i]) ==
+                                    _voiceProfile.activeVoiceStack,
+                            onTap: () =>
+                                _selectVoiceStack(VoiceStackChoice.values[i]),
                           ),
                         ],
                       ],
                     ),
                   ),
-                ],
-                const SizedBox(height: 28),
-                Text('通路检测', style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(height: 6),
-                Text(
-                  '最低成本自检：助手连接、模型一字回复、语音合成与识别握手。约消耗一字 TTS 与一字模型输出。',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.muted),
-                ),
-                const SizedBox(height: 12),
-                FilledButton.tonal(
-                  onPressed: _probing || widget.api == null ? null : _runProbe,
-                  child: Text(_probing ? '检测中…' : '运行检测'),
-                ),
-                if (_probeError != null) ...[
-                  const SizedBox(height: 10),
-                  Text(
-                    _probeError!,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.danger),
+                  const SizedBox(height: 28),
+                  _SectionLabel(
+                    title: '语音音色',
+                    value: current.name,
+                    prominent: true,
                   ),
-                ],
-                if (_probeResult != null) ...[
-                  const SizedBox(height: 14),
-                  _ProbeResultCard(result: _probeResult!),
-                ],
-                const SizedBox(height: 28),
-                Text('通知中心', style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(height: 6),
-                Text(
-                  '问书后台任务完成时，通过本地系统通知提醒。无需服务器推送通道。',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.muted),
-                ),
-                const SizedBox(height: 12),
-                ValueListenableBuilder<bool>(
-                  valueListenable: NotificationCenter.instance.enabled,
-                  builder: (context, isEnabled, _) {
-                    if (widget.api == null) {
-                      return Material(
-                        color: Wx.surface,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(Wx.radius),
-                          side: const BorderSide(color: Wx.hairline),
-                        ),
-                        child: const Padding(
-                          padding: EdgeInsets.fromLTRB(14, 12, 14, 12),
-                          child: Text('需要连接本机问象服务后才能开启通知。'),
-                        ),
-                      );
-                    }
-                    final status = isEnabled
-                        ? '已开启：后台任务完成时弹出通知'
-                        : '关闭';
-                    return Material(
+                  const SizedBox(height: 6),
+                  Text(
+                    _voiceProfile.usesMinimaxTts
+                        ? '快问快答使用 MiniMax 语音。'
+                        : _voiceProfile.usesCosyvoiceTts
+                            ? '快问快答使用本机 ${_voiceProfile.ttsEngine} 合成。'
+                            : '快问快答使用火山引擎音色。',
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(color: Wx.muted),
+                  ),
+                  if (_voiceProfile.usesCosyvoiceTts) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      '以下为 CosyVoice 中文 zero-shot 音色，companion 启动时会一并预载；切换后快问立即生效。',
+                      style: Theme.of(context)
+                          .textTheme
+                          .labelSmall
+                          ?.copyWith(color: Wx.faint),
+                    ),
+                  ],
+                  if (_saving) ...[
+                    const SizedBox(height: 10),
+                    Text('正在同步到本机服务…',
+                        style: Theme.of(context).textTheme.labelSmall),
+                  ],
+                  if (_saveError != null) ...[
+                    const SizedBox(height: 10),
+                    Text(
+                      '已记在手机上，但还没同步到本机服务。$_saveError',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: Wx.danger),
+                    ),
+                  ],
+                  if (_previewError != null) ...[
+                    const SizedBox(height: 10),
+                    Text(
+                      '试听失败：$_previewError',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: Wx.danger),
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                  for (final group in voiceGroups) ...[
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8, bottom: 8),
+                      child: Text(
+                        group.key,
+                        style: Theme.of(context)
+                            .textTheme
+                            .labelSmall
+                            ?.copyWith(color: Wx.faint),
+                      ),
+                    ),
+                    Material(
                       color: Wx.surface,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(Wx.radius),
                         side: const BorderSide(color: Wx.hairline),
                       ),
                       clipBehavior: Clip.antiAlias,
-                      child: SwitchListTile(
-                        value: isEnabled,
-                        onChanged: (val) {
-                          NotificationCenter.instance
-                              .setEnabled(widget.api!, want: val)
-                              .catchError((Object err) {
-                            if (!mounted) return null;
-                            setState(() => _saveError = err.toString());
-                            return null;
-                          });
-                        },
-                        title: const Text('开启本地通知'),
-                        subtitle: Text(
-                          status,
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.muted),
-                        ),
-                        secondary: Icon(
-                          isEnabled
-                              ? Icons.notifications_active_rounded
-                              : Icons.notifications_off_rounded,
-                          color: isEnabled ? Wx.accent : Wx.faint,
-                        ),
+                      child: Column(
+                        children: [
+                          for (var i = 0; i < group.value.length; i++) ...[
+                            if (i > 0) const WxHairline(),
+                            _VoiceTile(
+                              voice: group.value[i],
+                              selected: group.value[i].id == _voiceId,
+                              defaultVoiceId: defaultVoiceId,
+                              onTap: () => _selectVoice(group.value[i]),
+                              onPreview: widget.api == null
+                                  ? null
+                                  : () =>
+                                      unawaited(_previewVoice(group.value[i])),
+                              previewLoading: _previewLoading &&
+                                  _previewVoiceId == group.value[i].id,
+                              previewDisabled:
+                                  widget.api == null || _previewLoading,
+                            ),
+                          ],
+                        ],
                       ),
-                    );
-                  },
-                ),
-                const SizedBox(height: 28),
-                Text('关于', style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(height: 6),
-                Text(
-                  '问象的本机客户端。版本号会随每次打包写入 APK 文件名。',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.muted),
-                ),
-                const SizedBox(height: 12),
-                Material(
-                  color: Wx.surface,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(Wx.radius),
-                    side: const BorderSide(color: Wx.hairline),
+                    ),
+                  ],
+                  const SizedBox(height: 28),
+                  Text('通路检测', style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 6),
+                  Text(
+                    '最低成本自检：助手连接、模型一字回复、语音合成与识别握手。约消耗一字 TTS 与一字模型输出。',
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(color: Wx.muted),
                   ),
-                  clipBehavior: Clip.antiAlias,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                '问象',
-                                style: Theme.of(context).textTheme.titleSmall,
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                '打包自 hzfanfei/EleGit',
-                                style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.faint),
-                              ),
-                            ],
+                  const SizedBox(height: 12),
+                  FilledButton.tonal(
+                    onPressed:
+                        _probing || widget.api == null ? null : _runProbe,
+                    child: Text(_probing ? '检测中…' : '运行检测'),
+                  ),
+                  if (_probeError != null) ...[
+                    const SizedBox(height: 10),
+                    Text(
+                      _probeError!,
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: Wx.danger),
+                    ),
+                  ],
+                  if (_probeResult != null) ...[
+                    const SizedBox(height: 14),
+                    _ProbeResultCard(result: _probeResult!),
+                  ],
+                  const SizedBox(height: 28),
+                  Text('通知中心', style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 6),
+                  Text(
+                    '问书后台任务完成时，通过本地系统通知提醒。无需服务器推送通道。',
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(color: Wx.muted),
+                  ),
+                  const SizedBox(height: 12),
+                  ValueListenableBuilder<bool>(
+                    valueListenable: NotificationCenter.instance.enabled,
+                    builder: (context, isEnabled, _) {
+                      if (widget.api == null) {
+                        return Material(
+                          color: Wx.surface,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(Wx.radius),
+                            side: const BorderSide(color: Wx.hairline),
+                          ),
+                          child: const Padding(
+                            padding: EdgeInsets.fromLTRB(14, 12, 14, 12),
+                            child: Text('需要连接本机问象服务后才能开启通知。'),
+                          ),
+                        );
+                      }
+                      final status = isEnabled ? '已开启：后台任务完成时弹出通知' : '关闭';
+                      return Material(
+                        color: Wx.surface,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(Wx.radius),
+                          side: const BorderSide(color: Wx.hairline),
+                        ),
+                        clipBehavior: Clip.antiAlias,
+                        child: SwitchListTile(
+                          value: isEnabled,
+                          onChanged: (val) {
+                            NotificationCenter.instance
+                                .setEnabled(widget.api!, want: val)
+                                .catchError((Object err) {
+                              if (!mounted) return null;
+                              setState(() => _saveError = err.toString());
+                              return null;
+                            });
+                          },
+                          title: const Text('开启本地通知'),
+                          subtitle: Text(
+                            status,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(color: Wx.muted),
+                          ),
+                          secondary: Icon(
+                            isEnabled
+                                ? Icons.notifications_active_rounded
+                                : Icons.notifications_off_rounded,
+                            color: isEnabled ? Wx.accent : Wx.faint,
                           ),
                         ),
-                        Text(
-                          _appVersionLoading
-                              ? '加载中…'
-                              : _appVersion?.label ?? '版本不可用',
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                color: Wx.muted,
-                                fontFeatures: const [FontFeature.tabularFigures()],
-                              ),
-                        ),
-                      ],
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 28),
+                  Text('关于', style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 6),
+                  Text(
+                    '问象的本机客户端。版本号会随每次打包写入 APK 文件名。',
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(color: Wx.muted),
+                  ),
+                  const SizedBox(height: 12),
+                  Material(
+                    color: Wx.surface,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(Wx.radius),
+                      side: const BorderSide(color: Wx.hairline),
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '问象',
+                                  style: Theme.of(context).textTheme.titleSmall,
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  '打包自 hzfanfei/EleGit',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .labelSmall
+                                      ?.copyWith(color: Wx.faint),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Text(
+                            _appVersionLoading
+                                ? '加载中…'
+                                : _appVersion?.label ?? '版本不可用',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyMedium
+                                ?.copyWith(
+                              color: Wx.muted,
+                              fontFeatures: const [
+                                FontFeature.tabularFigures()
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
-    ),
     );
   }
 }
@@ -837,7 +689,8 @@ class _ProbeLine extends StatelessWidget {
               children: [
                 Text(
                   label,
-                  style: theme.titleSmall?.copyWith(color: Wx.text, fontWeight: FontWeight.w600),
+                  style: theme.titleSmall
+                      ?.copyWith(color: Wx.text, fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(height: 2),
                 Text(
@@ -883,170 +736,13 @@ class _SectionLabel extends StatelessWidget {
             value,
             textAlign: TextAlign.end,
             overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.muted),
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(color: Wx.muted),
           ),
         ),
       ],
-    );
-  }
-}
-
-class _AskEnginePicker extends StatelessWidget {
-  const _AskEnginePicker({
-    required this.scope,
-    required this.selected,
-    required this.onSelect,
-  });
-
-  final AskEngineScope scope;
-  final AskEngineChoice selected;
-  final ValueChanged<AskEngineChoice> onSelect;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Wx.surface,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(Wx.radius),
-        side: const BorderSide(color: Wx.hairline),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        children: [
-          for (var i = 0; i < AskEngineChoice.values.length; i++) ...[
-            if (i > 0) const WxHairline(),
-            _AskEngineTile(
-              scope: scope,
-              choice: AskEngineChoice.values[i],
-              selected: AskEngineChoice.values[i] == selected,
-              onTap: () => onSelect(AskEngineChoice.values[i]),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _AskEngineTile extends StatelessWidget {
-  const _AskEngineTile({
-    required this.scope,
-    required this.choice,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final AskEngineScope scope;
-  final AskEngineChoice choice;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final isDefault = choice == kDefaultAskEngine;
-    return InkWell(
-      splashFactory: NoSplash.splashFactory,
-      overlayColor: const WidgetStatePropertyAll(Colors.transparent),
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(askEngineChoiceLabel(choice), style: Theme.of(context).textTheme.titleSmall),
-                  const SizedBox(height: 2),
-                  Text(
-                    isDefault
-                        ? '默认 · ${askEngineChoiceBlurb(choice, scope)}'
-                        : askEngineChoiceBlurb(choice, scope),
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.faint),
-                  ),
-                ],
-              ),
-            ),
-            if (selected) const Icon(Icons.check_rounded, color: Wx.accent, size: 20),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _CursorModelPicker extends StatelessWidget {
-  const _CursorModelPicker({required this.selected, required this.onSelect});
-
-  final CursorModelChoice selected;
-  final ValueChanged<CursorModelChoice> onSelect;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Wx.surface,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(Wx.radius),
-        side: const BorderSide(color: Wx.hairline),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        children: [
-          for (var i = 0; i < CursorModelChoice.values.length; i++) ...[
-            if (i > 0) const WxHairline(),
-            _CursorModelTile(
-              choice: CursorModelChoice.values[i],
-              selected: CursorModelChoice.values[i] == selected,
-              onTap: () => onSelect(CursorModelChoice.values[i]),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _CursorModelTile extends StatelessWidget {
-  const _CursorModelTile({
-    required this.choice,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final CursorModelChoice choice;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final isDefault = choice == kDefaultCursorModel;
-    return InkWell(
-      splashFactory: NoSplash.splashFactory,
-      overlayColor: const WidgetStatePropertyAll(Colors.transparent),
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(cursorModelChoiceLabel(choice), style: Theme.of(context).textTheme.titleSmall),
-                  const SizedBox(height: 2),
-                  Text(
-                    isDefault
-                        ? '默认 · ${cursorModelChoiceBlurb(choice)}'
-                        : cursorModelChoiceBlurb(choice),
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.faint),
-                  ),
-                ],
-              ),
-            ),
-            if (selected) const Icon(Icons.check_rounded, color: Wx.accent, size: 20),
-          ],
-        ),
-      ),
     );
   }
 }
@@ -1076,16 +772,21 @@ class _VoiceStackTile extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(voiceStackLabel(choice), style: Theme.of(context).textTheme.titleSmall),
+                  Text(voiceStackLabel(choice),
+                      style: Theme.of(context).textTheme.titleSmall),
                   const SizedBox(height: 2),
                   Text(
                     voiceStackBlurb(choice),
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.faint),
+                    style: Theme.of(context)
+                        .textTheme
+                        .labelSmall
+                        ?.copyWith(color: Wx.faint),
                   ),
                 ],
               ),
             ),
-            if (selected) const Icon(Icons.check_rounded, color: Wx.accent, size: 20),
+            if (selected)
+              const Icon(Icons.check_rounded, color: Wx.accent, size: 20),
           ],
         ),
       ),
@@ -1127,11 +828,15 @@ class _VoiceTile extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(voice.name, style: Theme.of(context).textTheme.titleSmall),
+                  Text(voice.name,
+                      style: Theme.of(context).textTheme.titleSmall),
                   const SizedBox(height: 2),
                   Text(
                     isDefault ? '默认' : voice.scene,
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.faint),
+                    style: Theme.of(context)
+                        .textTheme
+                        .labelSmall
+                        ?.copyWith(color: Wx.faint),
                   ),
                 ],
               ),
@@ -1146,9 +851,11 @@ class _VoiceTile extends StatelessWidget {
               constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
               icon: previewLoading
                   ? const WxLoading(size: 18)
-                  : const Icon(Icons.volume_up_rounded, size: 22, color: Wx.muted),
+                  : const Icon(Icons.volume_up_rounded,
+                      size: 22, color: Wx.muted),
             ),
-          if (selected) const Icon(Icons.check_rounded, color: Wx.accent, size: 20),
+          if (selected)
+            const Icon(Icons.check_rounded, color: Wx.accent, size: 20),
         ],
       ),
     );

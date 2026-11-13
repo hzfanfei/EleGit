@@ -5,6 +5,7 @@ import 'dart:async';
 
 import 'package:wenxiang/api/wenxiang_api.dart';
 import 'package:wenxiang/models.dart';
+import 'package:wenxiang/diagnostics/client_error_log.dart';
 import 'package:wenxiang/persist/book_chat_store.dart';
 import 'package:wenxiang/voice/book_quick_voice_session.dart';
 import 'package:wenxiang/voice/repo_quick_voice_session.dart';
@@ -13,6 +14,47 @@ import 'package:wenxiang/voice/voice_media.dart';
 import 'support/fake_api.dart';
 
 void main() {
+  test('quick voice playback failures retain diagnostics for both scopes',
+      () async {
+    final previous = ClientErrorLog.instance;
+    final log = ClientErrorLog(persist: false);
+    ClientErrorLog.instance = log;
+    final errors = <String>[];
+    final book = BookQuickVoiceSession(
+        api: FakeWenxiangApi(),
+        bookId: 'b',
+        chapterHint: '',
+        onChanged: () {},
+        readingPlace: () => const BookReadingPlace(chapter: '第一章'),
+        historyForVoice: (_) => const [],
+        voiceMedia: _FailingPlaybackMedia(),
+        onError: errors.add);
+    final repo = RepoQuickVoiceSession(
+        api: FakeWenxiangApi(),
+        owner: 'o',
+        repo: 'r',
+        onChanged: () {},
+        historyForVoice: () => const [],
+        resolveSessionId: () => null,
+        voiceMedia: _FailingPlaybackMedia(),
+        onError: errors.add);
+    try {
+      await book.runVoiceTurnForTest('问题');
+      await repo.runVoiceTurnForTest('问题');
+      await log.idle;
+      final rows = await log.peek(10);
+      expect(errors.length, 2);
+      expect(rows, isNotEmpty);
+      expect(rows.first['kind'], 'voice-playback');
+      expect(rows.first['summary'], contains('Hz'));
+      expect(rows.first['stack'], isNotEmpty);
+    } finally {
+      book.dispose();
+      repo.dispose();
+      ClientErrorLog.instance = previous;
+    }
+  });
+
   test('statusLabel covers voice pipeline phases', () {
     final session = BookQuickVoiceSession(
       api: FakeWenxiangApi(),
@@ -121,7 +163,8 @@ void main() {
     expect(events.where((e) => e.type == 'audio').length, 2);
   });
 
-  test('tap cancel stops hang playback without waiting for TTS drain', () async {
+  test('tap cancel stops hang playback without waiting for TTS drain',
+      () async {
     final api = _GatedBookVoiceApi();
     final media = HangUntilStopMedia();
     final session = BookQuickVoiceSession(
@@ -305,4 +348,10 @@ class HangUntilStopMedia implements VoiceMedia {
     final play = _playing;
     if (play != null && !play.isCompleted) play.complete();
   }
+}
+
+class _FailingPlaybackMedia extends FakeVoiceMedia {
+  @override
+  Future<void> waitForPlaybackQueue() async =>
+      throw StateError('test playback failed');
 }

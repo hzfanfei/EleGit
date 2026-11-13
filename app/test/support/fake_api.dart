@@ -9,7 +9,6 @@ import 'package:wenxiang/voice/cosyvoice_tts_voices.dart';
 import 'package:wenxiang/voice/tts_voice_catalog.dart';
 import 'package:wenxiang/voice/volc_tts_voices.dart';
 import 'package:wenxiang/voice/minimax_tts_voices.dart';
-import 'package:wenxiang/voice/xiaomi_tts_voices.dart';
 
 class FakeWenxiangApi extends WenxiangApi {
   FakeWenxiangApi({
@@ -107,7 +106,8 @@ class FakeWenxiangApi extends WenxiangApi {
   HealthProbeResult healthProbe = const HealthProbeResult(ok: true, rttMs: 32);
 
   @override
-  Future<HealthProbeResult> probeHealth({Duration timeout = const Duration(seconds: 5)}) async {
+  Future<HealthProbeResult> probeHealth(
+      {Duration timeout = const Duration(seconds: 5)}) async {
     return healthProbe;
   }
 
@@ -120,7 +120,8 @@ class FakeWenxiangApi extends WenxiangApi {
   @override
   Future<List<Map<String, dynamic>>> fetchErrorLogs({int limit = 200}) async {
     return [
-      for (final entry in errorLogs.take(limit)) Map<String, dynamic>.from(entry),
+      for (final entry in errorLogs.take(limit))
+        Map<String, dynamic>.from(entry),
     ];
   }
 
@@ -149,8 +150,6 @@ class FakeWenxiangApi extends WenxiangApi {
     lastSetVoiceStack = stack;
     if (stack == 'local') {
       voiceTtsProvider = 'cosyvoice';
-    } else if (stack == 'xiaomi') {
-      voiceTtsProvider = 'xiaomi';
     } else if (stack == 'minimax') {
       voiceTtsProvider = 'minimax';
     } else {
@@ -158,12 +157,70 @@ class FakeWenxiangApi extends WenxiangApi {
     }
   }
 
+  String codexModel = 'codex-test-a';
+  final codexModelsByScope = {'book': 'codex-test-a', 'repo': 'codex-test-a'};
+  final codexOptionsByScope = <String, Map<String, dynamic>>{};
+  String? lastCodexScope;
+  bool failCodexSave = false;
+  String? lastCodexEffort;
+  bool? lastCodexFast;
+  int codexRefreshes = 0;
+
+  @override
+  Future<Map<String, dynamic>> codexModels() async {
+    codexRefreshes++;
+    return {
+      'scopes': {
+        for (final scope in ['book', 'repo'])
+          scope: {
+            'model': codexModelsByScope[scope],
+            'preferences': codexOptionsByScope[scope] ?? {}
+          }
+      },
+      'models': [
+        {
+          'id': 'codex-test-a',
+          'label': 'Codex Test A',
+          'reasoningEfforts': ['low', 'high'],
+          'defaultReasoningEffort': 'low',
+          'supportsFast': true
+        },
+        {'id': 'codex-test-b', 'label': 'Codex Test B'},
+      ]
+    };
+  }
+
+  @override
+  Future<void> setCodexModel(String model,
+      {required AskEngineScope scope,
+      String? effort,
+      bool? fast,
+      bool select = true}) async {
+    if (failCodexSave) throw Exception('test save failed');
+    final key = askEngineScopeId(scope);
+    lastCodexScope = key;
+    if (select) {
+      codexModel = model;
+      codexModelsByScope[key] = model;
+    }
+    final options = codexOptionsByScope.putIfAbsent(key, () => {});
+    options[model] = {
+      ...Map<String, dynamic>.from(options[model] ?? {}),
+      if (effort != null) 'effort': effort,
+      if (fast != null) 'fast': fast,
+    };
+    if (effort != null) lastCodexEffort = effort;
+    if (fast != null) lastCodexFast = fast;
+  }
+
   @override
   Future<void> setCursorModel(String model) async {
     lastSetCursorModel = model;
   }
 
-  Future<void> setAskEngine(String engine, {required AskEngineScope scope}) async {
+  @override
+  Future<void> setAskEngine(String engine,
+      {required AskEngineScope scope}) async {
     lastSetAskEngine = engine;
     lastSetAskEngineScope = askEngineScopeId(scope);
   }
@@ -176,7 +233,8 @@ class FakeWenxiangApi extends WenxiangApi {
   String? lastPreviewTtsVoice;
 
   @override
-  Future<TtsVoicePreview> previewTtsVoice(String ttsVoice, {String? text}) async {
+  Future<TtsVoicePreview> previewTtsVoice(String ttsVoice,
+      {String? text}) async {
     lastPreviewTtsVoice = ttsVoice;
     if (!voiceReady) {
       throw ApiException('语音未就绪');
@@ -193,7 +251,8 @@ class FakeWenxiangApi extends WenxiangApi {
       askCliRepo: DiagnosticsStep(ok: true, ms: 42),
       askModelBook: DiagnosticsStep(ok: true, ms: 880, snippet: '通'),
       askModelRepo: DiagnosticsStep(ok: true, ms: 900, snippet: '通'),
-      voiceTts: DiagnosticsVoiceTtsStep(ok: voiceReady, ms: 120, bytes: voiceReady ? 480 : 0),
+      voiceTts: DiagnosticsVoiceTtsStep(
+          ok: voiceReady, ms: 120, bytes: voiceReady ? 480 : 0),
       voiceStt: DiagnosticsVoiceSttStep(ok: voiceReady, ms: 80),
     );
   }
@@ -213,13 +272,16 @@ class FakeWenxiangApi extends WenxiangApi {
   }
 
   @override
-  Future<List<ChatSession>> listBookSessions(String bookId) async => List<ChatSession>.from(sessions);
+  Future<List<ChatSession>> listBookSessions(String bookId) async =>
+      List<ChatSession>.from(sessions);
 
   @override
-  Future<ChatSession> createBookSession(String bookId) async => createSession('_book', bookId);
+  Future<ChatSession> createBookSession(String bookId) async =>
+      createSession('_book', bookId);
 
   @override
-  Future<void> closeBookSession(String bookId, String id) async => closeSession('_book', bookId, id);
+  Future<void> closeBookSession(String bookId, String id) async =>
+      closeSession('_book', bookId, id);
 
   @override
   Future<void> warmBookSession(String bookId, {String? sessionId}) async {}
@@ -240,7 +302,8 @@ class FakeWenxiangApi extends WenxiangApi {
   }
 
   @override
-  Future<String> fetchBookChapterMarkdown(String bookId, String filename) async {
+  Future<String> fetchBookChapterMarkdown(
+      String bookId, String filename) async {
     return '# 第一章\n\n正文。';
   }
 
@@ -285,21 +348,7 @@ class FakeWenxiangApi extends WenxiangApi {
             .toList(),
       );
     }
-    if (voiceTtsProvider == 'xiaomi') {
-      return VoiceServiceProfile(
-        ready: voiceReady,
-        hint: voiceReady ? '' : voiceHint,
-        voiceStack: 'xiaomi',
-        ttsProvider: 'xiaomi',
-        ttsEngine: 'mimo-v2.5-tts',
-        asrProvider: 'xiaomi',
-        asrEngine: 'mimo-v2.5-asr',
-        ttsVoice: kDefaultXiaomiTtsVoice,
-        voices: kXiaomiTtsVoices
-            .map((v) => TtsVoiceOption(id: v.id, name: v.name, scene: v.scene))
-            .toList(),
-      );
-    }
+
     if (voiceTtsProvider == 'cosyvoice') {
       return VoiceServiceProfile(
         ready: voiceReady,
@@ -572,9 +621,14 @@ class FakeWenxiangApi extends WenxiangApi {
           ChatStreamEvent(type: 'start', engine: 'local-progress'),
           ChatStreamEvent(
             type: 'delta',
-            text: message.contains('README') ? 'README 说先跑 flutter run。' : '最近在修登录。',
+            text: message.contains('README')
+                ? 'README 说先跑 flutter run。'
+                : '最近在修登录。',
           ),
-          ChatStreamEvent(type: 'done', engine: 'local-progress', sessionId: sessionId ?? 's1'),
+          ChatStreamEvent(
+              type: 'done',
+              engine: 'local-progress',
+              sessionId: sessionId ?? 's1'),
         ];
     var sawDone = false;
     for (final event in events) {
@@ -584,7 +638,9 @@ class FakeWenxiangApi extends WenxiangApi {
       yield event;
       if (event.type == 'done') {
         sawDone = true;
-        final id = event.sessionId ?? sessionId ?? (sessions.isEmpty ? null : sessions.first.id);
+        final id = event.sessionId ??
+            sessionId ??
+            (sessions.isEmpty ? null : sessions.first.id);
         if (id == null) continue;
         final index = sessions.indexWhere((s) => s.id == id);
         if (index < 0) continue;

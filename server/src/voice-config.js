@@ -14,21 +14,13 @@ import {
   getMinimaxTtsVoices,
   isMinimaxTtsVoice,
 } from "./minimax-tts-voices.js";
-import { xiaomiSpeechFromEnv } from "./xiaomi-speech.js";
-import {
-  DEFAULT_XIAOMI_TTS_VOICE,
-  getXiaomiTtsVoices,
-  isXiaomiTtsVoice,
-} from "./xiaomi-tts-voices.js";
 
 export {
   DEFAULT_COSYVOICE_TTS_VOICE,
   DEFAULT_MINIMAX_TTS_VOICE,
   DEFAULT_VOLC_TTS_VOICE,
-  DEFAULT_XIAOMI_TTS_VOICE,
   VOLC_TTS_VOICES,
   getCosyvoiceTtsVoices,
-  getXiaomiTtsVoices,
   sanitizeTtsVoice,
 };
 
@@ -70,14 +62,12 @@ export function sanitizeVoiceStack(value) {
   const raw = trim(value).toLowerCase();
   if (raw === "local" || raw === "funasr" || raw === "cosyvoice") return "local";
   if (raw === "volc" || raw === "volcengine" || raw === "huoshan") return "volc";
-  if (raw === "xiaomi" || raw === "mimo") return "xiaomi";
   if (raw === "minimax" || raw === "mini-max") return "minimax";
   return "";
 }
 
 export function voiceMemoryKey(stack) {
   if (stack === "local") return "ttsVoiceLocal";
-  if (stack === "xiaomi") return "ttsVoiceXiaomi";
   if (stack === "minimax") return "ttsVoiceMinimax";
   return "ttsVoiceVolc";
 }
@@ -89,7 +79,6 @@ export function setPreferredVoiceStack(stack) {
 
 export function voiceStackOf(config) {
   if (config?.ttsProvider === "minimax" && config?.asrProvider === "minimax") return "minimax";
-  if (config?.ttsProvider === "xiaomi" && config?.asrProvider === "xiaomi") return "xiaomi";
   if (config?.ttsProvider === "cosyvoice" && config?.asrProvider === "funasr") return "local";
   return "volc";
 }
@@ -106,20 +95,7 @@ export function applyVoiceStack(config, stack) {
       funasr: { enabled: true, ...(config.funasr || {}) },
     };
   }
-  if (choice === "xiaomi") {
-    const xiaomi = config.xiaomi?.apiKey ? { ...config.xiaomi, enabled: true } : null;
-    return {
-      ...config,
-      ready: Boolean(xiaomi?.apiKey),
-      provider: xiaomi ? "xiaomi" : config.provider,
-      ttsProvider: "xiaomi",
-      asrProvider: "xiaomi",
-      xiaomi,
-      cosyvoice: null,
-      funasr: null,
-      hint: xiaomi ? "" : "还没配小米语音密钥。请在本机问象服务的 .env 里配置 XIAOMI_MIMO_TOKEN。",
-    };
-  }
+
   if (choice === "minimax") {
     const minimax = config.minimax?.apiKey ? { ...config.minimax, enabled: true } : null;
     return {
@@ -153,9 +129,7 @@ export function voiceForActiveStack(config, raw) {
   if (provider === "cosyvoice") {
     return isCosyvoiceTtsVoice(resolved) ? resolved : DEFAULT_COSYVOICE_TTS_VOICE;
   }
-  if (provider === "xiaomi") {
-    return isXiaomiTtsVoice(resolved) ? resolved : DEFAULT_XIAOMI_TTS_VOICE;
-  }
+
   if (provider === "minimax") {
     return isMinimaxTtsVoice(resolved) ? resolved : DEFAULT_MINIMAX_TTS_VOICE;
   }
@@ -166,10 +140,8 @@ export function voiceForActiveStack(config, raw) {
 
 export function resolveVoiceConfig(env = process.env) {
   const base = resolveVoiceConfigFromEnv(env);
-  const xiaomi = xiaomiSpeechFromEnv(env);
   const minimax = minimaxSpeechFromEnv(env);
   let next = base;
-  if (xiaomi) next = { ...next, xiaomi };
   if (minimax) next = { ...next, minimax };
   return applyVoiceStack(next, preferredVoiceStack);
 }
@@ -252,7 +224,6 @@ function readyVolc({ appId, accessToken, apiKey, env }) {
 function defaultTtsVoiceForConfig(config) {
   const ttsProvider = config?.ttsProvider || "volc";
   if (ttsProvider === "cosyvoice") return DEFAULT_COSYVOICE_TTS_VOICE;
-  if (ttsProvider === "xiaomi") return DEFAULT_XIAOMI_TTS_VOICE;
   if (ttsProvider === "minimax") return DEFAULT_MINIMAX_TTS_VOICE;
   if (config?.provider === "openai") return config.openai?.ttsVoice || "alloy";
   return DEFAULT_VOLC_TTS_VOICE;
@@ -265,9 +236,7 @@ export function resolveTtsVoiceId(config, rawVoice) {
   if (ttsProvider === "cosyvoice") {
     return isCosyvoiceTtsVoice(voice) ? voice : DEFAULT_COSYVOICE_TTS_VOICE;
   }
-  if (ttsProvider === "xiaomi") {
-    return isXiaomiTtsVoice(voice) ? voice : DEFAULT_XIAOMI_TTS_VOICE;
-  }
+
   if (ttsProvider === "minimax") {
     return isMinimaxTtsVoice(voice) ? voice : DEFAULT_MINIMAX_TTS_VOICE;
   }
@@ -292,9 +261,7 @@ export function withTtsVoice(config, rawVoice) {
   if (config.openai) {
     next.openai = { ...config.openai, ttsVoice: voice };
   }
-  if (config.xiaomi) {
-    next.xiaomi = { ...config.xiaomi, ttsVoice: voice };
-  }
+
   if (config.minimax) {
     next.minimax = { ...config.minimax, ttsVoice: voice };
   }
@@ -307,12 +274,10 @@ export function publicVoiceStatus(config = resolveVoiceConfig()) {
   const voices =
     ttsProvider === "cosyvoice"
       ? getCosyvoiceTtsVoices()
-      : ttsProvider === "xiaomi"
-        ? getXiaomiTtsVoices()
         : ttsProvider === "minimax"
           ? getMinimaxTtsVoices()
           : VOLC_TTS_VOICES;
-  const stored = config.ttsVoice || config.xiaomi?.ttsVoice || config.cosyvoice?.ttsVoice || config.volc?.ttsVoice;
+  const stored = config.ttsVoice || config.cosyvoice?.ttsVoice || config.volc?.ttsVoice;
   const ttsVoice = stored
     ? resolveTtsVoiceId(config, stored)
     : defaultTtsVoiceForConfig(config);
@@ -324,18 +289,14 @@ export function publicVoiceStatus(config = resolveVoiceConfig()) {
     asrEngine:
       asrProvider === "funasr"
         ? "FunASR-Paraformer"
-        : asrProvider === "xiaomi"
-          ? "mimo-v2.5-asr"
-          : asrProvider === "minimax"
+        : asrProvider === "minimax"
             ? "asr-1.0"
             : "volc",
     ttsProvider,
     ttsEngine:
       ttsProvider === "cosyvoice"
         ? "Fun-CosyVoice3"
-        : ttsProvider === "xiaomi"
-          ? "mimo-v2.5-tts"
-          : ttsProvider === "minimax"
+        : ttsProvider === "minimax"
             ? config.minimax?.ttsModel || "speech-2.8-turbo"
             : "volc",
     ttsVoice,

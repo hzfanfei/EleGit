@@ -48,7 +48,7 @@ export async function probeAskCli({ cwd, scope = "repo" } = {}) {
       scope,
       preference: acpEnginePreference(scope),
       engine: null,
-      error: "未找到本机问答助手（Claude Code、Cursor 或 Codex）",
+      error: "未找到本机 Codex，请安装并登录。",
     };
   }
   const root = probeCwd(cwd);

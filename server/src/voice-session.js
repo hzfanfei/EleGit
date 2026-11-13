@@ -20,8 +20,6 @@ const PLAYBACK_BARGE_RMS = 800;
  */
 const PLAYBACK_BARGE_MIN_RMS = 100;
 const PLAYBACK_ECHO_MARGIN = 2.5;
-/** Xiaomi echo cancel squeezes the user's voice; keep the bar closer to room noise. */
-const PLAYBACK_ECHO_MARGIN_XIAOMI = 2.1;
 const PLAYBACK_ECHO_LEARN_BYTES = 16000 * 2 * 1;
 /**
  * TTS runs 3-5x faster than playback. Sending every sentence at once stacked
@@ -55,10 +53,8 @@ function sleep(ms, signal) {
   });
 }
 const PLAYBACK_BARGE_BYTES = 16000 * 2 * 0.25;
-/** Xiaomi echo cancel squeezes the mic; reach ASR a bit sooner during playback. */
-const PLAYBACK_BARGE_BYTES_XIAOMI = 16000 * 2 * 0.18;
 /**
- * The squeezed interruption sits under Xiaomi's speech floor, so its gate threw the
+ * A quiet interruption can sit under the recognizer speech floor, so its gate threw the
  * words away and the call went quiet. Lift it to talking level for such recognizers,
  * for the barge audio and until the phone has stopped its speaker.
  */
@@ -322,7 +318,7 @@ export function createVoiceSession({
     speechBytesSinceTurn += buffered.length;
     playbackUserSpeech = true;
     asr?.push?.(buffered);
-    // Xiaomi (and other endpoint ASR) waits for silence before a final; stop playback as
+    // Endpoint ASR waits for silence before a final; stop playback as
     // soon as the mic proves real speech over the speaker, then answer on the final.
     const busy = machine.state === "speaking" || machine.state === "thinking";
     if (playbackOpen && busy) bargeIn("speech");
@@ -332,16 +328,13 @@ export function createVoiceSession({
     return callBargeRms ?? PLAYBACK_BARGE_RMS;
   }
 
-  function isXiaomiStack() {
-    return config?.asrProvider === "xiaomi" || config?.provider === "xiaomi";
-  }
 
   function playbackBargeMinBytes() {
-    return isXiaomiStack() ? PLAYBACK_BARGE_BYTES_XIAOMI : PLAYBACK_BARGE_BYTES;
+    return PLAYBACK_BARGE_BYTES;
   }
 
   function playbackEchoMargin() {
-    return isXiaomiStack() ? PLAYBACK_ECHO_MARGIN_XIAOMI : PLAYBACK_ECHO_MARGIN;
+    return PLAYBACK_ECHO_MARGIN;
   }
 
   function learnEcho(bytes, rms) {

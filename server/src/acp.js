@@ -175,12 +175,27 @@ export function readCodexConfiguredModel(filePath = path.join(os.homedir(), ".co
   }
 }
 
-export function acpModelId(env = process.env, settings, engineOverride) {
+const codexModelChoices = { book: "", repo: "" };
+let codexModelOptions = {};
+export function setCodexModelOptions(options) { codexModelOptions = options || {}; }
+
+export function setCodexModelPreference(model, scope) {
+  for (const key of scope ? [scope] : ["book", "repo"]) {
+    if (key === "book" || key === "repo") codexModelChoices[key] = String(model || "").trim();
+  }
+}
+
+export function codexOptionsFor(scope = "repo", model = acpModelId(process.env, undefined, "codex", scope)) {
+  return codexModelOptions[scope]?.[model] || {};
+}
+
+export function acpModelId(env = process.env, settings, engineOverride, scope = "repo") {
   const engine =
     sanitizeAcpEngine(engineOverride) ||
     sanitizeAcpEngine(env.WENXIANG_ACP_ENGINE) ||
     "claude";
   if (engine === "codex") {
+    if (codexModelChoices[scope]) return codexModelChoices[scope];
     const pinned = String(env.WENXIANG_CODEX_MODEL || "").trim();
     if (pinned) return pinned;
     return readCodexConfiguredModel() || "";
@@ -248,7 +263,7 @@ function codexAgentAcpScriptPath() {
   return existsSync(script) ? script : "";
 }
 
-export function resolveCodexAgentCommand() {
+export function resolveCodexAgentCommand(scope = "repo") {
   const script = codexAgentAcpScriptPath();
   const node = resolveNodeExecutable();
   if (!script || !node) return null;
@@ -258,8 +273,9 @@ export function resolveCodexAgentCommand() {
     path: node,
     args: [script],
     mode: "ask",
-    model: acpModelId(process.env, undefined, "codex"),
+    model: acpModelId(process.env, undefined, "codex", scope),
     codexPath: resolveCodexExecutable(),
+    modelOptions: codexOptionsFor(scope),
     transport: "stdio",
     provider: "codex",
   };
@@ -363,7 +379,7 @@ export function resolveCursorAgentCommand(enginePref = "cursor") {
 /** @param {"book"|"repo"} [scope] */
 export function resolveAgentCommand(scope = "repo") {
   const pref = acpEnginePreference(scope);
-  if (pref === "codex") return resolveCodexAgentCommand();
+  if (pref === "codex") return resolveCodexAgentCommand(scope);
   const claude = resolveClaudeAgentCommand("claude");
   const cursor = resolveCursorAgentCommand("cursor");
   if (pref === "cursor") return cursor || claude;
@@ -1453,6 +1469,16 @@ export class AcpChannel {
         // Startup --model is the reliable pin.
       }
     }
+    if (this.command?.provider === "codex") {
+      const prefs = this.command.modelOptions || {};
+      for (const [configId, value] of [["reasoning_effort", prefs.effort], ["fast-mode", prefs.fast === true ? "on" : "off"]]) {
+        if (value == null) continue;
+        const advertised = options.find(o => (o.configId || o.id) === configId);
+        if (configId === "fast-mode" && !advertised && !prefs.fast) continue;
+        await this.request("session/set_config_option", { sessionId: this.sessionId, configId, value });
+      }
+    }
+
   }
 
   /**
@@ -2134,6 +2160,11 @@ export function createSessionStore({
     await Promise.all(pending);
   }
 
+  // Keep the current answer running; warmSession replaces stale channels on reuse.
+  function invalidateChannels() {
+    channelEpoch += 1;
+  }
+
   async function resetAllChannels() {
     channelEpoch += 1;
     const pending = [];
@@ -2165,6 +2196,7 @@ export function createSessionStore({
     warm,
     warmRepo,
     resetAllChannels,
+    invalidateChannels,
     publicView,
   };
 }
