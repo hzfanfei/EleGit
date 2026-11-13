@@ -1127,6 +1127,9 @@ describe("Codex scoped preferences", () => {
   it("keeps selections and tuning independent, including the same model", () => {
     try {
       setCodexModelPreference("shared");
+      setCodexModelPreference("auto", "repo");
+      assert.equal(acpModelId({ WENXIANG_CODEX_MODEL: "fallback-model" }, undefined, "codex", "repo"), "fallback-model");
+      setCodexModelPreference("shared", "repo");
       setCodexModelPreference("book-model", "book");
       assert.equal(acpModelId({}, undefined, "codex", "book"), "book-model");
       assert.equal(acpModelId({}, undefined, "codex", "repo"), "shared");

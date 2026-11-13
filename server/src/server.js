@@ -1182,7 +1182,7 @@ app.get("/v1/settings/codex-usage", async (req, res) => {
 app.get("/v1/settings/codex-models", async (req, res) => {
   try {
     res.json({
-      models: [{ id: "auto", label: "Auto 智能选择", reasoningEfforts: [], supportsFast: false }, ...await listCodexModels()],
+      models: await listCodexModels(),
       scopes: Object.fromEntries(["book", "repo"].map(scope => [scope, {
         model: acpModelId(process.env, undefined, "codex", scope),
         preferences: store.config.codexOptions?.[scope] || {},
@@ -1197,7 +1197,7 @@ app.put("/v1/settings/codex-model", async (req, res) => {
     if (scope !== "book" && scope !== "repo") return res.status(400).json({ error: "scope must be book or repo" });
     const model = String(req.body?.model || "").trim();
     const models = await listCodexModels();
-    const capability = model === "auto" ? { id: "auto", reasoningEfforts: [], supportsFast: false } : models.find(m => m.id === model);
+    const capability = models.find(m => m.id === model);
     if (!capability) {
       res.status(400).json({ error: "unknown codex model" });
       return;

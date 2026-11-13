@@ -16,7 +16,6 @@
   "dependencies": {
     "@mermaid-js/mermaid-cli": "^11.4.0",
     "adm-zip": "^0.5.16",
-    "codex-smart-router": "0.1.0",
     "cors": "^2.8.5",
     "dotenv": "^17.4.2",
     "express": "^4.21.2",
