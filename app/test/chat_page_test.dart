@@ -34,6 +34,8 @@ Future<void> _pumpUntilChatReady(WidgetTester tester) async {
 
 void main() {
   testWidgets('agent button shows usage and keeps mode toggle', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(360, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
     final api = FakeWenxiangApi();
     api.usage = {
       'primary': {'usedPercent': 25, 'windowDurationMins': 10080,
@@ -44,7 +46,10 @@ void main() {
       api: api, repo: sampleRepo(), onBack: () {},
     )));
     await _pumpUntilChatReady(tester);
-    expect(find.textContaining('75%'), findsOneWidget);
+    expect(find.byKey(const Key('wx-codex-usage')), findsOneWidget);
+    expect(tester.getSize(find.byKey(const Key('wx-agent-mode'))).width, lessThan(85));
+    expect(tester.widget<FractionallySizedBox>(find.byKey(const Key('wx-codex-usage'))).heightFactor, 0.75);
+    expect(tester.getSize(find.text('octo/demo').first).width, greaterThan(100));
     await tester.longPress(find.byKey(const Key('wx-agent-mode')));
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.textContaining('7天额度：已用 25%，剩余 75%'), findsOneWidget);
@@ -53,6 +58,7 @@ void main() {
     await tester.tap(find.byKey(const Key('wx-agent-mode')));
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('Agent'), findsOneWidget);
+    expect(tester.getSize(find.byKey(const Key('wx-agent-mode'))).width, lessThan(85));
   });
 
   testWidgets('empty chat is a short prompt, not a chip wall', (tester) async {

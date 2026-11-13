@@ -2670,17 +2670,12 @@ class _AgentModeChip extends StatelessWidget {
     final date = reset is num && reset > 0
         ? DateTime.fromMillisecondsSinceEpoch((reset * 1000).round()).toLocal()
         : null;
-    final left = date?.difference(DateTime.now());
-    final countdown = left == null ? '—' : left.isNegative ? '0h'
-        : left.inDays > 0 ? '${left.inDays}d${left.inHours % 24}h'
-        : left.inHours > 0 ? '${left.inHours}h${left.inMinutes % 60}m'
-        : '${left.inMinutes}m';
     final minutes = window?['windowDurationMins'];
     final period = minutes is num && minutes > 0
         ? (minutes % 1440 == 0 ? '${minutes ~/ 1440}天' : '${minutes ~/ 60}小时')
         : '当前';
     return Tooltip(
-      message: agentMode ? '只改 $repoName' : '$repoName 只读',
+      message: agentMode ? 'Agent：可编辑 $repoName' : '$repoName 只读',
       child: Material(
         color: Colors.transparent,
         child: InkWell(
@@ -2703,33 +2698,34 @@ class _AgentModeChip extends StatelessWidget {
             curve: Wx.motionCurve,
             height: 28,
             alignment: Alignment.center,
-            padding: const EdgeInsets.symmetric(horizontal: 8),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(8),
               border: Border.all(color: agentMode ? Wx.accent : Wx.hairline),
             ),
-            child: AnimatedDefaultTextStyle(
-              duration: Wx.motion,
-              curve: Wx.motionCurve,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                height: 1,
-                color: agentMode ? Wx.accent : Wx.muted,
-              ),
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                Text(label),
-                if (window != null) ...[
-                  const SizedBox(width: 5),
-                  SizedBox(width: 17, height: 17, child: CircularProgressIndicator(
-                    value: used / 100, strokeWidth: 2.5,
-                    backgroundColor: Wx.hairline, color: used >= 90 ? Wx.danger : Wx.accent,
-                  )),
-                  const SizedBox(width: 3),
-                  Text('$remaining% · $countdown', key: const Key('wx-codex-usage'),
-                      style: const TextStyle(fontSize: 10)),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(7),
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  if (window != null)
+                    Positioned.fill(child: Align(
+                      alignment: Alignment.bottomCenter,
+                      child: FractionallySizedBox(
+                        key: const Key('wx-codex-usage'),
+                        widthFactor: 1,
+                        heightFactor: remaining / 100,
+                        child: ColoredBox(color: (used >= 90 ? Wx.danger : Wx.accent).withValues(alpha: 0.3)),
+                      ),
+                    )),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Text(label, style: TextStyle(
+                      fontSize: 12, fontWeight: FontWeight.w600, height: 1,
+                      color: agentMode ? Wx.accent : Wx.muted,
+                    )),
+                  ),
                 ],
-              ]),
+              ),
             ),
           ),
         ),
