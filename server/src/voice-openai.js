@@ -14,9 +14,11 @@ export function createOpenAiAsr({
   onPartial,
   onFinal,
   onSpeechStart,
+  onError,
 } = {}) {
   let socket = null;
   let opened = false;
+  let generation = 0;
   const pending = [];
   const url = `wss://api.openai.com/v1/realtime?model=${encodeURIComponent(openai.realtimeModel || "gpt-4o-realtime-preview")}`;
 
@@ -36,11 +38,25 @@ export function createOpenAiAsr({
 
   return {
     async start() {
+      const gen = ++generation;
       socket = connect(url, { headers: openAiRealtimeHeaders(openai) });
+      const active = socket;
+      let reported = false;
+      const failed = (err) => {
+        if (gen !== generation || reported) return;
+        reported = true;
+        opened = false;
+        pending.length = 0;
+        onError?.({ message: String(err?.message || err || "asr disconnected") });
+      };
       await new Promise((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error("asr timeout")), 8000);
+        const timer = setTimeout(() => {
+          reject(new Error("asr timeout"));
+          active.terminate?.();
+        }, 8000);
         socket.once("open", () => {
           clearTimeout(timer);
+          if (gen !== generation) { reject(new Error("asr cancelled")); return; }
           opened = true;
           send({
             type: "session.update",
@@ -63,18 +79,27 @@ export function createOpenAiAsr({
           flush();
           resolve();
         });
-        socket.once("error", (err) => {
+        socket.on("error", (err) => {
           clearTimeout(timer);
-          reject(err);
+          if (opened) failed(err);
+          else reject(err);
+        });
+        socket.on("close", () => {
+          clearTimeout(timer);
+          if (opened) failed(new Error("asr disconnected"));
+          else reject(new Error("asr connection closed"));
         });
       });
+      if (gen !== generation || reported) throw new Error("asr disconnected during startup");
       socket.on("message", (data) => {
+        if (gen !== generation || reported) return;
         let msg;
         try {
           msg = JSON.parse(data.toString());
         } catch {
           return;
         }
+        if (msg.type === "error") { failed(new Error(msg.error?.message || "asr error")); return; }
         if (msg.type === "input_audio_buffer.speech_started") onSpeechStart?.();
         if (msg.type === "conversation.item.input_audio_transcription.delta" && msg.delta) {
           onPartial?.(msg.delta);
@@ -85,6 +110,7 @@ export function createOpenAiAsr({
       });
     },
     push(pcm) {
+      if (!opened) return;
       const buf = Buffer.isBuffer(pcm) ? pcm : Buffer.from(pcm);
       if (!buf.length) return;
       send({ type: "input_audio_buffer.append", audio: buf.toString("base64") });
@@ -93,6 +119,7 @@ export function createOpenAiAsr({
       pending.length = 0;
     },
     stop() {
+      generation += 1;
       opened = false;
       socket?.close();
       socket = null;

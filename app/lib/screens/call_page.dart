@@ -114,6 +114,8 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
   bool _backgroundHeld = false;
   bool _playing = false;
   Timer? _micRetry;
+  Timer? _micWatchdog;
+  Timer? _postPlaybackCheck;
   Timer? _bargeMicCheck;
   Timer? _speakerIdleTimer;
   bool _watchingSpeaker = false;
@@ -280,8 +282,14 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
       _playing = false;
       _live = true;
     });
-    final allowed = await _media.requestMic();
-    if (!mounted) return;
+    bool allowed;
+    try {
+      allowed = await _media.requestMic();
+    } catch (err) {
+      if (mounted && !_disposing) _fail('无法打开麦克风，请重试', cause: err);
+      return;
+    }
+    if (!mounted || !_live || _disposing) return;
     if (!allowed) {
       setState(() {
         _live = false;
@@ -292,6 +300,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
     }
     _holdBackground();
     _linkResets = 0;
+    _micReopens = 0;
     _closing = false;
     _openSocket(_newClient());
     if (_live) _armMic();
@@ -302,16 +311,20 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
   }
 
   void _sayHello(VoiceCallClient client) {
+    final history = _captions.skip(_captions.length > 40 ? _captions.length - 40 : 0)
+        .map((m) => <String, String>{'role': m.role, 'content': m.content}).toList();
     if (widget.book != null) {
       client.hello(
         bookId: widget.book!.id,
         chapter: widget.chapter,
+        history: history,
       );
       return;
     }
     client.hello(
       owner: widget.repo?.owner ?? '',
       repo: widget.repo?.name ?? '',
+      history: history,
     );
   }
 
@@ -319,9 +332,9 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
     _client = client;
     try {
       _sub = client.connect().listen(
-        _onEvent,
-        onError: (Object err) => _onSocketGone(err),
-        onDone: () => _onSocketGone(null),
+        (event) { if (identical(_client, client)) _onEvent(event); },
+        onError: (Object err) { if (identical(_client, client)) _onSocketGone(err); },
+        onDone: () { if (identical(_client, client)) _onSocketGone(null); },
       );
       _sayHello(client);
     } catch (err) {
@@ -338,9 +351,10 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
       return;
     }
     _linkResets += 1;
+    _relinking = true;
     // onDone is still on the stack. Cancelling that subscription here never finishes.
     Timer(Duration.zero, () {
-      if (!_live || _closing || _disposing) return;
+      if (!_live || _closing || _disposing) { _relinking = false; return; }
       _relink();
     });
   }
@@ -423,7 +437,9 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
           sampleRate: event.outputRate,
           segmentCaption: captionAtEnqueue,
           onPlaybackStart: _playbackStartForCaption(captionAtEnqueue),
-        ),
+        ).catchError((Object err) {
+          if (_live && !_disposing) _fail('声音播放失败，请重试', cause: err);
+        }),
       );
       _watchSpeakerIdle();
       if (_answerAudioDone) {
@@ -445,6 +461,8 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
 
   /// Only barge / hangup / relink should bump [_listenHold] and drop a pending drain.
   void _cancelPlaybackEnd() {
+    _postPlaybackCheck?.cancel();
+    _watchPostPlaybackMic = false;
     _listenHold += 1;
     _playbackEndPending = false;
     _answerAudioDone = false;
@@ -463,7 +481,10 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
     if (_watchingSpeaker) return;
     _watchingSpeaker = true;
     final seq = _pcmSeq;
-    _media.waitForPlaybackQueue().catchError((_) {}).whenComplete(() {
+    final hold = _listenHold;
+    _media.waitForPlaybackQueue().catchError((Object err) {
+      if (_live && !_disposing && hold == _listenHold) _fail('声音播放中断，请重试', cause: err);
+    }).whenComplete(() {
       _watchingSpeaker = false;
       if (!mounted || _disposing || !_playing || _phase != 'speaking') return;
       if (seq != _pcmSeq) {
@@ -532,7 +553,10 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
       await _media.waitForPlaybackQueue();
       if (!mounted || _disposing || hold != _listenHold) return;
       await Future<void>.delayed(const Duration(milliseconds: 90));
-    } catch (_) {}
+    } catch (err) {
+      if (_live && !_disposing && hold == _listenHold) _fail('声音播放中断，请重试', cause: err);
+      return;
+    }
     _playbackEndPending = false;
     if (!mounted || _disposing || hold != _listenHold) return;
     if (_phase != 'speaking' && !_answerAudioDone) return;
@@ -543,19 +567,21 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
       _playing = false;
       _clearAssistantSubtitle();
     });
-    unawaited(_maybeReopenMicAfterPlayback(hold));
+    _maybeReopenMicAfterPlayback(hold);
   }
 
   /// Full stop/start after every answer drops short follow-ups on some OEM mics.
-  Future<void> _maybeReopenMicAfterPlayback(int hold) async {
+  void _maybeReopenMicAfterPlayback(int hold) {
     if (!_live || _disposing || hold != _listenHold) return;
     _postPlaybackPeak = 0;
     _watchPostPlaybackMic = true;
-    await Future<void>.delayed(const Duration(milliseconds: 420));
-    _watchPostPlaybackMic = false;
-    if (!_live || _disposing || hold != _listenHold) return;
-    if (_postPlaybackPeak >= _deadMicPeak) return;
-    await _reopenMicAfterSpeaker();
+    _postPlaybackCheck?.cancel();
+    _postPlaybackCheck = Timer(const Duration(milliseconds: 1200), () {
+      _watchPostPlaybackMic = false;
+      if (!_live || _disposing || hold != _listenHold) return;
+      if (_postPlaybackPeak > 0) return;
+      unawaited(_reopenMicAfterSpeaker());
+    });
   }
 
   void _userTapBarge() {
@@ -587,7 +613,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
         _bargeMicCheck = null;
         _watchBargeMic = false;
         if (!_live || _disposing || epoch != _micEpoch) return;
-        if (_bargeMicPeak < _deadMicPeak) unawaited(_reopenMicAfterSpeaker());
+        if (_bargeMicPeak == 0) unawaited(_reopenMicAfterSpeaker());
       });
     });
   }
@@ -596,7 +622,6 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
   static const _bargeMicWindow = Duration(milliseconds: 900);
 
   /// Room noise on a live phone mic peaks well above this; a suppressed one sends near-zero.
-  static const _deadMicPeak = 200;
 
   /// A spoken word on this phone sits above this. Silence, and a mic the echo
   /// cancel has wiped to zero, stay under it, so the rings mean the voice was captured.
@@ -619,9 +644,14 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
   Future<void> _reopenMicAfterSpeaker() async {
     if (!_live || _disposing) return;
     final epoch = ++_micEpoch;
-    await _micSub?.cancel();
-    _micSub = null;
-    await _media.stopMic();
+    try {
+      await _micSub?.cancel().timeout(const Duration(seconds: 3));
+      _micSub = null;
+      await _media.stopMic().timeout(const Duration(seconds: 3));
+    } catch (err) {
+      if (_live && !_disposing) _fail('无法恢复麦克风，请重试', cause: err);
+      return;
+    }
     if (!_live || _disposing || epoch != _micEpoch) return;
     _armMic();
   }
@@ -629,11 +659,17 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
   /// A recorder glitch used to hang the call up. Reopen unless it never really started.
   void _armMic() {
     final epoch = ++_micEpoch;
-    final started = DateTime.now();
-    var frames = 0;
+    void watchFrames() {
+      _micWatchdog?.cancel();
+      _micWatchdog = Timer(const Duration(seconds: 4), () => _reviveMic(epoch));
+    }
+    watchFrames();
     _micSub?.cancel();
+    try {
     _micSub = _media.startMic().listen((pcm) {
-      frames += 1;
+      if (epoch != _micEpoch || !_live || _disposing) return;
+      if (pcm.isEmpty) return;
+      watchFrames();
       _micReopens = 0;
       final peak = pcm16Peak(pcm);
       if (_watchBargeMic && peak > _bargeMicPeak) _bargeMicPeak = peak;
@@ -641,16 +677,19 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
       _noteHeard(peak);
       _client?.sendPcm(pcm);
     }, onError: (_) {
-      _reviveMic(epoch, started, frames);
+      _reviveMic(epoch);
     }, onDone: () {
-      _reviveMic(epoch, started, frames);
+      _reviveMic(epoch);
     });
+    } catch (_) {
+      _reviveMic(epoch);
+    }
   }
 
-  void _reviveMic(int epoch, DateTime started, int frames) {
+  void _reviveMic(int epoch) {
     if (epoch != _micEpoch || !_live || _disposing) return;
-    final brief = frames == 0 && DateTime.now().difference(started) < const Duration(milliseconds: 300);
-    if (brief) return;
+    if (_micRetry?.isActive == true) return;
+    _micWatchdog?.cancel();
     if (_micReopens >= 2) {
       _fail('需要麦克风才能通话');
       return;
@@ -658,8 +697,9 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
     _micReopens += 1;
     _micRetry?.cancel();
     _micRetry = Timer(const Duration(milliseconds: 350), () {
+      _micRetry = null;
       if (!_live || _disposing || epoch != _micEpoch) return;
-      _armMic();
+      unawaited(_reopenMicAfterSpeaker());
     });
   }
 
@@ -707,6 +747,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
     _freeBackground();
     _cancelPlaybackEnd();
     _micEpoch++;
+    _micWatchdog?.cancel();
     _micRetry?.cancel();
     _micRetry = null;
     _bargeMicCheck?.cancel();
@@ -798,11 +839,13 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
         style: speakingNow ? _assistantHeadlineCaptionStyle(context) : bodyLarge,
       );
     } else {
-      centerChild = const SizedBox.shrink();
+      centerChild = !_live && _error != null
+          ? Text(_error!, textAlign: TextAlign.center)
+          : const SizedBox.shrink();
     }
 
     return Semantics(
-      label: line.isEmpty && speakingNow ? '问象在说' : (line.isEmpty ? null : line),
+      label: line.isEmpty && _playing ? '问象在说' : (line.isEmpty ? null : line),
       container: true,
       child: KeyedSubtree(
         key: const Key('call-status-slot'),
@@ -812,7 +855,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
               physics: const ClampingScrollPhysics(),
               padding: const EdgeInsets.fromLTRB(2, 4, 2, 20),
               child: ConstrainedBox(
-                constraints: BoxConstraints(minHeight: constraints.maxHeight - 24),
+                constraints: BoxConstraints(minHeight: (constraints.maxHeight - 24).clamp(0, double.infinity)),
                 child: Align(
                   alignment: line.isNotEmpty ? Alignment.topLeft : Alignment.center,
                   child: centerChild,
@@ -841,7 +884,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
   }
 
   static const _orbSize = 168.0;
-  static const _orbBlockHeight = 196.0;
+  static const _orbBlockHeight = 212.0;
 
   Widget _callOrbBlock(BuildContext context, {required bool speaking, required bool listening}) {
     return SizedBox(
@@ -877,7 +920,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
                     final opacity = speaking
                         ? 0.55 + (_orb.value * 0.45)
                         : listening
-                            ? 0.72 + (_orb.value * 0.45)
+                            ? 0.72 + (_orb.value * 0.28)
                             : 1.0;
                     return Opacity(opacity: opacity, child: child);
                   },
@@ -1142,7 +1185,11 @@ class _CallThinkingMist extends StatelessWidget {
           builder: (context, _) {
             final y = -scroll.value * blockH;
             return ClipRect(
-              child: Transform.translate(
+              child: OverflowBox(
+                alignment: Alignment.topCenter,
+                minHeight: 0,
+                maxHeight: double.infinity,
+                child: Transform.translate(
                 offset: Offset(0, y),
                 child: ImageFiltered(
                   imageFilter: ImageFilter.blur(sigmaX: 2.2, sigmaY: 2.2),
@@ -1151,6 +1198,7 @@ class _CallThinkingMist extends StatelessWidget {
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 22),
                       child: Column(
+                        mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           for (final line in doubled)
@@ -1172,6 +1220,7 @@ class _CallThinkingMist extends StatelessWidget {
                     ),
                   ),
                 ),
+              ),
               ),
             );
           },

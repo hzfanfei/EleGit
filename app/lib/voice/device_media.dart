@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'dart:io';
 
-import 'dart:typed_data';
 
 
 
@@ -17,7 +16,9 @@ import 'package:record/record.dart';
 
 
 import 'android_media_audio.dart';
+import 'audio_format.dart';
 import 'background_work.dart';
+import 'call_pcm_player.dart';
 import 'voice_media.dart';
 
 
@@ -32,6 +33,10 @@ class DeviceVoiceMedia implements VoiceMedia {
   }
 
   final bool telephonyCapture;
+  final CallPcmPlayer _callPcm = CallPcmPlayer();
+  bool get _continuousCall => telephonyCapture && Platform.isAndroid;
+  Future<void> _callInputTail = Future.value();
+  static const _commandBudget = Duration(seconds: 3);
 
 
 
@@ -46,6 +51,7 @@ class DeviceVoiceMedia implements VoiceMedia {
   Future<void> _micChain = Future<void>.value();
 
   bool _playing = false;
+  Object? _playbackFault;
 
   /// Bumped by [stopPlayback]. In-flight [playPcm] must not enqueue after this.
   int _playbackEpoch = 0;
@@ -255,7 +261,7 @@ class DeviceVoiceMedia implements VoiceMedia {
 
         AudioContext(
 
-          android: AudioContextAndroid(
+          android: const AudioContextAndroid(
 
             isSpeakerphoneOn: true,
 
@@ -308,20 +314,6 @@ class DeviceVoiceMedia implements VoiceMedia {
 
 
 
-  static bool _looksLikeMp3(Uint8List bytes) {
-
-    if (bytes.length < 3) return false;
-
-    if (bytes[0] == 0x49 && bytes[1] == 0x44 && bytes[2] == 0x33) return true;
-
-    if (bytes[0] == 0xff && (bytes[1] & 0xe0) == 0xe0) return true;
-
-    return false;
-
-  }
-
-
-
   Future<void> _preparePlaybackAudio({bool leaveCall = false}) async {
 
     if (telephonyCapture && !leaveCall) {
@@ -346,7 +338,7 @@ class DeviceVoiceMedia implements VoiceMedia {
 
         AudioContext(
 
-          android: AudioContextAndroid(
+          android: const AudioContextAndroid(
 
             isSpeakerphoneOn: false,
 
@@ -407,13 +399,30 @@ class DeviceVoiceMedia implements VoiceMedia {
 
     if (pcm.isEmpty) return;
 
+    if (_continuousCall && format == 'pcm' && !looksLikeMp3(pcm)) {
+      final epoch = _playbackEpoch;
+      final task = _callInputTail.then((_) async {
+        if (epoch != _playbackEpoch) return;
+        await _preparePlaybackAudio().timeout(_commandBudget);
+        if (epoch != _playbackEpoch) return;
+        final bytes = codec == 'gzip' ? Uint8List.fromList(gzip.decode(pcm)) : pcm;
+        // Fixed gain across chunks avoids volume pumping at chunk boundaries.
+        await _callPcm.push(amplifyPcm16(normalizePcm16Length(bytes), gain: 1.75),
+            sampleRate, onPlaybackStart);
+      });
+      _callInputTail = task.catchError((Object _) {});
+      await task;
+      return;
+    }
+
     final epoch = _playbackEpoch;
 
     _pendingPlayCalls += 1;
+    if (!_playing && _queue.isEmpty) _playbackFault = null;
 
     try {
 
-    await _preparePlaybackAudio();
+    await _preparePlaybackAudio().timeout(_commandBudget);
 
     if (epoch != _playbackEpoch) return;
 
@@ -429,7 +438,7 @@ class DeviceVoiceMedia implements VoiceMedia {
 
     var outFormat = format;
 
-    if (outFormat == 'pcm' && _looksLikeMp3(bytes)) {
+    if (outFormat == 'pcm' && looksLikeMp3(bytes)) {
 
       outFormat = 'mp3';
 
@@ -499,13 +508,19 @@ class DeviceVoiceMedia implements VoiceMedia {
     required int epoch,
   }) async {
     if (epoch != _playbackEpoch) return;
-    job.onPlaybackStart?.call();
 
     final cancel = Completer<void>();
     _currentPlay = cancel;
     final done = Completer<void>();
+    Object? eventFailure;
+    var starting = true;
+    final temporaryFiles = <File>[];
     final completeSub = _player.onPlayerComplete.listen((_) {
       if (!done.isCompleted) done.complete();
+    }, onError: (Object error, StackTrace stack) {
+      eventFailure = error;
+      // During preparation, play() reports this error to the retry loop.
+      if (!starting && !done.isCompleted) done.complete();
     });
 
     try {
@@ -514,6 +529,10 @@ class DeviceVoiceMedia implements VoiceMedia {
         if (job.bytes.isEmpty) return;
         await _playSourceWithRetry(
           BytesSource(job.bytes, mimeType: 'audio/mpeg'),
+          fileFallbackBytes: Platform.isAndroid ? job.bytes : null,
+          fileExtension: 'mp3',
+          temporaryFiles: temporaryFiles,
+          onAttempt: () => eventFailure = null,
           leadingStop: leadingStop,
           epoch: epoch,
         );
@@ -525,11 +544,17 @@ class DeviceVoiceMedia implements VoiceMedia {
         if (epoch != _playbackEpoch) return;
         await _playSourceWithRetry(
           BytesSource(wav, mimeType: 'audio/wav'),
+          temporaryFiles: temporaryFiles,
+          onAttempt: () => eventFailure = null,
           fileFallbackBytes: Platform.isAndroid ? wav : null,
           leadingStop: leadingStop,
           epoch: epoch,
         );
       }
+      starting = false;
+      if (epoch != _playbackEpoch) return;
+      if (eventFailure != null) throw eventFailure!;
+      job.onPlaybackStart?.call();
       await Future.any([
         done.future,
         cancel.future,
@@ -538,18 +563,26 @@ class DeviceVoiceMedia implements VoiceMedia {
         sampleRate: _outRate,
         format: job.format,
       ));
+      if (eventFailure != null && !cancel.isCompleted) throw eventFailure!;
     } on TimeoutException {
       if (cancel.isCompleted) return;
       try {
-        await _player.stop();
-      } on PlatformException {
-        // already stopped
+        await _player.stop().timeout(_commandBudget);
+      } catch (_) {
+        // Preserve the original timeout.
       }
+      rethrow;
     } catch (_) {
       if (cancel.isCompleted) return;
       rethrow;
     } finally {
       await completeSub.cancel();
+      if (temporaryFiles.isNotEmpty) {
+        try { await _player.release().timeout(_commandBudget); } catch (_) { /* best effort */ }
+      }
+      for (final file in temporaryFiles) {
+        try { await file.delete(); } on FileSystemException { /* cache cleanup */ }
+      }
       if (identical(_currentPlay, cancel)) _currentPlay = null;
     }
   }
@@ -558,32 +591,43 @@ class DeviceVoiceMedia implements VoiceMedia {
   Future<void> _playSourceWithRetry(
     Source source, {
     Uint8List? fileFallbackBytes,
+    String fileExtension = 'wav',
+    required List<File> temporaryFiles,
+    required void Function() onAttempt,
     required bool leadingStop,
     required int epoch,
   }) async {
     Object? lastError;
     for (var attempt = 0; attempt < 3; attempt++) {
       if (epoch != _playbackEpoch) return;
+      onAttempt();
       try {
-        if (leadingStop || attempt > 0) {
-          await _player.stop();
+        if (attempt > 0) {
+          // stop() only pauses/seeks under ReleaseMode.stop; release resets a
+          // rejected source and creates a fresh native decoder on the next play.
+          await _player.release().timeout(_commandBudget);
+        } else if (leadingStop) {
+          await _player.stop().timeout(_commandBudget);
           if (Platform.isAndroid) {
             await Future<void>.delayed(Duration(milliseconds: 40 * (attempt + 1)));
           }
         }
-        await _player.setVolume(1);
-        await _player.setPlayerMode(PlayerMode.mediaPlayer);
+        if (epoch != _playbackEpoch) return;
+        await _player.setVolume(1).timeout(_commandBudget);
+        if (epoch != _playbackEpoch) return;
+        await _player.setPlayerMode(PlayerMode.mediaPlayer).timeout(_commandBudget);
         Source active = source;
         if (attempt > 0 && fileFallbackBytes != null && fileFallbackBytes.isNotEmpty) {
           final dir = await getTemporaryDirectory();
           final file = File(
-            '${dir.path}/wx_tts_${DateTime.now().microsecondsSinceEpoch}.wav',
+            '${dir.path}/wx_tts_${DateTime.now().microsecondsSinceEpoch}.$fileExtension',
           );
+          temporaryFiles.add(file);
           await file.writeAsBytes(fileFallbackBytes, flush: true);
           active = DeviceFileSource(file.path);
         }
         if (epoch != _playbackEpoch) return;
-        await _player.play(active);
+        await _player.play(active).timeout(_commandBudget);
         return;
       } on PlatformException catch (err) {
         lastError = err;
@@ -591,7 +635,7 @@ class DeviceVoiceMedia implements VoiceMedia {
         lastError = err;
       }
     }
-    if (lastError != null) throw lastError!;
+    if (lastError != null) throw lastError;
     throw StateError('playback failed');
   }
 
@@ -605,11 +649,10 @@ class DeviceVoiceMedia implements VoiceMedia {
 
     _playing = true;
 
-    await BackgroundWork.acquire();
-
     try {
+      await BackgroundWork.acquire().timeout(_commandBudget);
 
-      await _preparePlaybackAudio();
+      await _preparePlaybackAudio().timeout(_commandBudget);
 
       if (epoch != _playbackEpoch) return;
 
@@ -619,18 +662,16 @@ class DeviceVoiceMedia implements VoiceMedia {
         leadingStop = false;
       }
 
+    } catch (err) {
+      if (epoch == _playbackEpoch) { _playbackFault = err; _queue.clear(); }
+      rethrow;
     } finally {
-
-      await BackgroundWork.release();
-
-      _playing = false;
-
-      if (_queue.isNotEmpty) {
-
-        unawaited(_drain());
-
+      try {
+        await BackgroundWork.release().timeout(_commandBudget);
+      } finally {
+        _playing = false;
+        if (_queue.isNotEmpty) unawaited(_drain().catchError((Object _) {}));
       }
-
     }
 
   }
@@ -639,12 +680,18 @@ class DeviceVoiceMedia implements VoiceMedia {
 
   @override
   Future<void> waitForPlaybackQueue() async {
+    if (_continuousCall) {
+      await _callInputTail.timeout(const Duration(seconds: 8));
+      await _callPcm.waitForIdle();
+    }
     while (_playing || _queue.isNotEmpty || _pendingPlayCalls > 0) {
+      if (_playbackFault != null) throw _playbackFault!;
       if (!_playing && _queue.isNotEmpty) {
-        unawaited(_drain());
+        unawaited(_drain().catchError((Object _) {}));
       }
       await Future<void>.delayed(const Duration(milliseconds: 20));
     }
+    if (_playbackFault != null) throw _playbackFault!;
   }
 
   @override
@@ -652,6 +699,11 @@ class DeviceVoiceMedia implements VoiceMedia {
   Future<void> stopPlayback() async {
 
     _playbackEpoch += 1;
+    _playbackFault = null;
+    _callInputTail = Future.value();
+    if (_continuousCall) {
+      try { await _callPcm.stop(); } catch (_) { /* caller has already invalidated playback */ }
+    }
 
     _queue.clear();
 
@@ -661,8 +713,10 @@ class DeviceVoiceMedia implements VoiceMedia {
 
     try {
 
-      await _player.stop();
+      await _player.stop().timeout(_commandBudget);
 
+    } on TimeoutException {
+      // Stop is bounded even when the native player does not answer.
     } on PlatformException {
 
       // Player was not prepared, or already disposed.

@@ -200,6 +200,42 @@ describe("speech text", () => {
 });
 
 describe("first words", () => {
+  it("sends PCM before synthesis ends and bounds each packet by default", async () => {
+    const events = [];
+    await runVoiceTurn({ question: "q",
+      ask: async function* () { yield { type: "delta", text: "现在开始回答。" }; },
+      ttsStream: async (_text, _signal, send) => {
+        await send(Buffer.alloc(20000));
+        events.push("synth:end");
+      },
+      onAudio: async (buf) => events.push(buf.length),
+    });
+    assert.deepEqual(events, [9600, 9600, 800, "synth:end"]);
+  });
+
+  it("does not repeat a spoken prefix when streaming fails halfway", async () => {
+    let fallback = 0;
+    let packets = 0;
+    await assert.rejects(runVoiceTurn({ question: "q",
+      ask: async function* () { yield { type: "delta", text: "现在开始回答。" }; },
+      ttsStream: async (_text, _signal, send) => { await send(Buffer.alloc(100)); throw new Error("link lost"); },
+      tts: async () => { fallback++; return Buffer.alloc(100); },
+      onAudio: async () => packets++,
+    }), /link lost/);
+    assert.equal(fallback, 0);
+    assert.equal(packets, 1);
+  });
+
+  it("drops remaining streaming chunks immediately after cancellation", async () => {
+    const controller = new AbortController();
+    let packets = 0;
+    await runVoiceTurn({ question: "q", signal: controller.signal,
+      ask: async function* () { yield { type: "delta", text: "现在开始回答。" }; },
+      ttsStream: async (_text, _signal, send) => { await send(Buffer.alloc(30000)); },
+      onAudio: async () => { packets++; controller.abort(); },
+    });
+    assert.equal(packets, 1);
+  });
   it("says the first clause without waiting for the full stop", () => {
     assert.deepEqual(takeSpeakable("默认用小米的识别，", 320, { firstClause: true }), { speak: "默认用小米的识别，", rest: "" });
     assert.deepEqual(takeSpeakable("嗯，", 320, { firstClause: true }), { speak: "", rest: "嗯，" });
@@ -223,7 +259,7 @@ describe("first words", () => {
     assert.deepEqual(asked, ["先说结论。", "原因有两点，第一点是缓存。第二点是网络也慢，而且会重试好几次才放弃。", "最后一句话用来收个尾。"]);
   });
 
-  it("sends a streamed sentence to the phone as one clip", async () => {
+  it("forwards every synthesized chunk without collecting the sentence", async () => {
     const events = [];
     const piece = Buffer.alloc(8000, 1);
     await runVoiceTurn({
@@ -245,7 +281,7 @@ describe("first words", () => {
         events.push(`play:${buf.length}`);
       },
     });
-    assert.deepEqual(events, ["synth:0", "synth:1", "synth:2", "synth:3", "synth:end", "play:32000"]);
+    assert.deepEqual(events, ["synth:0", "play:8000", "synth:1", "play:8000", "synth:2", "play:8000", "synth:3", "play:8000", "synth:end"]);
   });
 
   it("falls back to whole-sentence TTS when streaming fails before any audio", async () => {

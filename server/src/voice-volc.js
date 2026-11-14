@@ -149,6 +149,7 @@ export function createVolcAsr({
   let heldBytes = 0;
   let lastSentAt = 0;
   let idleTimer = null;
+  let generation = 0;
 
   function release() {
     if (!heldBytes) return;
@@ -173,11 +174,29 @@ export function createVolcAsr({
 
   return {
     async start() {
+      const gen = ++generation;
       socket = connect(volc.asrUrl, { headers: volcAsrHeaders(volc) });
+      const active = socket;
+      let reported = false;
+      const failed = (err) => {
+        if (gen !== generation || reported) return;
+        reported = true;
+        opened = false;
+        if (idleTimer) clearInterval(idleTimer);
+        idleTimer = null;
+        pending.length = 0;
+        held = [];
+        heldBytes = 0;
+        onError?.({ message: String(err?.message || err || "asr disconnected") });
+      };
       await new Promise((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error("asr timeout")), 8000);
+        const timer = setTimeout(() => {
+          reject(new Error("asr timeout"));
+          active.terminate?.();
+        }, 8000);
         socket.once("open", () => {
           clearTimeout(timer);
+          if (gen !== generation) { reject(new Error("asr cancelled")); return; }
           opened = true;
           socket.send(encodeVolcClientRequest(defaultAsrConfigPayload()));
           lastSentAt = now();
@@ -188,15 +207,23 @@ export function createVolcAsr({
           }
           resolve();
         });
-        socket.once("error", (err) => {
+        socket.on("error", (err) => {
           clearTimeout(timer);
-          reject(err);
+          if (opened) failed(err);
+          else reject(err);
+        });
+        socket.on("close", () => {
+          clearTimeout(timer);
+          if (opened) failed(new Error("asr disconnected"));
+          else reject(new Error("asr connection closed"));
         });
       });
+      if (gen !== generation || reported) throw new Error("asr disconnected during startup");
       socket.on("message", (data) => {
+        if (gen !== generation || reported) return;
         const frame = decodeVolcServerFrame(data);
         if (frame.type === "error") {
-          onError?.({ message: frame.message, code: frame.code });
+          failed(new Error(frame.message || "asr error"));
           return;
         }
         if (frame.type !== "result" || !frame.json) return;
@@ -207,6 +234,7 @@ export function createVolcAsr({
       });
     },
     push(pcm) {
+      if (!opened) return;
       if (!pcm?.length) return;
       held.push(Buffer.isBuffer(pcm) ? pcm : Buffer.from(pcm));
       heldBytes += pcm.length;
@@ -220,6 +248,7 @@ export function createVolcAsr({
       heldBytes = 0;
     },
     stop() {
+      generation += 1;
       if (idleTimer) clearInterval(idleTimer);
       idleTimer = null;
       release();

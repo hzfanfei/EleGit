@@ -1,3 +1,4 @@
+import { looksLikeMp3 } from "./audio-format.js";
 import { encodeAdpcm } from "./adpcm.js";
 import { noteServerLog } from "./server-logs.js";
 import { bookSessionOwner } from "./books.js";
@@ -34,11 +35,6 @@ const PCM_BYTES_PER_MS = 48;
  */
 const DOWNLINK_BACKLOG_BYTES = 48 * 1024;
 
-function looksLikeMp3(buf) {
-  if (!buf || buf.length < 3) return false;
-  if (buf[0] === 0x49 && buf[1] === 0x44 && buf[2] === 0x33) return true;
-  return buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0;
-}
 
 function sleep(ms, signal) {
   return new Promise((resolve) => {
@@ -116,7 +112,7 @@ export function createVoiceSession({
   let playbackOpen = false;
   let playbackBytes = 0;
   let playbackTimer = null;
-  let asrRecoverAt = 0;
+  let asrRecovering = false;
   let echoLooseUntil = 0;
   let micTimer = null;
   let micFrames = 0;
@@ -128,6 +124,7 @@ export function createVoiceSession({
   let bargeSpeechBytes = 0;
   let bargeHardBytes = 0;
   let bargeHardStreakBytes = 0;
+  let bargeQuietBytes = 0;
   let echoBytes = 0;
   let echoLevels = [];
   let callBargeRms = null;
@@ -293,6 +290,7 @@ export function createVoiceSession({
   }
 
   function resetPlaybackBarge() {
+    bargeQuietBytes = 0;
     bargeChunks = [];
     bargeSpeechBytes = 0;
     bargeHardBytes = 0;
@@ -351,6 +349,7 @@ export function createVoiceSession({
     const bar = playbackBargeRms();
     learnEcho(bytes, rms);
     if (rms >= bar) {
+      bargeQuietBytes = 0;
       if (bargeGapTimer) {
         clearTimeout(bargeGapTimer);
         bargeGapTimer = null;
@@ -363,7 +362,9 @@ export function createVoiceSession({
       flushPlaybackSpeechToAsr();
       return;
     }
-    bargeHardStreakBytes = 0;
+    // Preserve a voiced run across a brief AEC hole, but not isolated keyboard taps.
+    bargeQuietBytes += bytes.length;
+    if (bargeQuietBytes > 16000 * 2 * 0.05) bargeHardStreakBytes = 0;
     if (!bargeSpeechBytes) return;
     bargeChunks.push(bytes);
     if (bargeGapTimer) return;
@@ -588,12 +589,16 @@ export function createVoiceSession({
       return captions.slice();
     },
     async start(opts = {}) {
+      if (started || closed) return;
       owner = String(opts.owner || "").trim();
       repo = String(opts.repo || "").trim();
       bookId = String(opts.bookId || "").trim();
       chapter = String(opts.chapter || "").trim();
       bookMode = Boolean(bookId);
-      history = [];
+      // A reconnect starts a new Agent process, but keeps the phone's call transcript.
+      history = (Array.isArray(opts.history) ? opts.history : [])
+        .filter((m) => (m?.role === "user" || m?.role === "assistant") && typeof m.content === "string")
+        .slice(-40).map((m) => ({ role: m.role, content: m.content.slice(0, 8000) }));
       downlinkAdpcm = opts.audio === "adpcm";
       callSessionStore = null;
       callSessionOwner = "";
@@ -618,6 +623,7 @@ export function createVoiceSession({
       started = true;
       try {
         await asr?.start?.();
+        if (closed) { asr?.stop?.(); return; }
         machine.connected();
         emit({
           type: "hello",
@@ -645,7 +651,8 @@ export function createVoiceSession({
       const busy = machine.state === "speaking" || machine.state === "thinking";
       const interrupting = busy || playbackOpen;
       if (echoOfAssistant(spoken, { loose: interrupting || Date.now() < echoLooseUntil })) return;
-      if (interrupting && compact(spoken).length < 4) return;
+      const shortInterrupt = /^(等等|等一下|停|停下|暂停|别说了|不对|不是)$/.test(compact(spoken));
+      if (interrupting && compact(spoken).length < 4 && !shortInterrupt) return;
       if (interrupting && revisionOfAsk(spoken)) return;
       if (final && spoken === lastFinalText) {
         const now = Date.now();
@@ -691,6 +698,7 @@ export function createVoiceSession({
     },
     onAsrFailure(message) {
       if (!started || closed) return;
+      if (asrRecovering) return;
       const asrMsg = String(message || "failed");
       console.error(`[voice] asr ${asrMsg}`);
       noteServerLog({ kind: "voice-asr", message: asrMsg, summary: "语音识别失败" });
@@ -698,20 +706,24 @@ export function createVoiceSession({
       if (!busy) {
         emit({ type: "caption", role: "assistant", text: "没听清，再说一次", final: true });
       }
-      const now = Date.now();
-      if (now < asrRecoverAt) return;
-      asrRecoverAt = now + 3000;
+      asrRecovering = true;
       Promise.resolve()
         .then(async () => {
           if (closed || !started) return;
           asr?.stop?.();
           await asr?.start?.();
+          if (closed || !started) asr?.stop?.();
         })
         .catch((err) => {
+          if (closed) return;
           const restartMsg = String(err?.message || err || "");
           console.error(`[voice] asr restart ${restartMsg}`);
           noteServerLog({ kind: "voice-asr", message: restartMsg, summary: "语音识别重启失败" });
-        });
+          started = false;
+          abortTurn();
+          machine.fail();
+          emit({ type: "error", code: "channel", hint: "语音连接断了，请重试", detail: restartMsg });
+        }).finally(() => { asrRecovering = false; });
     },
     barge(reason = "tap") {
       if (reason !== "tap") return;

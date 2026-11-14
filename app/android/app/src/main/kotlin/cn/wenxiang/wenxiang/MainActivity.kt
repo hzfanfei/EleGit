@@ -10,6 +10,13 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
+    private var callPcm: CallPcmOutput? = null
+
+    override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        callPcm?.dispose()
+        callPcm = null
+        super.cleanUpFlutterEngine(flutterEngine)
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         keepScreenOnWhileVisible()
@@ -33,6 +40,7 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        callPcm = CallPcmOutput(flutterEngine.dartExecutor.binaryMessenger)
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "cn.wenxiang.wenxiang/audio_route",

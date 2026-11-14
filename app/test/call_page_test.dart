@@ -13,6 +13,69 @@ import 'package:wenxiang/widgets/wx_chrome.dart';
 import 'support/fake_api.dart';
 
 void main() {
+  testWidgets('a recorder that never sends frames cannot stay listening forever', (tester) async {
+    final media = FakeVoiceMedia();
+    final key = GlobalKey<CallPageState>();
+    await tester.pumpWidget(MaterialApp(theme: wenxiangTheme(), home: CallPage(
+      key: key, api: FakeWenxiangApi(voiceReady: true), repo: sampleRepo(),
+      onBack: () {}, media: media, client: FakeVoiceClient(),
+    )));
+    await tester.pump();
+    await tester.tap(find.text('开始通话'));
+    await tester.pump();
+    for (var i = 0; i < 3; i++) {
+      await tester.pump(const Duration(seconds: 4));
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
+    }
+    expect(media.startCalls, 3);
+    expect(key.currentState!.isLive, isFalse);
+    expect(find.text('需要麦克风才能通话'), findsOneWidget);
+  });
+
+  testWidgets('immediate microphone failures retry then show a recoverable error', (tester) async {
+    final media = _FailingMicMedia();
+    final key = GlobalKey<CallPageState>();
+    await tester.pumpWidget(MaterialApp(theme: wenxiangTheme(), home: CallPage(
+      key: key, api: FakeWenxiangApi(voiceReady: true), repo: sampleRepo(),
+      onBack: () {}, media: media, client: FakeVoiceClient(),
+    )));
+    await tester.pump();
+    await tester.tap(find.text('开始通话'));
+    await tester.pump();
+    for (var i = 0; i < 3; i++) {
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
+    }
+    expect(media.startCalls, 3);
+    expect(key.currentState!.isLive, isFalse);
+    expect(find.text('需要麦克风才能通话'), findsOneWidget);
+    expect(find.text('重试'), findsOneWidget);
+  });
+
+  testWidgets('a silent but live microphone is not restarted after playback', (tester) async {
+    final media = _LiveMicMedia();
+    final client = FakeVoiceClient();
+    await tester.pumpWidget(MaterialApp(theme: wenxiangTheme(), home: CallPage(
+      api: FakeWenxiangApi(voiceReady: true), repo: sampleRepo(), onBack: () {},
+      media: media, client: client,
+    )));
+    await tester.pump();
+    await tester.tap(find.text('开始通话'));
+    await tester.pump();
+    client.emit(VoiceEvent(type: 'state', state: 'speaking'));
+    client.emit(VoiceEvent(type: 'pcm', pcm: Uint8List.fromList([1, 0])));
+    client.emit(VoiceEvent(type: 'state', state: 'audio_done'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    media.speak(1);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1300));
+    expect(media.startCalls, 1);
+    expect(media.stopMicCalls, 0);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('missing keys show a Chinese setup hint and never start a fake call', (tester) async {
     final media = FakeVoiceMedia();
     final client = FakeVoiceClient();
@@ -93,7 +156,7 @@ void main() {
 
     client.emit(VoiceEvent(type: 'activity', text: '读·README.md'));
     await tester.pump();
-    expect(find.textContaining('README'), findsOneWidget);
+    expect(find.textContaining('README'), findsNWidgets(2));
     expect(find.text('思考中'), findsNothing);
     expect(find.text('在听'), findsNothing);
 
@@ -179,7 +242,8 @@ void main() {
     client.emit(VoiceEvent(type: 'state', state: 'audio_done'));
     client.emit(VoiceEvent(type: 'pcm', pcm: Uint8List.fromList([1, 0, 2, 0])));
     await tester.pump();
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 1250));
     await tester.pump();
     expect(find.text('在听'), findsOneWidget);
     expect(client.playedCalls, 1);
@@ -215,7 +279,8 @@ void main() {
 
     client.emit(VoiceEvent(type: 'pcm', pcm: Uint8List.fromList([1, 0, 2, 0])));
     await tester.pump();
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 1250));
     await tester.pump();
     expect(find.text('在听'), findsOneWidget);
     expect(client.playedCalls, 1);
@@ -251,6 +316,7 @@ void main() {
 
     media.releasePlayback();
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
     expect(find.text('在听'), findsOneWidget);
     expect(find.bySemanticsLabel('问象在说'), findsNothing);
     expect(client.playedCalls, 1);
@@ -293,7 +359,7 @@ void main() {
 
     client.emit(VoiceEvent(type: 'state', state: 'listening'));
     await tester.pump();
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
     expect(find.text('在听'), findsOneWidget);
     expect(client.playedCalls, 1);
   });
@@ -358,13 +424,17 @@ void main() {
     expect(clients, hasLength(1));
     expect(key.currentState!.isLive, isTrue);
 
+    clients.first.emit(VoiceEvent(type: 'caption', role: 'user', text: '我读到第三章', finalCaption: true));
+    await tester.pump();
     clients.first.end();
+    clients.first.end(); // error + close must schedule only one reconnect
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 1));
     expect(key.currentState!.linkResets, 1);
     expect(key.currentState!.isLive, isTrue);
     expect(clients, hasLength(2));
     expect(clients.last.sent.any((msg) => msg['type'] == 'hello'), isTrue);
+    expect(clients.last.sent.first['history'], [{'role': 'user', 'content': '我读到第三章'}]);
     expect(find.text('通话断了'), findsNothing);
   });
 
@@ -478,6 +548,7 @@ void main() {
     expect(media.startCalls, 1);
 
     await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump();
     expect(media.startCalls, 2);
     expect(key.currentState!.isLive, isTrue);
     expect(find.text('需要麦克风才能通话'), findsNothing);
@@ -635,6 +706,14 @@ class _DroppingMicMedia extends FakeVoiceMedia {
       return Stream<Uint8List>.value(Uint8List.fromList([1, 0, 0, 0]));
     }
     return StreamController<Uint8List>.broadcast().stream;
+  }
+}
+
+class _FailingMicMedia extends FakeVoiceMedia {
+  @override
+  Stream<Uint8List> startMic() {
+    startCalls += 1;
+    return Stream<Uint8List>.error(StateError('recorder unavailable'));
   }
 }
 

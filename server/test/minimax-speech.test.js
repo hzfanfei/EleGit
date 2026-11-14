@@ -8,7 +8,7 @@ import {
 } from "../src/minimax-speech.js";
 
 function scriptedSocket() {
-  const listeners = { message: [], close: [] };
+  const listeners = { message: [], close: [], error: [] };
   const sent = [];
   let announced = false;
   const socket = {
@@ -46,6 +46,26 @@ function scriptedSocket() {
 }
 
 describe("minimax speech", () => {
+  it("cancels a stalled connection before synthesis starts", async () => {
+    const controller = new AbortController();
+    const task = minimaxTtsStream({}, "Hello world.", {
+      signal: controller.signal, connectImpl: () => new Promise(() => {}),
+    });
+    controller.abort();
+    await assert.rejects(task, { code: "cancelled" });
+  });
+
+  it("times out the connection and closes a socket that arrives late", async () => {
+    let complete;
+    let closed = false;
+    const task = minimaxTtsStream({}, "Hello world.", {
+      timeoutMs: 20, connectImpl: () => new Promise((resolve) => { complete = resolve; }),
+    });
+    await assert.rejects(task, /connect timeout/);
+    complete({ close() { closed = true; } });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(closed, true);
+  });
   it("streams one sentence over the bidirectional websocket and returns pcm", async () => {
     const socket = scriptedSocket();
     const parts = [];

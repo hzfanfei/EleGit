@@ -70,20 +70,42 @@ function failureOf(msg) {
   return null;
 }
 
-function openSocket(url, apiKey, connectImpl) {
-  if (connectImpl) return Promise.resolve(connectImpl(url, apiKey));
+function openSocket(url, apiKey, connectImpl, signal, timeoutMs) {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(url, { headers: { Authorization: `Bearer ${apiKey}` } });
-    const fail = (err) => {
-      ws.removeListener("open", ok);
-      reject(err instanceof Error ? err : new Error("minimax tts connect failed"));
+    let ws;
+    let settled = false;
+    const cleanup = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
+      ws?.removeListener?.("open", ok);
+      ws?.removeListener?.("close", closed);
     };
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      try { ws?.terminate?.(); } catch { /* closing */ }
+      reject(err);
+    };
+    const abort = () => fail(Object.assign(new Error("minimax tts cancelled"), { code: "cancelled" }));
+    const closed = () => fail(new Error("minimax tts connection closed"));
     const ok = () => {
-      ws.removeListener("error", fail);
+      if (settled) { ws?.close?.(); return; }
+      settled = true;
+      cleanup();
       resolve(ws);
     };
-    ws.once("open", ok);
-    ws.once("error", fail);
+    const timer = setTimeout(() => fail(new Error("minimax tts connect timeout")), timeoutMs);
+    if (signal?.aborted) { abort(); return; }
+    signal?.addEventListener("abort", abort, { once: true });
+    if (connectImpl) {
+      Promise.resolve().then(() => connectImpl(url, apiKey)).then((socket) => { ws = socket; ok(); }, fail);
+    } else {
+      ws = new WebSocket(url, { headers: { Authorization: `Bearer ${apiKey}` }, handshakeTimeout: timeoutMs });
+      ws.once("open", ok);
+      ws.on("error", fail);
+      ws.once("close", closed);
+    }
   });
 }
 
@@ -92,10 +114,11 @@ function openSocket(url, apiKey, connectImpl) {
  * chunks come back on task_continued, and task_flush pushes a short tail
  * that has no sentence punctuation.
  */
-export async function minimaxTtsStream(minimax, text, { signal, onPcm, connectImpl } = {}) {
+export async function minimaxTtsStream(minimax, text, { signal, onPcm, connectImpl, timeoutMs = TTS_TIMEOUT_MS } = {}) {
   const spoken = String(text || "").trim();
   if (!isSpeakableTtsText(spoken)) return 0;
-  const socket = await openSocket(minimax.ttsUrl, minimax.apiKey, connectImpl);
+  const deadline = Date.now() + timeoutMs;
+  const socket = await openSocket(minimax.ttsUrl, minimax.apiKey, connectImpl, signal, timeoutMs);
   const queue = [];
   let waiter = null;
   let closed = false;
@@ -119,7 +142,8 @@ export async function minimaxTtsStream(minimax, text, { signal, onPcm, connectIm
   };
   socket.on("message", onMessage);
   socket.on("close", markClosed);
-  const deadline = Date.now() + TTS_TIMEOUT_MS;
+  const onError = (err) => push({ event: "error", message: String(err?.message || err) });
+  socket.on("error", onError);
   const next = () => {
     if (queue.length) return Promise.resolve(queue.shift());
     if (closed || signal?.aborted) return Promise.resolve(null);
@@ -244,6 +268,7 @@ export async function minimaxTtsStream(minimax, text, { signal, onPcm, connectIm
     signal?.removeEventListener?.("abort", onAbort);
     socket.off?.("message", onMessage);
     socket.off?.("close", markClosed);
+    socket.off?.("error", onError);
     try {
       socket.close();
     } catch {

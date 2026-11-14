@@ -17,6 +17,30 @@ import {
 } from "../src/voice-volc.js";
 
 describe("volc binary frames", () => {
+  it("reports a live ASR disconnect once, ignores intentional stop and stale frames", async () => {
+    const sockets = [];
+    const errors = [];
+    const asr = createVolcAsr({
+      volc: { asrUrl: "wss://test" }, idleMs: 0,
+      connect: () => {
+        const ws = new EventEmitter();
+        ws.readyState = 1; ws.send = () => {};
+        ws.close = () => ws.emit("close");
+        sockets.push(ws);
+        queueMicrotask(() => ws.emit("open"));
+        return ws;
+      }, onError: (err) => errors.push(err),
+    });
+    await asr.start();
+    sockets[0].emit("close");
+    sockets[0].emit("error", new Error("closed"));
+    assert.equal(errors.length, 1);
+    asr.stop();
+    await asr.start();
+    sockets[0].emit("close");
+    asr.stop();
+    assert.equal(errors.length, 1);
+  });
   it("encodes a gzip JSON full client request", () => {
     const frame = encodeVolcClientRequest({ user: { uid: "wenxiang" } });
     assert.equal(frame[0], 0x11);

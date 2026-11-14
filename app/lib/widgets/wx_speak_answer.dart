@@ -59,7 +59,11 @@ class AnswerSpeech extends ChangeNotifier {
               sampleRate: event.sampleRate ?? 24000,
               format: event.audioFormat ?? 'pcm',
               codec: event.codec ?? 'raw',
-            ),
+            ).catchError((Object error, StackTrace stack) async {
+              if (token != _token) return;
+              onError?.call('声音播放失败，请重试');
+              await stop(api);
+            }),
           );
         } else if (event.type == 'error') {
           onError?.call(

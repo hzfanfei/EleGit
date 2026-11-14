@@ -111,6 +111,7 @@ function resolveAsr(config, hooks) {
       onPartial: hooks.onPartial,
       onFinal: hooks.onFinal,
       onSpeechStart: hooks.onSpeechStart,
+      onError: (detail) => hooks.onAsrError?.({ message: detail?.message, err: detail }),
     });
   }
   return null;

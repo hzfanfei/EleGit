@@ -247,22 +247,23 @@ export async function runVoiceTurn({
     await onAudio?.(buf);
   };
 
-  /**
-   * Streaming synthesis finishes a sentence sooner than the whole-sentence API,
-   * but the phone plays every send as its own clip with a gap and its own gain.
-   * Split mid-sentence, that stuttered and jumped in volume. Send whole sentences.
-   */
+  // Forward PCM as it arrives; call playback uses a continuous audio track.
   const speakStreamed = async (speak) => {
-    const parts = [];
+    let sent = false;
     try {
       await ttsStream(speak, signal, async (pcm) => {
-        if (!signal?.aborted && pcm?.length) parts.push(pcm);
+        if (signal?.aborted || !pcm?.length) return;
+        // Keep each downlink packet small so control messages aren't trapped behind a sentence.
+        for (let offset = 0; offset < pcm.length && !signal?.aborted; offset += 9600) {
+          sent = true;
+          await playAudio(pcm.subarray(offset, offset + 9600));
+        }
       });
-    } catch {
+    } catch (err) {
+      if (sent && !signal?.aborted) throw err; // Never replay the already spoken prefix.
       return Boolean(signal?.aborted);
     }
-    if (!signal?.aborted && parts.length) await playAudio(Buffer.concat(parts));
-    return true;
+    return sent || Boolean(signal?.aborted);
   };
 
   const speakOne = async (speak) => {

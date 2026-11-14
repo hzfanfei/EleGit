@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform;
 import 'dart:typed_data';
 
 import 'package:web_socket_channel/io.dart';
@@ -61,6 +62,7 @@ abstract class VoiceCallClient {
   void hello({
     String owner = '',
     String repo = '',
+    List<Map<String, String>> history = const [],
     String? sessionId,
     String? bookId,
     String? chapter,
@@ -145,6 +147,7 @@ class SocketVoiceClient implements VoiceCallClient {
   void hello({
     String owner = '',
     String repo = '',
+    List<Map<String, String>> history = const [],
     String? sessionId,
     String? bookId,
     String? chapter,
@@ -152,6 +155,8 @@ class SocketVoiceClient implements VoiceCallClient {
     _send({
       'type': 'hello',
       'audio': 'adpcm',
+      'continuousPcm': Platform.isAndroid,
+      if (history.isNotEmpty) 'history': history,
       if (owner.isNotEmpty) 'owner': owner,
       if (repo.isNotEmpty) 'repo': repo,
       if (sessionId != null && sessionId.isNotEmpty) 'sessionId': sessionId,
@@ -226,6 +231,7 @@ class FakeVoiceClient implements VoiceCallClient {
   void hello({
     String owner = '',
     String repo = '',
+    List<Map<String, String>> history = const [],
     String? sessionId,
     String? bookId,
     String? chapter,
@@ -233,6 +239,7 @@ class FakeVoiceClient implements VoiceCallClient {
     sent.add({
       'type': 'hello',
       'owner': owner,
+      'history': history,
       'repo': repo,
       'sessionId': sessionId,
       if (bookId != null && bookId.isNotEmpty) 'bookId': bookId,

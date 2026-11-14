@@ -100,7 +100,7 @@ class FakeVoiceMedia implements VoiceMedia {
   @override
   Stream<Uint8List> startMic() {
     startCalls += 1;
-    return const Stream.empty();
+    return Stream<Uint8List>.multi((_) {});
   }
 
   @override
