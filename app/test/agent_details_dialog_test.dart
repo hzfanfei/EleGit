@@ -41,7 +41,7 @@ class _Api extends FakeWenxiangApi {
 
 void main() {
   Future<void> choose(WidgetTester tester, String id) async {
-    await tester.tap(find.text('切换模型'));
+    await tester.tap(find.byKey(const Key('agent-change-model')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(ValueKey('agent-model-$id')));
     await tester.pumpAndSettle();
@@ -70,14 +70,38 @@ void main() {
       'codex-test-a': {'effort': 'high', 'fast': true}
     };
     await open(tester, api);
-    expect(find.text('当前模型：codex-test-a'), findsOneWidget);
-    expect(find.text('思考强度：高'), findsOneWidget);
-    expect(find.text('快速模式：开启'), findsOneWidget);
+    expect(find.text('Codex Test A'), findsOneWidget);
+    expect(find.text('高'), findsOneWidget);
+    expect(
+        tester.widget<Switch>(find.byKey(const Key('agent-change-fast'))).value,
+        true);
     await tester.tap(find.text('模型测速'));
     await tester.pumpAndSettle();
     expect(api.lastSpeedScope, AskEngineScope.repo);
     expect(find.textContaining('42.5 token/秒'), findsOneWidget);
     expect(find.textContaining('首字 0.25 秒'), findsOneWidget);
+  });
+
+  testWidgets('compact phone dialog expands quota details without overflow',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(320, 640));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final api = _Api();
+    api.usage = {
+      'primary': {'usedPercent': 20, 'windowDurationMins': 300},
+      'secondary': {'usedPercent': 40, 'windowDurationMins': 10080},
+    };
+    await open(tester, api);
+    expect(find.text('剩余 80% / 剩余 60%'), findsOneWidget);
+    expect(find.textContaining('重置：'), findsNothing);
+    await tester.tap(find.text('用量'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('重置：'), findsNWidgets(2));
+    await tester.ensureVisible(find.text('模型测速'));
+    await tester.tap(find.text('模型测速'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('42.5 token/秒'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   for (final scope in AskEngineScope.values) {
@@ -93,13 +117,13 @@ void main() {
       expect(api.lastCodexScope, scope.name);
       expect(api.codexModelsByScope[scope.name], 'codex-test-b');
       expect(api.codexModelsByScope[other], 'codex-test-a');
-      expect(find.text('当前模型：codex-test-b'), findsOneWidget);
-      expect(find.text('思考强度：高'), findsOneWidget);
+      expect(find.text('Codex Test B'), findsOneWidget);
+      expect(find.text('高'), findsOneWidget);
       await tester.ensureVisible(find.text('模型测速'));
       await tester.tap(find.text('模型测速'));
       await tester.pumpAndSettle();
       expect(api.lastSpeedScope, scope);
-      await tester.ensureVisible(find.text('切换模型'));
+      await tester.ensureVisible(find.byKey(const Key('agent-change-model')));
       await choose(tester, 'codex-test-a');
       expect(find.textContaining('42.5 token/秒'), findsNothing);
     });
@@ -143,7 +167,7 @@ void main() {
     expect(
         tester.widget<Switch>(find.byKey(const Key('agent-change-fast'))).value,
         true);
-    await tester.ensureVisible(find.text('切换模型'));
+    await tester.ensureVisible(find.byKey(const Key('agent-change-model')));
     await choose(tester, 'codex-test-b');
     expect(find.byKey(const Key('agent-change-fast')), findsNothing);
     expect(find.byKey(const Key('agent-change-effort')), findsNothing);
@@ -155,10 +179,10 @@ void main() {
     await open(tester, api);
     await choose(tester, 'codex-test-b');
     expect(find.textContaining('切换失败'), findsOneWidget);
-    expect(find.text('当前模型：codex-test-a'), findsOneWidget);
+    expect(find.text('Codex Test A'), findsOneWidget);
     api.failCodexSave = false;
     await choose(tester, 'codex-test-b');
-    expect(find.text('当前模型：codex-test-b'), findsOneWidget);
+    expect(find.text('Codex Test B'), findsOneWidget);
     expect(find.textContaining('切换失败'), findsNothing);
   });
 
@@ -171,15 +195,15 @@ void main() {
     expect(api.saveCalls, 1);
     expect(
         tester
-            .widget<TextButton>(find.byKey(const Key('agent-change-model')))
-            .onPressed,
+            .widget<ListTile>(find.byKey(const Key('agent-change-model')))
+            .onTap,
         isNull);
     expect(
         tester
             .widget<TextButton>(find.byKey(const Key('agent-model-speed')))
             .onPressed,
         isNull);
-    await tester.tap(find.text('关闭'));
+    await tester.tap(find.byTooltip('关闭'));
     await tester.pumpAndSettle();
     api.savePending!.complete();
     await tester.pumpAndSettle();
@@ -219,8 +243,8 @@ void main() {
         .longPress(find.byKey(const ValueKey('agent-model-button-book')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
-    expect(find.text('问书 · Agent 详情'), findsOneWidget);
-    await tester.tap(find.text('切换模型'));
+    expect(find.text('问书 · 模型'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('agent-change-model')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     await tester.tap(find.byKey(const ValueKey('agent-model-codex-test-b')));
@@ -239,7 +263,7 @@ void main() {
     await tester.pump();
     await tester.tap(find.text('正在测速…'));
     expect(api.speedCalls, 1);
-    await tester.tap(find.text('关闭'));
+    await tester.tap(find.byTooltip('关闭'));
     await tester.pumpAndSettle();
     api.pending!.completeError(Exception('offline'));
     await tester.pumpAndSettle();
@@ -252,9 +276,9 @@ void main() {
     await open(tester, api);
     expect(find.text('模型信息获取失败，请刷新重试。'), findsOneWidget);
     api.fail = false;
-    await tester.tap(find.text('刷新'));
+    await tester.tap(find.byTooltip('刷新'));
     await tester.pumpAndSettle();
-    expect(find.text('思考强度：低'), findsOneWidget);
+    expect(find.text('低'), findsOneWidget);
     api.pending = Completer<Map<String, dynamic>>();
     await tester.tap(find.text('模型测速'));
     await tester.pump();

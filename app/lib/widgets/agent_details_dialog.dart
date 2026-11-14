@@ -71,15 +71,12 @@ class _AgentDetailsDialogState extends State<AgentDetailsDialog> {
           child: Column(mainAxisSize: MainAxisSize.min, children: [
         Text('$_scopeTitle · 选择模型',
             style: Theme.of(context).textTheme.titleMedium),
-        const Padding(
-            padding: EdgeInsets.all(12), child: Text('仅切换当前模块，下一次提问生效。')),
         Flexible(
             child: ListView(shrinkWrap: true, children: [
           for (final model in models)
             ListTile(
               key: ValueKey('agent-model-${model['id']}'),
               title: Text((model['label'] ?? model['id']).toString()),
-              subtitle: Text(model['id'].toString()),
               trailing: Icon(model['id'] == selected
                   ? Icons.radio_button_checked
                   : Icons.radio_button_off),
@@ -104,7 +101,7 @@ class _AgentDetailsDialogState extends State<AgentDetailsDialog> {
         };
         _config = {..._config!, 'scopes': scopes};
         _speed = null;
-        _saveMessage = '已切换$_scopeTitle模型，下一次提问生效。';
+        _saveMessage = null;
       });
       await _loadConfig();
     } catch (err) {
@@ -137,7 +134,7 @@ class _AgentDetailsDialogState extends State<AgentDetailsDialog> {
         scopes[_scopeId] = {...scope, 'preferences': preferences};
         _config = {..._config!, 'scopes': scopes};
         _speed = null;
-        _saveMessage = '已更新$_scopeTitle参数，下一次提问生效。';
+        _saveMessage = null;
       });
     } catch (err) {
       if (mounted) setState(() => _saveMessage = '参数保存失败：$err');
@@ -203,14 +200,12 @@ class _AgentDetailsDialogState extends State<AgentDetailsDialog> {
       final first = result['firstTokenMs'];
       final rate = result['tokensPerSecond'];
       final elapsed = result['elapsedMs'];
-      final model = result['model'];
       final text = [
-        if (model is String && model.isNotEmpty) '测速模型：$model',
         if (first is num) '首字 ${(first / 1000).toStringAsFixed(2)} 秒',
         if (rate is num)
           '生成速度 ${rate.toStringAsFixed(1)} token/秒'
         else
-          '供应商未返回 token 用量，无法计算 token/秒',
+          '无法计算 token/秒',
         if (elapsed is num) '总耗时 ${(elapsed / 1000).toStringAsFixed(2)} 秒',
       ].join('\n');
       if (mounted) setState(() => _speed = text);
@@ -238,7 +233,7 @@ class _AgentDetailsDialogState extends State<AgentDetailsDialog> {
     final date = reset is num && reset > 0
         ? DateTime.fromMillisecondsSinceEpoch((reset * 1000).round()).toLocal()
         : null;
-    return '$period额度：已用 ${used.toStringAsFixed(0)}%，剩余 ${(100 - used).round()}%\n'
+    return '$period · 剩余 ${(100 - used).round()}%\n'
         '重置：${date == null ? '未知' : '${date.month}月${date.day}日 ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}'}';
   }
 
@@ -271,71 +266,101 @@ class _AgentDetailsDialogState extends State<AgentDetailsDialog> {
         .whereType<Map>()
         .where((w) => w['usedPercent'] is num);
     return AlertDialog(
-      title: Text('$_scopeTitle · Agent 详情'),
+      title: Row(children: [
+        Expanded(child: Text('$_scopeTitle · 模型')),
+        IconButton(
+            tooltip: '刷新',
+            onPressed: _loading || _testing || _saving ? null : _refresh,
+            icon: const Icon(Icons.refresh)),
+        IconButton(
+            tooltip: '关闭',
+            onPressed: () => Navigator.pop(context),
+            icon: const Icon(Icons.close)),
+      ]),
+      contentPadding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
       content: SingleChildScrollView(
           child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('当前权限：${widget.agentMode ? 'Agent · 可编辑' : '只读'}'),
-          const SizedBox(height: 12),
           if (_loading) const LinearProgressIndicator(),
+          if (_saving) const Text('保存中…'),
           if (_configError != null) Text(_configError!),
           if (_config != null) ...[
-            Text('当前模型：${model?.isNotEmpty == true ? model : '跟随本机默认模型'}'),
-            TextButton.icon(
+            ListTile(
               key: const Key('agent-change-model'),
-              onPressed: _loading || _testing || _saving || models.isEmpty
+              contentPadding: EdgeInsets.zero,
+              title: Text((capability?['label'] ?? model ?? '默认模型').toString()),
+              subtitle: Text(widget.agentMode ? 'Agent · 可编辑' : '只读'),
+              trailing: const Icon(Icons.unfold_more),
+              onTap: _loading || _testing || _saving || models.isEmpty
                   ? null
                   : _chooseModel,
-              icon: const Icon(Icons.swap_horiz),
-              label: Text(_saving ? '正在切换…' : '切换模型'),
             ),
-            Text(
-                '思考强度：${effort == null ? '跟随模型默认' : efforts[effort] ?? effort}'),
-            if (availableEfforts.length > 1)
-              DropdownButton<String>(
-                key: const Key('agent-change-effort'),
-                isExpanded: true,
-                value:
-                    availableEfforts.contains(effort) ? effort as String : null,
-                hint: const Text('选择思考强度'),
-                items: [
-                  for (final value in availableEfforts)
-                    DropdownMenuItem(
-                        value: value, child: Text(efforts[value] ?? value))
-                ],
-                onChanged: canEdit
-                    ? (value) {
-                        if (value != null) _saveTuning(model, effort: value);
-                      }
-                    : null,
-              ),
-            Text('快速模式：${prefs?['fast'] == true ? '开启' : '关闭'}'),
-            if (capability?['supportsFast'] == true) ...[
-              Switch(
-                key: const Key('agent-change-fast'),
-                value: prefs?['fast'] == true,
-                onChanged:
-                    canEdit ? (value) => _saveTuning(model, fast: value) : null,
-              ),
-              const Text('快速模式加速响应，用量更高。', style: TextStyle(fontSize: 12)),
-            ] else
-              const Text('当前模型不支持快速模式。', style: TextStyle(fontSize: 12)),
+            const Divider(height: 16),
+            Row(children: [
+              const Expanded(child: Text('思考')),
+              if (availableEfforts.length > 1)
+                DropdownButton<String>(
+                  key: const Key('agent-change-effort'),
+                  underline: const SizedBox.shrink(),
+                  value: availableEfforts.contains(effort)
+                      ? effort as String
+                      : null,
+                  hint: const Text('默认'),
+                  items: [
+                    for (final value in availableEfforts)
+                      DropdownMenuItem(
+                          value: value, child: Text(efforts[value] ?? value))
+                  ],
+                  onChanged: canEdit
+                      ? (value) {
+                          if (value != null) _saveTuning(model, effort: value);
+                        }
+                      : null,
+                ),
+              if (availableEfforts.length <= 1)
+                Text(efforts[effort] ?? effort?.toString() ?? '默认'),
+            ]),
+            Row(children: [
+              const Expanded(child: Text('快速模式')),
+              if (capability?['supportsFast'] == true)
+                Switch(
+                  key: const Key('agent-change-fast'),
+                  value: prefs?['fast'] == true,
+                  onChanged: canEdit
+                      ? (value) => _saveTuning(model, fast: value)
+                      : null,
+                ),
+              if (capability?['supportsFast'] != true) const Text('不支持'),
+            ]),
+            Text(prefs?['fast'] == true ? '下次提问生效 · 快速模式用量更高' : '下次提问生效',
+                style: Theme.of(context).textTheme.bodySmall),
           ],
           if (_saveMessage != null) Text(_saveMessage!),
-          const SizedBox(height: 16),
-          const Text('Codex 用量'),
-          if (_usageError != null)
-            Text(_usageError!)
-          else if (windows.isEmpty)
-            const Text('用量暂不可用，请稍后重试。')
-          else
-            for (final window in windows)
-              Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text(_usageText(window))),
-          const SizedBox(height: 16),
+          const Divider(height: 24),
+          ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            childrenPadding: const EdgeInsets.only(bottom: 12),
+            title: const Text('用量'),
+            subtitle: Text(windows.isEmpty
+                ? '暂不可用'
+                : windows
+                    .map((w) =>
+                        '剩余 ${(100 - (w['usedPercent'] as num).clamp(0, 100)).round()}%')
+                    .join(' / ')),
+            children: [
+              if (_usageError != null)
+                Text(_usageError!)
+              else if (windows.isEmpty)
+                const Text('用量暂不可用，请稍后重试。')
+              else
+                for (final window in windows)
+                  Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(_usageText(window))),
+            ],
+          ),
           TextButton.icon(
             key: const Key('agent-model-speed'),
             onPressed: _testing || _loading || _saving || _config == null
@@ -344,20 +369,11 @@ class _AgentDetailsDialogState extends State<AgentDetailsDialog> {
             icon: const Icon(Icons.speed),
             label: Text(_testing ? '正在测速…' : '模型测速'),
           ),
-          Text('测试当前$_scopeTitle模型，会消耗少量模型额度；测试内容不进入对话。',
-              style: const TextStyle(fontSize: 12)),
           if (_speed != null)
             Padding(
                 padding: const EdgeInsets.only(top: 8), child: Text(_speed!)),
         ],
       )),
-      actions: [
-        TextButton(
-            onPressed: _loading || _testing || _saving ? null : _refresh,
-            child: const Text('刷新')),
-        TextButton(
-            onPressed: () => Navigator.pop(context), child: const Text('关闭')),
-      ],
     );
   }
 }
