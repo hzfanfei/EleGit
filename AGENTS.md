@@ -11,6 +11,18 @@
 - 提交、打包、重启均属于已授权的收尾动作，不停在“代码已改，尚未提交/打包/重启”，也不重复请求许可。用户当次明确要求暂缓某项动作时，以用户要求为准。
 - 操作失败时继续排查可修复的问题；无法完成时如实说明失败原因和未完成项，不声称成功。
 
+## 项目技能（Cursor / Codex 共用约定）
+
+Cursor 的项目技能位于 `.cursor/skills/`，Codex 对应技能位于 `.agents/skills/`。两份同名技能保持内容一致；新增、修改或删除共用技能时同步两处。
+
+按任务需要读取对应的 `SKILL.md`，无需每轮加载全部技能；当前会话的技能列表未刷新时，可直接读取以下项目文件：
+
+- [pack-android](.agents/skills/pack-android/SKILL.md)：打包、重新出包或交付 Android 安装包时使用。
+- [mermaid-diagrams](.agents/skills/mermaid-diagrams/SKILL.md)：输出 Mermaid 流程图、时序图等图表时使用。
+- [markdown-tables](.agents/skills/markdown-tables/SKILL.md)：在问象对话中输出 Markdown 表格时使用。
+
+这些技能仅适用于本项目。打包、提交、推送和重启仍遵循上面的交付规则；纯技能或文档修改不触发打包、服务重启。
+
 ## 汇报
 
 用简体中文简洁汇报修改结果、必要验证、真实提交号及推送状态；涉及安装包或服务重启时，补充下载链接及健康检查结果。每段一两句，段间空行。
