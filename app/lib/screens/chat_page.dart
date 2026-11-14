@@ -28,6 +28,7 @@ import '../voice/voice_stt_client.dart';
 import '../widgets/book_quick_voice_fab.dart';
 import '../widgets/wx_chat_markdown_stream.dart';
 import '../widgets/agent_decision_card.dart';
+import '../widgets/agent_details_dialog.dart';
 import '../widgets/chat_image_strip.dart';
 import '../widgets/wx_chrome.dart';
 import '../widgets/wx_motion.dart';
@@ -1606,6 +1607,7 @@ class _ChatPageState extends State<ChatPage> {
             status: WxLinkQualityMark(api: widget.api),
             trailing: [
               _AgentModeChip(
+                api: widget.api,
                 agentMode: _agentMode,
                 usage: _codexUsage,
                 loading: _usageLoading,
@@ -2640,6 +2642,7 @@ class _StepDot extends StatelessWidget {
 
 class _AgentModeChip extends StatelessWidget {
   const _AgentModeChip({
+    required this.api,
     required this.agentMode,
     required this.usage,
     required this.loading,
@@ -2649,6 +2652,7 @@ class _AgentModeChip extends StatelessWidget {
     required this.onChanged,
   });
 
+  final WenxiangApi api;
   final bool agentMode;
   final Map<String, dynamic>? usage;
   final bool loading;
@@ -2668,15 +2672,6 @@ class _AgentModeChip extends StatelessWidget {
           .compareTo((a['windowDurationMins'] as num?) ?? 0));
     final window = windows.isEmpty ? null : windows.first;
     final used = ((window?['usedPercent'] as num?) ?? 0).clamp(0, 100).toDouble();
-    final remaining = (100 - used).round();
-    final reset = window?['resetsAt'];
-    final date = reset is num && reset > 0
-        ? DateTime.fromMillisecondsSinceEpoch((reset * 1000).round()).toLocal()
-        : null;
-    final minutes = window?['windowDurationMins'];
-    final period = minutes is num && minutes > 0
-        ? (minutes % 1440 == 0 ? '${minutes ~/ 1440}天' : '${minutes ~/ 60}小时')
-        : '当前';
     return Tooltip(
       message: agentMode ? 'Agent：可编辑 $repoName' : '$repoName 只读',
       child: Material(
@@ -2686,13 +2681,8 @@ class _AgentModeChip extends StatelessWidget {
           onTap: enabled ? () => onChanged(!agentMode) : null,
           onLongPress: () {
             onRefreshUsage();
-            showDialog<void>(context: context, builder: (context) => AlertDialog(
-              title: const Text('Codex 用量'),
-              content: Text(window == null ? '用量暂不可用，请稍后重试。'
-                  : '$period额度：已用 ${used.toStringAsFixed(0)}%，剩余 $remaining%\n'
-                    '重置：${date == null ? '未知' : '${date.month}月${date.day}日 ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}'}\n'
-                    '月度额度数据未提供。'),
-              actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('关闭'))],
+            showDialog<void>(context: context, builder: (context) => AgentDetailsDialog(
+              api: api, agentMode: agentMode, initialUsage: usage,
             ));
           },
           borderRadius: BorderRadius.circular(8),
