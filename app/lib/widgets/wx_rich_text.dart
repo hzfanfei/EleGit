@@ -686,7 +686,7 @@ class WxCopyAnswerButton extends StatelessWidget {
       icon: const Icon(Icons.copy_outlined, size: 16, color: Wx.muted),
       visualDensity: VisualDensity.compact,
       padding: EdgeInsets.zero,
-      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+      constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
     );
     if (bare) return button;
     return Align(

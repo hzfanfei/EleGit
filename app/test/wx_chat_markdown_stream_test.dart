@@ -3,6 +3,15 @@ import 'package:wenxiang/widgets/wx_chat_markdown_stream.dart';
 
 void main() {
   group('ChatMarkdownBlockParser', () {
+    test('tilde and longer fences protect special tags inside code', () {
+      for (final fence in ['~~~', '````']) {
+        final p = ChatMarkdownBlockParser();
+        p.update('$fence\n<details>\n\n> [!NOTE]\n</details>\n$fence\n');
+        expect(p.completed, hasLength(1));
+        expect(p.completed.single, contains('<details>\n\n> [!NOTE]'));
+        expect(p.pending, isEmpty);
+      }
+    });
     test('treats a single paragraph as one pending block', () {
       final p = ChatMarkdownBlockParser();
       p.update('hello world');
