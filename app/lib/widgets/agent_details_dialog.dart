@@ -114,6 +114,38 @@ class _AgentDetailsDialogState extends State<AgentDetailsDialog> {
     }
   }
 
+  Future<void> _saveTuning(String model, {String? effort, bool? fast}) async {
+    if (_loading || _testing || _saving) return;
+    setState(() {
+      _saving = true;
+      _saveMessage = null;
+    });
+    try {
+      await widget.api.setCodexModel(model,
+          scope: widget.scope, effort: effort, fast: fast, select: false);
+      if (!mounted) return;
+      setState(() {
+        final scopes = Map<String, dynamic>.from(_config!['scopes'] ?? {});
+        final scope = Map<String, dynamic>.from(scopes[_scopeId] ?? {});
+        final preferences =
+            Map<String, dynamic>.from(scope['preferences'] ?? {});
+        preferences[model] = {
+          ...Map<String, dynamic>.from(preferences[model] ?? {}),
+          if (effort != null) 'effort': effort,
+          if (fast != null) 'fast': fast,
+        };
+        scopes[_scopeId] = {...scope, 'preferences': preferences};
+        _config = {..._config!, 'scopes': scopes};
+        _speed = null;
+        _saveMessage = '已更新$_scopeTitle参数，下一次提问生效。';
+      });
+    } catch (err) {
+      if (mounted) setState(() => _saveMessage = '参数保存失败：$err');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -230,6 +262,11 @@ class _AgentDetailsDialogState extends State<AgentDetailsDialog> {
       'ultra': '超高',
       'auto': '自动'
     };
+    final availableEfforts = (capability?['reasoningEfforts'] as List? ?? [])
+        .whereType<String>()
+        .toSet()
+        .toList();
+    final canEdit = !_loading && !_testing && !_saving && model != null;
     final windows = [_usage?['primary'], _usage?['secondary']]
         .whereType<Map>()
         .where((w) => w['usedPercent'] is num);
@@ -256,7 +293,35 @@ class _AgentDetailsDialogState extends State<AgentDetailsDialog> {
             ),
             Text(
                 '思考强度：${effort == null ? '跟随模型默认' : efforts[effort] ?? effort}'),
+            if (availableEfforts.length > 1)
+              DropdownButton<String>(
+                key: const Key('agent-change-effort'),
+                isExpanded: true,
+                value:
+                    availableEfforts.contains(effort) ? effort as String : null,
+                hint: const Text('选择思考强度'),
+                items: [
+                  for (final value in availableEfforts)
+                    DropdownMenuItem(
+                        value: value, child: Text(efforts[value] ?? value))
+                ],
+                onChanged: canEdit
+                    ? (value) {
+                        if (value != null) _saveTuning(model, effort: value);
+                      }
+                    : null,
+              ),
             Text('快速模式：${prefs?['fast'] == true ? '开启' : '关闭'}'),
+            if (capability?['supportsFast'] == true) ...[
+              Switch(
+                key: const Key('agent-change-fast'),
+                value: prefs?['fast'] == true,
+                onChanged:
+                    canEdit ? (value) => _saveTuning(model, fast: value) : null,
+              ),
+              const Text('快速模式加速响应，用量更高。', style: TextStyle(fontSize: 12)),
+            ] else
+              const Text('当前模型不支持快速模式。', style: TextStyle(fontSize: 12)),
           ],
           if (_saveMessage != null) Text(_saveMessage!),
           const SizedBox(height: 16),

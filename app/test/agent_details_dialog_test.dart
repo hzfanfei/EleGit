@@ -105,6 +105,50 @@ void main() {
     });
   }
 
+  for (final scope in AskEngineScope.values) {
+    testWidgets('tuning saves only current scope ${scope.name}',
+        (tester) async {
+      final api = _Api();
+      await open(tester, api, scope: scope);
+      await tester.tap(find.byKey(const Key('agent-change-effort')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('高').last);
+      await tester.pumpAndSettle();
+      expect(api.lastCodexEffort, 'high');
+      await tester.ensureVisible(find.byKey(const Key('agent-change-fast')));
+      await tester.tap(find.byKey(const Key('agent-change-fast')));
+      await tester.pumpAndSettle();
+      expect(api.lastCodexFast, true);
+      expect(api.lastCodexScope, scope.name);
+      expect(api.codexOptionsByScope[scope.name]?['codex-test-a'],
+          {'effort': 'high', 'fast': true});
+      final other = scope == AskEngineScope.book ? 'repo' : 'book';
+      expect(api.codexOptionsByScope[other] ?? {}, isEmpty);
+    });
+  }
+
+  testWidgets('failed tuning keeps old value and allows retry', (tester) async {
+    final api = _Api()..failCodexSave = true;
+    await open(tester, api);
+    await tester.ensureVisible(find.byKey(const Key('agent-change-fast')));
+    await tester.tap(find.byKey(const Key('agent-change-fast')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('参数保存失败'), findsOneWidget);
+    expect(
+        tester.widget<Switch>(find.byKey(const Key('agent-change-fast'))).value,
+        false);
+    api.failCodexSave = false;
+    await tester.tap(find.byKey(const Key('agent-change-fast')));
+    await tester.pumpAndSettle();
+    expect(
+        tester.widget<Switch>(find.byKey(const Key('agent-change-fast'))).value,
+        true);
+    await tester.ensureVisible(find.text('切换模型'));
+    await choose(tester, 'codex-test-b');
+    expect(find.byKey(const Key('agent-change-fast')), findsNothing);
+    expect(find.byKey(const Key('agent-change-effort')), findsNothing);
+  });
+
   testWidgets('failed switch preserves the current model and can retry',
       (tester) async {
     final api = _Api()..failCodexSave = true;
