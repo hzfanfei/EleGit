@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -32,7 +33,41 @@ Future<void> _pumpUntilChatReady(WidgetTester tester) async {
   }
 }
 
+class _DelayedUsageApi extends FakeWenxiangApi {
+  final result = Completer<Map<String, dynamic>>();
+  @override
+  Future<Map<String, dynamic>> codexUsage() => result.future;
+}
+
 void main() {
+  testWidgets('agent loading animates without moving label or segments', (tester) async {
+    final api = _DelayedUsageApi();
+    await tester.pumpWidget(MaterialApp(theme: wenxiangTheme(), home: ChatPage(
+      api: api, repo: sampleRepo(), onBack: () {},
+    )));
+    await _pumpUntilChatReady(tester);
+    final label = find.text('\u53ea\u8bfb');
+    final labelPosition = tester.getTopLeft(label);
+    final chipSize = tester.getSize(find.byKey(const Key('wx-agent-mode')));
+    final segment = find.byKey(const ValueKey('wx-codex-usage-segment-0'));
+    final segmentPosition = tester.getTopLeft(segment);
+    Color? color() => (tester.widget<DecoratedBox>(segment).decoration as BoxDecoration).color;
+    final initialColor = color();
+    await tester.pump(const Duration(milliseconds: 280));
+    expect(color(), isNot(initialColor));
+    api.result.complete({'primary': {'usedPercent': 80, 'windowDurationMins': 10080}});
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(tester.getTopLeft(label), labelPosition);
+    expect(tester.getTopLeft(segment), segmentPosition);
+    expect(tester.getSize(find.byKey(const Key('wx-agent-mode'))), chipSize);
+    expect(color(), Wx.accent);
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(color(), Wx.accent);
+    await tester.pumpWidget(const SizedBox());
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('agent button shows usage and keeps mode toggle', (tester) async {
     await tester.binding.setSurfaceSize(const Size(360, 800));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -48,7 +83,11 @@ void main() {
     await _pumpUntilChatReady(tester);
     expect(find.byKey(const Key('wx-codex-usage')), findsOneWidget);
     expect(tester.getSize(find.byKey(const Key('wx-agent-mode'))).width, lessThan(85));
-    expect(tester.widget<FractionallySizedBox>(find.byKey(const Key('wx-codex-usage'))).heightFactor, 0.75);
+    for (var i = 0; i < 5; i++) {
+      final segment = tester.widget<DecoratedBox>(find.byKey(ValueKey('wx-codex-usage-segment-$i')));
+      expect((segment.decoration as BoxDecoration).color, i < 4 ? Wx.ok : Wx.hairline);
+    }
+    expect(tester.getSize(find.byKey(const Key('wx-agent-mode'))).height, 32);
     expect(tester.getSize(find.text('octo/demo').first).width, greaterThan(100));
     await tester.longPress(find.byKey(const Key('wx-agent-mode')));
     await tester.pump(const Duration(milliseconds: 300));
@@ -60,6 +99,41 @@ void main() {
     expect(find.text('Agent'), findsOneWidget);
     expect(tester.getSize(find.byKey(const Key('wx-agent-mode'))).width, lessThan(85));
   });
+
+  for (final (remaining, activeColor) in <(int?, Color)>[
+    (0, Wx.danger), (1, Wx.danger), (10, Wx.danger),
+    (11, Wx.accent), (20, Wx.accent), (21, Wx.accent), (40, Wx.accent),
+    (41, Wx.ok), (99, Wx.ok), (100, Wx.ok), (null, Wx.hairline),
+  ]) {
+    testWidgets('agent quota segments for $remaining percent remaining', (tester) async {
+      final api = FakeWenxiangApi();
+      api.usage = remaining == null ? {} : {
+        'primary': {'usedPercent': 100 - remaining, 'windowDurationMins': 10080},
+      };
+      await tester.pumpWidget(MaterialApp(theme: wenxiangTheme(), home: ChatPage(
+        api: api, repo: sampleRepo(), onBack: () {},
+      )));
+      await _pumpUntilChatReady(tester);
+      if (remaining == null) {
+        expect(find.byKey(const Key('wx-codex-usage')), findsOneWidget);
+        for (var i = 0; i < 5; i++) {
+          final segment = tester.widget<DecoratedBox>(find.byKey(ValueKey('wx-codex-usage-segment-$i')));
+          expect((segment.decoration as BoxDecoration).color, Wx.hairline);
+        }
+      } else {
+        for (var i = 0; i < 5; i++) {
+          final segment = tester.widget<DecoratedBox>(find.byKey(ValueKey('wx-codex-usage-segment-$i')));
+          final size = tester.getSize(find.byKey(ValueKey('wx-codex-usage-segment-$i')));
+          expect(size.height, 3);
+          expect(size.width, greaterThan(0));
+          expect(tester.getBottomRight(find.byKey(ValueKey('wx-codex-usage-segment-$i'))).dy,
+            closeTo(tester.getBottomRight(find.byKey(const Key('wx-agent-mode'))).dy - 4, 0.01));
+          expect((segment.decoration as BoxDecoration).color,
+            i < (remaining / 20).ceil() ? activeColor : Wx.hairline);
+        }
+      }
+    });
+  }
 
   testWidgets('empty chat is a short prompt, not a chip wall', (tester) async {
     await tester.pumpWidget(

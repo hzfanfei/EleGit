@@ -1537,14 +1537,14 @@ class _ChatPageState extends State<ChatPage> {
 
   Future<void> _refreshCodexUsage() async {
     if (_usageLoading) return;
-    _usageLoading = true;
+    setState(() => _usageLoading = true);
     try {
       final usage = await widget.api.codexUsage();
       if (mounted) setState(() => _codexUsage = usage);
     } catch (_) {
       if (mounted) setState(() => _codexUsage = null);
     } finally {
-      _usageLoading = false;
+      if (mounted) setState(() => _usageLoading = false);
     }
   }
 
@@ -1608,6 +1608,7 @@ class _ChatPageState extends State<ChatPage> {
               _AgentModeChip(
                 agentMode: _agentMode,
                 usage: _codexUsage,
+                loading: _usageLoading,
                 onRefreshUsage: _refreshCodexUsage,
                 repoName: widget.repo.name,
                 enabled: !_busy && !_preparingChat,
@@ -2641,6 +2642,7 @@ class _AgentModeChip extends StatelessWidget {
   const _AgentModeChip({
     required this.agentMode,
     required this.usage,
+    required this.loading,
     required this.onRefreshUsage,
     required this.repoName,
     required this.enabled,
@@ -2649,6 +2651,7 @@ class _AgentModeChip extends StatelessWidget {
 
   final bool agentMode;
   final Map<String, dynamic>? usage;
+  final bool loading;
   final VoidCallback onRefreshUsage;
   final String repoName;
   final bool enabled;
@@ -2696,7 +2699,7 @@ class _AgentModeChip extends StatelessWidget {
           child: AnimatedContainer(
             duration: Wx.motion,
             curve: Wx.motionCurve,
-            height: 28,
+            height: 32,
             alignment: Alignment.center,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(8),
@@ -2704,27 +2707,27 @@ class _AgentModeChip extends StatelessWidget {
             ),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(7),
-              child: Stack(
+              child: SizedBox(
+                height: 32,
+                child: Stack(
                 alignment: Alignment.center,
                 children: [
-                  if (window != null)
-                    Positioned.fill(child: Align(
-                      alignment: Alignment.bottomCenter,
-                      child: FractionallySizedBox(
-                        key: const Key('wx-codex-usage'),
-                        widthFactor: 1,
-                        heightFactor: remaining / 100,
-                        child: ColoredBox(color: (used >= 90 ? Wx.danger : Wx.accent).withValues(alpha: 0.3)),
-                      ),
-                    )),
+                  Positioned(
+                    left: 8, right: 8, bottom: 3,
+                    child: _QuotaSegments(
+                      used: window == null ? null : used,
+                      loading: loading,
+                    ),
+                  ),
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    padding: const EdgeInsets.fromLTRB(8, 0, 8, 7),
                     child: Text(label, style: TextStyle(
                       fontSize: 12, fontWeight: FontWeight.w600, height: 1,
                       color: agentMode ? Wx.accent : Wx.muted,
                     )),
                   ),
                 ],
+                ),
               ),
             ),
           ),
@@ -2732,6 +2735,85 @@ class _AgentModeChip extends StatelessWidget {
       ),
     );
   }
+}
+
+// Keep the quota slot mounted while only its paint changes.
+class _QuotaSegments extends StatefulWidget {
+  const _QuotaSegments({required this.used, required this.loading});
+  final double? used;
+  final bool loading;
+
+  @override
+  State<_QuotaSegments> createState() => _QuotaSegmentsState();
+}
+
+class _QuotaSegmentsState extends State<_QuotaSegments>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse = AnimationController(
+    vsync: this, duration: const Duration(milliseconds: 1400),
+  );
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _syncAnimation();
+  }
+
+  @override
+  void didUpdateWidget(covariant _QuotaSegments oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _syncAnimation();
+  }
+
+  void _syncAnimation() {
+    if (widget.loading && !MediaQuery.disableAnimationsOf(context)) {
+      if (!_pulse.isAnimating) _pulse.repeat();
+    } else {
+      _pulse.stop();
+    }
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: _pulse,
+    builder: (context, _) {
+      final used = widget.used;
+      return Semantics(
+        label: 'Codex \u5269\u4f59\u989d\u5ea6',
+        value: widget.loading ? '\u52a0\u8f7d\u4e2d' : used == null ? '\u6682\u4e0d\u53ef\u7528' : '${(100 - used).round()}%',
+        child: SizedBox(
+          height: 3,
+          child: Row(
+            key: const Key('wx-codex-usage'),
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (var i = 0; i < 5; i++) ...[
+                if (i > 0) const SizedBox(width: 2),
+                Expanded(child: DecoratedBox(
+                  key: ValueKey('wx-codex-usage-segment-$i'),
+                  decoration: BoxDecoration(
+                    color: widget.loading
+                        ? Color.lerp(Wx.hairline, Wx.accent,
+                            (1 - ((_pulse.value * 5 - i + 5) % 5) / 5) * 0.7)
+                        : used != null && i < ((100 - used) / 20).ceil()
+                            ? (used >= 90 ? Wx.danger : used >= 60 ? Wx.accent : Wx.ok)
+                            : Wx.hairline,
+                    borderRadius: BorderRadius.circular(1),
+                  ),
+                )),
+              ],
+            ],
+          ),
+        ),
+      );
+    },
+  );
 }
 
 class _Composer extends StatelessWidget {
