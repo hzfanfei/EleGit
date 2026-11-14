@@ -7,6 +7,8 @@ import 'package:flutter/services.dart';
 
 import '../api/wenxiang_api.dart';
 import '../copy/errors.dart';
+import '../copy/ask_engine.dart';
+import 'agent_details_dialog.dart';
 import '../copy/voice_stt_copy.dart';
 import '../models.dart';
 import '../persist/app_memory.dart';
@@ -836,6 +838,7 @@ class BookAskPanelState extends State<BookAskPanel> with SingleTickerProviderSta
                           ),
                           _DragHandle(expanded: true, fullscreen: widget.fullscreen),
                           _AskHeaderRow(
+                            api: widget.api,
                             theme: theme,
                             expanded: true,
                             fullscreen: widget.fullscreen,
@@ -1021,6 +1024,7 @@ class _DragHandle extends StatelessWidget {
 
 class _AskHeaderRow extends StatelessWidget {
   const _AskHeaderRow({
+    required this.api,
     required this.theme,
     required this.expanded,
     this.fullscreen = false,
@@ -1035,6 +1039,7 @@ class _AskHeaderRow extends StatelessWidget {
   });
 
   final ThemeData theme;
+  final WenxiangApi api;
   final bool expanded;
   final bool fullscreen;
   final BookReadingPlace place;
@@ -1070,6 +1075,7 @@ class _AskHeaderRow extends StatelessWidget {
               ),
             ),
           ),
+          AgentModelButton(api: api, scope: AskEngineScope.book),
           if (onCall != null)
             IconButton(
               key: const Key('wx-book-call'),

@@ -5,6 +5,8 @@ import 'package:flutter/services.dart';
 
 import '../api/wenxiang_api.dart';
 import '../copy/errors.dart';
+import '../copy/ask_engine.dart';
+import '../widgets/agent_details_dialog.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../widgets/agent_decision_card.dart';
@@ -224,6 +226,7 @@ class _BookChatPageState extends State<BookChatPage> {
             title: widget.book.title,
             subtitle: widget.book.author.isEmpty ? '问书' : widget.book.author,
             onBack: widget.onBack,
+            trailing: [AgentModelButton(api: widget.api, scope: AskEngineScope.book)],
           ),
           const WxHairline(),
           Expanded(

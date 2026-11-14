@@ -3,16 +3,42 @@ import 'package:flutter/material.dart';
 import '../api/wenxiang_api.dart';
 import '../copy/ask_engine.dart';
 
-/// Repository model diagnostics, independent of the conversation's messages.
+class AgentModelButton extends StatelessWidget {
+  const AgentModelButton({super.key, required this.api, required this.scope});
+  final WenxiangApi api;
+  final AskEngineScope scope;
+
+  @override
+  Widget build(BuildContext context) {
+    void open() => showDialog<void>(
+        context: context,
+        builder: (_) =>
+            AgentDetailsDialog(api: api, scope: scope, agentMode: false));
+    return OutlinedButton(
+      key: ValueKey('agent-model-button-${askEngineScopeId(scope)}'),
+      onPressed: open,
+      onLongPress: open,
+      style: OutlinedButton.styleFrom(
+          minimumSize: const Size(48, 32),
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          visualDensity: VisualDensity.compact),
+      child: const Text('Agent'),
+    );
+  }
+}
+
+/// Model settings and diagnostics for the module that opened this dialog.
 class AgentDetailsDialog extends StatefulWidget {
   const AgentDetailsDialog(
       {super.key,
       required this.api,
       required this.agentMode,
+      required this.scope,
       this.initialUsage});
 
   final WenxiangApi api;
   final bool agentMode;
+  final AskEngineScope scope;
   final Map<String, dynamic>? initialUsage;
 
   @override
@@ -27,6 +53,66 @@ class _AgentDetailsDialogState extends State<AgentDetailsDialog> {
   String? _speed;
   bool _loading = false;
   bool _testing = false;
+  bool _saving = false;
+  String? _saveMessage;
+
+  String get _scopeId => askEngineScopeId(widget.scope);
+  String get _scopeTitle => widget.scope == AskEngineScope.book ? '问书' : '问象';
+
+  Future<void> _chooseModel() async {
+    if (_loading || _testing || _saving || _config == null) return;
+    final selected = (_config!['scopes'] as Map?)?[_scopeId]?['model'];
+    final models =
+        (_config!['models'] as List? ?? []).whereType<Map>().toList();
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Text('$_scopeTitle · 选择模型',
+            style: Theme.of(context).textTheme.titleMedium),
+        const Padding(
+            padding: EdgeInsets.all(12), child: Text('仅切换当前模块，下一次提问生效。')),
+        Flexible(
+            child: ListView(shrinkWrap: true, children: [
+          for (final model in models)
+            ListTile(
+              key: ValueKey('agent-model-${model['id']}'),
+              title: Text((model['label'] ?? model['id']).toString()),
+              subtitle: Text(model['id'].toString()),
+              trailing: Icon(model['id'] == selected
+                  ? Icons.radio_button_checked
+                  : Icons.radio_button_off),
+              onTap: () => Navigator.pop(context, model['id'].toString()),
+            ),
+        ])),
+      ])),
+    );
+    if (!mounted || picked == null || picked == selected) return;
+    setState(() {
+      _saving = true;
+      _saveMessage = null;
+    });
+    try {
+      await widget.api.setCodexModel(picked, scope: widget.scope);
+      if (!mounted) return;
+      setState(() {
+        final scopes = Map<String, dynamic>.from(_config!['scopes'] ?? {});
+        scopes[_scopeId] = {
+          ...Map<String, dynamic>.from(scopes[_scopeId] ?? {}),
+          'model': picked
+        };
+        _config = {..._config!, 'scopes': scopes};
+        _speed = null;
+        _saveMessage = '已切换$_scopeTitle模型，下一次提问生效。';
+      });
+      await _loadConfig();
+    } catch (err) {
+      if (mounted) setState(() => _saveMessage = '切换失败：$err');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
 
   @override
   void initState() {
@@ -36,7 +122,7 @@ class _AgentDetailsDialogState extends State<AgentDetailsDialog> {
   }
 
   Future<void> _refresh() async {
-    if (_loading) return;
+    if (_loading || _testing || _saving) return;
     setState(() {
       _loading = true;
       _configError = null;
@@ -75,13 +161,13 @@ class _AgentDetailsDialogState extends State<AgentDetailsDialog> {
   }
 
   Future<void> _testSpeed() async {
-    if (_testing) return;
+    if (_testing || _loading || _saving) return;
     setState(() {
       _testing = true;
       _speed = null;
     });
     try {
-      final result = await widget.api.measureModelSpeed(AskEngineScope.repo);
+      final result = await widget.api.measureModelSpeed(widget.scope);
       final first = result['firstTokenMs'];
       final rate = result['tokensPerSecond'];
       final elapsed = result['elapsedMs'];
@@ -126,7 +212,7 @@ class _AgentDetailsDialogState extends State<AgentDetailsDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final scope = (_config?['scopes'] as Map?)?['repo'] as Map?;
+    final scope = (_config?['scopes'] as Map?)?[_scopeId] as Map?;
     final model = scope?['model'] as String?;
     final models = (_config?['models'] as List? ?? []).whereType<Map>();
     final matching = models.where((item) => item['id'] == model);
@@ -148,7 +234,7 @@ class _AgentDetailsDialogState extends State<AgentDetailsDialog> {
         .whereType<Map>()
         .where((w) => w['usedPercent'] is num);
     return AlertDialog(
-      title: const Text('Agent 详情'),
+      title: Text('$_scopeTitle · Agent 详情'),
       content: SingleChildScrollView(
           child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -160,10 +246,19 @@ class _AgentDetailsDialogState extends State<AgentDetailsDialog> {
           if (_configError != null) Text(_configError!),
           if (_config != null) ...[
             Text('当前模型：${model?.isNotEmpty == true ? model : '跟随本机默认模型'}'),
+            TextButton.icon(
+              key: const Key('agent-change-model'),
+              onPressed: _loading || _testing || _saving || models.isEmpty
+                  ? null
+                  : _chooseModel,
+              icon: const Icon(Icons.swap_horiz),
+              label: Text(_saving ? '正在切换…' : '切换模型'),
+            ),
             Text(
                 '思考强度：${effort == null ? '跟随模型默认' : efforts[effort] ?? effort}'),
             Text('快速模式：${prefs?['fast'] == true ? '开启' : '关闭'}'),
           ],
+          if (_saveMessage != null) Text(_saveMessage!),
           const SizedBox(height: 16),
           const Text('Codex 用量'),
           if (_usageError != null)
@@ -178,13 +273,14 @@ class _AgentDetailsDialogState extends State<AgentDetailsDialog> {
           const SizedBox(height: 16),
           TextButton.icon(
             key: const Key('agent-model-speed'),
-            onPressed:
-                _testing || _loading || _config == null ? null : _testSpeed,
+            onPressed: _testing || _loading || _saving || _config == null
+                ? null
+                : _testSpeed,
             icon: const Icon(Icons.speed),
             label: Text(_testing ? '正在测速…' : '模型测速'),
           ),
-          const Text('测试当前仓库模型，会消耗少量模型额度；测试内容不进入对话。',
-              style: TextStyle(fontSize: 12)),
+          Text('测试当前$_scopeTitle模型，会消耗少量模型额度；测试内容不进入对话。',
+              style: const TextStyle(fontSize: 12)),
           if (_speed != null)
             Padding(
                 padding: const EdgeInsets.only(top: 8), child: Text(_speed!)),
@@ -192,7 +288,7 @@ class _AgentDetailsDialogState extends State<AgentDetailsDialog> {
       )),
       actions: [
         TextButton(
-            onPressed: _loading || _testing ? null : _refresh,
+            onPressed: _loading || _testing || _saving ? null : _refresh,
             child: const Text('刷新')),
         TextButton(
             onPressed: () => Navigator.pop(context), child: const Text('关闭')),

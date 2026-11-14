@@ -10,6 +10,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../api/wenxiang_api.dart';
 import '../chat/chat_image.dart';
 import '../copy/engine.dart';
+import '../copy/ask_engine.dart';
 import '../copy/errors.dart';
 import '../copy/time.dart';
 import '../models.dart';
@@ -2682,6 +2683,7 @@ class _AgentModeChip extends StatelessWidget {
           onLongPress: () {
             onRefreshUsage();
             showDialog<void>(context: context, builder: (context) => AgentDetailsDialog(
+              scope: AskEngineScope.repo,
               api: api, agentMode: agentMode, initialUsage: usage,
             ));
           },
