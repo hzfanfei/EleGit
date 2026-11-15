@@ -89,6 +89,16 @@ Future<void> menu(WidgetTester tester, String text) async {
   await tester.pump(const Duration(milliseconds: 350));
 }
 
+void expectRunningCount(int count) {
+  final badge = find.byKey(const Key('wx-running-count'));
+  if (count == 0) {
+    expect(badge, findsNothing);
+  } else {
+    expect(find.descendant(of: badge, matching: find.text('$count')),
+        findsOneWidget);
+  }
+}
+
 void main() {
   tearDown(RunningSessions.stopAllForTesting);
 
@@ -174,9 +184,11 @@ void main() {
           onBack: () {},
         )));
     await ready(tester);
+    expectRunningCount(0);
     await tester.tap(find.text('这个仓库最近在做什么？'));
     await tester.pump();
     expect(pool.active.length, 1);
+    expectRunningCount(1);
     await menu(tester, '新建会话');
     expect(api.createSessionCalls, 1);
     expect(api.cancelled, isEmpty);
@@ -185,6 +197,7 @@ void main() {
     await tester.tap(find.text('README 里怎么写的？'));
     await tester.pump();
     expect(pool.active.length, 2);
+    expectRunningCount(2);
     final second = pool.active.last.sessionId;
     expect(
         api.histories[second]!.any((m) => m.content.contains('最近在做')), isFalse);
@@ -207,6 +220,57 @@ void main() {
     expect(api.cancelled, [second]);
     expect(pool.execution('s1')!.busy, isTrue);
     pool.stopAll();
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('home count and open running list track additions and completions',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final memory = AppMemory(await SharedPreferences.getInstance());
+    final api = ControlledApi();
+    final pool = RunningSessions.of(api);
+    final repo = pool.repo(sampleRepo(), memory);
+    void start(String id) {
+      final message = ChatMessage(role: 'user', content: id, turnId: id);
+      repo.transcripts[id] = [message];
+      pool.session(repo, id, false).enqueue(message);
+    }
+
+    await tester.pumpWidget(MaterialApp(
+        theme: wenxiangTheme(),
+        home: ShellPage(api: api, memory: memory)));
+    await ready(tester);
+    expectRunningCount(0);
+    start('first');
+    await tester.pump();
+    expectRunningCount(1);
+    start('second');
+    await tester.pump();
+    expectRunningCount(2);
+    api.finish('first', 'first answer');
+    await tester.pumpAndSettle();
+    expectRunningCount(1);
+    await tester.tap(find.byKey(const Key('wx-home-more')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('执行中'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('wx-running-first')), findsNothing);
+    expect(find.byKey(const ValueKey('wx-running-second')), findsOneWidget);
+    start('third');
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('wx-running-third')), findsOneWidget);
+    expect(find.byKey(const ValueKey('wx-running-second')), findsOneWidget);
+    api.finish('second', 'second answer');
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('wx-running-second')), findsNothing);
+    expect(find.byKey(const ValueKey('wx-running-third')), findsOneWidget);
+    api.finish('third', 'third answer');
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('wx-running-third')), findsNothing);
+    expect(find.text('暂无执行中的会话'), findsOneWidget);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expectRunningCount(0);
     await tester.pumpWidget(const SizedBox());
   });
 

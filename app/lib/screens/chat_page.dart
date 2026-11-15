@@ -33,6 +33,7 @@ import '../widgets/agent_decision_card.dart';
 import '../widgets/agent_details_dialog.dart';
 import '../widgets/chat_image_strip.dart';
 import '../widgets/wx_chrome.dart';
+import '../widgets/wx_running_more_icon.dart';
 import '../widgets/wx_motion.dart';
 import '../widgets/wx_link_route.dart';
 import '../widgets/wx_hold_to_speak.dart';
@@ -1254,7 +1255,7 @@ class _ChatPageState extends State<ChatPage> {
                 enabled: !_preparingChat,
                 color: Wx.surface,
                 surfaceTintColor: Colors.transparent,
-                icon: const Icon(Icons.more_horiz),
+                icon: WxRunningMoreIcon(running: _running),
                 onSelected: (value) {
                   if (value == 'new') _newSession();
                   if (value == 'history') _openSessions();

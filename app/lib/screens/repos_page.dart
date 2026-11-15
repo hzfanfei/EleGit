@@ -4,10 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../api/wenxiang_api.dart';
+import '../chat/running_sessions.dart';
 import '../copy/time.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../widgets/wx_chrome.dart';
+import '../widgets/wx_running_more_icon.dart';
 import '../widgets/wx_link_route.dart';
 import '../repo_open.dart';
 import '../widgets/wx_clone_scrim.dart';
@@ -310,7 +312,7 @@ class ReposPageState extends State<ReposPage> {
                 enabled: !blocked,
                 color: Wx.surface,
                 surfaceTintColor: Colors.transparent,
-                icon: const Icon(Icons.more_horiz),
+                icon: WxRunningMoreIcon(running: RunningSessions.of(widget.api)),
                 onSelected: (value) {
                   if (value == 'github') setState(() => _reauth = true);
                   if (value == 'running') widget.onOpenRunningSessions?.call();
