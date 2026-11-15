@@ -145,6 +145,24 @@ describe("streamAnswer", () => {
 });
 
 describe("taskCompletionNotice", () => {
+  it("recognizes completion after progress even when glued to the answer", () => {
+    for (const separator of ["", "\n", "\r\n"]) {
+      const notice = taskCompletionNotice(`正在复检最终文件。\r\n\r\n  ===TASK_COMPLETED===${separator}做好了：检查通过。`);
+      assert.equal(notice.answer, "做好了：检查通过。");
+      assert.equal(notice.body, "做好了：检查通过。");
+    }
+  });
+
+  it("ignores code examples and still finds a later real completion", () => {
+    for (const fence of ["```", "~~~~"]) {
+      const example = `${fence}text\n===TASK_COMPLETED===示例\n${fence}`;
+      assert.equal(taskCompletionNotice(example), null);
+      const notice = taskCompletionNotice(`${example}\n\n===TASK_COMPLETED===实际完成。`);
+      assert.equal(notice.answer, "实际完成。");
+    }
+    assert.equal(taskCompletionNotice("示例：`===TASK_COMPLETED===`"), null);
+  });
+
   it("keeps the full answer for chat and a short body for the toast", () => {
     const answer = `${"已修好。".repeat(80)}`;
     const notice = taskCompletionNotice(`===TASK_COMPLETED===\n${answer}`, {

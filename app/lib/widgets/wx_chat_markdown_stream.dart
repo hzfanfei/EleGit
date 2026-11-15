@@ -3,18 +3,13 @@ import 'package:flutter/material.dart';
 import '../theme.dart';
 import '../api/wenxiang_api.dart';
 import '../utils/text_fit.dart';
+import '../utils/task_completion.dart';
 import '../utils/wx_mermaid_fence.dart';
 import '../utils/wx_markdown_styles.dart';
 export '../utils/wx_markdown_styles.dart'
     show WxMarkdownStyle, chatMarkdownStyle;
 import 'wx_rich_text.dart';
 import 'wx_answer_block.dart';
-
-final _taskMarkerRe = RegExp(r'^\s*===TASK_COMPLETED===[ \t]*(?:\r?\n|$)');
-
-String _stripTaskMarker(String text) {
-  return text.replaceFirst(_taskMarkerRe, '').trim();
-}
 
 /// Splits a partial Markdown stream into "complete" blocks (ready to render
 /// with [MarkdownBody]) and a "pending" tail that the user is still typing
@@ -213,12 +208,13 @@ class _WxChatMarkdownStreamState extends State<WxChatMarkdownStream> {
     final raw = widget.source.value;
     if (raw == _lastSource) return;
     _lastSource = raw;
+    final completion = parseTaskCompletion(raw);
     final stripped = separateChatParagraphs(
-      normalizeChatMarkdownTables(_stripTaskMarker(raw)),
+      normalizeChatMarkdownTables(completion.text),
     );
     _parser.update(stripped);
     setState(() {
-      _taskCompleted = _taskMarkerRe.hasMatch(raw);
+      _taskCompleted = completion.completed;
       _blocks = [
         ..._parser.completed,
         if (_parser.pending.isNotEmpty) _parser.pending

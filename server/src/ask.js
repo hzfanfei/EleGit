@@ -6,6 +6,8 @@ import {
   noteLiveTurn,
 } from "./live-turns.js";
 import { publishInboxNotice } from "./notifications.js";
+import { findTaskCompletionMarker } from "./task-completion.js";
+export { TASK_COMPLETED_MARKER } from "./task-completion.js";
 
 export { detectCursorEngine } from "./acp.js";
 export { whichSync } from "./which.js";
@@ -26,23 +28,17 @@ function withTurnId(notice, turnId) {
   return notice;
 }
 
-/**
- * Marker the agent emits when a previously-deferred / background answer is now
- * ready. Anything after this marker (on its own line) becomes the inbox body.
- */
-export const TASK_COMPLETED_MARKER = "===TASK_COMPLETED===";
-const TASK_COMPLETED_RE = /^===TASK_COMPLETED===\s*$/m;
 const CHAT_ANSWER_CAP = 20000;
 
 /**
- * When a finished reply contains the task marker, split the toast preview
- * from the full text that should be written back into the chat.
+ * A marker outside code starts the final answer, even after progress text
+ * or without a newline before the answer. Use its tail for the inbox.
  */
 export function taskCompletionNotice(full, { session, question, bookId, turnId } = {}) {
   const text = String(full || "");
-  const match = text.match(TASK_COMPLETED_RE);
+  const match = findTaskCompletionMarker(text);
   if (!match) return null;
-  const answer = text.slice((match.index ?? 0) + match[0].length).trim();
+  const answer = text.slice(match.end).trim();
   if (!answer) return null;
   const notice = {
     kind: "agent-notification",

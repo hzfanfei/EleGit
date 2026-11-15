@@ -10,8 +10,7 @@
 
 import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
-
-const MARKER_RE = /^===TASK_COMPLETED===\s*$/m;
+import { findTaskCompletionMarker } from "../server/src/task-completion.js";
 
 function readEnv(cwd) {
   const envPath = path.join(cwd, ".env");
@@ -64,10 +63,9 @@ function lastAssistantText(transcriptPath) {
 }
 
 function summariseAfterMarker(fullText) {
-  const m = fullText.match(MARKER_RE);
+  const m = findTaskCompletionMarker(fullText);
   if (!m) return null;
-  const idx = m.index ?? 0;
-  const tail = fullText.slice(idx + m[0].length).replace(/^\s*\n/, "").trim();
+  const tail = fullText.slice(m.end).trim();
   if (!tail) return { title: "Claude Code 后台任务完成", body: "已就绪" };
   // Take the first non-empty line as the title; everything else as body.
   const lines = tail.split(/\r?\n/);

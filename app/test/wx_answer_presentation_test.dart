@@ -78,7 +78,7 @@ void main() {
     expect(find.byIcon(Icons.download_outlined), findsNothing);
   });
 
-  testWidgets('task marker is a status label only at the start',
+  testWidgets('task marker becomes a status label and preserves code examples',
       (tester) async {
     await show(tester, ValueNotifier('===TASK_COMPLETED===\n已处理。'));
     expect(find.text('✓ 任务已完成'), findsOneWidget);
@@ -91,6 +91,21 @@ void main() {
     expect(find.byType(ExpansionTile), findsNothing);
     expect(tester.widget<WxFencedCode>(find.byType(WxFencedCode)).code,
         contains('===TASK_COMPLETED==='));
+  });
+
+  testWidgets('completion after streamed progress never leaks into the answer',
+      (tester) async {
+    final source = ValueNotifier('片尾音乐已修正，正在复检最终文件。\n\n');
+    await show(tester, source);
+    expect(find.text('✓ 任务已完成'), findsNothing);
+    source.value += '===TASK_COMPLETED===做好了：视频已通过检查。';
+    await tester.pumpAndSettle();
+    expect(find.text('✓ 任务已完成'), findsOneWidget);
+    expect(find.textContaining('===TASK_COMPLETED==='), findsNothing);
+    expect(find.textContaining('片尾音乐已修正', findRichText: true), findsOneWidget);
+    expect(find.textContaining('做好了：视频已通过检查。', findRichText: true),
+        findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('code containing download links stays code', (tester) async {

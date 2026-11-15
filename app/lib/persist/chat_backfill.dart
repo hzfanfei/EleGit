@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models.dart';
+import '../utils/task_completion.dart';
 import 'app_memory.dart';
 import 'book_chat_store.dart';
 
@@ -29,7 +30,7 @@ final ValueNotifier<InboxProgressHint?> inboxProgressHint =
     ValueNotifier<InboxProgressHint?>(null);
 
 String stripTaskMarker(String text) {
-  return text.replaceFirst(RegExp(r'^===TASK_COMPLETED===\s*', multiLine: true), '').trim();
+  return parseTaskCompletion(text).text;
 }
 
 bool sameChatText(String a, String b) => stripTaskMarker(a) == stripTaskMarker(b);

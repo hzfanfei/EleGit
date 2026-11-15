@@ -4,6 +4,15 @@ import 'package:wenxiang/persist/app_memory.dart';
 import 'package:wenxiang/persist/chat_backfill.dart';
 
 void main() {
+  test('marker cleanup handles progress and preserves examples', () {
+    expect(stripTaskMarker('正在检查。\r\n\r\n  ===TASK_COMPLETED===已完成。'),
+        '正在检查。\r\n\r\n已完成。');
+    const code = '```text\n===TASK_COMPLETED===\n```';
+    expect(stripTaskMarker(code), code);
+    const inline = '标记示例：`===TASK_COMPLETED===`';
+    expect(stripTaskMarker(inline), inline);
+  });
+
   test('appends the finished answer once and strips the marker', () {
     final store = RepoChatStore(
       sessions: [
