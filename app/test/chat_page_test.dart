@@ -1,3 +1,4 @@
+import 'package:wenxiang/chat/running_sessions.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -40,6 +41,7 @@ class _DelayedUsageApi extends FakeWenxiangApi {
 }
 
 void main() {
+  tearDown(RunningSessions.stopAllForTesting);
   testWidgets('agent loading animates without moving label or segments', (tester) async {
     final api = _DelayedUsageApi();
     await tester.pumpWidget(MaterialApp(theme: wenxiangTheme(), home: ChatPage(
@@ -64,6 +66,7 @@ void main() {
     expect(color(), Wx.accent);
     await tester.pump(const Duration(milliseconds: 500));
     expect(color(), Wx.accent);
+    RunningSessions.stopAllForTesting();
     await tester.pumpWidget(const SizedBox());
     expect(tester.takeException(), isNull);
   });
@@ -474,6 +477,7 @@ void main() {
 
     expect(find.textContaining('inbox-hold'), findsOneWidget);
 
+    RunningSessions.stopAllForTesting();
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
@@ -541,6 +545,7 @@ void main() {
     await tester.pump();
     expect(notes.debugAlertCount, 1);
 
+    RunningSessions.stopAllForTesting();
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
@@ -569,6 +574,7 @@ void main() {
     final mark = tester.widget<WxLoading>(find.byKey(const Key('wx-working-mark')));
     expect(mark.color, Wx.holdPoll);
 
+    RunningSessions.stopAllForTesting();
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 1));
   });
@@ -598,6 +604,7 @@ void main() {
     final mark = tester.widget<WxLoading>(find.byKey(const Key('wx-working-mark')));
     expect(mark.color, Wx.holdPoll);
 
+    RunningSessions.stopAllForTesting();
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 1));
   });
@@ -633,6 +640,7 @@ void main() {
     expect(find.text('重试上一问'), findsNothing);
     expect(find.byKey(const Key('wx-working-mark')), findsNothing);
 
+    RunningSessions.stopAllForTesting();
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 1));
   });

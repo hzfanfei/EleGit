@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../app_brand.dart';
 import '../api/wenxiang_api.dart';
+import '../chat/running_sessions.dart';
 import '../config.dart';
 import '../copy/errors.dart';
 import '../diagnostics/client_error_log.dart';
@@ -20,6 +21,7 @@ import '../widgets/wx_motion.dart';
 import 'book_reader_page.dart';
 import 'books_page.dart';
 import 'chat_page.dart';
+import 'running_sessions_page.dart';
 import 'repos_page.dart';
 import 'settings_page.dart';
 import 'static_files_page.dart';
@@ -56,6 +58,7 @@ class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
   bool _oauthAutoStart = false;
   final _reposKey = GlobalKey<ReposPageState>();
   bool _chatLeavePrompt = false;
+  String? _requestedSessionId;
 
   bool _uploadingClientErrors = false;
 
@@ -207,6 +210,7 @@ class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
   }
 
   void _openRepo(RepoItem repo) {
+    _requestedSessionId = null;
     _memory?.saveLastRepo(repo);
     _api.warmChatSession(repo.owner, repo.name).catchError((_) {});
     setState(() {
@@ -217,6 +221,19 @@ class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
 
   void _openBooks() {
     setState(() => _step = AppStep.books);
+  }
+
+  Future<void> _openRunningSessions() async {
+    final task = await Navigator.of(context).push<SessionExecution>(
+      MaterialPageRoute(builder: (_) => RunningSessionsPage(running: RunningSessions.of(_api))),
+    );
+    if (!mounted || task == null) return;
+    _memory?.saveLastRepo(task.repo.repo);
+    setState(() {
+      _repo = task.repo.repo;
+      _requestedSessionId = task.sessionId;
+      _step = AppStep.chat;
+    });
   }
 
   void _openFiles() {
@@ -378,6 +395,7 @@ class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
           onOpenBooks: _openBooks,
           onOpenFiles: _openFiles,
           onOpenSettings: _openSettings,
+          onOpenRunningSessions: _openRunningSessions,
         )),
       ),
       if (_step == AppStep.files)
@@ -422,6 +440,7 @@ class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
             api: _api,
             repo: _repo!,
             memory: _memory,
+            initialSessionId: _requestedSessionId,
             onBack: _backFromChat,
           )),
         ),

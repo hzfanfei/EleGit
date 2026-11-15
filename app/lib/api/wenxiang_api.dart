@@ -82,6 +82,11 @@ class MermaidRender {
   final String? svg;
 }
 
+class _ChatRequest {
+  http.Client? client;
+  bool cancelled = false;
+}
+
 class WenxiangApi {
   WenxiangApi({required String baseUrl, required this.apiKey})
       : baseUrl = normalizeBaseUrl(baseUrl),
@@ -310,12 +315,11 @@ class WenxiangApi {
   }
 
   http.Client? _checkoutClient;
-  http.Client? _chatClient;
+  final Map<String, _ChatRequest> _chatRequests = {};
   http.Client? _bookVoiceClient;
   http.Client? _repoVoiceClient;
   http.Client? _speakClient;
   bool _checkoutCancelled = false;
-  bool _chatCancelled = false;
   bool _bookVoiceCancelled = false;
   bool _repoVoiceCancelled = false;
   bool _speakCancelled = false;
@@ -327,12 +331,13 @@ class WenxiangApi {
   }
 
   void cancelChat({String? sessionId}) {
-    _chatCancelled = true;
-    _chatClient?.close();
-    _chatClient = null;
     final id = sessionId?.trim() ?? '';
-    if (id.isEmpty) return;
-    unawaited(_postChatCancel(id));
+    final requests = id.isEmpty ? _chatRequests.values.toSet() : [_chatRequests[id]].nonNulls;
+    for (final request in requests) {
+      request.cancelled = true;
+      request.client?.close();
+    }
+    if (id.isNotEmpty) unawaited(_postChatCancel(id));
   }
 
   Future<void> replyInteraction({
@@ -1305,9 +1310,12 @@ class WenxiangApi {
     String? chapter,
     String? turnId,
   }) {
-    _chatCancelled = false;
-    return _retryBeforeVisible(
+    final control = _ChatRequest();
+    final key = sessionId?.trim().isNotEmpty == true ? sessionId!.trim() : _mintChatRequestId();
+    _chatRequests[key] = control;
+    return _trackedChatStream(control, key, () => _retryBeforeVisible(
       () => _bookChatStreamOnce(
+        control: control,
         bookId: bookId,
         message: message,
         history: history,
@@ -1315,11 +1323,12 @@ class WenxiangApi {
         chapter: chapter,
         turnId: turnId,
       ),
-      cancelled: () => _chatCancelled,
-    );
+      cancelled: () => control.cancelled,
+    ));
   }
 
   Stream<ChatStreamEvent> _bookChatStreamOnce({
+    required _ChatRequest control,
     required String bookId,
     required String message,
     required List<ChatMessage> history,
@@ -1328,7 +1337,7 @@ class WenxiangApi {
     String? turnId,
   }) async* {
     final client = http.Client();
-    _chatClient = client;
+    control.client = client;
     var headersAccepted = false;
     try {
       final request = http.Request('POST', _uri('/v1/books/chat'))
@@ -1361,11 +1370,11 @@ class WenxiangApi {
         byteStream: res.stream,
         client: client,
         throwIfCancelled: () {
-          if (_chatCancelled) throw const OperationCancelled();
+          if (control.cancelled) throw const OperationCancelled();
         },
       );
     } catch (err) {
-      if (_chatCancelled || err is OperationCancelled) {
+      if (control.cancelled || err is OperationCancelled) {
         throw const OperationCancelled();
       }
       if (headersAccepted && err is SseHeartbeatStale) {
@@ -1374,7 +1383,7 @@ class WenxiangApi {
       if (headersAccepted) throw AcceptedChatDrop(err);
       rethrow;
     } finally {
-      if (identical(_chatClient, client)) _chatClient = null;
+      if (identical(control.client, client)) control.client = null;
       client.close();
     }
   }
@@ -1499,9 +1508,12 @@ class WenxiangApi {
     String? turnId,
     List<ChatImageAttachment> images = const [],
   }) {
-    _chatCancelled = false;
-    return _retryBeforeVisible(
+    final control = _ChatRequest();
+    final key = sessionId?.trim().isNotEmpty == true ? sessionId!.trim() : _mintChatRequestId();
+    _chatRequests[key] = control;
+    return _trackedChatStream(control, key, () => _retryBeforeVisible(
       () => _chatStreamOnce(
+        control: control,
         owner: owner,
         repo: repo,
         message: message,
@@ -1511,11 +1523,28 @@ class WenxiangApi {
         turnId: turnId,
         images: images,
       ),
-      cancelled: () => _chatCancelled,
-    );
+      cancelled: () => control.cancelled,
+    ));
   }
 
+  Stream<ChatStreamEvent> _trackedChatStream(
+    _ChatRequest control, String key, Stream<ChatStreamEvent> Function() open,
+  ) async* {
+    try {
+      await for (final event in open()) {
+        final id = event.sessionId;
+        if (id != null && id.isNotEmpty) _chatRequests[id] = control;
+        yield event;
+      }
+    } finally {
+      _chatRequests.removeWhere((key, request) => identical(request, control));
+    }
+  }
+
+  String _mintChatRequestId() => 'request-${DateTime.now().microsecondsSinceEpoch}-${_chatRequests.length}';
+
   Stream<ChatStreamEvent> _chatStreamOnce({
+    required _ChatRequest control,
     required String owner,
     required String repo,
     required String message,
@@ -1526,7 +1555,7 @@ class WenxiangApi {
     List<ChatImageAttachment> images = const [],
   }) async* {
     final client = http.Client();
-    _chatClient = client;
+    control.client = client;
     var headersAccepted = false;
     try {
       final request = http.Request('POST', _uri('/v1/chat'))
@@ -1573,11 +1602,11 @@ class WenxiangApi {
         byteStream: res.stream,
         client: client,
         throwIfCancelled: () {
-          if (_chatCancelled) throw const OperationCancelled();
+          if (control.cancelled) throw const OperationCancelled();
         },
       );
     } catch (err) {
-      if (_chatCancelled || err is OperationCancelled) {
+      if (control.cancelled || err is OperationCancelled) {
         throw const OperationCancelled();
       }
       if (headersAccepted && err is SseHeartbeatStale) {
@@ -1586,7 +1615,7 @@ class WenxiangApi {
       if (headersAccepted) throw AcceptedChatDrop(err);
       rethrow;
     } finally {
-      if (identical(_chatClient, client)) _chatClient = null;
+      if (identical(control.client, client)) control.client = null;
       client.close();
     }
   }

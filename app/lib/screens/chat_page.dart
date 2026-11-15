@@ -9,6 +9,8 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../api/wenxiang_api.dart';
 import '../chat/chat_image.dart';
+import '../chat/running_sessions.dart';
+import 'running_sessions_page.dart';
 import '../copy/engine.dart';
 import '../copy/ask_engine.dart';
 import '../copy/errors.dart';
@@ -18,7 +20,6 @@ import '../persist/app_memory.dart';
 import '../persist/chat_backfill.dart';
 import '../persist/book_reader_prefs.dart';
 import '../theme.dart';
-import '../utils/notification_center.dart';
 import '../voice/device_media.dart';
 import '../voice/repo_quick_voice_session.dart';
 import '../voice/volc_tts_voices.dart';
@@ -55,6 +56,7 @@ class ChatPage extends StatefulWidget {
     required this.repo,
     required this.onBack,
     this.memory,
+    this.initialSessionId,
     this.voiceMedia,
     this.sttClient,
     this.callMedia,
@@ -66,6 +68,7 @@ class ChatPage extends StatefulWidget {
   final RepoItem repo;
   final VoidCallback onBack;
   final AppMemory? memory;
+  final String? initialSessionId;
   final VoiceMedia? voiceMedia;
   final VoiceSttClient? sttClient;
   final VoiceMedia? callMedia;
@@ -95,25 +98,25 @@ class _ChatPageState extends State<ChatPage> {
   final _input = TextEditingController();
   final _focus = FocusNode();
   final _scroll = ScrollController();
-  final Map<String, List<ChatMessage>> _transcripts = {};
-  final List<ChatSession> _sessions = [];
+  late final RunningSessions _running;
+  late final RunningRepo _repoState;
+  Map<String, List<ChatMessage>> get _transcripts => _repoState.transcripts;
+  List<ChatSession> get _sessions => _repoState.sessions;
+  SessionExecution? get _execution => _running.execution(_sessionId);
+  String? _shownTurnId;
   late final WxTypewriterStream _typewriter;
   final ValueNotifier<String?> _liveEngine = ValueNotifier(null);
   final ValueNotifier<String> _livePhase = ValueNotifier('connect');
   final ValueNotifier<String> _liveActivity = ValueNotifier('');
   /// Hold inbox poll: yellow = last poll ok, red = last poll failed.
   final ValueNotifier<bool> _holdPollOk = ValueNotifier(true);
-  Timer? _livePhaseTimer;
   Timer? _streamScrollTimer;
   double _lastFollowExtent = -1;
   String? _sessionId;
   bool _live = false;
   bool _busy = false;
-  bool _holdForAnswer = false;
-  bool _releasingHold = false;
-  bool _stopped = false;
   int? _processingUserIndex;
-  final List<int> _queuedUserIndices = <int>[];
+  List<int> get _queuedUserIndices => _execution?.queuedIndices ?? <int>[];
   bool _agentMode = false;
   Map<String, dynamic>? _codexUsage;
   bool _usageLoading = false;
@@ -163,6 +166,8 @@ class _ChatPageState extends State<ChatPage> {
   @override
   void initState() {
     super.initState();
+    _running = RunningSessions.of(widget.api);
+    _repoState = _running.repo(widget.repo, widget.memory);
     widget.api.linkEpoch.addListener(_onLinkChanged);
     _refreshCodexUsage();
     _usageTimer = Timer.periodic(const Duration(minutes: 5), (_) => _refreshCodexUsage());
@@ -214,13 +219,16 @@ class _ChatPageState extends State<ChatPage> {
     );
     _restoreLocal();
     chatBackfillTick.addListener(_onChatBackfill);
-    inboxProgressHint.addListener(_onInboxProgressHint);
+    _running.addListener(_syncExecution);
     _agentMode = widget.memory?.agentModeFor(widget.repo.fullName) ?? false;
     widget.api
         .warmChatSession(widget.repo.owner, widget.repo.name)
         .catchError((_) {});
     _loadSessions().whenComplete(() {
-      if (mounted) setState(() => _preparingChat = false);
+      if (mounted) {
+        setState(() => _preparingChat = false);
+        _syncExecution();
+      }
     });
     _loadVoice();
     _voiceHoldTipVisible = !(widget.memory?.voiceHoldTipDismissed() ?? false);
@@ -552,58 +560,13 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   void _restoreLocal() {
-    final stored = widget.memory?.loadChats(widget.repo.fullName);
-    if (stored == null || stored.sessions.isEmpty && stored.transcripts.isEmpty) {
-      return;
-    }
-    _sessions
-      ..clear()
-      ..addAll(stored.sessions);
-    _transcripts
-      ..clear()
-      ..addAll(stored.transcripts.map((key, value) => MapEntry(key, List<ChatMessage>.from(value))));
-    _sessionId = stored.activeId ?? (_sessions.isEmpty ? null : _sessions.first.id);
+    _sessionId = widget.initialSessionId ?? _repoState.activeId ??
+        (_sessions.isEmpty ? null : _sessions.first.id);
   }
 
   Future<void> _persist() async {
-    final memory = widget.memory;
-    if (memory == null) return;
-    await memory.saveChats(
-      widget.repo.fullName,
-      RepoChatStore(
-        sessions: List<ChatSession>.from(_sessions),
-        activeId: _sessionId,
-        transcripts: _transcripts.map((key, value) => MapEntry(key, List<ChatMessage>.from(value))),
-      ),
-    );
-  }
-
-  void _setLivePhase(String phase) {
-    if (phase.isEmpty || _livePhase.value == phase) return;
-    _livePhase.value = phase;
-  }
-
-  void _startLivePhaseFallback() {
-    _livePhaseTimer?.cancel();
-    final sentAt = DateTime.now();
-    _livePhaseTimer = Timer.periodic(const Duration(milliseconds: 900), (timer) {
-      if (!mounted || !_live || _typewriter.visible.value.isNotEmpty) {
-        timer.cancel();
-        return;
-      }
-      if (_livePhase.value == 'hold') return;
-      final seconds = DateTime.now().difference(sentAt).inSeconds;
-      if (seconds >= 4) {
-        _setLivePhase('generate');
-      } else if (seconds >= 1.5 && _livePhase.value == 'connect') {
-        _setLivePhase('repo');
-      }
-    });
-  }
-
-  void _stopLivePhaseFallback() {
-    _livePhaseTimer?.cancel();
-    _livePhaseTimer = null;
+    _repoState.activeId = _sessionId;
+    await _repoState.persist();
   }
 
   Future<void> _refreshCurrentSessionMeta() async {
@@ -676,7 +639,6 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _newSession() async {
-    if (_busy) return;
     try {
       final created = await widget.api.createSession(widget.repo.owner, widget.repo.name);
       if (!mounted) return;
@@ -686,10 +648,13 @@ class _ChatPageState extends State<ChatPage> {
         _transcripts[created.id] = [];
         _live = false;
         _editingIndex = null;
+        _input.clear();
+        _draftImages.clear();
+        _lastUser = null;
+        _lastImages = const [];
       });
-      _typewriter.reset();
-      _liveEngine.value = null;
-      _livePhase.value = 'connect';
+      _shownTurnId = null;
+      _syncExecution();
       await _persist();
     } catch (err) {
       if (!mounted) return;
@@ -700,19 +665,18 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _switchSession(ChatSession session) async {
-    if (_busy) return;
     setState(() {
       _sessionId = session.id;
       _live = false;
       _editingIndex = null;
     });
-    _typewriter.reset();
-    _liveEngine.value = null;
-    _livePhase.value = 'connect';
+    _shownTurnId = null;
+    _syncExecution();
     _persist();
   }
 
   Future<void> _closeSession(ChatSession session) async {
+    _running.execution(session.id)?.stop();
     try {
       await widget.api.closeSession(widget.repo.owner, widget.repo.name, session.id);
       if (!mounted) return;
@@ -823,19 +787,6 @@ class _ChatPageState extends State<ChatPage> {
     return _busy && active != null && index > active;
   }
 
-  void _insertMessageAfterUser(int userIndex, ChatMessage message) {
-    final insertAt = userIndex + 1;
-    _messages.insert(insertAt, message);
-    for (var i = 0; i < _queuedUserIndices.length; i++) {
-      if (_queuedUserIndices[i] >= insertAt) {
-        _queuedUserIndices[i]++;
-      }
-    }
-    if (_editingIndex != null && _editingIndex! >= insertAt) {
-      _editingIndex = _editingIndex! + 1;
-    }
-  }
-
   Future<void> _removeQueuedTurn(int index) async {
     if (index < 0 || index >= _messages.length) return;
     final message = _messages[index];
@@ -844,12 +795,7 @@ class _ChatPageState extends State<ChatPage> {
     HapticFeedback.selectionClick();
     setState(() {
       _messages.removeAt(index);
-      _queuedUserIndices.remove(index);
-      for (var i = 0; i < _queuedUserIndices.length; i++) {
-        if (_queuedUserIndices[i] > index) {
-          _queuedUserIndices[i]--;
-        }
-      }
+      _execution?.queued.remove(message);
       if (_processingUserIndex != null && _processingUserIndex! > index) {
         _processingUserIndex = _processingUserIndex! - 1;
       }
@@ -1016,7 +962,7 @@ class _ChatPageState extends State<ChatPage> {
     _jumpToLatest(force: true);
 
     if (_busy) {
-      setState(() => _queuedUserIndices.add(userIndex));
+      _execution!.enqueue(_messages[userIndex]);
       return;
     }
     await _runSendForUserIndex(userIndex);
@@ -1028,6 +974,7 @@ class _ChatPageState extends State<ChatPage> {
     required bool accept,
     required List<Map<String, dynamic>> answers,
   }) async {
+    final execution = _execution;
     final requestId = _decision?.payload?['requestId']?.toString() ?? '';
     final sessionId = (_decision?.sessionId ?? _sessionId ?? '').trim();
     if (requestId.isEmpty || sessionId.isEmpty) {
@@ -1041,423 +988,96 @@ class _ChatPageState extends State<ChatPage> {
       skip: skip,
       answers: answers,
     );
-    if (!mounted) return;
-    setState(() => _decision = null);
+    execution?.decision = null;
+    _running.changed();
   }
 
   Future<void> _runSendForUserIndex(int userIndex) async {
-    if (userIndex < 0 || userIndex >= _messages.length) {
-      _finishSendQueue();
-      return;
+    // Resolve the ID before starting: requests in other projects must never
+    // inherit the server's last selected conversation.
+    if (_sessionId == null) {
+      final created = await widget.api.createSession(widget.repo.owner, widget.repo.name);
+      if (!mounted) return;
+      _rememberSessionId(created.id);
     }
-    final userMessage = _messages[userIndex];
-    final text = userMessage.content.trim().isEmpty ? '请看附图。' : userMessage.content;
-    _processingUserIndex = userIndex;
-    _cancelStreamScrollFollow();
-    _typewriter.reset();
-    _liveEngine.value = null;
-    _livePhase.value = 'connect';
-    _liveActivity.value = '';
-    _decision = null;
-    _startLivePhaseFallback();
-    setState(() {
-      if (_editingIndex == userIndex) _editingIndex = null;
-      _live = true;
-      _busy = true;
-    });
-    _jumpToLatest(force: true);
-
-    final history = _messages
-        .sublist(0, userIndex + 1)
-        .where((m) => m.role != 'error')
-        .toList();
-    var firstDelta = true;
-    var accepted = false;
-    _stopped = false;
-
-    try {
-      await for (final event in widget.api.chatStream(
-        owner: widget.repo.owner,
-        repo: widget.repo.name,
-        message: text,
-        images: userMessage.images,
-        sessionId: _sessionId,
-        history: history,
-        agentMode: _agentMode,
-        turnId: _messages[userIndex].turnId,
-      )) {
-        if (!mounted) return;
-        accepted = true;
-        if (event.sessionId != null && event.sessionId!.isNotEmpty) {
-          _rememberSessionId(event.sessionId);
-        }
-        if (event.type == 'status') {
-          final phase = event.phase?.trim();
-          final detail = event.detail?.trim() ?? '';
-          if (phase == 'activity') {
-            _liveActivity.value = detail;
-          } else if (detail.isNotEmpty) {
-            _liveActivity.value = detail;
-          }
-          if (phase != null && phase.isNotEmpty && phase != 'activity') {
-            _setLivePhase(phase);
-          }
-        } else if (event.type == 'ask' || event.type == 'plan') {
-          setState(() => _decision = event);
-        } else if (event.type == 'delta' && event.text.isNotEmpty) {
-          if (firstDelta) {
-            firstDelta = false;
-            HapticFeedback.lightImpact();
-          }
-          _typewriter.push(event.text);
-        } else if (event.type == 'start' && event.engine != null) {
-          _liveEngine.value = event.engine;
-          _setLivePhase('repo');
-        } else if (event.type == 'done') {
-          _liveActivity.value = '';
-          _liveEngine.value = event.engine ?? _liveEngine.value;
-          if (event.text.isNotEmpty && _typewriter.fullText.isEmpty) {
-            _typewriter.push(event.text);
-          }
-        } else if (event.type == 'error') {
-          throw ApiException(event.error ?? '问答失败');
-        }
-      }
-      if (!mounted) return;
-      await _typewriter.animateToEnd();
-      if (!mounted) return;
-      final answer = stripTaskMarker(_typewriter.fullText);
-      final already = _messages.any(
-        (message) => message.role == 'assistant' && sameChatText(message.content, answer),
-      );
-      setState(() {
-        if (answer.isNotEmpty && !already) {
-          _insertMessageAfterUser(
-            userIndex,
-            ChatMessage(
-              role: 'assistant',
-              content: answer,
-              engine: _liveEngine.value,
-            ),
-          );
-        }
-        _live = false;
-      });
-      _typewriter.reset();
-      await _persist();
-      unawaited(_refreshCurrentSessionMeta());
-    } on OperationCancelled {
-      if (!mounted) return;
-      _typewriter.flushNow();
-      final partial = _typewriter.fullText;
-      setState(() {
-        if (partial.isNotEmpty) {
-          _insertMessageAfterUser(
-            userIndex,
-            ChatMessage(
-              role: 'assistant',
-              content: partial,
-              engine: _liveEngine.value,
-            ),
-          );
-        }
-        _live = false;
-      });
-      _typewriter.reset();
-      await _persist();
-    } catch (err) {
-      if (!mounted) return;
-      final cause = err is AcceptedChatDrop ? err.cause : err;
-      if ((accepted || err is AcceptedChatDrop) && !_stopped && isChatTransportDrop(cause)) {
-        final landed = await _holdForServerAnswer(userIndex);
-        if (!mounted) return;
-        if (landed) {
-          _typewriter.reset();
-          await _persist();
-        } else {
-          // Hold already covers the drop. Do not surface "连接中断，请重试".
-          await _finishDroppedTurn(userIndex);
-        }
-      } else {
-        _showSendError(userIndex, cause);
-      }
-    } finally {
-      _holdForAnswer = false;
-      _processingUserIndex = null;
-      _stopLivePhaseFallback();
-      _cancelStreamScrollFollow();
-      if (mounted) {
-        if (_queuedUserIndices.isNotEmpty) {
-          final next = _queuedUserIndices.removeAt(0);
-          unawaited(_runSendForUserIndex(next));
-        } else {
-          _finishSendQueue();
-        }
-      }
-      _jumpToLatest();
-    }
-  }
-
-  void _finishSendQueue() {
-    if (!mounted) return;
-    setState(() {
-      _busy = false;
-      _live = false;
-    });
-    _mergeBackfill();
-    _refreshCodexUsage();
-  }
-
-  void _stop() {
-    if (!_busy) return;
-    _stopped = true;
-    _holdForAnswer = false;
-    widget.api.cancelChat(sessionId: _sessionId);
-  }
-
-  Future<void> _finishDroppedTurn(int userIndex) async {
-    _typewriter.flushNow();
-    final partial = _typewriter.fullText;
-    setState(() {
-      if (partial.isNotEmpty) {
-        _insertMessageAfterUser(
-          userIndex,
-          ChatMessage(
-            role: 'assistant',
-            content: partial,
-            engine: _liveEngine.value,
-          ),
-        );
-      }
-      _live = false;
-    });
-    _typewriter.reset();
+    final task = _running.session(_repoState, _sessionId!, _agentMode);
+    task.enqueue(_messages[userIndex]);
     await _persist();
   }
 
-  void _showSendError(int userIndex, Object err) {
-    _typewriter.flushNow();
-    final partial = _typewriter.fullText;
-    recordClientError(err, kind: 'chat');
-    final raw = err.toString().trim();
-    final reason = raw.isEmpty ? '出了点问题。请稍后重试。' : raw;
+  void _syncExecution() {
+    if (!mounted) return;
+    final task = _execution;
+    if (task != null && task.sessionId != _sessionId) {
+      _sessionId = task.sessionId;
+    }
+    final turnId = task?.current?.turnId;
+    final wasBusy = _busy;
+    if (turnId != _shownTurnId || task == null || !task.busy) {
+      _typewriter.flushNow();
+      _typewriter.reset();
+      _shownTurnId = turnId;
+    }
+    final next = task?.text ?? '';
+    if (task?.busy == true && next != _typewriter.fullText) {
+      if (next.startsWith(_typewriter.fullText)) {
+        _typewriter.push(next.substring(_typewriter.fullText.length));
+      } else {
+        _typewriter.replacePending(next);
+      }
+    }
+    _liveEngine.value = task?.engine;
+    _liveActivity.value = task?.activity ?? '';
+    _livePhase.value = task?.phase ?? 'connect';
+    _holdPollOk.value = task?.pollOk ?? true;
     setState(() {
-      if (partial.isEmpty) {
-        _messages.add(ChatMessage(role: 'error', content: reason));
-      } else {
-        _insertMessageAfterUser(
-          userIndex,
-          ChatMessage(
-            role: 'assistant',
-            content: partial,
-            engine: _liveEngine.value,
-          ),
-        );
-        _messages.add(ChatMessage(role: 'error', content: reason));
-      }
-      _live = false;
+      _busy = task?.busy ?? false;
+      _live = _busy;
+      _processingUserIndex = task?.userIndex;
+      _decision = task?.decision;
     });
-    _typewriter.reset();
-    unawaited(_persist());
-  }
-
-  bool _answerAfter(int userIndex) {
-    if (userIndex < 0 || userIndex >= _messages.length) return false;
-    for (var i = userIndex + 1; i < _messages.length; i++) {
-      final message = _messages[i];
-      if (message.role == 'user') return false;
-      if (message.role == 'assistant' && message.content.trim().isNotEmpty) return true;
+    if (wasBusy && !_busy) {
+      unawaited(_refreshCodexUsage());
+      unawaited(_refreshCurrentSessionMeta());
     }
-    return false;
+    _jumpToLatest();
   }
 
-  /// The socket dropped after the server accepted the turn. Keep waiting:
-  /// a new POST would abort the answer that is still being written.
-  /// A failed inbox poll is the same outage, so it does not end the wait.
-  Future<bool> _holdForServerAnswer(int userIndex) async {
-    _holdForAnswer = true;
-    _stopLivePhaseFallback();
-    _holdPollOk.value = true;
-    _setLivePhase('hold');
-    var expired = false;
-    final timer = Timer(const Duration(minutes: 12), () {
-      expired = true;
-    });
-    try {
-      while (mounted && _holdForAnswer && !expired) {
-        if (_answerAfter(userIndex)) return true;
-        try {
-          await _pullInboxIntoChat(userIndex);
-          if (mounted && _holdForAnswer) _holdPollOk.value = true;
-        } catch (_) {
-          if (mounted && _holdForAnswer) _holdPollOk.value = false;
-        }
-        if (_answerAfter(userIndex)) return true;
-        if (expired) break;
-        await _waitWhileHolding(const Duration(milliseconds: 400));
-      }
-      return _answerAfter(userIndex);
-    } finally {
-      timer.cancel();
-    }
-  }
-
-  Future<void> _waitWhileHolding(Duration total) async {
-    var left = total;
-    const slice = Duration(milliseconds: 250);
-    while (left > Duration.zero && mounted && _holdForAnswer) {
-      final step = left < slice ? left : slice;
-      await Future<void>.delayed(step);
-      left -= step;
-    }
-  }
-
-  Future<void> _pullInboxIntoChat(int userIndex) async {
-    final res = await widget.api.fetchInbox();
-    final list = (res['items'] as List?) ?? const [];
-    final rows = <Map<String, dynamic>>[];
-    for (final entry in list) {
-      if (entry is! Map) continue;
-      final item = Map<String, dynamic>.from(entry);
-      rows.add(item);
-      final answer = (item['answer'] ?? '').toString().trim();
-      if (answer.isEmpty || item['partial'] == true) continue;
-      await backfillChatFromNotice(
-        sessionId: (item['sessionId'] ?? '').toString(),
-        answer: answer,
-        question: (item['question'] ?? '').toString(),
-        owner: (item['owner'] ?? '').toString(),
-        repo: (item['repo'] ?? '').toString(),
-        bookId: (item['bookId'] ?? '').toString(),
-        turnId: (item['turnId'] ?? '').toString(),
-      );
-    }
-    final askedTurnId = userIndex >= 0 && userIndex < _messages.length
-        ? (_messages[userIndex].turnId ?? '')
-        : '';
-    final picked = pickHeldInboxItem(rows, turnId: askedTurnId);
-    if (picked != null) {
-      if (picked['partial'] == true) {
-        _applyPartialInboxRow(picked);
-      } else {
-        final answer = (picked['answer'] ?? '').toString().trim();
-        if (answer.isNotEmpty) await _placeHeldAnswer(userIndex, answer);
-        await NotificationCenter.instance.notifyPolledFinish(picked);
-      }
-    }
-    _mergeBackfill();
-  }
-
-  void _applyPartialInboxRow(Map<String, dynamic> item) {
-    final activity = (item['activity'] ?? '').toString();
-    final answer = (item['answer'] ?? '').toString();
-    if (activity.trim().isNotEmpty) _liveActivity.value = activity;
-    if (answer.isNotEmpty) _showHeldPreview(answer);
-    if (!_holdForAnswer && (activity.trim().isNotEmpty || answer.isNotEmpty)) {
-      _setLivePhase('generate');
-    }
-  }
-
-  bool _messagesMatchNotice(int userIndex, {required String turnId}) {
-    if (userIndex < 0 || userIndex >= _messages.length) return false;
-    return heldTurnMatchesNotice(
-      turnId: turnId,
-      askedTurnId: _messages[userIndex].turnId ?? '',
-    );
-  }
-
-  void _showHeldPreview(String answer) {
-    final text = stripTaskMarker(answer);
-    if (text.isEmpty || text.length <= _typewriter.fullText.length) return;
-    _typewriter.replacePending(text);
-  }
-
-  Future<void> _placeHeldAnswer(int userIndex, String answer) async {
-    if (!mounted || _releasingHold) return;
-    final text = stripTaskMarker(answer);
-    if (text.isEmpty || _answerAfter(userIndex)) return;
-    if (userIndex < 0 || userIndex >= _messages.length) return;
-    _releasingHold = true;
-    try {
-      if (_livePhase.value == 'hold') {
-        _setLivePhase('generate');
-        await Future<void>.delayed(const Duration(milliseconds: 280));
-        if (!mounted || _answerAfter(userIndex)) return;
-      }
-      setState(() {
-        _insertMessageAfterUser(
-          userIndex,
-          ChatMessage(
-            role: 'assistant',
-            content: text,
-            engine: _liveEngine.value ?? 'acp',
-          ),
-        );
-        _live = false;
-      });
-    } finally {
-      _releasingHold = false;
-    }
-  }
+  void _stop() => _execution?.stop();
 
   void _onChatBackfill() {
-    if (!mounted) return;
-    if (_busy && !_holdForAnswer) return;
+    if (!mounted || _busy) return;
     _mergeBackfill();
-  }
-
-  void _onInboxProgressHint() {
-    if (!mounted || !_holdForAnswer) return;
-    final hint = inboxProgressHint.value;
-    if (hint == null) return;
-    final userIndex = _processingUserIndex;
-    if (userIndex == null) return;
-    if (!_messagesMatchNotice(userIndex, turnId: hint.turnId)) {
-      return;
-    }
-    final activity = hint.activity.trim();
-    final answer = hint.answer.trim();
-    if (activity.isNotEmpty) _liveActivity.value = activity;
-    if (answer.isNotEmpty) _showHeldPreview(answer);
-    if (!_holdForAnswer && (activity.isNotEmpty || answer.isNotEmpty)) {
-      _setLivePhase('generate');
-    }
   }
 
   void _mergeBackfill() {
     final stored = widget.memory?.loadChats(widget.repo.fullName);
     if (stored == null) return;
-    var changed = false;
     for (final entry in stored.transcripts.entries) {
-      final incoming = entry.value.where((message) => message.role == 'assistant');
-      if (incoming.isEmpty) continue;
-      final holdingThis =
-          _holdForAnswer && entry.key == (_sessionId ?? '') && _processingUserIndex != null;
-      if (holdingThis) {
-        final askedTurnId = _messages[_processingUserIndex!].turnId ?? '';
-        final held = answerAfterTurn(entry.value, askedTurnId);
-        if (held != null) {
-          _placeHeldAnswer(_processingUserIndex!, held);
-          changed = true;
-        }
-        continue;
-      }
-      final last = incoming.last;
-      final local = _transcripts[entry.key];
-      final have = local?.any(
-            (message) => message.role == 'assistant' && sameChatText(message.content, last.content),
-          ) ??
-          false;
-      if (have) continue;
+      if (_running.execution(entry.key)?.busy == true) continue;
       _transcripts[entry.key] = List<ChatMessage>.from(entry.value);
-      changed = true;
     }
-    if (!changed || !mounted) return;
-    final answered = _processingUserIndex != null && _answerAfter(_processingUserIndex!);
-    setState(() {
-      if (!_holdForAnswer || answered) _live = false;
-    });
-    _jumpToLatest(force: true);
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _openRunningSessions() async {
+    final task = await Navigator.of(context).push<SessionExecution>(
+      MaterialPageRoute(builder: (_) => RunningSessionsPage(running: _running)),
+    );
+    if (!mounted || task == null) return;
+    if (task.repo.repo.fullName == widget.repo.fullName) {
+      _sessionId = task.sessionId;
+      _shownTurnId = null;
+      _syncExecution();
+      await _persist();
+    } else {
+      await Navigator.of(context).push<void>(MaterialPageRoute(builder: (context) => ChatPage(
+        api: widget.api, repo: task.repo.repo, memory: widget.memory,
+        initialSessionId: task.sessionId,
+        onBack: () => Navigator.of(context).pop(),
+      )));
+      if (mounted) _syncExecution();
+    }
   }
 
   bool get _nearBottom {
@@ -1568,11 +1188,10 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   void dispose() {
-    _stop();
     _usageTimer?.cancel();
     widget.api.linkEpoch.removeListener(_onLinkChanged);
     chatBackfillTick.removeListener(_onChatBackfill);
-    inboxProgressHint.removeListener(_onInboxProgressHint);
+    _running.removeListener(_syncExecution);
     _quickVoice.dispose();
     _disposeStt();
     _micSub?.cancel();
@@ -1581,7 +1200,6 @@ class _ChatPageState extends State<ChatPage> {
     _focus.dispose();
     _scroll.removeListener(_onScrollPosition);
     _scroll.dispose();
-    _stopLivePhaseFallback();
     _cancelStreamScrollFollow();
     _typewriter.dispose();
     _liveEngine.dispose();
@@ -1608,7 +1226,6 @@ class _ChatPageState extends State<ChatPage> {
             children: [
           WxPageHeader(
             onBack: () {
-              _stop();
               widget.onBack();
             },
             backTooltip: '返回仓库',
@@ -1646,6 +1263,8 @@ class _ChatPageState extends State<ChatPage> {
                 onSelected: (value) {
                   if (value == 'new') _newSession();
                   if (value == 'history') _openSessions();
+                  if (value == 'minimize') _newSession();
+                  if (value == 'running') _openRunningSessions();
                 },
                 itemBuilder: (context) => [
                   PopupMenuItem(
@@ -1653,6 +1272,16 @@ class _ChatPageState extends State<ChatPage> {
                     value: 'new',
                     enabled: !_busy && !_preparingChat,
                     child: const Text('新建会话'),
+                  ),
+                  const PopupMenuItem(
+                    key: Key('wx-chat-minimize'),
+                    value: 'minimize',
+                    child: Text('最小化'),
+                  ),
+                  const PopupMenuItem(
+                    key: Key('wx-chat-running'),
+                    value: 'running',
+                    child: Text('执行中会话'),
                   ),
                   const PopupMenuItem(
                     key: Key('wx-chat-history'),

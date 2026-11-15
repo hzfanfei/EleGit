@@ -22,6 +22,7 @@ class ReposPage extends StatefulWidget {
     this.onOpenBooks,
     this.onOpenFiles,
     this.onOpenSettings,
+    this.onOpenRunningSessions,
     this.githubConnected = true,
     this.githubLogin = '',
     this.autoStartOAuth = false,
@@ -34,6 +35,7 @@ class ReposPage extends StatefulWidget {
   final VoidCallback? onOpenBooks;
   final VoidCallback? onOpenFiles;
   final VoidCallback? onOpenSettings;
+  final VoidCallback? onOpenRunningSessions;
   final bool githubConnected;
   final String githubLogin;
   final bool autoStartOAuth;
@@ -311,8 +313,14 @@ class ReposPageState extends State<ReposPage> {
                 icon: const Icon(Icons.more_horiz),
                 onSelected: (value) {
                   if (value == 'github') setState(() => _reauth = true);
+                  if (value == 'running') widget.onOpenRunningSessions?.call();
                 },
                 itemBuilder: (context) => [
+                  if (widget.onOpenRunningSessions != null)
+                    const PopupMenuItem(
+                      value: 'running',
+                      child: Text('执行中会话'),
+                    ),
                   PopupMenuItem(
                     value: 'github',
                     child: Text(widget.githubConnected ? 'GitHub' : '连接 GitHub'),
