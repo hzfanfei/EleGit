@@ -288,7 +288,7 @@ void main() {
   });
 
   for (final systemBack in [false, true]) {
-    testWidgets('leaving running chat without prompt, systemBack=$systemBack',
+    testWidgets('chat exit confirms but running list closes directly, systemBack=$systemBack',
         (tester) async {
       SharedPreferences.setMockInitialValues({});
       final memory = AppMemory(await SharedPreferences.getInstance());
@@ -304,11 +304,28 @@ void main() {
       await tester.tap(find.text('这个仓库最近在做什么？'));
       await tester.pump();
       expect(pool.active.single.sessionId, 's1');
+      await tester.enterText(find.byKey(const Key('wx-chat-input')), '保留草稿');
+      await openRunning(tester);
+      if (systemBack) {
+        await tester.binding.handlePopRoute();
+      } else {
+        await tester.tap(find.byTooltip('关闭执行中'));
+      }
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 700));
+      await tester.pump();
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.text('保留草稿'), findsOneWidget);
       if (systemBack) {
         await tester.binding.handlePopRoute();
       } else {
         await tester.tap(find.byTooltip('返回仓库'));
       }
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.byKey(const Key('wx-leave-chat')), findsOneWidget);
+      expect(pool.active.single.sessionId, 's1');
+      await tester.tap(find.byKey(const Key('wx-leave-chat-ok')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
       expect(find.byType(AlertDialog), findsNothing);

@@ -1057,7 +1057,7 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _openRunningSessions() async {
-    final task = await Navigator.of(context).push<SessionExecution>(
+    final task = await Navigator.of(context, rootNavigator: true).push<SessionExecution>(
       MaterialPageRoute(builder: (_) => RunningSessionsPage(running: _running)),
     );
     if (!mounted || task == null) return;

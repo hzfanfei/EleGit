@@ -132,7 +132,7 @@ void main() {
     expect(find.text('重新打开 GitHub'), findsNothing);
   });
 
-  testWidgets('system and header back leave chat without a confirmation', (tester) async {
+  testWidgets('system and header back confirm before leaving chat', (tester) async {
     final store = await memory();
     final api = FakeWenxiangApi();
 
@@ -153,6 +153,17 @@ void main() {
     await tester.binding.handlePopRoute();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byKey(const Key('wx-leave-chat')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('wx-leave-chat-cancel')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.textContaining('从进度问起'), findsOneWidget);
+    await tester.binding.handlePopRoute();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.byKey(const Key('wx-leave-chat-ok')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
     expect(find.byType(AlertDialog), findsNothing);
     expect(find.text('搜索仓库名'), findsOneWidget);
     expect(find.textContaining('从进度问起'), findsNothing);
@@ -162,6 +173,10 @@ void main() {
     await tester.pump(const Duration(milliseconds: 80));
     expect(find.byKey(const Key('wx-leave-chat')), findsNothing);
     await tester.tap(find.byTooltip('返回仓库'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byKey(const Key('wx-leave-chat')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('wx-leave-chat-ok')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.byKey(const Key('wx-leave-chat')), findsNothing);
@@ -218,6 +233,9 @@ void main() {
     expect(find.textContaining('从进度问起'), findsOneWidget);
 
     await tester.tap(find.byTooltip('返回仓库'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.byKey(const Key('wx-leave-chat-ok')));
     await tester.pumpAndSettle();
     expect(find.text('搜索仓库名'), findsOneWidget);
 
