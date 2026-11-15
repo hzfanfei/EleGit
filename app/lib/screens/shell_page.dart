@@ -25,8 +25,9 @@ import 'running_sessions_page.dart';
 import 'repos_page.dart';
 import 'settings_page.dart';
 import 'static_files_page.dart';
+import 'temporary_chat_page.dart';
 
-enum AppStep { boot, repos, books, files, chat, bookRead }
+enum AppStep { boot, repos, books, files, chat, bookRead, temporaryChat }
 
 class ShellPage extends StatefulWidget {
   const ShellPage({super.key, this.api, this.memory});
@@ -327,6 +328,10 @@ class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
   }
 
   bool _handlePop() {
+    if (_step == AppStep.temporaryChat) {
+      setState(() => _step = AppStep.repos);
+      return true;
+    }
     if (_step == AppStep.bookRead) {
       _backFromBookRead();
       return true;
@@ -393,8 +398,18 @@ class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
           onOpenFiles: _openFiles,
           onOpenSettings: _openSettings,
           onOpenRunningSessions: _openRunningSessions,
+          onOpenTemporaryChat: () => setState(() => _step = AppStep.temporaryChat),
         )),
       ),
+      if (_step == AppStep.temporaryChat)
+        WxFadePage<void>(
+          key: const ValueKey('temporary-chat'),
+          name: 'temporaryChat',
+          child: _fit(TemporaryChatPage(
+            api: _api,
+            onBack: () => setState(() => _step = AppStep.repos),
+          )),
+        ),
       if (_step == AppStep.files)
         WxFadePage<void>(
           key: const ValueKey('files'),
@@ -465,6 +480,8 @@ class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
                 _backFromFiles();
               } else if (name == 'chat' && _step == AppStep.chat) {
                 _backFromChat();
+              } else if (name == 'temporaryChat' && _step == AppStep.temporaryChat) {
+                setState(() => _step = AppStep.repos);
               }
             },
           ),

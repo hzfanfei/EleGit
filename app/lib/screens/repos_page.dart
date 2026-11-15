@@ -25,6 +25,7 @@ class ReposPage extends StatefulWidget {
     this.onOpenFiles,
     this.onOpenSettings,
     this.onOpenRunningSessions,
+    this.onOpenTemporaryChat,
     this.githubConnected = true,
     this.githubLogin = '',
     this.autoStartOAuth = false,
@@ -38,6 +39,7 @@ class ReposPage extends StatefulWidget {
   final VoidCallback? onOpenFiles;
   final VoidCallback? onOpenSettings;
   final VoidCallback? onOpenRunningSessions;
+  final VoidCallback? onOpenTemporaryChat;
   final bool githubConnected;
   final String githubLogin;
   final bool autoStartOAuth;
@@ -316,8 +318,14 @@ class ReposPageState extends State<ReposPage> {
                 onSelected: (value) {
                   if (value == 'github') setState(() => _reauth = true);
                   if (value == 'running') widget.onOpenRunningSessions?.call();
+                  if (value == 'temporary') widget.onOpenTemporaryChat?.call();
                 },
                 itemBuilder: (context) => [
+                  if (widget.onOpenTemporaryChat != null)
+                    const PopupMenuItem(
+                      value: 'temporary',
+                      child: Text('临时会话'),
+                    ),
                   if (widget.onOpenRunningSessions != null)
                     const PopupMenuItem(
                       value: 'running',

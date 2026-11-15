@@ -19,6 +19,7 @@ import {
   sanitizeCursorModel,
   acpEnginePreference,
   resolveAgentCommand,
+  resolveCodexExecutable,
   buildBookAcpPrompt,
   createSessionStore,
   detectCursorEngine,
@@ -131,6 +132,7 @@ import { beginHandoff, handoffActive, publishLiveTurnSnapshots } from "./live-tu
 import { attachNotifications, publishInboxNotice } from "./notifications.js";
 import { startScriptActivityTicker } from "./script-activity-ticker.js";
 import { stat } from "node:fs/promises";
+import { cleanupAbandonedTemporaryChats, createTemporaryChats, TemporaryChat } from "./temporary-chat.js";
 
 loadLocalEnv();
 process.env = envWithNodeOnPath(process.env);
@@ -186,6 +188,12 @@ const bookSessions = createSessionStore({
   readOnly: true,
 });
 const chatTurns = createChatTurns();
+const temporaryChats = createTemporaryChats({
+  createChat: () => new TemporaryChat({ executable: resolveCodexExecutable(), model: acpModelId(process.env, undefined, "codex", "repo") }),
+});
+void cleanupAbandonedTemporaryChats();
+const temporaryCleanupTimer = setInterval(() => { void cleanupAbandonedTemporaryChats(); }, 5 * 60_000);
+temporaryCleanupTimer.unref();
 const beginChatTurn = (sessionId, turnId) => chatTurns.begin(sessionId, turnId);
 const endChatTurn = (sessionId, turn) => chatTurns.end(sessionId, turn);
 
@@ -1449,6 +1457,53 @@ app.post("/v1/books/chat", async (req, res) => {
   } finally {
     if (turn) endChatTurn(turnSessionId, turn);
   }
+});
+
+app.post("/v1/temporary-chats", async (_req, res) => {
+  res.json({ id: await temporaryChats.create() });
+});
+
+app.post("/v1/temporary-chats/:id/ping", (req, res) => {
+  try { temporaryChats.get(req.params.id); res.json({ ok: true }); }
+  catch (err) { sendError(res, err); }
+});
+
+app.delete("/v1/temporary-chats/:id", async (req, res) => {
+  await temporaryChats.close(req.params.id);
+  res.json({ ok: true });
+});
+
+app.post("/v1/temporary-chats/:id/stop", async (req, res) => {
+  try { await temporaryChats.get(req.params.id).interrupt(); res.json({ ok: true }); }
+  catch (err) { sendError(res, err); }
+});
+
+app.post("/v1/temporary-chats/:id/turn", async (req, res) => {
+  try {
+    const chat = temporaryChats.get(req.params.id);
+    const message = String(req.body?.message || "").trim();
+    if (!message || message.length > 100_000) {
+      res.status(400).json({ error: "请输入问题" });
+      return;
+    }
+    if (chat.busy) { res.status(409).json({ error: "上一条回答尚未结束" }); return; }
+    openSse(res);
+    let answer = "";
+    res.on("close", () => {
+      if (!res.writableEnded) void temporaryChats.close(req.params.id);
+    });
+    writeSseSafe(res, { type: "status", phase: "generate" });
+    try {
+      await chat.prompt(message, (delta) => {
+        answer += delta;
+        writeSseSafe(res, { type: "delta", text: delta });
+      });
+      writeSseSafe(res, { type: "done", answer, engine: "codex" });
+    } catch (err) {
+      writeSseSafe(res, { type: "error", error: err.message || "临时会话失败" });
+    }
+    res.end();
+  } catch (err) { sendError(res, err); }
 });
 
 app.post("/v1/chat/cancel", async (req, res) => {

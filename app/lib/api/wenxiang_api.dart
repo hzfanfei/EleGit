@@ -1502,6 +1502,55 @@ class WenxiangApi {
     return res.bodyBytes;
   }
 
+  Future<String> createTemporaryChat() async {
+    final res = await http.post(_uri('/v1/temporary-chats'), headers: _headers)
+        .timeout(const Duration(seconds: 15));
+    final data = await _json(res, fallback: '创建临时会话失败');
+    final id = data['id']?.toString() ?? '';
+    if (id.isEmpty) throw ApiException('创建临时会话失败');
+    return id;
+  }
+
+  Future<void> pingTemporaryChat(String id) async {
+    final res = await http.post(_uri('/v1/temporary-chats/${Uri.encodeComponent(id)}/ping'), headers: _headers)
+        .timeout(const Duration(seconds: 10));
+    await _json(res, fallback: '临时会话已结束');
+  }
+
+  Future<void> closeTemporaryChat(String id) async {
+    try {
+      await http.delete(_uri('/v1/temporary-chats/${Uri.encodeComponent(id)}'), headers: _headers)
+          .timeout(const Duration(seconds: 10));
+    } catch (_) {}
+  }
+
+  Future<void> stopTemporaryChat(String id) async {
+    final res = await http.post(_uri('/v1/temporary-chats/${Uri.encodeComponent(id)}/stop'), headers: _headers)
+        .timeout(const Duration(seconds: 10));
+    await _json(res, fallback: '停止失败');
+  }
+
+  Stream<ChatStreamEvent> temporaryChatStream(String id, String message) async* {
+    final client = http.Client();
+    try {
+      final request = http.Request('POST', _uri('/v1/temporary-chats/${Uri.encodeComponent(id)}/turn'))
+        ..headers.addAll({..._headers, 'Accept': 'text/event-stream'})
+        ..body = jsonEncode({'message': message});
+      final res = await client.send(request).timeout(const Duration(seconds: 25));
+      if (res.statusCode >= 400) {
+        final raw = await res.stream.bytesToString();
+        String error = '临时会话失败';
+        try { error = (jsonDecode(raw)['error'] ?? error).toString(); } catch (_) {}
+        throw ApiException(error);
+      }
+      yield* streamWenxiangSseEventsRequireDone(
+        byteStream: res.stream, client: client, throwIfCancelled: () {},
+      );
+    } finally {
+      client.close();
+    }
+  }
+
   Stream<ChatStreamEvent> chatStream({
     required String owner,
     required String repo,
