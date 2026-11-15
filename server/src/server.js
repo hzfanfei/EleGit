@@ -1497,7 +1497,7 @@ app.post("/v1/temporary-chats/:id/turn", async (req, res) => {
       await chat.prompt(message, (delta) => {
         answer += delta;
         writeSseSafe(res, { type: "delta", text: delta });
-      });
+      }, typeof req.body?.model === "string" ? req.body.model.slice(0, 200) : undefined);
       writeSseSafe(res, { type: "done", answer, engine: "codex" });
     } catch (err) {
       writeSseSafe(res, { type: "error", error: err.message || "临时会话失败" });

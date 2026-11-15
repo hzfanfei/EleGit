@@ -113,7 +113,7 @@ export class TemporaryChat {
     });
   }
 
-  async prompt(text, onDelta) {
+  async prompt(text, onDelta, model) {
     if (this.busy) throw Object.assign(new Error("上一条回答尚未结束"), { status: 409 });
     this.busy = true;
     this.cancelBeforeTurn = false;
@@ -122,13 +122,13 @@ export class TemporaryChat {
       await this.startPromise;
       if (this.closed) throw new Error("临时会话已关闭");
       if (this.cancelBeforeTurn) throw new Error("已停止");
-      await this.runTurn(text, onDelta);
+      await this.runTurn(text, onDelta, model);
     } finally {
       this.busy = false;
     }
   }
 
-  async runTurn(text, onDelta) {
+  async runTurn(text, onDelta, model) {
     let resolve, reject;
     const completed = new Promise((ok, fail) => { resolve = ok; reject = fail; });
     // Attach a handler immediately: a disconnect can reject before turn/start returns.
@@ -136,7 +136,7 @@ export class TemporaryChat {
     const active = { resolve, reject, onDelta, turnId: null };
     this.active = active;
     try {
-      const result = await this.request("turn/start", { threadId: this.threadId, input: [{ type: "text", text, text_elements: [] }] });
+      const result = await this.request("turn/start", { threadId: this.threadId, input: [{ type: "text", text, text_elements: [] }], ...(model ? { model } : this.model ? { model: this.model } : {}) });
       active.turnId = result?.turn?.id;
       if (active.cancelRequested && active.turnId) await this.interrupt();
       await completed;

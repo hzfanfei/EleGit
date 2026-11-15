@@ -1530,12 +1530,12 @@ class WenxiangApi {
     await _json(res, fallback: '停止失败');
   }
 
-  Stream<ChatStreamEvent> temporaryChatStream(String id, String message) async* {
+  Stream<ChatStreamEvent> temporaryChatStream(String id, String message, {String? model}) async* {
     final client = http.Client();
     try {
       final request = http.Request('POST', _uri('/v1/temporary-chats/${Uri.encodeComponent(id)}/turn'))
         ..headers.addAll({..._headers, 'Accept': 'text/event-stream'})
-        ..body = jsonEncode({'message': message});
+        ..body = jsonEncode({'message': message, if (model != null) 'model': model});
       final res = await client.send(request).timeout(const Duration(seconds: 25));
       if (res.statusCode >= 400) {
         final raw = await res.stream.bytesToString();

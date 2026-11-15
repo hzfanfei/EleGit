@@ -109,3 +109,20 @@ test("异常退出后的清理仅删除过期且进程已退出的临时目录",
     assert.equal((await stat(unrelated)).isDirectory(), true);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+
+test("model selection keeps the thread and close removes generated files", async () => {
+  const fake = fakeCodex();
+  const chat = new TemporaryChat({ executable: "fake", model: "default-model", spawnImpl: () => fake.child });
+  await chat.prompt("first", () => {}, "model-one");
+  await mkdir(path.join(chat.cwd, "generated"));
+  await writeFile(path.join(chat.cwd, "generated", "result.txt"), "temporary");
+  await chat.prompt("second", () => {}, "model-two");
+  await chat.prompt("default", () => {});
+  const turns = fake.requests.filter((r) => r.method === "turn/start");
+  assert.deepEqual(turns.map((r) => r.params.model), ["model-one", "model-two", "default-model"]);
+  assert.equal(new Set(turns.map((r) => r.params.threadId)).size, 1);
+  const dir = chat.cwd;
+  await chat.close();
+  await assert.rejects(stat(dir), { code: "ENOENT" });
+});

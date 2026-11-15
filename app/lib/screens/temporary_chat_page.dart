@@ -8,6 +8,8 @@ import '../theme.dart';
 import '../widgets/wx_chat_markdown_stream.dart';
 import '../widgets/wx_chrome.dart';
 import '../widgets/wx_speak_answer.dart';
+import '../widgets/wx_hold_to_speak.dart';
+import '../voice/hold_to_speak_session.dart';
 
 class TemporaryChatPage extends StatefulWidget {
   const TemporaryChatPage({super.key, required this.api, required this.onBack});
@@ -29,10 +31,19 @@ class _TemporaryChatPageState extends State<TemporaryChatPage> {
   bool _busy = false;
   bool _stopping = false;
   Timer? _heartbeat;
+  late final HoldToSpeakSession _hold;
+  bool _voiceMode = false;
+  String? _model;
 
   @override
   void initState() {
     super.initState();
+    _hold = HoldToSpeakSession(
+      api: widget.api,
+      onChanged: () { if (mounted) setState(() {}); },
+      onTranscript: (text) { if (mounted) { _input.text = text; unawaited(_send()); } },
+      onError: (message) { if (mounted) setState(() => _error = message); },
+    );
     unawaited(_open());
   }
 
@@ -52,6 +63,24 @@ class _TemporaryChatPageState extends State<TemporaryChatPage> {
     }
   }
 
+  Future<void> _selectModel() async {
+    try {
+      final data = await widget.api.codexModels();
+      if (!mounted) return;
+      final models = (data['models'] as List? ?? []).whereType<Map>().toList();
+      final selected = await showModalBottomSheet<String>(context: context, builder: (context) => SafeArea(
+        child: ListView(shrinkWrap: true, children: [
+          const ListTile(title: Text('选择临时会话模型')),
+          ListTile(title: const Text('跟随默认模型'), trailing: _model == null ? const Icon(Icons.check) : null, onTap: () => Navigator.pop(context, '')),
+          for (final model in models)
+            ListTile(title: Text('${model['label'] ?? model['id']}'), trailing: model['id'] == _model ? const Icon(Icons.check) : null,
+              onTap: () => Navigator.pop(context, model['id'].toString())),
+        ]),
+      ));
+      if (selected != null && mounted) setState(() => _model = selected.isEmpty ? null : selected);
+    } catch (err) { if (mounted) setState(() => _error = '获取模型失败：$err'); }
+  }
+
   Future<void> _send() async {
     final text = _input.text.trim();
     final id = _id;
@@ -67,7 +96,7 @@ class _TemporaryChatPageState extends State<TemporaryChatPage> {
     _scrollDown();
     var sawError = false;
     try {
-      await for (final event in widget.api.temporaryChatStream(id, text)) {
+      await for (final event in widget.api.temporaryChatStream(id, text, model: _model)) {
         if (!mounted) return;
         if (event.type == 'delta') {
           _liveText.value += event.text;
@@ -115,6 +144,7 @@ class _TemporaryChatPageState extends State<TemporaryChatPage> {
 
   @override
   void dispose() {
+    _hold.dispose();
     _heartbeat?.cancel();
     final id = _id;
     if (id != null) unawaited(widget.api.closeTemporaryChat(id));
@@ -130,6 +160,10 @@ class _TemporaryChatPageState extends State<TemporaryChatPage> {
       body: Column(children: [
         WxPageHeader(showMark: false, title: '临时会话', subtitle: '不关联项目，退出后丢弃', onBack: widget.onBack),
         const WxHairline(),
+        Align(alignment: Alignment.centerRight, child: TextButton.icon(
+          onPressed: _busy ? null : _selectModel,
+          icon: const Icon(Icons.tune), label: Text(_model ?? '选择模型'),
+        )),
         Expanded(
           child: ListView(
             controller: _scroll,
@@ -158,7 +192,18 @@ class _TemporaryChatPageState extends State<TemporaryChatPage> {
           child: Padding(
             padding: const EdgeInsets.fromLTRB(Wx.inset, 0, Wx.inset, 12),
             child: Row(children: [
-              Expanded(child: TextField(
+              IconButton(
+                tooltip: _voiceMode ? '键盘输入' : '按住说话',
+                onPressed: _busy || _hold.active ? null : () => setState(() => _voiceMode = !_voiceMode),
+                icon: Icon(_voiceMode ? Icons.keyboard_alt_outlined : Icons.mic_outlined),
+              ),
+              Expanded(child: _voiceMode ? WxHoldToSpeakPad(
+                enabled: _id != null && (!_busy || _hold.sttBusy),
+                holding: _hold.holding, holdCancel: _hold.holdCancel, sttBusy: _hold.sttBusy,
+                hint: _hold.holdLive.isNotEmpty ? _hold.holdLive : _hold.holdHint.isNotEmpty ? _hold.holdHint : '按住 说话',
+                onHoldStart: _hold.beginHold, onHoldMove: _hold.moveHold, onHoldEnd: _hold.endHold,
+                onCancelRecognize: _hold.sttBusy ? () => unawaited(_hold.cancelRecognition()) : null,
+              ) : TextField(
                 controller: _input, minLines: 1, maxLines: 4,
                 textInputAction: TextInputAction.send,
                 onSubmitted: _busy ? null : (_) => _send(),
