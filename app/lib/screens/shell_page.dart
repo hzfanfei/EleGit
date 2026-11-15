@@ -57,7 +57,6 @@ class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
   bool _githubConnected = false;
   bool _oauthAutoStart = false;
   final _reposKey = GlobalKey<ReposPageState>();
-  bool _chatLeavePrompt = false;
   String? _requestedSessionId;
 
   bool _uploadingClientErrors = false;
@@ -296,39 +295,6 @@ class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
     });
   }
 
-  /// Edge swipe and the system back button both land here. Ask first so a
-  /// stray swipe does not drop the chat; the header back button still leaves
-  /// immediately via [_backFromChat].
-  Future<void> _confirmLeaveChat() async {
-    if (_chatLeavePrompt || !mounted || _step != AppStep.chat) return;
-    _chatLeavePrompt = true;
-    try {
-      final ok = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          key: const Key('wx-leave-chat'),
-          title: const Text('离开这个对话？'),
-          content: const Text('确认后回到仓库列表。'),
-          actions: [
-            TextButton(
-              key: const Key('wx-leave-chat-cancel'),
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              key: const Key('wx-leave-chat-ok'),
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('离开'),
-            ),
-          ],
-        ),
-      );
-      if (ok == true && mounted && _step == AppStep.chat) _backFromChat();
-    } finally {
-      _chatLeavePrompt = false;
-    }
-  }
-
   bool _handlePop() {
     if (_step == AppStep.bookRead) {
       _backFromBookRead();
@@ -343,7 +309,7 @@ class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
       return true;
     }
     if (_step == AppStep.chat) {
-      unawaited(_confirmLeaveChat());
+      _backFromChat();
       return true;
     }
     if (_step == AppStep.repos) {

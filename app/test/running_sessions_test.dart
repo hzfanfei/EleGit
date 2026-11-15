@@ -12,6 +12,7 @@ import 'package:wenxiang/chat/running_sessions.dart';
 import 'package:wenxiang/models.dart';
 import 'package:wenxiang/persist/app_memory.dart';
 import 'package:wenxiang/screens/chat_page.dart';
+import 'package:wenxiang/screens/shell_page.dart';
 import 'package:wenxiang/theme.dart';
 
 import 'support/fake_api.dart';
@@ -142,7 +143,7 @@ void main() {
           find.byKey(const Key('wx-chat-input')), 'original image question');
       await tester.tap(find.byKey(const Key('wx-chat-send')));
       await tester.pump();
-      await menu(tester, '最小化');
+      await menu(tester, '新建会话');
       final newId = pool.repo(sampleRepo(), null).activeId;
       expect(newId, isNot('s1'));
       await tester.enterText(
@@ -161,7 +162,7 @@ void main() {
     });
   }
 
-  testWidgets('minimize creates another session and both contexts keep running',
+  testWidgets('new session creates another session and both contexts keep running',
       (tester) async {
     final api = ControlledApi();
     final pool = RunningSessions.of(api);
@@ -176,7 +177,7 @@ void main() {
     await tester.tap(find.text('这个仓库最近在做什么？'));
     await tester.pump();
     expect(pool.active.length, 1);
-    await menu(tester, '最小化');
+    await menu(tester, '新建会话');
     expect(api.createSessionCalls, 1);
     expect(api.cancelled, isEmpty);
     expect(
@@ -187,7 +188,7 @@ void main() {
     final second = pool.active.last.sessionId;
     expect(
         api.histories[second]!.any((m) => m.content.contains('最近在做')), isFalse);
-    await menu(tester, '执行中会话');
+    await menu(tester, '执行中');
     expect(find.byKey(const ValueKey('wx-running-s1')), findsOneWidget);
     expect(find.byKey(ValueKey('wx-running-$second')), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('wx-running-s1')));
@@ -198,7 +199,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 120));
     expect(find.textContaining('第一会话'), findsWidgets);
     expect(api.cancelled, isEmpty);
-    await menu(tester, '执行中会话');
+    await menu(tester, '执行中');
     await tester.tap(find.descendant(
         of: find.byKey(ValueKey('wx-running-$second')),
         matching: find.byTooltip('中断')));
@@ -208,6 +209,53 @@ void main() {
     pool.stopAll();
     await tester.pumpWidget(const SizedBox());
   });
+
+  for (final systemBack in [false, true]) {
+    testWidgets('leaving running chat without prompt, systemBack=$systemBack',
+        (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      final memory = AppMemory(await SharedPreferences.getInstance());
+      final api = ControlledApi();
+      final pool = RunningSessions.of(api);
+      await tester.pumpWidget(MaterialApp(
+          theme: wenxiangTheme(),
+          home: ShellPage(api: api, memory: memory)));
+      await ready(tester);
+      await tester.tap(find.text('demo').first);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.tap(find.text('这个仓库最近在做什么？'));
+      await tester.pump();
+      expect(pool.active.single.sessionId, 's1');
+      if (systemBack) {
+        await tester.binding.handlePopRoute();
+      } else {
+        await tester.tap(find.byTooltip('返回仓库'));
+      }
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.text('搜索仓库名'), findsOneWidget);
+      expect(api.cancelled, isEmpty);
+      await tester.tap(find.byTooltip('更多'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('执行中'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('wx-running-s1')), findsOneWidget);
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.text('搜索仓库名'), findsOneWidget);
+      expect(pool.active.single.sessionId, 's1');
+      expect(api.cancelled, isEmpty);
+      api.finish('s1', '离开后仍然完成');
+      await tester.pumpAndSettle();
+      expect(pool.active, isEmpty);
+      expect(memory.loadChats('octo/demo').transcripts['s1']!.last.content,
+          '离开后仍然完成');
+      await tester.pumpWidget(const SizedBox());
+    });
+  }
 
   testWidgets('leaving a project preserves the stream, queue and saved answer',
       (tester) async {
@@ -282,7 +330,7 @@ void main() {
     await ready(tester);
     await tester.tap(find.text('这个仓库最近在做什么？'));
     await tester.pump();
-    await menu(tester, '执行中会话');
+    await menu(tester, '执行中');
     await tester.tap(find.byKey(const ValueKey('wx-running-other-session')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 350));

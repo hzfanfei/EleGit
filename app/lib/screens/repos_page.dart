@@ -319,7 +319,7 @@ class ReposPageState extends State<ReposPage> {
                   if (widget.onOpenRunningSessions != null)
                     const PopupMenuItem(
                       value: 'running',
-                      child: Text('执行中会话'),
+                      child: Text('执行中'),
                     ),
                   PopupMenuItem(
                     value: 'github',

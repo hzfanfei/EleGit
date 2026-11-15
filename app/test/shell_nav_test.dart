@@ -132,7 +132,7 @@ void main() {
     expect(find.text('重新打开 GitHub'), findsNothing);
   });
 
-  testWidgets('system back asks before leaving chat; header back returns', (tester) async {
+  testWidgets('system and header back leave chat without a confirmation', (tester) async {
     final store = await memory();
     final api = FakeWenxiangApi();
 
@@ -153,22 +153,7 @@ void main() {
     await tester.binding.handlePopRoute();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
-    expect(find.byKey(const Key('wx-leave-chat')), findsOneWidget);
-    expect(find.textContaining('从进度问起'), findsOneWidget);
-    expect(api.startOAuthCalls, 0);
-
-    await tester.tap(find.byKey(const Key('wx-leave-chat-cancel')));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 400));
-    expect(find.byKey(const Key('wx-leave-chat')), findsNothing);
-    expect(find.textContaining('从进度问起'), findsOneWidget);
-
-    await tester.binding.handlePopRoute();
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
-    await tester.tap(find.byKey(const Key('wx-leave-chat-ok')));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byType(AlertDialog), findsNothing);
     expect(find.text('搜索仓库名'), findsOneWidget);
     expect(find.textContaining('从进度问起'), findsNothing);
 

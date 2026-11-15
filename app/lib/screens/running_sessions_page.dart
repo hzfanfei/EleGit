@@ -13,7 +13,7 @@ class RunningSessionsPage extends StatelessWidget {
         body: SafeArea(
             child: Column(children: [
           WxPageHeader(
-            title: '执行中会话',
+            title: '执行中',
             onBack: () => Navigator.of(context).pop(),
           ),
           const WxHairline(),

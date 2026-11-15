@@ -1118,7 +1118,7 @@ class _ChatPageState extends State<ChatPage> {
                         ),
                       ),
                       TextButton.icon(
-                        onPressed: _busy
+                        onPressed: _preparingChat
                             ? null
                             : () async {
                                 Navigator.pop(context);
@@ -1258,25 +1258,19 @@ class _ChatPageState extends State<ChatPage> {
                 onSelected: (value) {
                   if (value == 'new') _newSession();
                   if (value == 'history') _openSessions();
-                  if (value == 'minimize') _newSession();
                   if (value == 'running') _openRunningSessions();
                 },
                 itemBuilder: (context) => [
                   PopupMenuItem(
                     key: const Key('wx-chat-new-session'),
                     value: 'new',
-                    enabled: !_busy && !_preparingChat,
+                    enabled: !_preparingChat,
                     child: const Text('新建会话'),
-                  ),
-                  const PopupMenuItem(
-                    key: Key('wx-chat-minimize'),
-                    value: 'minimize',
-                    child: Text('最小化'),
                   ),
                   const PopupMenuItem(
                     key: Key('wx-chat-running'),
                     value: 'running',
-                    child: Text('执行中会话'),
+                    child: Text('执行中'),
                   ),
                   const PopupMenuItem(
                     key: Key('wx-chat-history'),
