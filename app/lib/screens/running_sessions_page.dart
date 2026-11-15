@@ -73,17 +73,6 @@ class _RunningSessionRow extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.fromLTRB(14, 12, 6, 12),
             child: Row(children: [
-              Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.12),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(attention ? Icons.help_outline : Icons.sync,
-                    color: color, size: 18),
-              ),
-              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
