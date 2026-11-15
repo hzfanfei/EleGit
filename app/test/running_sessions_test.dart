@@ -90,10 +90,10 @@ Future<void> menu(WidgetTester tester, String text) async {
 }
 
 void expectRunningCount(int count) {
+  expect(find.byKey(const Key('wx-running-float')), findsNothing);
   final badge = find.byKey(const Key('wx-running-count'));
   if (count == 0) {
     expect(badge, findsNothing);
-    expect(find.byKey(const Key('wx-running-float')), findsNothing);
   } else {
     expect(find.descendant(of: badge, matching: find.text('$count')),
         findsOneWidget);
@@ -101,7 +101,13 @@ void expectRunningCount(int count) {
 }
 
 Future<void> openRunning(WidgetTester tester) async {
-  await tester.tap(find.byKey(const Key('wx-running-float')).last);
+  final chatMore = find.byKey(const Key('wx-chat-more'));
+  await tester.tap(chatMore.evaluate().isEmpty
+      ? find.byKey(const Key('wx-home-more'))
+      : chatMore.last);
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 350));
+  await tester.tap(find.text('执行中').last);
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 350));
   await tester.pump();
@@ -239,7 +245,7 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('floating entry and open list track additions and completions',
+  testWidgets('more menu count and open list track additions and completions',
       (tester) async {
     SharedPreferences.setMockInitialValues({});
     final memory = AppMemory(await SharedPreferences.getInstance());
