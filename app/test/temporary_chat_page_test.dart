@@ -23,7 +23,7 @@ class TemporaryApi extends WenxiangApi {
   @override
   Future<void> pingTemporaryChat(String id) async {}
   @override
-  Stream<ChatStreamEvent> temporaryChatStream(String id, String message, {String? model}) async* {
+  Stream<ChatStreamEvent> temporaryChatStream(String id, String message, {String? model, List<String> images = const []}) async* {
     lastModel = model;
     sent.add('$id:$message');
     yield ChatStreamEvent(type: 'delta', text: '这是回答');

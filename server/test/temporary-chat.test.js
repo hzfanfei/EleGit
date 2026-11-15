@@ -28,6 +28,7 @@ function fakeCodex({ ephemeral = true, autoComplete = true } = {}) {
       if (msg.method === "thread/start") send({ id: msg.id, result: { thread: { id: "thread", ephemeral } } });
       if (msg.method === "turn/start") {
         send({ id: msg.id, result: { turn: { id: "turn" } } });
+        send({ method: "item/started", params: { threadId: "thread", item: { type: "reasoning" } } });
         send({ method: "item/agentMessage/delta", params: { threadId: "thread", delta: "回答" } });
         if (autoComplete) send({ method: "turn/completed", params: { threadId: "thread", turn: { status: "completed" } } });
       }
@@ -53,6 +54,19 @@ test("临时线程复用本次上下文且不传其他会话", async () => {
     assert.equal(starts[0].params.ephemeral, true);
     assert.equal(starts[0].params.config.project_doc_max_bytes, 0);
     assert.deepEqual(fake.requests.filter((r) => r.method === "turn/start").map((r) => r.params.input[0].text), ["第一个问题", "追问"]);
+  } finally { await chat.close(); }
+});
+
+test("临时图片与进度只传给当前线程", async () => {
+  const fake = fakeCodex();
+  const chat = new TemporaryChat({ executable: "fake", spawnImpl: () => fake.child });
+  try {
+    const statuses = [];
+    const image = "data:image/png;base64,aGVsbG8=";
+    await chat.prompt("看图", () => {}, undefined, [image], (status) => statuses.push(status));
+    const turn = fake.requests.find((r) => r.method === "turn/start");
+    assert.deepEqual(turn.params.input, [{ type: "text", text: "看图", text_elements: [] }, { type: "image", url: image }]);
+    assert.deepEqual(statuses, ["正在思考"]);
   } finally { await chat.close(); }
 });
 

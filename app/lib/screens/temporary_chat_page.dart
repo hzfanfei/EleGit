@@ -1,14 +1,20 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../api/wenxiang_api.dart';
+import '../chat/chat_image.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../widgets/wx_chat_markdown_stream.dart';
 import '../widgets/wx_chrome.dart';
 import '../widgets/wx_speak_answer.dart';
 import '../widgets/wx_hold_to_speak.dart';
+import '../widgets/chat_image_strip.dart';
 import '../voice/hold_to_speak_session.dart';
 
 class TemporaryChatPage extends StatefulWidget {
@@ -26,6 +32,9 @@ class _TemporaryChatPageState extends State<TemporaryChatPage> {
   final _scroll = ScrollController();
   final _liveText = ValueNotifier<String>('');
   final List<ChatMessage> _messages = [];
+  final Map<ChatMessage, List<_TemporaryImage>> _messageImages = {};
+  final List<_TemporaryImage> _draftImages = [];
+  String _status = '正在回答…';
   String? _id;
   String? _error;
   bool _busy = false;
@@ -81,26 +90,65 @@ class _TemporaryChatPageState extends State<TemporaryChatPage> {
     } catch (err) { if (mounted) setState(() => _error = '获取模型失败：$err'); }
   }
 
+  Future<void> _pickImages() async {
+    final room = chatImageMaxCount - _draftImages.length;
+    if (room <= 0) return;
+    final source = await showModalBottomSheet<ImageSource>(context: context, builder: (context) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [
+      ListTile(leading: const Icon(Icons.photo_library_outlined), title: const Text('从相册选择'), onTap: () => Navigator.pop(context, ImageSource.gallery)),
+      ListTile(leading: const Icon(Icons.photo_camera_outlined), title: const Text('拍照'), onTap: () => Navigator.pop(context, ImageSource.camera)),
+    ])));
+    if (source == null || !mounted) return;
+    if (source == ImageSource.camera && !(await Permission.camera.request()).isGranted) {
+      if (mounted) setState(() => _error = '需要相机权限才能拍照');
+      return;
+    }
+    try {
+      final picker = ImagePicker();
+      final List<XFile> files;
+      if (source == ImageSource.gallery) {
+        files = await picker.pickMultiImage(maxWidth: 1600, maxHeight: 1600, imageQuality: 82, limit: room);
+      } else {
+        final file = await picker.pickImage(source: source, maxWidth: 1600, maxHeight: 1600, imageQuality: 82);
+        files = file == null ? [] : [file];
+      }
+      final images = <_TemporaryImage>[];
+      var skipped = false;
+      for (final file in files.take(room)) {
+        final bytes = await file.readAsBytes();
+        if (bytes.length > chatImageMaxBytes) { skipped = true; continue; }
+        images.add(_TemporaryImage(bytes, chatImageMime(mimeType: file.mimeType, path: file.path)));
+      }
+      if (mounted) setState(() { _draftImages.addAll(images); if (skipped) _error = '有图片太大，已跳过'; });
+    } catch (_) { if (mounted) setState(() => _error = '没能读取图片'); }
+  }
+
   Future<void> _send() async {
     final text = _input.text.trim();
     final id = _id;
-    if (text.isEmpty || id == null || _busy) return;
+    if ((text.isEmpty && _draftImages.isEmpty) || id == null || _busy) return;
+    final images = List<_TemporaryImage>.from(_draftImages);
+    final message = ChatMessage(role: 'user', content: text);
     _input.clear();
     _liveText.value = '';
     setState(() {
       _error = null;
       _busy = true;
       _stopping = false;
-      _messages.add(ChatMessage(role: 'user', content: text));
+      _status = '正在回答…';
+      _draftImages.clear();
+      _messages.add(message);
+      if (images.isNotEmpty) _messageImages[message] = images;
     });
     _scrollDown();
     var sawError = false;
     try {
-      await for (final event in widget.api.temporaryChatStream(id, text, model: _model)) {
+      await for (final event in widget.api.temporaryChatStream(id, text, model: _model, images: [for (final image in images) 'data:${image.mime};base64,${base64Encode(image.bytes)}'])) {
         if (!mounted) return;
         if (event.type == 'delta') {
           _liveText.value += event.text;
           _scrollDown();
+        } else if (event.type == 'status' && event.detail != null) {
+          setState(() => _status = event.detail!);
         } else if (event.type == 'error') {
           sawError = true;
           if (!_stopping) setState(() => _error = event.error ?? '回答失败');
@@ -172,14 +220,14 @@ class _TemporaryChatPageState extends State<TemporaryChatPage> {
               if (_messages.isEmpty)
                 const Text('从空白开始，退出后对话将清除。', style: TextStyle(color: Wx.muted)),
               for (final message in _messages)
-                _MessageBubble(message: message, api: widget.api),
+                _MessageBubble(message: message, api: widget.api, images: _messageImages[message] ?? const []),
               if (_busy)
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 10),
                   child: ValueListenableBuilder<String>(
                     valueListenable: _liveText,
                     builder: (context, value, _) => value.isEmpty
-                        ? const Text('正在回答…', style: TextStyle(color: Wx.muted))
+                        ? Text(_status, style: const TextStyle(color: Wx.muted))
                         : WxChatMarkdownStream(source: _liveText, mdStyle: chatMarkdownStyle(Theme.of(context)), api: widget.api, showCaret: true),
                   ),
                 ),
@@ -191,12 +239,15 @@ class _TemporaryChatPageState extends State<TemporaryChatPage> {
           top: false,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(Wx.inset, 0, Wx.inset, 12),
-            child: Row(children: [
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              if (_draftImages.isNotEmpty) ChatImageStrip(images: const [], draftBytes: [for (final image in _draftImages) image.bytes], onRemove: (index) => setState(() => _draftImages.removeAt(index))),
+              Row(children: [
               IconButton(
                 tooltip: _voiceMode ? '键盘输入' : '按住说话',
                 onPressed: _busy || _hold.active ? null : () => setState(() => _voiceMode = !_voiceMode),
                 icon: Icon(_voiceMode ? Icons.keyboard_alt_outlined : Icons.mic_outlined),
               ),
+              IconButton(tooltip: '上传图片', onPressed: _busy || _hold.active || _draftImages.length >= chatImageMaxCount ? null : _pickImages, icon: const Icon(Icons.image_outlined)),
               Expanded(child: _voiceMode ? WxHoldToSpeakPad(
                 enabled: _id != null && (!_busy || _hold.sttBusy),
                 holding: _hold.holding, holdCancel: _hold.holdCancel, sttBusy: _hold.sttBusy,
@@ -216,6 +267,7 @@ class _TemporaryChatPageState extends State<TemporaryChatPage> {
                 icon: Icon(_busy ? Icons.stop : Icons.arrow_upward),
               ),
             ]),
+            ]),
           ),
         ),
       ]),
@@ -224,9 +276,10 @@ class _TemporaryChatPageState extends State<TemporaryChatPage> {
 }
 
 class _MessageBubble extends StatelessWidget {
-  const _MessageBubble({required this.message, required this.api});
+  const _MessageBubble({required this.message, required this.api, required this.images});
   final ChatMessage message;
   final WenxiangApi api;
+  final List<_TemporaryImage> images;
 
   @override
   Widget build(BuildContext context) {
@@ -242,10 +295,17 @@ class _MessageBubble extends StatelessWidget {
           borderRadius: BorderRadius.circular(Wx.radius),
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          WxChatMarkdownStream(source: ValueNotifier<String>(message.content), mdStyle: chatMarkdownStyle(Theme.of(context)), api: api, showCaret: false),
+          if (images.isNotEmpty) ChatImageStrip(images: const [], draftBytes: [for (final image in images) image.bytes]),
+          if (message.content.isNotEmpty) WxChatMarkdownStream(source: ValueNotifier<String>(message.content), mdStyle: chatMarkdownStyle(Theme.of(context)), api: api, showCaret: false),
           if (!user) WxAnswerActions(text: message.content, api: api),
         ]),
       ),
     );
   }
+}
+
+class _TemporaryImage {
+  const _TemporaryImage(this.bytes, this.mime);
+  final Uint8List bytes;
+  final String mime;
 }

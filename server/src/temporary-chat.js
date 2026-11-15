@@ -71,6 +71,12 @@ export class TemporaryChat {
         else pending.resolve(msg.result);
       } else if (this.active && msg.params?.threadId === this.threadId) {
         if (msg.method === "item/agentMessage/delta") this.active.onDelta(msg.params.delta || "");
+        if (msg.method === "item/started") {
+          const type = msg.params.item?.type;
+          if (type === "reasoning") this.active.onStatus?.("正在思考");
+          if (type === "commandExecution") this.active.onStatus?.("正在执行命令");
+          if (type === "webSearch") this.active.onStatus?.("正在搜索");
+        }
         if (msg.method === "turn/completed") {
           const turn = msg.params.turn || {};
           if (turn.status === "completed") this.active.resolve();
@@ -113,7 +119,7 @@ export class TemporaryChat {
     });
   }
 
-  async prompt(text, onDelta, model) {
+  async prompt(text, onDelta, model, images = [], onStatus) {
     if (this.busy) throw Object.assign(new Error("上一条回答尚未结束"), { status: 409 });
     this.busy = true;
     this.cancelBeforeTurn = false;
@@ -122,21 +128,22 @@ export class TemporaryChat {
       await this.startPromise;
       if (this.closed) throw new Error("临时会话已关闭");
       if (this.cancelBeforeTurn) throw new Error("已停止");
-      await this.runTurn(text, onDelta, model);
+      await this.runTurn(text, onDelta, model, images, onStatus);
     } finally {
       this.busy = false;
     }
   }
 
-  async runTurn(text, onDelta, model) {
+  async runTurn(text, onDelta, model, images, onStatus) {
     let resolve, reject;
     const completed = new Promise((ok, fail) => { resolve = ok; reject = fail; });
     // Attach a handler immediately: a disconnect can reject before turn/start returns.
     completed.catch(() => {});
-    const active = { resolve, reject, onDelta, turnId: null };
+    const active = { resolve, reject, onDelta, onStatus, turnId: null };
     this.active = active;
     try {
-      const result = await this.request("turn/start", { threadId: this.threadId, input: [{ type: "text", text, text_elements: [] }], ...(model ? { model } : this.model ? { model: this.model } : {}) });
+      const input = [...(text ? [{ type: "text", text, text_elements: [] }] : []), ...images.map((url) => ({ type: "image", url }))];
+      const result = await this.request("turn/start", { threadId: this.threadId, input, ...(model ? { model } : this.model ? { model: this.model } : {}) });
       active.turnId = result?.turn?.id;
       if (active.cancelRequested && active.turnId) await this.interrupt();
       await completed;

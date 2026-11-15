@@ -230,6 +230,7 @@ const tunnelHealth = createTunnelHealth({
 const app = express();
 app.use(cors(corsOptions));
 app.options("*", cors(corsOptions));
+app.use("/v1/temporary-chats/:id/turn", express.json({ limit: "23mb" }));
 app.use(express.json({ limit: "1mb" }));
 
 function sendError(res, err) {
@@ -1482,7 +1483,12 @@ app.post("/v1/temporary-chats/:id/turn", async (req, res) => {
   try {
     const chat = temporaryChats.get(req.params.id);
     const message = String(req.body?.message || "").trim();
-    if (!message || message.length > 100_000) {
+    const images = req.body?.images ?? [];
+    if (!Array.isArray(images) || images.length > 4 || images.some((image) => typeof image !== "string" || image.length > 5_592_430 || !/^data:image\/(jpeg|png|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/.test(image))) {
+      res.status(400).json({ error: "图片格式或大小不正确" });
+      return;
+    }
+    if ((!message && !images.length) || message.length > 100_000) {
       res.status(400).json({ error: "请输入问题" });
       return;
     }
@@ -1497,7 +1503,8 @@ app.post("/v1/temporary-chats/:id/turn", async (req, res) => {
       await chat.prompt(message, (delta) => {
         answer += delta;
         writeSseSafe(res, { type: "delta", text: delta });
-      }, typeof req.body?.model === "string" ? req.body.model.slice(0, 200) : undefined);
+      }, typeof req.body?.model === "string" ? req.body.model.slice(0, 200) : undefined, images,
+      (detail) => writeSseSafe(res, { type: "status", detail }));
       writeSseSafe(res, { type: "done", answer, engine: "codex" });
     } catch (err) {
       writeSseSafe(res, { type: "error", error: err.message || "临时会话失败" });
