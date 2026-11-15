@@ -93,10 +93,18 @@ void expectRunningCount(int count) {
   final badge = find.byKey(const Key('wx-running-count'));
   if (count == 0) {
     expect(badge, findsNothing);
+    expect(find.byKey(const Key('wx-running-float')), findsNothing);
   } else {
     expect(find.descendant(of: badge, matching: find.text('$count')),
         findsOneWidget);
   }
+}
+
+Future<void> openRunning(WidgetTester tester) async {
+  await tester.tap(find.byKey(const Key('wx-running-float')).last);
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 350));
+  await tester.pump();
 }
 
 void main() {
@@ -201,7 +209,15 @@ void main() {
     final second = pool.active.last.sessionId;
     expect(
         api.histories[second]!.any((m) => m.content.contains('最近在做')), isFalse);
-    await menu(tester, '执行中');
+    await tester.enterText(find.byKey(const Key('wx-chat-input')), '未发送草稿');
+    await openRunning(tester);
+    await tester.tap(find.byTooltip('关闭执行中'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 700));
+    await tester.pump();
+    expect(find.text('未发送草稿'), findsOneWidget);
+    expectRunningCount(2);
+    await openRunning(tester);
     expect(find.byKey(const ValueKey('wx-running-s1')), findsOneWidget);
     expect(find.byKey(ValueKey('wx-running-$second')), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('wx-running-s1')));
@@ -212,7 +228,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 120));
     expect(find.textContaining('第一会话'), findsWidgets);
     expect(api.cancelled, isEmpty);
-    await menu(tester, '执行中');
+    await openRunning(tester);
     await tester.tap(find.descendant(
         of: find.byKey(ValueKey('wx-running-$second')),
         matching: find.byTooltip('中断')));
@@ -223,7 +239,7 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('home count and open running list track additions and completions',
+  testWidgets('floating entry and open list track additions and completions',
       (tester) async {
     SharedPreferences.setMockInitialValues({});
     final memory = AppMemory(await SharedPreferences.getInstance());
@@ -250,10 +266,7 @@ void main() {
     api.finish('first', 'first answer');
     await tester.pumpAndSettle();
     expectRunningCount(1);
-    await tester.tap(find.byKey(const Key('wx-home-more')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('执行中'));
-    await tester.pumpAndSettle();
+    await openRunning(tester);
     expect(find.byKey(const ValueKey('wx-running-first')), findsNothing);
     expect(find.byKey(const ValueKey('wx-running-second')), findsOneWidget);
     start('third');
@@ -301,10 +314,7 @@ void main() {
       expect(find.byType(AlertDialog), findsNothing);
       expect(find.text('搜索仓库名'), findsOneWidget);
       expect(api.cancelled, isEmpty);
-      await tester.tap(find.byTooltip('更多'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('执行中'));
-      await tester.pumpAndSettle();
+      await openRunning(tester);
       expect(find.byKey(const ValueKey('wx-running-s1')), findsOneWidget);
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
@@ -394,7 +404,7 @@ void main() {
     await ready(tester);
     await tester.tap(find.text('这个仓库最近在做什么？'));
     await tester.pump();
-    await menu(tester, '执行中');
+    await openRunning(tester);
     await tester.tap(find.byKey(const ValueKey('wx-running-other-session')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 350));

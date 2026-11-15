@@ -18,6 +18,7 @@ import '../utils/background_sync.dart';
 import '../utils/notification_center.dart';
 import '../widgets/wx_chrome.dart';
 import '../widgets/wx_motion.dart';
+import '../widgets/wx_running_sessions_button.dart';
 import 'book_reader_page.dart';
 import 'books_page.dart';
 import 'chat_page.dart';
@@ -361,7 +362,6 @@ class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
           onOpenBooks: _openBooks,
           onOpenFiles: _openFiles,
           onOpenSettings: _openSettings,
-          onOpenRunningSessions: _openRunningSessions,
         )),
       ),
       if (_step == AppStep.files)
@@ -422,7 +422,8 @@ class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
         _handlePop();
       },
       child: SizedBox.expand(
-        child: Navigator(
+        child: Stack(children: [
+          Navigator(
             pages: _pages(),
             onDidRemovePage: (page) {
               final name = page.name;
@@ -437,6 +438,12 @@ class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
               }
             },
           ),
+          if (_step != AppStep.boot && _step != AppStep.chat)
+            WxRunningSessionsButton(
+              running: RunningSessions.of(_api),
+              onPressed: _openRunningSessions,
+            ),
+        ]),
         ),
     );
   }

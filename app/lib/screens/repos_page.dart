@@ -4,12 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../api/wenxiang_api.dart';
-import '../chat/running_sessions.dart';
 import '../copy/time.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../widgets/wx_chrome.dart';
-import '../widgets/wx_running_more_icon.dart';
 import '../widgets/wx_link_route.dart';
 import '../repo_open.dart';
 import '../widgets/wx_clone_scrim.dart';
@@ -24,7 +22,6 @@ class ReposPage extends StatefulWidget {
     this.onOpenBooks,
     this.onOpenFiles,
     this.onOpenSettings,
-    this.onOpenRunningSessions,
     this.githubConnected = true,
     this.githubLogin = '',
     this.autoStartOAuth = false,
@@ -37,7 +34,6 @@ class ReposPage extends StatefulWidget {
   final VoidCallback? onOpenBooks;
   final VoidCallback? onOpenFiles;
   final VoidCallback? onOpenSettings;
-  final VoidCallback? onOpenRunningSessions;
   final bool githubConnected;
   final String githubLogin;
   final bool autoStartOAuth;
@@ -312,17 +308,11 @@ class ReposPageState extends State<ReposPage> {
                 enabled: !blocked,
                 color: Wx.surface,
                 surfaceTintColor: Colors.transparent,
-                icon: WxRunningMoreIcon(running: RunningSessions.of(widget.api)),
+                icon: const Icon(Icons.more_horiz),
                 onSelected: (value) {
                   if (value == 'github') setState(() => _reauth = true);
-                  if (value == 'running') widget.onOpenRunningSessions?.call();
                 },
                 itemBuilder: (context) => [
-                  if (widget.onOpenRunningSessions != null)
-                    const PopupMenuItem(
-                      value: 'running',
-                      child: Text('执行中'),
-                    ),
                   PopupMenuItem(
                     value: 'github',
                     child: Text(widget.githubConnected ? 'GitHub' : '连接 GitHub'),

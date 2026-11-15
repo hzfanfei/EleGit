@@ -33,7 +33,7 @@ import '../widgets/agent_decision_card.dart';
 import '../widgets/agent_details_dialog.dart';
 import '../widgets/chat_image_strip.dart';
 import '../widgets/wx_chrome.dart';
-import '../widgets/wx_running_more_icon.dart';
+import '../widgets/wx_running_sessions_button.dart';
 import '../widgets/wx_motion.dart';
 import '../widgets/wx_link_route.dart';
 import '../widgets/wx_hold_to_speak.dart';
@@ -1255,11 +1255,10 @@ class _ChatPageState extends State<ChatPage> {
                 enabled: !_preparingChat,
                 color: Wx.surface,
                 surfaceTintColor: Colors.transparent,
-                icon: WxRunningMoreIcon(running: _running),
+                icon: const Icon(Icons.more_horiz),
                 onSelected: (value) {
                   if (value == 'new') _newSession();
                   if (value == 'history') _openSessions();
-                  if (value == 'running') _openRunningSessions();
                 },
                 itemBuilder: (context) => [
                   PopupMenuItem(
@@ -1267,11 +1266,6 @@ class _ChatPageState extends State<ChatPage> {
                     value: 'new',
                     enabled: !_preparingChat,
                     child: const Text('新建会话'),
-                  ),
-                  const PopupMenuItem(
-                    key: Key('wx-chat-running'),
-                    value: 'running',
-                    child: Text('执行中'),
                   ),
                   const PopupMenuItem(
                     key: Key('wx-chat-history'),
@@ -1415,6 +1409,10 @@ class _ChatPageState extends State<ChatPage> {
                 ),
               ),
             ),
+          WxRunningSessionsButton(
+            running: _running,
+            onPressed: _openRunningSessions,
+          ),
           if (_preparingChat)
             const ColoredBox(
               color: Color(0x990C0D0F),

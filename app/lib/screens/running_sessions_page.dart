@@ -15,6 +15,13 @@ class RunningSessionsPage extends StatelessWidget {
           WxPageHeader(
             title: '执行中',
             onBack: () => Navigator.of(context).pop(),
+            trailing: [
+              IconButton(
+                tooltip: '关闭执行中',
+                onPressed: () => Navigator.of(context).pop(),
+                icon: const Icon(Icons.close),
+              ),
+            ],
           ),
           const WxHairline(),
           Expanded(
