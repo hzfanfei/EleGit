@@ -13,6 +13,8 @@ import 'package:wenxiang/models.dart';
 import 'package:wenxiang/persist/app_memory.dart';
 import 'package:wenxiang/screens/chat_page.dart';
 import 'package:wenxiang/screens/shell_page.dart';
+import 'package:wenxiang/screens/running_sessions_page.dart';
+import 'package:wenxiang/copy/running_status.dart';
 import 'package:wenxiang/theme.dart';
 
 import 'support/fake_api.dart';
@@ -115,6 +117,73 @@ Future<void> openRunning(WidgetTester tester) async {
 
 void main() {
   tearDown(RunningSessions.stopAllForTesting);
+
+  test('running status uses only the newest block without thought or commands', () {
+    expect(latestRunningActivity('思考·**旧的思考**\n旧的内容\n\n跑脚本\n'
+        'powershell -command private-command · 已跑 8 秒'), '执行脚本 · 已跑 8 秒');
+    expect(latestRunningActivity('跑脚本\n旧的输出\n\n思考·**新的思考**\n详细推理'),
+        '正在思考');
+    expect(latestRunningActivity('旧状态\r\n\r\n**正在读取文件**\r\n正文'),
+        '正在读取文件');
+    expect(latestRunningActivity('跑脚本\ncommand · 已跑 2 分 12 秒'),
+        '执行脚本 · 已跑 2 分 12 秒');
+    expect(latestRunningActivity('  '), isEmpty);
+  });
+
+  testWidgets('running rows keep equal fixed heights on narrow screens',
+      (tester) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = ControlledApi();
+    final pool = RunningSessions.of(api);
+    final repo = pool.repo(sampleRepo(), null);
+    for (final id in ['layout-first', 'layout-second']) {
+      final message = ChatMessage(role: 'user',
+          content: '$id 很长的会话标题\n继续描述一个很长的任务', turnId: id);
+      repo.transcripts[id] = [message];
+      pool.session(repo, id, false).enqueue(message);
+    }
+    await tester.pumpWidget(MaterialApp(
+      theme: wenxiangTheme(),
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(1.4)),
+        child: child!,
+      ),
+      home: RunningSessionsPage(running: pool),
+    ));
+    await ready(tester);
+    api.streams['layout-first']!.add(ChatStreamEvent(type: 'status',
+        phase: 'activity', detail: '思考·**旧的思考**\n很多旧内容\n\n跑脚本\n'
+        'powershell -command very-long-command · 已跑 8 秒'));
+    await tester.pumpAndSettle();
+    expect(find.text('执行脚本 · 已跑 8 秒'), findsOneWidget);
+    expect(find.textContaining('旧的思考'), findsNothing);
+    expect(find.textContaining('powershell'), findsNothing);
+    for (final id in ['layout-first', 'layout-second']) {
+      expect(tester.getSize(find.byKey(ValueKey('wx-running-$id'))).height, 112);
+    }
+    api.streams['layout-first']!.add(ChatStreamEvent(type: 'status',
+        phase: 'activity', detail: '旧的状态\n\n思考·下一步\n新的思考内容'));
+    await tester.pumpAndSettle();
+    expect(find.text('正在思考'), findsOneWidget);
+    expect(find.text('执行脚本 · 已跑 8 秒'), findsNothing);
+    expect(tester.getSize(find.byKey(const ValueKey('wx-running-layout-first')))
+        .height, 112);
+    final task = pool.execution('layout-first')!;
+    task.holding = true;
+    pool.changed();
+    await tester.pump();
+    expect(find.text('等待回复'), findsOneWidget);
+    task.decision = ChatStreamEvent(type: 'ask');
+    pool.changed();
+    await tester.pump();
+    expect(find.text('等待确认'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    pool.stopAll();
+    await tester.pumpWidget(const SizedBox());
+  });
 
   test(
       'late background notices merge before saving without replacing live messages',
@@ -430,7 +499,8 @@ void main() {
     await openRunning(tester);
     await tester.tap(find.byKey(const ValueKey('wx-running-other-session')));
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 350));
+    await tester.pump(const Duration(milliseconds: 700));
+    await tester.pump();
     expect(find.text('octo/other'), findsOneWidget);
     expect(find.text('另一个项目的任务'), findsWidgets);
     expect(pool.active.length, 2);

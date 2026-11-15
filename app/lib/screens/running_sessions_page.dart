@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../chat/running_sessions.dart';
+import '../copy/running_status.dart';
 import '../theme.dart';
 import '../widgets/wx_chrome.dart';
 
@@ -31,35 +32,97 @@ class RunningSessionsPage extends StatelessWidget {
               final tasks = running.active;
               if (tasks.isEmpty) return const Center(child: Text('暂无执行中的会话'));
               return ListView.separated(
-                padding: const EdgeInsets.all(Wx.inset),
+                padding: const EdgeInsets.all(12),
                 itemCount: tasks.length,
-                separatorBuilder: (context, index) => const WxHairline(),
-                itemBuilder: (context, index) {
-                  final task = tasks[index];
-                  return ListTile(
-                    key: ValueKey('wx-running-${task.sessionId}'),
-                    contentPadding: const EdgeInsets.symmetric(vertical: 8),
-                    leading: Icon(
-                        task.decision != null ? Icons.help_outline : Icons.sync,
-                        color: task.decision != null ? Wx.accent : Wx.ok),
-                    title: Text(task.title,
-                        maxLines: 2, overflow: TextOverflow.ellipsis),
-                    subtitle: Text('${task.repo.repo.fullName} · '
-                        '${task.stopped ? '正在中断' : task.decision != null ? '等待确认' : task.holding ? '等待回复' : '运行中'}'
-                        '${task.queued.isEmpty ? '' : ' · ${task.queued.length} 条排队'}'
-                        '${task.activity.isEmpty ? '' : '\n${task.activity}'}'),
-                    onTap: () => Navigator.of(context).pop(task),
-                    trailing: IconButton(
-                      tooltip: '中断',
-                      onPressed: task.stopped ? null : task.stop,
-                      icon: const Icon(Icons.stop_circle_outlined,
-                          color: Wx.danger),
-                    ),
-                  );
-                },
+                separatorBuilder: (context, index) =>
+                    const SizedBox(height: 10),
+                itemBuilder: (context, index) => _RunningSessionRow(
+                  key: ValueKey('wx-running-${tasks[index].sessionId}'),
+                  task: tasks[index],
+                ),
               );
             },
           )),
         ])),
       );
+}
+
+class _RunningSessionRow extends StatelessWidget {
+  const _RunningSessionRow({super.key, required this.task});
+  final SessionExecution task;
+
+  @override
+  Widget build(BuildContext context) {
+    final attention = task.decision != null || task.holding;
+    final color = task.stopped
+        ? Wx.muted
+        : attention
+            ? Wx.accent
+            : Wx.ok;
+    return SizedBox(
+      height: 112,
+      child: Material(
+        color: Wx.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: const BorderSide(color: Wx.hairline),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => Navigator.of(context).pop(task),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 6, 12),
+            child: Row(children: [
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(attention ? Icons.help_outline : Icons.sync,
+                    color: color, size: 18),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(task.title.replaceAll(RegExp(r'\s+'), ' ').trim(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 15,
+                            height: 1.3,
+                            fontWeight: FontWeight.w600,
+                            color: Wx.text)),
+                    const SizedBox(height: 4),
+                    Text(task.repo.repo.fullName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 11, height: 1.3, color: Wx.muted)),
+                    const SizedBox(height: 8),
+                    Text(runningSessionStatus(task),
+                        key: ValueKey('wx-running-status-${task.sessionId}'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style:
+                            TextStyle(fontSize: 12, height: 1.3, color: color)),
+                  ],
+                ),
+              ),
+              IconButton(
+                tooltip: '中断',
+                onPressed: task.stopped ? null : task.stop,
+                icon: const Icon(Icons.stop_circle_outlined,
+                    color: Wx.danger, size: 21),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
 }
