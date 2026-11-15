@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f6f3e9">
+  <title>鹈鹕的骑行日记</title>
+  <style>
+    :root { color-scheme: light; font-family: "Microsoft YaHei", "PingFang SC", sans-serif; background: #f6f3e9; color: #304c48; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 28px; }
+    main { width: min(1080px, 100%); }
+    .top { display: flex; justify-content: space-between; align-items: center; gap: 18px; margin-bottom: 18px; }
+    .brand { font-size: 12px; font-weight: 800; letter-spacing: .2em; color: #6b8378; }
+    .number { font-family: Georgia, serif; font-size: 13px; color: #84988c; letter-spacing: .08em; }
+    .card { position: relative; overflow: hidden; background: #d9eae1; border: 1px solid #cbded2; border-radius: 12px; box-shadow: 0 18px 50px #526c5914; }
+    .intro { position: absolute; z-index: 2; top: clamp(25px, 5vw, 55px); left: clamp(25px, 6vw, 70px); }
+    .eyebrow { margin: 0 0 12px; color: #6c8b7b; font-size: 10px; font-weight: 800; letter-spacing: .23em; }
+    h1 { margin: 0; font-family: Georgia, "Songti SC", SimSun, serif; font-size: clamp(29px, 5vw, 52px); font-weight: 500; letter-spacing: .08em; color: #36584d; }
+    .intro p:last-child { margin: 12px 0 0; color: #708d7e; font-size: clamp(12px, 1.5vw, 14px); letter-spacing: .1em; }
+    svg { display: block; width: 100%; height: auto; }
+    .wheel { animation: wheel-spin 1.1s linear infinite; transform-box: fill-box; transform-origin: center; }
+    .rider { animation: bob 1.1s ease-in-out infinite; }
+    .cloud-a { animation: drift 17s ease-in-out infinite alternate; }
+    .cloud-b { animation: drift 23s ease-in-out infinite alternate-reverse; }
+    .land { animation: landscape 4s linear infinite; }
+    .paused * { animation-play-state: paused !important; }
+    @keyframes wheel-spin { to { transform: rotate(360deg); } }
+    @keyframes bob { 50% { transform: translateY(-3px) rotate(-.3deg); } }
+    @keyframes drift { to { transform: translateX(30px); } }
+    @keyframes landscape { to { transform: translateX(-120px); } }
+    .footer { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 22px 2px; }
+    .caption { margin: 0; color: #819185; font-size: 12px; letter-spacing: .12em; line-height: 1.7; }
+    button { flex: none; border: 1px solid #aec3b3; border-radius: 999px; background: transparent; color: #557367; padding: 11px 19px; font: inherit; font-size: 12px; letter-spacing: .08em; cursor: pointer; }
+    button:hover { background: #e6eee4; }
+    button:focus-visible { outline: 3px solid #d29266; outline-offset: 3px; }
+    @media (max-width: 600px) { body { padding: 18px; } .number { display: none; } .intro { top: 20px; left: 22px; } .intro p:last-child { margin-top: 7px; } .eyebrow { margin-bottom: 7px; } .caption { font-size: 11px; } }
+    @media (prefers-reduced-motion: reduce) { .wheel, .rider, .cloud-a, .cloud-b, .land { animation-play-state: paused; } }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="top"><span class="brand">LITTLE JOY CLUB</span><span class="number">A LITTLE MOMENT OF JOY &nbsp; / &nbsp; 01</span></div>
+    <section class="card" id="scene" aria-label="一只鹈鹕骑自行车的动画">
+      <div class="intro"><p class="eyebrow">A SUNNY LITTLE RIDE</p><h1>鹈鹕的骑行日记</h1><p>慢慢骑，风会告诉你答案。</p></div>
+      <svg viewBox="0 0 1000 650" role="img" aria-label="一只白色鹈鹕骑着绿色自行车，沿着乡间小路兜风">
+        <defs>
+          <pattern id="speckles" width="32" height="32" patternUnits="userSpaceOnUse"><circle cx="3" cy="5" r=".7" fill="#fff" opacity=".35"/><circle cx="21" cy="19" r=".6" fill="#6b8977" opacity=".12"/></pattern>
+          <g id="spokes" fill="none" stroke="#b8c5b5" stroke-width="1.4"><circle r="101"/><circle r="91"/><path d="M-99 0H99M0-99V99M-70-70 70 70M70-70-70 70M-38-92 38 92M38-92-38 92M-92-38 92 38M-92 38 92-38"/><circle r="7" fill="#f6f2e5" stroke="#718e7e" stroke-width="3"/></g>
+        </defs>
+        <rect width="1000" height="650" fill="url(#speckles)"/>
+        <circle cx="812" cy="135" r="48" fill="#f9e7ac" opacity=".9"/>
+        <g fill="#f7f7ea" opacity=".72"><path class="cloud-a" d="M667 225c9-18 27-22 42-10 10-25 47-23 55 1 17-6 32 2 34 16H661c0-3 3-6 6-7Z"/><path class="cloud-b" d="M119 235c10-16 27-18 39-8 10-19 38-19 47 0 13-5 25 1 27 12H113c0-2 2-3 6-4Z"/></g>
+        <path d="M0 474Q116 409 241 463T501 450T760 457T1000 430V650H0Z" fill="#bad5bd"/>
+        <path d="M0 511Q153 461 304 503T615 497T1000 488V650H0Z" fill="#9ebfa4"/>
+        <path d="M0 550Q215 521 426 540T1000 531V650H0Z" fill="#ebdaba"/>
+        <path d="M0 592Q251 576 480 589T1000 579V650H0Z" fill="#e2cba6"/>
+        <g class="land" stroke="#92ae92" stroke-width="3" stroke-linecap="round" fill="none"><path d="M115 523l-4-15m4 15 8-13m-8 13-11-6M239 535l-3-14m3 14 8-11M807 518l-3-13m3 13 8-11M935 529l-4-17m4 17 10-11M1055 523l-4-15m4 15 8-13"/></g>
+        <ellipse cx="505" cy="552" rx="288" ry="19" fill="#a9987c" opacity=".18"/>
+        <!-- wheels -->
+        <g transform="translate(289 445)"><g class="wheel"><use href="#spokes"/></g><circle r="104" fill="none" stroke="#526f64" stroke-width="8"/><circle r="97" fill="none" stroke="#f6f1df" stroke-width="3"/></g>
+        <g transform="translate(698 445)"><g class="wheel"><use href="#spokes"/></g><circle r="104" fill="none" stroke="#526f64" stroke-width="8"/><circle r="97" fill="none" stroke="#f6f1df" stroke-width="3"/></g>
+        <!-- bicycle frame -->
+        <g fill="none" stroke="#507d68" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"><path d="M289 445 392 329 480 445H289l180-103 229 103-51-153"/><path d="M392 329h77l11 116M647 292l-13-25h-26"/></g>
+        <g fill="none" stroke="#d5e5ce" stroke-width="2" opacity=".8"><path d="M292 441 392 333 477 443M395 332h70l13 109M483 441l-184 1M474 344l215 98"/></g>
+        <path d="M368 323q24-10 52-3" fill="none" stroke="#835e4c" stroke-width="10" stroke-linecap="round"/>
+        <path d="M603 265q12-8 24 0" fill="none" stroke="#835e4c" stroke-width="8" stroke-linecap="round"/>
+        <circle cx="480" cy="445" r="26" fill="#d9e5d2" stroke="#668876" stroke-width="5"/>
+        <g id="pedals" stroke="#567465" stroke-width="6" stroke-linecap="round"><path id="crank"/><path id="pedal1"/><path id="pedal2"/></g>
+        <!-- far leg -->
+        <path id="legBack" d="M407 352 L435 389 L456 445" fill="none" stroke="#c88451" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+        <g class="rider">
+          <!-- tail, body and folded wing -->
+          <path d="M363 308q-42-3-56-39 21 10 43 5-11-13-15-25 32 9 50 32" fill="#f4f3e9" stroke="#6d8980" stroke-width="3" stroke-linejoin="round"/>
+          <path d="M360 268q-7-49 33-66 33-13 58 8 20 17 26 51 14 33 50 35-11 45-64 58-52 14-92-11-30-19-11-75Z" fill="#faf9ef" stroke="#6d8980" stroke-width="3"/>
+          <path d="M378 280q28-35 76-12 15 7 32 27-17 27-52 30-35 2-56-20" fill="#e4e9de" stroke="#b4c5b7" stroke-width="2"/>
+          <path d="M389 295q31 17 66 6m-57 8q27 10 49 3" fill="none" stroke="#c5d2c6" stroke-width="2" stroke-linecap="round"/>
+          <!-- neck and head -->
+          <path d="M453 280q38-21 48-61 4-17-5-35-10-19-3-38 10-29 43-29 32 0 43 27 8 20-4 41-13 23-19 47-6 41-32 70" fill="#faf9ef" stroke="#6d8980" stroke-width="3" stroke-linejoin="round"/>
+          <!-- characteristic long bill and pouch -->
+          <path d="M561 159q50 7 134 32-71 4-130-3-13-3-18-12Z" fill="#e9aa69" stroke="#9d775f" stroke-width="3" stroke-linejoin="round"/>
+          <path d="M561 187q52 6 134 4-33 23-70 30-45 8-64-34Z" fill="#efc092" stroke="#ad866c" stroke-width="3" stroke-linejoin="round"/>
+          <path d="M570 175q47 11 103 16" fill="none" stroke="#c98d5c" stroke-width="2"/>
+          <circle cx="550" cy="150" r="4.5" fill="#405d55"/><circle cx="551" cy="149" r="1.2" fill="#fff"/>
+          <ellipse cx="534" cy="164" rx="9" ry="5" fill="#e6aaa0" opacity=".5"/>
+          <!-- arm to handlebar -->
+          <path d="M470 296q30-4 57-29 23-19 46-5 17 10 34 3" fill="none" stroke="#6d8980" stroke-width="14" stroke-linecap="round"/>
+          <path d="M470 296q30-4 57-29 23-19 46-5 17 10 34 3" fill="none" stroke="#faf9ef" stroke-width="9" stroke-linecap="round"/>
+        </g>
+        <!-- near leg moves with the crank -->
+        <path id="legFront" d="M419 349 L451 388 L504 445" fill="none" stroke="#dc9b61" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
+        <g fill="#f9f4df"><circle cx="157" cy="543" r="3"/><circle cx="163" cy="539" r="3"/><circle cx="169" cy="543" r="3"/><circle cx="830" cy="533" r="3"/><circle cx="836" cy="529" r="3"/><circle cx="842" cy="533" r="3"/></g>
+      </svg>
+    </section>
+    <div class="footer"><p class="caption">给生活一点时间，也给自己一点风景。<br>TAKE THE SCENIC ROUTE.</p><button id="toggle" type="button" aria-pressed="false">Ⅱ &nbsp; 暂停动画</button></div>
+  </main>
+  <script>
+    (() => {
+      const scene = document.getElementById('scene');
+      const button = document.getElementById('toggle');
+      const crank = document.getElementById('crank');
+      const pedal1 = document.getElementById('pedal1');
+      const pedal2 = document.getElementById('pedal2');
+      const legFront = document.getElementById('legFront');
+      const legBack = document.getElementById('legBack');
+      const motion = matchMedia('(prefers-reduced-motion: reduce)');
+      let paused = motion.matches, last = null, angle = 0;
+      function render(time) {
+        if (!paused && last !== null) angle += Math.min(time - last, 50) * Math.PI * 2 / 1100;
+        last = time;
+        const dx = Math.cos(angle) * 24, dy = Math.sin(angle) * 24;
+        const x1 = 480 + dx, y1 = 445 + dy, x2 = 480 - dx, y2 = 445 - dy;
+        crank.setAttribute('d', `M${x1} ${y1} L${x2} ${y2}`);
+        pedal1.setAttribute('d', `M${x1 - 9} ${y1}h18`);
+        pedal2.setAttribute('d', `M${x2 - 9} ${y2}h18`);
+        legFront.setAttribute('d', `M419 349 Q${(419 + x1) / 2 - 12} ${y1 - 47} ${x1} ${y1}`);
+        legBack.setAttribute('d', `M407 352 Q${(407 + x2) / 2 - 15} ${y2 - 43} ${x2} ${y2}`);
+        requestAnimationFrame(render);
+      }
+      function sync() {
+        scene.classList.toggle('paused', paused);
+        button.setAttribute('aria-pressed', String(paused));
+        button.textContent = paused ? '▶  继续动画' : 'Ⅱ  暂停动画';
+      }
+      button.addEventListener('click', () => { paused = !paused; last = null; sync(); });
+      sync();
+      requestAnimationFrame(render);
+    })();
+  </script>
+</body>
+</html>
