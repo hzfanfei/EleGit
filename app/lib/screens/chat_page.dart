@@ -63,6 +63,8 @@ class ChatPage extends StatefulWidget {
     this.callMedia,
     this.callClient,
     this.openAnswerLink,
+    this.temporary = false,
+    this.onOpenFiles,
   });
 
   final WenxiangApi api;
@@ -77,6 +79,8 @@ class ChatPage extends StatefulWidget {
 
   /// When set, used instead of the system browser. Tests record the tapped URL.
   final Future<bool> Function(Uri uri)? openAnswerLink;
+  final bool temporary;
+  final VoidCallback? onOpenFiles;
 
   @override
   State<ChatPage> createState() => _ChatPageState();
@@ -221,7 +225,7 @@ class _ChatPageState extends State<ChatPage> {
     _restoreLocal();
     chatBackfillTick.addListener(_onChatBackfill);
     _running.addListener(_syncExecution);
-    _agentMode = widget.memory?.agentModeFor(widget.repo.fullName) ?? false;
+    _agentMode = widget.memory?.agentModeFor(widget.repo.fullName) ?? widget.temporary;
     widget.api
         .warmChatSession(widget.repo.owner, widget.repo.name)
         .catchError((_) {});
@@ -362,6 +366,10 @@ class _ChatPageState extends State<ChatPage> {
   Future<void> _openCall() async {
     if (!_voiceCall || _preparingChat || _busy || _live || _holding || _holdPending || _sttBusy) return;
     _quickVoice.interruptReply();
+    if (widget.temporary) {
+      try { await widget.api.prepareVoiceChatSession(sessionId: _sessionId, agentMode: _agentMode); }
+      catch (err) { if (mounted) _snack(err.toString()); return; }
+    }
     if (!mounted) return;
     await openVoiceCall(
       context,
@@ -674,6 +682,7 @@ class _ChatPageState extends State<ChatPage> {
     _shownTurnId = null;
     _syncExecution();
     _persist();
+    if (widget.temporary) _warmAcp();
   }
 
   Future<void> _closeSession(ChatSession session) async {
@@ -1224,9 +1233,9 @@ class _ChatPageState extends State<ChatPage> {
             onBack: () {
               widget.onBack();
             },
-            backTooltip: '返回仓库',
-            title: widget.repo.fullName,
-            subtitle: subtitle,
+            backTooltip: widget.temporary ? '结束临时会话' : '返回仓库',
+            title: widget.temporary ? '临时会话' : widget.repo.fullName,
+            subtitle: widget.temporary ? '退出后清除对话和文件' : subtitle,
             status: WxLinkQualityMark(api: widget.api),
             trailing: [
               _AgentModeChip(
@@ -1260,8 +1269,10 @@ class _ChatPageState extends State<ChatPage> {
                   if (value == 'new') _newSession();
                   if (value == 'history') _openSessions();
                   if (value == 'running') _openRunningSessions();
+                  if (value == 'files') widget.onOpenFiles?.call();
                 },
                 itemBuilder: (context) => [
+                  if (widget.onOpenFiles != null) const PopupMenuItem(value: 'files', child: Text('本次生成文件')),
                   PopupMenuItem(
                     key: const Key('wx-chat-new-session'),
                     value: 'new',
@@ -1290,6 +1301,7 @@ class _ChatPageState extends State<ChatPage> {
                 itemCount == 0
                     ? _EmptyChat(
                         onPick: _preparingChat ? null : _send,
+                        temporary: widget.temporary,
                       )
                     : NotificationListener<ScrollNotification>(
                         onNotification: _onChatScrollNotification,
@@ -1430,22 +1442,23 @@ class _ChatPageState extends State<ChatPage> {
 }
 
 class _EmptyChat extends StatelessWidget {
-  const _EmptyChat({required this.onPick});
+  const _EmptyChat({required this.onPick, this.temporary = false});
   final void Function(String text)? onPick;
+  final bool temporary;
 
   @override
   Widget build(BuildContext context) {
     return ListView(
       padding: const EdgeInsets.fromLTRB(Wx.inset, 36, Wx.inset, 16),
       children: [
-        Text('从进度问起。', style: Theme.of(context).textTheme.headlineMedium),
+        Text(temporary ? '从空白开始。' : '从进度问起。', style: Theme.of(context).textTheme.headlineMedium),
         const SizedBox(height: 8),
         Text(
-          '连上本机问象后可直接问；否则会按本地进度简要回答。不编造。',
+          temporary ? '对话和文件仅用于本次临时会话，退出后清除。' : '连上本机问象后可直接问；否则会按本地进度简要回答。不编造。',
           style: Theme.of(context).textTheme.bodyMedium,
         ),
         const SizedBox(height: 28),
-        for (final q in _ChatPageState._suggestions)
+        for (final q in temporary ? const ['帮我梳理一个想法', '帮我写一段文字', '帮我生成一个文件'] : _ChatPageState._suggestions)
           _SuggestRow(label: q, onTap: onPick == null ? null : () => onPick!(q)),
       ],
     );
@@ -1954,7 +1967,6 @@ class _VoiceTurn extends StatelessWidget {
     this.footer,
     this.trailing,
     this.bottom = 24,
-    this.lead = 6,
   });
 
   final String voice;
@@ -1965,7 +1977,6 @@ class _VoiceTurn extends StatelessWidget {
   final Widget? footer;
   final Widget? trailing;
   final double bottom;
-  final double lead;
 
   @override
   Widget build(BuildContext context) {
@@ -1975,7 +1986,7 @@ class _VoiceTurn extends StatelessWidget {
       railColor: railColor,
       railWidth: railWidth,
       bottom: bottom,
-      lead: lead,
+      lead: 6,
       footer: footer,
       trailing: trailing,
       child: child,

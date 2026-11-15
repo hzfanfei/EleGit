@@ -69,6 +69,13 @@ class RunningSessions extends ChangeNotifier {
 
   void changed() => notifyListeners();
 
+  void discard() {
+    stopAll();
+    chatBackfillTick.removeListener(_mergeBackfill);
+    for (final repo in _repos.values) { repo.transcripts.clear(); repo.sessions.clear(); }
+    _repos.clear(); _executions.clear(); _testPools.remove(this);
+  }
+
   @visibleForTesting
   void stopAll() {
     for (final execution in _executions.values) {
@@ -217,7 +224,7 @@ class SessionExecution {
         try {
           await _run();
         } catch (error) {
-          recordClientError(error, kind: 'chat');
+          if (!pool.api.ephemeral) recordClientError(error, kind: 'chat');
           messages.add(ChatMessage(role: 'error', content: error.toString()));
         }
         final answer = stripTaskMarker(text);
@@ -231,6 +238,9 @@ class SessionExecution {
           reply.engine = engine;
         }
         await repo.persist();
+        if (pool.api.ephemeral && answer.isNotEmpty && !stopped) {
+          unawaited(NotificationCenter.instance.notifyTemporaryFinish(sessionId));
+        }
       }
     } finally {
       busy = false;
@@ -312,7 +322,7 @@ class SessionExecution {
             (accepted && (failure == null || isChatTransportDrop(cause!))))) {
       await _hold();
     } else if (failure != null) {
-      recordClientError(failure!, kind: 'chat');
+      if (!pool.api.ephemeral) recordClientError(failure!, kind: 'chat');
       messages.add(ChatMessage(role: 'error', content: failure.toString()));
     }
   }
@@ -342,7 +352,9 @@ class SessionExecution {
             final answer = (row['answer'] ?? '').toString();
             if (answer.isNotEmpty) text = answer;
             if (row['partial'] != true && answer.isNotEmpty) {
-              await NotificationCenter.instance.notifyPolledFinish(row);
+              if (pool.api.ephemeral) {
+                await NotificationCenter.instance.notifyTemporaryFinish(sessionId);
+              } else { await NotificationCenter.instance.notifyPolledFinish(row); }
               return;
             }
           }

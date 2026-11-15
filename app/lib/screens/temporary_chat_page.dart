@@ -1,311 +1,91 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:permission_handler/permission_handler.dart';
-
+import 'package:url_launcher/url_launcher.dart';
 import '../api/wenxiang_api.dart';
-import '../chat/chat_image.dart';
+import '../api/temporary_project_api.dart';
+import '../chat/running_sessions.dart';
 import '../models.dart';
-import '../theme.dart';
-import '../widgets/wx_chat_markdown_stream.dart';
-import '../widgets/wx_chrome.dart';
 import '../widgets/wx_speak_answer.dart';
-import '../widgets/wx_hold_to_speak.dart';
-import '../widgets/chat_image_strip.dart';
-import '../voice/hold_to_speak_session.dart';
+import 'chat_page.dart';
 
+/// Same project chat page, with a disposable workspace and no persistent memory.
 class TemporaryChatPage extends StatefulWidget {
   const TemporaryChatPage({super.key, required this.api, required this.onBack});
-
   final WenxiangApi api;
   final VoidCallback onBack;
-
   @override
   State<TemporaryChatPage> createState() => _TemporaryChatPageState();
 }
 
 class _TemporaryChatPageState extends State<TemporaryChatPage> {
-  final _input = TextEditingController();
-  final _scroll = ScrollController();
-  final _liveText = ValueNotifier<String>('');
-  final List<ChatMessage> _messages = [];
-  final Map<ChatMessage, List<_TemporaryImage>> _messageImages = {};
-  final List<_TemporaryImage> _draftImages = [];
-  String _status = '正在回答…';
-  String? _id;
-  String? _error;
-  bool _busy = false;
-  bool _stopping = false;
-  Timer? _heartbeat;
-  late final HoldToSpeakSession _hold;
-  bool _voiceMode = false;
-  String? _model;
-
-  @override
-  void initState() {
-    super.initState();
-    _hold = HoldToSpeakSession(
-      api: widget.api,
-      onChanged: () { if (mounted) setState(() {}); },
-      onTranscript: (text) { if (mounted) { _input.text = text; unawaited(_send()); } },
-      onError: (message) { if (mounted) setState(() => _error = message); },
-    );
-    unawaited(_open());
+  late final _api = TemporaryProjectApi(widget.api);
+  late final _repo = RepoItem(
+      owner: '__wenxiang_temporary__',
+      name: '临时目录',
+      fullName: '临时会话',
+      description: '',
+      privateRepo: true,
+      language: '',
+      pushedAt: '');
+  bool _closing = false;
+  Future<void> _close() async {
+    if (_closing) return;
+    _closing = true;
+    RunningSessions.of(_api).discard();
+    await AnswerSpeech.shared.stop(_api);
+    await _api.closeProject();
   }
 
-  Future<void> _open() async {
-    try {
-      final id = await widget.api.createTemporaryChat();
-      if (!mounted) {
-        await widget.api.closeTemporaryChat(id);
-        return;
-      }
-      setState(() => _id = id);
-      _heartbeat = Timer.periodic(const Duration(minutes: 1), (_) {
-        widget.api.pingTemporaryChat(id).catchError((_) {});
-      });
-    } catch (err) {
-      if (mounted) setState(() => _error = err.toString());
-    }
-  }
-
-  Future<void> _selectModel() async {
-    try {
-      final data = await widget.api.codexModels();
-      if (!mounted) return;
-      final models = (data['models'] as List? ?? []).whereType<Map>().toList();
-      final selected = await showModalBottomSheet<String>(context: context, builder: (context) => SafeArea(
-        child: ListView(shrinkWrap: true, children: [
-          const ListTile(title: Text('选择临时会话模型')),
-          ListTile(title: const Text('跟随默认模型'), trailing: _model == null ? const Icon(Icons.check) : null, onTap: () => Navigator.pop(context, '')),
-          for (final model in models)
-            ListTile(title: Text('${model['label'] ?? model['id']}'), trailing: model['id'] == _model ? const Icon(Icons.check) : null,
-              onTap: () => Navigator.pop(context, model['id'].toString())),
-        ]),
-      ));
-      if (selected != null && mounted) setState(() => _model = selected.isEmpty ? null : selected);
-    } catch (err) { if (mounted) setState(() => _error = '获取模型失败：$err'); }
-  }
-
-  Future<void> _pickImages() async {
-    final room = chatImageMaxCount - _draftImages.length;
-    if (room <= 0) return;
-    final source = await showModalBottomSheet<ImageSource>(context: context, builder: (context) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [
-      ListTile(leading: const Icon(Icons.photo_library_outlined), title: const Text('从相册选择'), onTap: () => Navigator.pop(context, ImageSource.gallery)),
-      ListTile(leading: const Icon(Icons.photo_camera_outlined), title: const Text('拍照'), onTap: () => Navigator.pop(context, ImageSource.camera)),
-    ])));
-    if (source == null || !mounted) return;
-    if (source == ImageSource.camera && !(await Permission.camera.request()).isGranted) {
-      if (mounted) setState(() => _error = '需要相机权限才能拍照');
-      return;
-    }
-    try {
-      final picker = ImagePicker();
-      final List<XFile> files;
-      if (source == ImageSource.gallery) {
-        files = await picker.pickMultiImage(maxWidth: 1600, maxHeight: 1600, imageQuality: 82, limit: room);
-      } else {
-        final file = await picker.pickImage(source: source, maxWidth: 1600, maxHeight: 1600, imageQuality: 82);
-        files = file == null ? [] : [file];
-      }
-      final images = <_TemporaryImage>[];
-      var skipped = false;
-      for (final file in files.take(room)) {
-        final bytes = await file.readAsBytes();
-        if (bytes.length > chatImageMaxBytes) { skipped = true; continue; }
-        images.add(_TemporaryImage(bytes, chatImageMime(mimeType: file.mimeType, path: file.path)));
-      }
-      if (mounted) setState(() { _draftImages.addAll(images); if (skipped) _error = '有图片太大，已跳过'; });
-    } catch (_) { if (mounted) setState(() => _error = '没能读取图片'); }
-  }
-
-  Future<void> _send() async {
-    final text = _input.text.trim();
-    final id = _id;
-    if ((text.isEmpty && _draftImages.isEmpty) || id == null || _busy) return;
-    final images = List<_TemporaryImage>.from(_draftImages);
-    final message = ChatMessage(role: 'user', content: text);
-    _input.clear();
-    _liveText.value = '';
-    setState(() {
-      _error = null;
-      _busy = true;
-      _stopping = false;
-      _status = '正在回答…';
-      _draftImages.clear();
-      _messages.add(message);
-      if (images.isNotEmpty) _messageImages[message] = images;
-    });
-    _scrollDown();
-    var sawError = false;
-    try {
-      await for (final event in widget.api.temporaryChatStream(id, text, model: _model, images: [for (final image in images) 'data:${image.mime};base64,${base64Encode(image.bytes)}'])) {
-        if (!mounted) return;
-        if (event.type == 'delta') {
-          _liveText.value += event.text;
-          _scrollDown();
-        } else if (event.type == 'status' && event.detail != null) {
-          setState(() => _status = event.detail!);
-        } else if (event.type == 'error') {
-          sawError = true;
-          if (!_stopping) setState(() => _error = event.error ?? '回答失败');
-        }
-      }
-    } catch (err) {
-      if (mounted && !sawError && !_stopping) setState(() => _error = err.toString());
-    } finally {
-      if (mounted) {
-        final answer = _liveText.value;
-        setState(() {
-          if (answer.isNotEmpty) _messages.add(ChatMessage(role: 'assistant', content: answer));
-          _busy = false;
-          _stopping = false;
-        });
-        _liveText.value = '';
-        _scrollDown();
-      }
-    }
-  }
-
-  Future<void> _stop() async {
-    final id = _id;
-    if (id == null || _stopping) return;
-    setState(() => _stopping = true);
-    try {
-      await widget.api.stopTemporaryChat(id);
-    } catch (err) {
-      if (mounted) setState(() { _stopping = false; _error = err.toString(); });
-    }
-  }
-
-  void _scrollDown() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scroll.hasClients) {
-        _scroll.animateTo(_scroll.position.maxScrollExtent,
-            duration: const Duration(milliseconds: 180), curve: Curves.easeOut);
-      }
-    });
+  Future<void> _back() async {
+    await _close();
+    if (mounted) widget.onBack();
   }
 
   @override
   void dispose() {
-    _hold.dispose();
-    _heartbeat?.cancel();
-    final id = _id;
-    if (id != null) unawaited(widget.api.closeTemporaryChat(id));
-    _input.dispose();
-    _scroll.dispose();
-    _liveText.dispose();
+    unawaited(_close());
     super.dispose();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Column(children: [
-        WxPageHeader(showMark: false, title: '临时会话', subtitle: '不关联项目，退出后丢弃', onBack: widget.onBack),
-        const WxHairline(),
-        Align(alignment: Alignment.centerRight, child: TextButton.icon(
-          onPressed: _busy ? null : _selectModel,
-          icon: const Icon(Icons.tune), label: Text(_model ?? '选择模型'),
-        )),
-        Expanded(
-          child: ListView(
-            controller: _scroll,
-            padding: const EdgeInsets.fromLTRB(Wx.inset, 12, Wx.inset, 12),
-            children: [
-              if (_messages.isEmpty)
-                const Text('从空白开始，退出后对话将清除。', style: TextStyle(color: Wx.muted)),
-              for (final message in _messages)
-                _MessageBubble(message: message, api: widget.api, images: _messageImages[message] ?? const []),
-              if (_busy)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  child: ValueListenableBuilder<String>(
-                    valueListenable: _liveText,
-                    builder: (context, value, _) => value.isEmpty
-                        ? Text(_status, style: const TextStyle(color: Wx.muted))
-                        : WxChatMarkdownStream(source: _liveText, mdStyle: chatMarkdownStyle(Theme.of(context)), api: widget.api, showCaret: true),
-                  ),
-                ),
-              if (_error != null) WxErrorPanel(error: _error!),
-            ],
-          ),
-        ),
-        SafeArea(
-          top: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(Wx.inset, 0, Wx.inset, 12),
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              if (_draftImages.isNotEmpty) ChatImageStrip(images: const [], draftBytes: [for (final image in _draftImages) image.bytes], onRemove: (index) => setState(() => _draftImages.removeAt(index))),
-              Row(children: [
-              IconButton(
-                tooltip: _voiceMode ? '键盘输入' : '按住说话',
-                onPressed: _busy || _hold.active ? null : () => setState(() => _voiceMode = !_voiceMode),
-                icon: Icon(_voiceMode ? Icons.keyboard_alt_outlined : Icons.mic_outlined),
-              ),
-              IconButton(tooltip: '上传图片', onPressed: _busy || _hold.active || _draftImages.length >= chatImageMaxCount ? null : _pickImages, icon: const Icon(Icons.image_outlined)),
-              Expanded(child: _voiceMode ? WxHoldToSpeakPad(
-                enabled: _id != null && (!_busy || _hold.sttBusy),
-                holding: _hold.holding, holdCancel: _hold.holdCancel, sttBusy: _hold.sttBusy,
-                hint: _hold.holdLive.isNotEmpty ? _hold.holdLive : _hold.holdHint.isNotEmpty ? _hold.holdHint : '按住 说话',
-                onHoldStart: _hold.beginHold, onHoldMove: _hold.moveHold, onHoldEnd: _hold.endHold,
-                onCancelRecognize: _hold.sttBusy ? () => unawaited(_hold.cancelRecognition()) : null,
-              ) : TextField(
-                controller: _input, minLines: 1, maxLines: 4,
-                textInputAction: TextInputAction.send,
-                onSubmitted: _busy ? null : (_) => _send(),
-                decoration: const InputDecoration(hintText: '输入问题…'),
-              )),
-              const SizedBox(width: 8),
-              IconButton.filled(
-                tooltip: _busy ? '停止' : '发送',
-                onPressed: _busy ? (_stopping ? null : _stop) : (_id == null ? null : _send),
-                icon: Icon(_busy ? Icons.stop : Icons.arrow_upward),
-              ),
-            ]),
-            ]),
-          ),
-        ),
-      ]),
-    );
+  Future<void> _files() async {
+    final id = _api.activeId;
+    if (id == null) return;
+    try {
+      final data = await widget.api.temporaryChatRequest(id);
+      if (!mounted) return;
+      final files = (data['files'] as List? ?? []).whereType<Map>();
+      await showModalBottomSheet<void>(
+          context: context,
+          builder: (context) => SafeArea(
+                  child: ListView(shrinkWrap: true, children: [
+                const ListTile(
+                    title: Text('本次生成文件'),
+                    subtitle: Text('结束临时会话后删除；已下载到手机的文件由你保留。')),
+                if (files.isEmpty) const ListTile(title: Text('暂无生成文件')),
+                for (final file in files)
+                  ListTile(
+                      leading: const Icon(Icons.download_outlined),
+                      title: Text('${file['path']}'),
+                      onTap: () async {
+                        final uri = widget.api.temporaryFileUri(
+                            id, '${file['path']}', '${data['downloadKey']}');
+                        await launchUrl(uri,
+                            mode: LaunchMode.externalApplication);
+                      }),
+              ])));
+    } catch (err) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(err.toString())));
+      }
+    }
   }
-}
-
-class _MessageBubble extends StatelessWidget {
-  const _MessageBubble({required this.message, required this.api, required this.images});
-  final ChatMessage message;
-  final WenxiangApi api;
-  final List<_TemporaryImage> images;
 
   @override
-  Widget build(BuildContext context) {
-    final user = message.role == 'user';
-    return Align(
-      alignment: user ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        constraints: const BoxConstraints(maxWidth: 520),
-        decoration: BoxDecoration(
-          color: user ? Wx.accent.withValues(alpha: 0.14) : Wx.hairline.withValues(alpha: 0.35),
-          borderRadius: BorderRadius.circular(Wx.radius),
-        ),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          if (images.isNotEmpty) ChatImageStrip(images: const [], draftBytes: [for (final image in images) image.bytes]),
-          if (message.content.isNotEmpty) WxChatMarkdownStream(source: ValueNotifier<String>(message.content), mdStyle: chatMarkdownStyle(Theme.of(context)), api: api, showCaret: false),
-          if (!user) WxAnswerActions(text: message.content, api: api),
-        ]),
-      ),
-    );
-  }
-}
-
-class _TemporaryImage {
-  const _TemporaryImage(this.bytes, this.mime);
-  final Uint8List bytes;
-  final String mime;
+  Widget build(BuildContext context) => ChatPage(
+      api: _api,
+      repo: _repo,
+      temporary: true,
+      onBack: _back,
+      onOpenFiles: _files);
 }

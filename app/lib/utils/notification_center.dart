@@ -292,6 +292,25 @@ class NotificationCenter {
     await _showItem(InboxItem.fromJson(raw));
   }
 
+  /// Generic, page-scoped alert; never saves temporary text or backfills history.
+  Future<void> notifyTemporaryFinish(String sessionId) async {
+    if (!enabled.value || !Platform.isAndroid) return;
+    try {
+      await FlutterLocalNotificationsPlugin().show(
+        _stableId('temporary-$sessionId'), '临时会话', '回答已完成，点击问象查看',
+        const NotificationDetails(android: AndroidNotificationDetails(
+          _channelId, _channelName, channelDescription: _channelDesc,
+          icon: 'ic_stat_wenxiang', importance: Importance.high, priority: Priority.high,
+        )),
+      );
+    } catch (_) {}
+  }
+
+  Future<void> clearTemporaryFinish(String sessionId) async {
+    if (!Platform.isAndroid) return;
+    try { await FlutterLocalNotificationsPlugin().cancel(_stableId('temporary-$sessionId')); } catch (_) {}
+  }
+
   Future<void> fetchAndShowUnread() async {
     final api = _api;
     if (api == null) return;

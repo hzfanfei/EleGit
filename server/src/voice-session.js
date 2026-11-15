@@ -84,6 +84,7 @@ export function createVoiceSession({
   asr,
   playbackFallbackMs = null,
   socketBacklog,
+  temporary = false,
 } = {}) {
   const machine = createCallMachine();
   const captions = [];
@@ -470,7 +471,9 @@ export function createVoiceSession({
     emit({ type: "state", state: "thinking" });
     try {
       let ctx = null;
-      if (bookMode) {
+      if (temporary) {
+        ctx = {};
+      } else if (bookMode) {
         try {
           ctx = await prepareContext?.({ bookId, chapter, sessionId, signal });
         } catch {
@@ -555,9 +558,9 @@ export function createVoiceSession({
     } catch (err) {
       if (signal.aborted || err?.code === "cancelled") return;
       const turnMsg = String(err?.message || err || "");
-      console.error(`[voice] turn ${err?.code || ""} ${turnMsg}`);
+      if (!temporary) console.error(`[voice] turn ${err?.code || ""} ${turnMsg}`);
       const ttsFailed = err?.code === "tts" || /tts/i.test(turnMsg);
-      noteServerLog({
+      if (!temporary) noteServerLog({
         kind: ttsFailed ? "voice-tts" : "voice-turn",
         message: turnMsg,
         summary: ttsFailed ? "语音通话合成失败" : "语音通话问答失败",
@@ -614,7 +617,7 @@ export function createVoiceSession({
         emit({ type: "error", code: "unconfigured", hint: config?.hint || "还没配语音密钥" });
         return;
       }
-      if (!bookMode && (!owner || !repo)) {
+      if (!temporary && !bookMode && (!owner || !repo)) {
         emit({ type: "error", code: "repo", hint: "还没选仓库" });
         return;
       }
@@ -634,7 +637,7 @@ export function createVoiceSession({
         });
         emit({ type: "state", state: "listening" });
         startMicLog();
-        if (!bookMode) warmRepoCall();
+        if (!temporary && !bookMode) warmRepoCall();
       } catch (err) {
         started = false;
         machine.fail();

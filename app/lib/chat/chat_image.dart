@@ -36,4 +36,5 @@ class ChatImageCache {
   }
 
   static List<int>? get(String id) => _bytes[id];
+  static void remove(String id) { _bytes.remove(id); _order.remove(id); }
 }

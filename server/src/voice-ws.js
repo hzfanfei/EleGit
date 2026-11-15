@@ -165,6 +165,7 @@ export function attachVoiceGateway(httpServer, {
   resolveConfig = resolveVoiceConfig,
   createAsk = createDefaultAsk,
   createBookAsk,
+  temporaryChats,
   createProviders = createVoiceProviders,
 } = {}) {
   const wss = new WebSocketServer({ noServer: true });
@@ -191,11 +192,18 @@ export function attachVoiceGateway(httpServer, {
     });
   });
 
-  wss.on("connection", (ws) => {
+  wss.on("connection", (ws, req) => {
+    const temporaryId = new URL(req.url, "http://localhost").searchParams.get("temporary");
+    let temporary;
+    if (temporaryId) {
+      try { temporary = temporaryChats?.get(temporaryId); } catch { /* expired */ }
+      if (!temporary) { ws.close(1008, "Temporary conversation expired"); return; }
+    }
     const config = resolveConfig();
     const repoAsk = createAsk();
     const bookAsk = createBookAsk?.();
     const ask = async function* (opts, signal) {
+      if (temporary) { yield* temporary.voice(opts.question, signal); return; }
       if (opts?.book) {
         if (!bookAsk) return;
         yield* bookAsk(opts, signal);
@@ -226,6 +234,7 @@ export function attachVoiceGateway(httpServer, {
       tts: providers.tts,
       asr: providers.asr,
       socketBacklog: () => ws.bufferedAmount,
+      temporary: Boolean(temporary),
     });
     holder.session = session;
 
@@ -253,6 +262,9 @@ export function attachVoiceGateway(httpServer, {
       }
     });
     const beat = setInterval(() => {
+      if (temporaryId) {
+        try { temporaryChats.get(temporaryId); } catch { session.hangup(); ws.close(1008, "Temporary conversation ended"); return; }
+      }
       if (ws.readyState === 1) {
         try { ws.ping(); } catch { /* already closing */ }
       }

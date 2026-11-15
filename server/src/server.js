@@ -133,6 +133,8 @@ import { attachNotifications, publishInboxNotice } from "./notifications.js";
 import { startScriptActivityTicker } from "./script-activity-ticker.js";
 import { stat } from "node:fs/promises";
 import { cleanupAbandonedTemporaryChats, createTemporaryChats, TemporaryChat } from "./temporary-chat.js";
+import { TemporaryConversation } from "./temporary-conversation.js";
+import { attachTemporaryDownloads, attachTemporaryRoutes } from "./temporary-chat-routes.js";
 
 loadLocalEnv();
 process.env = envWithNodeOnPath(process.env);
@@ -189,7 +191,7 @@ const bookSessions = createSessionStore({
 });
 const chatTurns = createChatTurns();
 const temporaryChats = createTemporaryChats({
-  createChat: () => new TemporaryChat({ executable: resolveCodexExecutable(), model: acpModelId(process.env, undefined, "codex", "repo") }),
+  createChat: () => new TemporaryConversation(new TemporaryChat({ executable: resolveCodexExecutable(), model: acpModelId(process.env, undefined, "codex", "repo") })),
 });
 void cleanupAbandonedTemporaryChats();
 const temporaryCleanupTimer = setInterval(() => { void cleanupAbandonedTemporaryChats(); }, 5 * 60_000);
@@ -231,6 +233,7 @@ const app = express();
 app.use(cors(corsOptions));
 app.options("*", cors(corsOptions));
 app.use("/v1/temporary-chats/:id/turn", express.json({ limit: "23mb" }));
+app.use("/v1/temporary-chats/:id/messages", express.json({ limit: "23mb" }));
 app.use(express.json({ limit: "1mb" }));
 
 function sendError(res, err) {
@@ -339,6 +342,8 @@ app.get("/oauth/github/callback", async (req, res) => {
     res.status(400).type("html").send(callbackHtml({ ok: false, message: err.message }));
   }
 });
+
+attachTemporaryDownloads(app, temporaryChats);
 
 app.use("/v1", (req, res, next) => {
   if (req.method === "OPTIONS") {
@@ -1460,6 +1465,10 @@ app.post("/v1/books/chat", async (req, res) => {
   }
 });
 
+attachTemporaryRoutes(app, temporaryChats, {
+  executable: resolveCodexExecutable(), defaultModel: acpModelId(process.env, undefined, "codex", "repo"), ttsVoice: () => store.config.ttsVoice,
+});
+
 app.post("/v1/temporary-chats", async (_req, res) => {
   res.json({ id: await temporaryChats.create() });
 });
@@ -1470,18 +1479,18 @@ app.post("/v1/temporary-chats/:id/ping", (req, res) => {
 });
 
 app.delete("/v1/temporary-chats/:id", async (req, res) => {
-  await temporaryChats.close(req.params.id);
-  res.json({ ok: true });
+  try { await temporaryChats.close(req.params.id); res.json({ ok: true }); }
+  catch (err) { sendError(res, err); }
 });
 
 app.post("/v1/temporary-chats/:id/stop", async (req, res) => {
-  try { await temporaryChats.get(req.params.id).interrupt(); res.json({ ok: true }); }
+  try { await temporaryChats.get(req.params.id).stop(req.body?.turnId); res.json({ ok: true }); }
   catch (err) { sendError(res, err); }
 });
 
 app.post("/v1/temporary-chats/:id/turn", async (req, res) => {
   try {
-    const chat = temporaryChats.get(req.params.id);
+    const chat = temporaryChats.get(req.params.id).chat;
     const message = String(req.body?.message || "").trim();
     const images = req.body?.images ?? [];
     if (!Array.isArray(images) || images.length > 4 || images.some((image) => typeof image !== "string" || image.length > 5_592_430 || !/^data:image\/(jpeg|png|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/.test(image))) {
@@ -1850,6 +1859,7 @@ httpServer.headersTimeout = 0;
 httpServer.timeout = 0;
 
 attachVoiceGateway(httpServer, {
+  temporaryChats,
   getApiKey: () => store.config.apiKey,
   resolveConfig: () => withTtsVoice(resolveVoiceConfig(), store.config.ttsVoice),
   checkoutRepo: (owner, repo, signal) => checkoutRepo(owner, repo, signal, { fast: true }),

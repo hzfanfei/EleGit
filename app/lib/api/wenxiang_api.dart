@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -52,8 +51,9 @@ bool shouldRetryChatStreamBeforeText({
   required Object error,
   bool sawEvent = false,
 }) {
-  if (cancelled || error is OperationCancelled || error is AcceptedChatDrop)
+  if (cancelled || error is OperationCancelled || error is AcceptedChatDrop) {
     return false;
+  }
   if (error is ApiException) return false;
   // A second POST aborts the turn already running on the server.
   if (sawText || sawEvent) return false;
@@ -90,6 +90,8 @@ class _ChatRequest {
 }
 
 class WenxiangApi {
+  bool get ephemeral => false;
+  Future<void> prepareVoiceChatSession({String? sessionId, bool agentMode = false}) async {}
   WenxiangApi({required String baseUrl, required this.apiKey})
       : baseUrl = normalizeBaseUrl(baseUrl),
         _tunnelUrl = normalizeBaseUrl(baseUrl);
@@ -1509,6 +1511,36 @@ class WenxiangApi {
     final id = data['id']?.toString() ?? '';
     if (id.isEmpty) throw ApiException('创建临时会话失败');
     return id;
+  }
+
+  Future<Map<String, dynamic>> temporaryChatRequest(String id, {String method = 'GET', String suffix = '', Map<String, dynamic>? body}) async {
+    final resource = Uri.parse(suffix);
+    final request = http.Request(method, _uri('/v1/temporary-chats/${Uri.encodeComponent(id)}${resource.path}', resource.queryParameters.isEmpty ? null : resource.queryParameters))
+      ..headers.addAll(_headers);
+    if (body != null) request.body = jsonEncode(body);
+    final client = http.Client();
+    try {
+      final response = await http.Response.fromStream(await client.send(request)).timeout(const Duration(seconds: 55));
+      return _json(response, fallback: '临时会话操作失败');
+    } finally { client.close(); }
+  }
+
+  Uri temporaryFileUri(String id, String relative, String token) => Uri.parse(baseUrl).resolve('/temporary-files/${Uri.encodeComponent(id)}/${relative.split('/').map(Uri.encodeComponent).join('/')}').replace(queryParameters: {'token': token});
+
+  http.Client? _temporaryVoiceClient;
+  void cancelTemporaryVoice() { _temporaryVoiceClient?.close(); _temporaryVoiceClient = null; }
+
+  Stream<ChatStreamEvent> temporaryVoiceStream(String id, String message) async* {
+    final client = http.Client();
+    _temporaryVoiceClient = client;
+    try {
+      final request = http.Request('POST', _uri('/v1/temporary-chats/${Uri.encodeComponent(id)}/voice-turn'))
+        ..headers.addAll({..._headers, 'Accept': 'text/event-stream'})
+        ..body = jsonEncode({'message': message});
+      final res = await client.send(request).timeout(const Duration(seconds: 25));
+      if (res.statusCode >= 400) throw ApiException('临时语音失败（${res.statusCode}）');
+      yield* streamWenxiangSseEventsRequireDone(byteStream: res.stream, client: client, throwIfCancelled: () {});
+    } finally { if (identical(_temporaryVoiceClient, client)) _temporaryVoiceClient = null; client.close(); }
   }
 
   Future<void> pingTemporaryChat(String id) async {
