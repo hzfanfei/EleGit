@@ -14,6 +14,8 @@ String humanizeSttEvent({String? code, String? hint}) {
       return '语音识别资源未开通或资源 ID 不对。请看配置说明里的火山 ASR 步骤。';
     case 'asr_failed':
       return '语音识别暂时不可用。请稍后重试。';
+    case 'asr_timeout':
+      return '语音识别超时，请检查网络后按住重试。';
     case 'empty':
       return '没听清，请按住再说一次。';
     case 'empty_answer':

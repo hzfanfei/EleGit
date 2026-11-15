@@ -16,34 +16,72 @@ abstract class VoiceSttClient {
 }
 
 class SocketSttClient implements VoiceSttClient {
-  SocketSttClient(this.uri);
+  SocketSttClient(
+    this.uri, {
+    this.connectTimeout = const Duration(seconds: 10),
+    this.recognitionTimeout = const Duration(seconds: 30),
+  });
 
   final Uri uri;
+  final Duration connectTimeout;
+  final Duration recognitionTimeout;
   WebSocketChannel? _channel;
   StreamController<VoiceEvent>? _bridge;
   StreamSubscription? _sub;
+  Timer? _deadline;
+  bool _terminal = false;
 
   @override
   Stream<VoiceEvent> connect() {
+    _terminal = false;
     final channel = WebSocketChannel.connect(uri);
     _channel = channel;
-    _bridge = StreamController<VoiceEvent>.broadcast();
+    final bridge = StreamController<VoiceEvent>.broadcast();
+    _bridge = bridge;
     () async {
       try {
-        await channel.ready;
+        await channel.ready.timeout(connectTimeout);
+        if (_channel != channel || _terminal) return;
         _sub = channel.stream.listen((message) {
-          if (message is List<int>) return;
-          final decoded = jsonDecode(message.toString());
-          if (decoded is Map<String, dynamic>) {
-            _bridge?.add(VoiceEvent.fromJson(decoded));
+          if (_terminal || message is List<int>) return;
+          try {
+            final decoded = jsonDecode(message.toString());
+            if (decoded is Map<String, dynamic>) {
+              final event = VoiceEvent.fromJson(decoded);
+              if (['done', 'error', 'cancelled'].contains(event.type)) {
+                _terminal = true;
+                _deadline?.cancel();
+              }
+              bridge.add(event);
+            }
+          } catch (_) {
+            _fail('network');
           }
-        }, onError: _bridge?.addError, onDone: _bridge?.close);
+        }, onError: (Object err) {
+          _fail('network');
+        }, onDone: () {
+          _fail('network');
+          if (!bridge.isClosed) unawaited(bridge.close());
+        });
       } catch (err) {
-        _bridge?.addError(err);
-        await _bridge?.close();
+        if (_channel != channel) return;
+        if (!_terminal) {
+          _terminal = true;
+          _deadline?.cancel();
+          bridge.addError(err);
+        }
+        await bridge.close();
       }
     }();
     return _bridge!.stream;
+  }
+
+  void _fail(String code) {
+    if (_terminal) return;
+    _terminal = true;
+    _deadline?.cancel();
+    _bridge?.add(VoiceEvent(type: 'error', code: code));
+    unawaited(_channel?.sink.close());
   }
 
   void _send(Map<String, dynamic> msg) {
@@ -62,6 +100,9 @@ class SocketSttClient implements VoiceSttClient {
 
   @override
   void stop() {
+    if (_terminal || _channel == null) return;
+    _deadline?.cancel();
+    _deadline = Timer(recognitionTimeout, () => _fail('asr_timeout'));
     _send({'type': 'stop'});
   }
 
@@ -73,6 +114,9 @@ class SocketSttClient implements VoiceSttClient {
 
   @override
   void dispose() {
+    _terminal = true;
+    _deadline?.cancel();
+    _deadline = null;
     _sub?.cancel();
     _channel?.sink.close();
     _channel = null;

@@ -394,7 +394,7 @@ class _ChatPageState extends State<ChatPage> {
     final media = widget.voiceMedia ?? _media ?? DeviceVoiceMedia();
     _media = media;
     final allowed = await media.requestMic();
-    if (!mounted) return;
+    if (!mounted || _stt != client || !_holdPending) return;
     if (!allowed) {
       _disposeStt();
       if (mounted) {
@@ -432,6 +432,7 @@ class _ChatPageState extends State<ChatPage> {
 
   Future<void> _endHold() async {
     if (!_holding && !_holdPending && _stt == null) return;
+    final client = _stt;
     final cancel = _holdCancel;
     final pendingOnly = _holdPending && _stt == null;
     setState(() {
@@ -447,6 +448,8 @@ class _ChatPageState extends State<ChatPage> {
     await _micSub?.cancel();
     _micSub = null;
     await _media?.stopMic();
+    // A disconnect/cancel can finish this session while the recorder stops.
+    if (!mounted || client == null || _stt != client) return;
     if (cancel) {
       _stt?.cancel();
       _disposeStt();
@@ -521,6 +524,7 @@ class _ChatPageState extends State<ChatPage> {
     setState(() {
       _sttBusy = false;
       _holding = false;
+      _holdPending = false;
       _holdLive = '';
       _holdHint = '';
     });
@@ -536,6 +540,11 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   void _disposeStt() {
+    if (_micSub != null) {
+      _micSub?.cancel();
+      _micSub = null;
+      unawaited(_media?.stopMic());
+    }
     _sttSub?.cancel();
     _sttSub = null;
     _stt?.dispose();

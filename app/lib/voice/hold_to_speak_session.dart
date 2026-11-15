@@ -73,6 +73,7 @@ class HoldToSpeakSession {
     final media = voiceMedia ?? _media ?? DeviceVoiceMedia();
     _media = media;
     final allowed = await media.requestMic();
+    if (_stt != client || !holdPending) return;
     if (!allowed) {
       _disposeStt();
       holdPending = false;
@@ -104,6 +105,7 @@ class HoldToSpeakSession {
 
   Future<void> endHold() async {
     if (!holding && !holdPending && _stt == null) return;
+    final client = _stt;
     final cancel = holdCancel;
     final pendingOnly = holdPending && _stt == null;
     holding = false;
@@ -120,6 +122,8 @@ class HoldToSpeakSession {
     await _micSub?.cancel();
     _micSub = null;
     await _media?.stopMic();
+    // Do not resurrect recognition after a failure/cancel during stopMic.
+    if (client == null || _stt != client) return;
     if (cancel) {
       _stt?.cancel();
       _disposeStt();
@@ -174,6 +178,7 @@ class HoldToSpeakSession {
     _disposeStt();
     sttBusy = false;
     holding = false;
+    holdPending = false;
     holdLive = '';
     holdHint = '';
     onChanged();
@@ -181,6 +186,11 @@ class HoldToSpeakSession {
   }
 
   void _disposeStt() {
+    if (_micSub != null) {
+      _micSub?.cancel();
+      _micSub = null;
+      unawaited(_media?.stopMic());
+    }
     _freeBackground();
     _sttSub?.cancel();
     _sttSub = null;
