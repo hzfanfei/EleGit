@@ -161,6 +161,17 @@ void main() {
     expect(find.text('执行脚本 · 已跑 8 秒'), findsOneWidget);
     expect(find.textContaining('旧的思考'), findsNothing);
     expect(find.textContaining('powershell'), findsNothing);
+    final firstRow = find.byKey(const ValueKey('wx-running-layout-first'));
+    final project = find.descendant(of: firstRow, matching: find.text('octo/demo'));
+    final question = find.descendant(of: firstRow,
+        matching: find.text('layout-first 很长的会话标题 继续描述一个很长的任务'));
+    final status = find.descendant(of: firstRow,
+        matching: find.text('执行脚本 · 已跑 8 秒'));
+    for (final label in ['项目', '问题', '状态']) {
+      expect(find.descendant(of: firstRow, matching: find.text(label)), findsOneWidget);
+    }
+    expect(tester.getTopLeft(project).dy, lessThan(tester.getTopLeft(question).dy));
+    expect(tester.getTopLeft(question).dy, lessThan(tester.getTopLeft(status).dy));
     for (final id in ['layout-first', 'layout-second']) {
       expect(tester.getSize(find.byKey(ValueKey('wx-running-$id'))).height, 112);
     }
