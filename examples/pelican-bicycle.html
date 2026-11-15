@@ -23,19 +23,19 @@
     .rider { animation: bob 1.1s ease-in-out infinite; }
     .cloud-a { animation: drift 17s ease-in-out infinite alternate; }
     .cloud-b { animation: drift 23s ease-in-out infinite alternate-reverse; }
-    .land { animation: landscape 4s linear infinite; }
+    .land { animation: landscape 12s linear infinite; }
     .paused * { animation-play-state: paused !important; }
     @keyframes wheel-spin { to { transform: rotate(360deg); } }
     @keyframes bob { 50% { transform: translateY(-3px) rotate(-.3deg); } }
     @keyframes drift { to { transform: translateX(30px); } }
-    @keyframes landscape { to { transform: translateX(-120px); } }
+    @keyframes landscape { to { transform: translateX(-500px); } }
     .footer { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 22px 2px; }
     .caption { margin: 0; color: #819185; font-size: 12px; letter-spacing: .12em; line-height: 1.7; }
     button { flex: none; border: 1px solid #aec3b3; border-radius: 999px; background: transparent; color: #557367; padding: 11px 19px; font: inherit; font-size: 12px; letter-spacing: .08em; cursor: pointer; }
     button:hover { background: #e6eee4; }
     button:focus-visible { outline: 3px solid #d29266; outline-offset: 3px; }
-    @media (max-width: 600px) { body { padding: 18px; } .number { display: none; } .intro { top: 20px; left: 22px; } .intro p:last-child { margin-top: 7px; } .eyebrow { margin-bottom: 7px; } .caption { font-size: 11px; } }
-    @media (prefers-reduced-motion: reduce) { .wheel, .rider, .cloud-a, .cloud-b, .land { animation-play-state: paused; } }
+    @media (max-width: 800px) { .intro { position: relative; padding: 24px 22px 0; inset: auto; } }
+    @media (max-width: 600px) { body { padding: 18px; } .number { display: none; } .intro p:last-child { margin-top: 7px; } .eyebrow { margin-bottom: 7px; } .caption { font-size: 11px; } }
   </style>
 </head>
 <body>
@@ -47,6 +47,7 @@
         <defs>
           <pattern id="speckles" width="32" height="32" patternUnits="userSpaceOnUse"><circle cx="3" cy="5" r=".7" fill="#fff" opacity=".35"/><circle cx="21" cy="19" r=".6" fill="#6b8977" opacity=".12"/></pattern>
           <g id="spokes" fill="none" stroke="#b8c5b5" stroke-width="1.4"><circle r="101"/><circle r="91"/><path d="M-99 0H99M0-99V99M-70-70 70 70M70-70-70 70M-38-92 38 92M38-92-38 92M-92-38 92 38M-92 38 92-38"/><circle r="7" fill="#f6f2e5" stroke="#718e7e" stroke-width="3"/></g>
+          <g id="verge" fill="none" stroke="#92ae92" stroke-width="3" stroke-linecap="round"><path d="M115 520l-4-15m4 15 8-13m-8 13-11-6M239 520l-3-14m3 14 8-11M307 520l-3-13m3 13 8-11M435 520l-4-17m4 17 10-11"/></g>
         </defs>
         <rect width="1000" height="650" fill="url(#speckles)"/>
         <circle cx="812" cy="135" r="48" fill="#f9e7ac" opacity=".9"/>
@@ -55,7 +56,7 @@
         <path d="M0 511Q153 461 304 503T615 497T1000 488V650H0Z" fill="#9ebfa4"/>
         <path d="M0 550Q215 521 426 540T1000 531V650H0Z" fill="#ebdaba"/>
         <path d="M0 592Q251 576 480 589T1000 579V650H0Z" fill="#e2cba6"/>
-        <g class="land" stroke="#92ae92" stroke-width="3" stroke-linecap="round" fill="none"><path d="M115 523l-4-15m4 15 8-13m-8 13-11-6M239 535l-3-14m3 14 8-11M807 518l-3-13m3 13 8-11M935 529l-4-17m4 17 10-11M1055 523l-4-15m4 15 8-13"/></g>
+        <g class="land"><use href="#verge"/><use href="#verge" x="500"/><use href="#verge" x="1000"/></g>
         <ellipse cx="505" cy="552" rx="288" ry="19" fill="#a9987c" opacity=".18"/>
         <!-- wheels -->
         <g transform="translate(289 445)"><g class="wheel"><use href="#spokes"/></g><circle r="104" fill="none" stroke="#526f64" stroke-width="8"/><circle r="97" fill="none" stroke="#f6f1df" stroke-width="3"/></g>
@@ -122,7 +123,13 @@
         button.setAttribute('aria-pressed', String(paused));
         button.textContent = paused ? '▶  继续动画' : 'Ⅱ  暂停动画';
       }
-      button.addEventListener('click', () => { paused = !paused; last = null; sync(); });
+      function setPaused(value) {
+        paused = value;
+        last = null;
+        sync();
+      }
+      button.addEventListener('click', () => setPaused(!paused));
+      motion.addEventListener('change', event => setPaused(event.matches));
       sync();
       requestAnimationFrame(render);
     })();
