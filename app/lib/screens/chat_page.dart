@@ -681,8 +681,7 @@ class _ChatPageState extends State<ChatPage> {
       await widget.api.closeSession(widget.repo.owner, widget.repo.name, session.id);
       if (!mounted) return;
       setState(() {
-        _sessions.removeWhere((s) => s.id == session.id);
-        _transcripts.remove(session.id);
+        _repoState.removeSession(session.id);
         if (_sessionId == session.id) {
           _sessionId = _sessions.isEmpty ? null : _sessions.first.id;
           _live = false;
@@ -911,16 +910,27 @@ class _ChatPageState extends State<ChatPage> {
     final draftCount = usingDrafts ? _draftImages.length : reuseImages.length;
     if (text.isEmpty && draftCount == 0) return;
 
+    // Capture the destination before uploading: routes and selected sessions may change.
+    if (_sessionId == null) _rememberSessionId(mintTurnId());
+    _repoState.activeId = _sessionId;
+    final targetId = _sessionId!;
+    final targetMessages = _messages;
+    final targetMode = _agentMode;
+    final drafts = List<_DraftImage>.from(_draftImages);
+    _editingIndex = null;
+    _input.clear();
+    if (usingDrafts) _draftImages.clear();
+
     List<ChatImageAttachment> images;
     if (!usingDrafts) {
       images = reuseImages;
-    } else if (_draftImages.isEmpty) {
+    } else if (drafts.isEmpty) {
       images = const [];
     } else {
       setState(() => _uploadingImages = true);
       try {
         final uploaded = <ChatImageAttachment>[];
-        for (final draft in List<_DraftImage>.from(_draftImages)) {
+        for (final draft in drafts) {
           uploaded.add(await widget.api.uploadChatImage(
             bytes: draft.bytes,
             mimeType: draft.mimeType,
@@ -929,43 +939,46 @@ class _ChatPageState extends State<ChatPage> {
         images = uploaded;
       } catch (err) {
         if (mounted) {
-          setState(() => _uploadingImages = false);
+          setState(() {
+            _uploadingImages = false;
+            if (_sessionId == targetId) {
+              if (_input.text.isEmpty) _input.text = text;
+              _draftImages.addAll(drafts);
+            }
+          });
           _snack(humanizeError(err));
         }
         return;
       }
-      if (!mounted) return;
     }
 
-    _editingIndex = null;
-    _input.clear();
-    _lastUser = text;
-    _lastImages = images;
-    HapticFeedback.selectionClick();
-
-    late int userIndex;
-    setState(() {
-      _uploadingImages = false;
-      if (usingDrafts) _draftImages.clear();
-      _rememberInputMode(voice);
-      _messages.add(ChatMessage(
-        role: 'user',
-        content: text,
-        via: voice ? 'voice' : null,
-        turnId: mintTurnId(),
-        images: images,
-      ));
-      userIndex = _messages.length - 1;
-      _appearUserKey = '${_sessionId ?? ''}:$userIndex';
-    });
-    unawaited(_persist());
-    _jumpToLatest(force: true);
-
-    if (_busy) {
-      _execution!.enqueue(_messages[userIndex]);
+    if (!_sessions.any((s) => s.id == targetId)) {
+      if (mounted) setState(() => _uploadingImages = false);
       return;
     }
-    await _runSendForUserIndex(userIndex);
+    if (mounted && _sessionId == targetId) {
+      _lastUser = text;
+      _lastImages = images;
+    }
+    HapticFeedback.selectionClick();
+
+    final message = ChatMessage(
+      role: 'user', content: text, via: voice ? 'voice' : null,
+      turnId: mintTurnId(), images: images,
+    );
+    targetMessages.add(message);
+    _running.session(_repoState, targetId, targetMode).enqueue(message);
+    if (mounted) {
+      setState(() {
+        _uploadingImages = false;
+        if (_sessionId == targetId) {
+          _rememberInputMode(voice);
+          _appearUserKey = '$targetId:${targetMessages.length - 1}';
+        }
+      });
+      _jumpToLatest(force: true);
+    }
+    await _repoState.persist();
   }
 
   Future<void> _submitDecision({
@@ -990,19 +1003,6 @@ class _ChatPageState extends State<ChatPage> {
     );
     execution?.decision = null;
     _running.changed();
-  }
-
-  Future<void> _runSendForUserIndex(int userIndex) async {
-    // Resolve the ID before starting: requests in other projects must never
-    // inherit the server's last selected conversation.
-    if (_sessionId == null) {
-      final created = await widget.api.createSession(widget.repo.owner, widget.repo.name);
-      if (!mounted) return;
-      _rememberSessionId(created.id);
-    }
-    final task = _running.session(_repoState, _sessionId!, _agentMode);
-    task.enqueue(_messages[userIndex]);
-    await _persist();
   }
 
   void _syncExecution() {
@@ -1051,12 +1051,7 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   void _mergeBackfill() {
-    final stored = widget.memory?.loadChats(widget.repo.fullName);
-    if (stored == null) return;
-    for (final entry in stored.transcripts.entries) {
-      if (_running.execution(entry.key)?.busy == true) continue;
-      _transcripts[entry.key] = List<ChatMessage>.from(entry.value);
-    }
+    _repoState.mergeSaved();
     if (mounted) setState(() {});
   }
 

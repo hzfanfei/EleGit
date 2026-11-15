@@ -1,3 +1,4 @@
+import { createWorkspaceGate } from "./workspace-gate.js";
 import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -1860,6 +1861,7 @@ export function createSessionStore({
     return publicView(session);
   }
 
+  const acquireWorkspace = createWorkspaceGate();
   const channels = new Map();
   const pendingInteractions = new Map();
 
@@ -1998,11 +2000,21 @@ export function createSessionStore({
   function resolveForChat(owner, repo, sessionId) {
     const requested = String(sessionId || "").trim();
     if (requested) {
-      const existing = sessions.get(requested);
-      if (existing && existing.owner === owner && existing.repo === repo) {
-        activeByRepo.set(repoKey(owner, repo), existing.id);
-        return existing;
+      if (!/^[\w.-]{1,120}$/.test(requested)) {
+        throw Object.assign(new Error("Invalid sessionId"), { status: 400 });
       }
+      const existing = sessions.get(requested);
+      if (existing && (existing.owner !== owner || existing.repo !== repo)) {
+        throw Object.assign(new Error("Session belongs to another repository"), { status: 409 });
+      }
+      if (!existing) {
+        sessions.set(requested, {
+          id: requested, owner, repo, title: "新会话",
+          createdAt: now(), updatedAt: now(), turns: 0,
+        });
+      }
+      activeByRepo.set(repoKey(owner, repo), requested);
+      return sessions.get(requested);
     }
     const activeId = activeByRepo.get(repoKey(owner, repo));
     if (activeId && sessions.has(activeId)) return sessions.get(activeId);
@@ -2026,6 +2038,7 @@ export function createSessionStore({
     workspaceRoot,
     bookId,
     partialBackfill = false,
+    signal,
     turnId = "",
     images = [],
     loadImages,
@@ -2042,86 +2055,98 @@ export function createSessionStore({
       err.code = "checkout_missing";
       throw err;
     }
-    await warmSession(session, root);
-    const entry = takeEntry(session.id, root);
-    const channel = entry.channel;
-    if (!channel?.alive) {
-      const err = new Error("ACP channel failed to start");
-      err.code = "acp_dead";
-      throw err;
-    }
-    const hasHistory = (history || []).some(
-      (m) => visibleHistoryMessage(m),
-    );
-    const makePrompt =
-      buildPrompt ||
-      (bookContext ? buildBookAcpPrompt : buildAcpPrompt);
-    const write = Boolean(agentMode) && !bookContext;
-    const primed = Boolean(entry.primed);
-    const refs = bookContext ? [] : promptImageRefs({ history, images, primed });
-    const loaded = refs.length && typeof loadImages === "function" ? await loadImages(refs) : [];
-    const questionText = bookContext ? String(question || "") : questionWithImages(question, loaded);
-    let text;
-    if (!primed) {
-      text = makePrompt({
-        question: questionText,
-        history,
-        githubContext,
-        bookContext,
-        seedHistory: hasHistory,
-        agentMode: write,
-        staticFiles: bookContext ? undefined : staticFiles,
-      });
-      if (turnNote) text = `${text}\n\n${turnNote}`;
-    } else {
-      const notes = [];
-      if (entry.announcedAgentMode !== write) {
-        notes.push(write
-          ? "You are now in agent mode for this checkout. Edit files in this checkout when that is what the user asked for."
-          : "You are now in ask mode. Do not edit files or change the working tree.");
-      }
-      if (turnNote) notes.push(turnNote);
-      text = notes.length ? `${notes.join("\n")}\n\n${questionText}` : questionText;
-    }
-    await withRepoLock(entry, async () => {
-      channel.agentMode = write;
-      channel.onInteraction = onInteraction
-        ? async (spec) => {
-            const { requestId, promise } = beginInteraction(session.id);
-            onInteraction({
-              kind: spec.kind,
-              requestId,
-              sessionId: session.id,
-              ...publicInteraction(spec.kind, spec.params),
-            });
-            return promise;
-          }
-        : null;
-      try {
-        channel.noteTurn?.({
-          workspaceRoot,
-          session: { id: session.id, owner: session.owner, repo: session.repo },
-          question,
-          bookId,
-          turnId,
-          partial: Boolean(partialBackfill),
-        });
-        await channel.applySessionMode();
-        await channel.prompt(text, { onDelta, onActivity, images: loaded });
-        entry.primed = true;
-        entry.announcedAgentMode = write;
-      } finally {
-        channel.onInteraction = null;
-        channel.agentMode = false;
-        if (write) await channel.applySessionMode().catch(() => {});
-      }
+    const releaseWorkspace = await acquireWorkspace((process.platform === "win32" ? path.resolve(root).toLowerCase() : path.resolve(root)), {
+      write: Boolean(agentMode) && !bookContext,
+      signal,
+      onWaiting: () => onActivity?.("等待同仓库任务完成…"),
     });
-    session.turns += 1;
-    if (session.title === "新会话" && question) {
-      session.title = String(question).replace(/\s+/g, " ").slice(0, 32);
+    try {
+      if (signal?.aborted) throw signal.reason || new Error("cancelled");
+      await warmSession(session, root);
+      if (signal?.aborted) throw signal.reason || new Error("cancelled");
+      const entry = takeEntry(session.id, root);
+      const channel = entry.channel;
+      if (!channel?.alive) {
+        const err = new Error("ACP channel failed to start");
+        err.code = "acp_dead";
+        throw err;
+      }
+      const hasHistory = (history || []).some(
+        (m) => visibleHistoryMessage(m),
+      );
+      const makePrompt =
+        buildPrompt ||
+        (bookContext ? buildBookAcpPrompt : buildAcpPrompt);
+      const write = Boolean(agentMode) && !bookContext;
+      const primed = Boolean(entry.primed);
+      const refs = bookContext ? [] : promptImageRefs({ history, images, primed });
+      const loaded = refs.length && typeof loadImages === "function" ? await loadImages(refs) : [];
+      const questionText = bookContext ? String(question || "") : questionWithImages(question, loaded);
+      let text;
+      if (!primed) {
+        text = makePrompt({
+          question: questionText,
+          history,
+          githubContext,
+          bookContext,
+          seedHistory: hasHistory,
+          agentMode: write,
+          staticFiles: bookContext ? undefined : staticFiles,
+        });
+        if (turnNote) text = `${text}\n\n${turnNote}`;
+      } else {
+        const notes = [];
+        if (entry.announcedAgentMode !== write) {
+          notes.push(write
+            ? "You are now in agent mode for this checkout. Edit files in this checkout when that is what the user asked for."
+            : "You are now in ask mode. Do not edit files or change the working tree.");
+        }
+        if (turnNote) notes.push(turnNote);
+        text = notes.length ? `${notes.join("\n")}\n\n${questionText}` : questionText;
+      }
+      await withRepoLock(entry, async () => {
+        if (signal?.aborted) throw signal.reason || new Error("cancelled");
+        channel.agentMode = write;
+        channel.onInteraction = onInteraction
+          ? async (spec) => {
+              const { requestId, promise } = beginInteraction(session.id);
+              onInteraction({
+                kind: spec.kind,
+                requestId,
+                sessionId: session.id,
+                ...publicInteraction(spec.kind, spec.params),
+              });
+              return promise;
+            }
+          : null;
+        try {
+          channel.noteTurn?.({
+            workspaceRoot,
+            session: { id: session.id, owner: session.owner, repo: session.repo },
+            question,
+            bookId,
+            turnId,
+            partial: Boolean(partialBackfill),
+          });
+          await channel.applySessionMode();
+          await channel.prompt(text, { onDelta, onActivity, images: loaded });
+          entry.primed = true;
+          entry.announcedAgentMode = write;
+        } finally {
+          channel.onInteraction = null;
+          channel.agentMode = false;
+          if (write) await channel.applySessionMode().catch(() => {});
+        }
+      });
+      session.turns += 1;
+      if (session.title === "新会话" && question) {
+        session.title = String(question).replace(/\s+/g, " ").slice(0, 32);
+      }
+      session.updatedAt = now();
+      return { engine: "acp", sessionId: session.id };
+    } finally {
+      releaseWorkspace();
     }
-    session.updatedAt = now();
-    return { engine: "acp", sessionId: session.id };
   }
 
   async function cancel(session) {

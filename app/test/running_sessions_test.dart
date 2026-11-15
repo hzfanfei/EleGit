@@ -1,4 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
+// ignore: depend_on_referenced_packages
+import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
+import 'package:wenxiang/persist/chat_backfill.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -15,6 +20,7 @@ class ControlledApi extends FakeWenxiangApi {
   final streams = <String, StreamController<ChatStreamEvent>>{};
   final histories = <String, List<ChatMessage>>{};
   final cancelled = <String>[];
+  final cancelledTurns = <String?>[];
 
   @override
   Stream<ChatStreamEvent> chatStream({
@@ -34,8 +40,9 @@ class ControlledApi extends FakeWenxiangApi {
   }
 
   @override
-  void cancelChat({String? sessionId}) {
+  void cancelChat({String? sessionId, String? turnId}) {
     cancelled.add(sessionId!);
+    cancelledTurns.add(turnId);
   }
 
   void finish(String id, String answer) {
@@ -43,6 +50,28 @@ class ControlledApi extends FakeWenxiangApi {
         .add(ChatStreamEvent(type: 'done', text: answer, engine: 'acp'));
     unawaited(streams[id]!.close());
   }
+}
+
+class UploadApi extends ControlledApi {
+  final upload = Completer<ChatImageAttachment>();
+  @override
+  Future<ChatImageAttachment> uploadChatImage(
+          {required Uint8List bytes, required String mimeType}) =>
+      upload.future;
+}
+
+class TestImagePicker extends ImagePickerPlatform {
+  @override
+  Future<List<XFile>> getMultiImageWithOptions(
+          {MultiImagePickerOptions options =
+              const MultiImagePickerOptions()}) async =>
+      [
+        XFile.fromData(
+            base64Decode(
+                'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII='),
+            mimeType: 'image/png',
+            name: 'test.png'),
+      ];
 }
 
 Future<void> ready(WidgetTester tester) async {
@@ -61,6 +90,76 @@ Future<void> menu(WidgetTester tester, String text) async {
 
 void main() {
   tearDown(RunningSessions.stopAllForTesting);
+
+  test(
+      'late background notices merge before saving without replacing live messages',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final memory = AppMemory(await SharedPreferences.getInstance());
+    final api = ControlledApi();
+    final repo = RunningSessions.of(api).repo(sampleRepo(), memory);
+    final user =
+        ChatMessage(role: 'user', content: 'question', turnId: 'late-turn');
+    repo.transcripts['s1'] = [user];
+    await repo.persist();
+    await backfillChatFromNotice(
+        sessionId: 's1',
+        answer: 'late complete answer',
+        owner: 'octo',
+        repo: 'demo',
+        turnId: 'late-turn');
+    expect(identical(repo.transcripts['s1']!.first, user), isTrue);
+    expect(repo.transcripts['s1']!.last.content, 'late complete answer');
+    await repo.persist();
+    expect(memory.loadChats('octo/demo').transcripts['s1']!.last.content,
+        'late complete answer');
+    repo.removeSession('s1');
+    await repo.persist();
+    expect(repo.transcripts.containsKey('s1'), isFalse);
+    expect(
+        memory.loadChats('octo/demo').transcripts.containsKey('s1'), isFalse);
+  });
+
+  for (final leave in [false, true]) {
+    testWidgets('upload keeps its original session when leave=$leave',
+        (tester) async {
+      final picker = ImagePickerPlatform.instance;
+      ImagePickerPlatform.instance = TestImagePicker();
+      addTearDown(() => ImagePickerPlatform.instance = picker);
+      final api = UploadApi();
+      final pool = RunningSessions.of(api);
+      await tester.pumpWidget(MaterialApp(
+          theme: wenxiangTheme(),
+          home: ChatPage(api: api, repo: sampleRepo(), onBack: () {})));
+      await ready(tester);
+      await tester.tap(find.byKey(const Key('wx-chat-attach')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.tap(find.text('从相册选择'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.enterText(
+          find.byKey(const Key('wx-chat-input')), 'original image question');
+      await tester.tap(find.byKey(const Key('wx-chat-send')));
+      await tester.pump();
+      await menu(tester, '最小化');
+      final newId = pool.repo(sampleRepo(), null).activeId;
+      expect(newId, isNot('s1'));
+      await tester.enterText(
+          find.byKey(const Key('wx-chat-input')), 'new draft');
+      if (leave) await tester.pumpWidget(const SizedBox());
+      api.upload.complete(
+          const ChatImageAttachment(id: 'test-image', mimeType: 'image/png'));
+      await tester.pump();
+      expect(pool.execution('s1')!.current!.content, 'original image question');
+      expect(pool.execution(newId), isNull);
+      if (!leave) expect(find.text('new draft'), findsOneWidget);
+      expect(pool.repo(sampleRepo(), null).transcripts[newId], isEmpty);
+      pool.execution('s1')!.stop();
+      expect(api.cancelledTurns.single, pool.execution('s1')!.current!.turnId);
+      await tester.pumpWidget(const SizedBox());
+    });
+  }
 
   testWidgets('minimize creates another session and both contexts keep running',
       (tester) async {

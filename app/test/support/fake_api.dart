@@ -521,7 +521,7 @@ class FakeWenxiangApi extends WenxiangApi {
   }
 
   @override
-  void cancelChat({String? sessionId}) {
+  void cancelChat({String? sessionId, String? turnId}) {
     cancelChatCalls += 1;
     streamThrows ??= const OperationCancelled();
   }

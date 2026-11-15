@@ -83,6 +83,8 @@ class MermaidRender {
 }
 
 class _ChatRequest {
+  _ChatRequest(this.turnId);
+  final String? turnId;
   http.Client? client;
   bool cancelled = false;
 }
@@ -330,14 +332,16 @@ class WenxiangApi {
     _checkoutClient = null;
   }
 
-  void cancelChat({String? sessionId}) {
+  void cancelChat({String? sessionId, String? turnId}) {
     final id = sessionId?.trim() ?? '';
     final requests = id.isEmpty ? _chatRequests.values.toSet() : [_chatRequests[id]].nonNulls;
     for (final request in requests) {
+      if (turnId != null && request.turnId != turnId) continue;
       request.cancelled = true;
       request.client?.close();
     }
-    if (id.isNotEmpty) unawaited(_postChatCancel(id));
+    final targetTurn = turnId ?? _chatRequests[id]?.turnId;
+    if (id.isNotEmpty) unawaited(_postChatCancel(id, targetTurn));
   }
 
   Future<void> replyInteraction({
@@ -365,13 +369,13 @@ class WenxiangApi {
     _json(res, fallback: '提交选择失败');
   }
 
-  Future<void> _postChatCancel(String sessionId) async {
+  Future<void> _postChatCancel(String sessionId, String? turnId) async {
     try {
       await http
           .post(
             _uri('/v1/chat/cancel'),
             headers: _headers,
-            body: jsonEncode({'sessionId': sessionId}),
+            body: jsonEncode({'sessionId': sessionId, if (turnId != null) 'turnId': turnId}),
           )
           .timeout(const Duration(seconds: 8));
     } catch (_) {}
@@ -1310,7 +1314,7 @@ class WenxiangApi {
     String? chapter,
     String? turnId,
   }) {
-    final control = _ChatRequest();
+    final control = _ChatRequest(turnId);
     final key = sessionId?.trim().isNotEmpty == true ? sessionId!.trim() : _mintChatRequestId();
     _chatRequests[key] = control;
     return _trackedChatStream(control, key, () => _retryBeforeVisible(
@@ -1508,7 +1512,7 @@ class WenxiangApi {
     String? turnId,
     List<ChatImageAttachment> images = const [],
   }) {
-    final control = _ChatRequest();
+    final control = _ChatRequest(turnId);
     final key = sessionId?.trim().isNotEmpty == true ? sessionId!.trim() : _mintChatRequestId();
     _chatRequests[key] = control;
     return _trackedChatStream(control, key, () => _retryBeforeVisible(
@@ -1536,6 +1540,9 @@ class WenxiangApi {
         if (id != null && id.isNotEmpty) _chatRequests[id] = control;
         yield event;
       }
+    } on OperationCancelled {
+      // An explicit stop ends this stream normally, including while a listener
+      // is cancelling its subscription. Do not leak an async cancellation error.
     } finally {
       _chatRequests.removeWhere((key, request) => identical(request, control));
     }

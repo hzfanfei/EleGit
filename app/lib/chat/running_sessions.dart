@@ -12,7 +12,17 @@ import '../voice/background_work.dart';
 
 /// Owns executions independently of routes. Each API connection has its own pool.
 class RunningSessions extends ChangeNotifier {
-  RunningSessions._(this.api);
+  RunningSessions._(this.api) {
+    chatBackfillTick.addListener(_mergeBackfill);
+  }
+
+  void _mergeBackfill() {
+    for (final repo in _repos.values) {
+      repo.mergeSaved();
+    }
+    changed();
+  }
+
   static final _pools = Expando<RunningSessions>();
   static final _testPools = <RunningSessions>[];
   static RunningSessions of(WenxiangApi api) {
@@ -30,6 +40,7 @@ class RunningSessions extends ChangeNotifier {
   static void stopAllForTesting() {
     for (final pool in _testPools) {
       pool.stopAll();
+      chatBackfillTick.removeListener(pool._mergeBackfill);
     }
     _testPools.clear();
   }
@@ -38,8 +49,12 @@ class RunningSessions extends ChangeNotifier {
   final Map<String, RunningRepo> _repos = {};
   final Map<String, SessionExecution> _executions = {};
 
-  RunningRepo repo(RepoItem repo, AppMemory? memory) =>
-      _repos.putIfAbsent(repo.fullName, () => RunningRepo(repo, memory));
+  RunningRepo repo(RepoItem repo, AppMemory? memory) {
+    final state =
+        _repos.putIfAbsent(repo.fullName, () => RunningRepo(repo, memory));
+    state.mergeSaved();
+    return state;
+  }
 
   SessionExecution? execution(String? id) => _executions[id];
   List<SessionExecution> get active =>
@@ -75,8 +90,44 @@ class RunningRepo {
   final List<ChatSession> sessions = [];
   final Map<String, List<ChatMessage>> transcripts = {};
   String? activeId;
+  final Set<String> _removedIds = {};
+
+  void removeSession(String id) {
+    _removedIds.add(id);
+    sessions.removeWhere((s) => s.id == id);
+    transcripts.remove(id);
+  }
+
+  // Merge notices into existing lists, preserving queued/current message identity.
+  void mergeSaved() {
+    final saved = memory?.loadChats(repo.fullName);
+    if (saved == null) return;
+    for (final session in saved.sessions) {
+      if (!_removedIds.contains(session.id) &&
+          !sessions.any((s) => s.id == session.id)) {
+        sessions.add(session);
+      }
+    }
+    for (final entry in saved.transcripts.entries) {
+      if (_removedIds.contains(entry.key)) continue;
+      final local = transcripts.putIfAbsent(entry.key, () => []);
+      ChatMessage? user;
+      for (final message in entry.value) {
+        if (message.role == 'user') {
+          user = message;
+          // Only restore missing turns when importing an entirely new session.
+          continue;
+        }
+        if (message.role != 'assistant' || user?.turnId == null) continue;
+        final at = indexOfTurn(local, user!.turnId!);
+        if (at >= 0) insertTurnAnswer(local, at, message.content);
+      }
+      if (local.isEmpty) local.addAll(entry.value);
+    }
+  }
 
   Future<void> persist() async {
+    mergeSaved();
     await memory?.saveChats(
         repo.fullName,
         RepoChatStore(
@@ -133,7 +184,7 @@ class SessionExecution {
     stopped = true;
     _holdTimeout?.cancel();
     queued.clear();
-    pool.api.cancelChat(sessionId: sessionId);
+    pool.api.cancelChat(sessionId: sessionId, turnId: current?.turnId);
     unawaited(_subscription?.cancel().catchError((Object _) {}));
     _completeStream();
     _wakePoll();
@@ -233,8 +284,9 @@ class SessionExecution {
               (event.detail?.isNotEmpty ?? false)) {
             activity = event.detail ?? '';
           }
-          if (event.phase != null && event.phase != 'activity')
+          if (event.phase != null && event.phase != 'activity') {
             phase = event.phase!;
+          }
         case 'start':
           phase = 'repo';
         case 'ask':

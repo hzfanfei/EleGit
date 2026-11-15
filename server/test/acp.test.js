@@ -650,7 +650,7 @@ describe("session store", () => {
     const closed = await store.close("hzfanfei", "fwechat", first.id);
     assert.equal(closed.closed, true);
     const recovered = store.resolveForChat("hzfanfei", "fwechat", first.id);
-    assert.equal(recovered.id, second.id);
+    assert.equal(recovered.id, first.id);
     assert.equal(store.resolveForChat("hzfanfei", "fwechat", second.id).id, second.id);
     const fresh = createSessionStore({
       resolveCommand: () => ({
@@ -664,7 +664,7 @@ describe("session store", () => {
     });
     const afterRestart = fresh.resolveForChat("hzfanfei", "fwechat", first.id);
     assert.ok(afterRestart.id);
-    assert.notEqual(afterRestart.id, first.id);
+    assert.equal(afterRestart.id, first.id);
   });
 
   it("warms one ACP process per phone chat", async () => {

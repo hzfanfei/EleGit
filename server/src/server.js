@@ -1,3 +1,4 @@
+import { createChatTurns } from "./chat-turns.js";
 import { measureModelSpeed } from "./model-speed.js";
 import { listCodexModels, readCodexRateLimits } from "./codex-models.js";
 import { createServer } from "node:http";
@@ -184,19 +185,9 @@ const bookSessions = createSessionStore({
   spawnImpl: turnRelay ? relaySpawn : undefined,
   readOnly: true,
 });
-const chatCancels = new Map();
-
-function beginChatTurn(sessionId) {
-  const prev = chatCancels.get(sessionId);
-  prev?.abort();
-  const ac = new AbortController();
-  chatCancels.set(sessionId, ac);
-  return ac;
-}
-
-function endChatTurn(sessionId, ac) {
-  if (chatCancels.get(sessionId) === ac) chatCancels.delete(sessionId);
-}
+const chatTurns = createChatTurns();
+const beginChatTurn = (sessionId, turnId) => chatTurns.begin(sessionId, turnId);
+const endChatTurn = (sessionId, turn) => chatTurns.end(sessionId, turn);
 
 function trackUnwatched(res) {
   let gone = false;
@@ -1340,7 +1331,7 @@ app.post("/v1/books/chat", async (req, res) => {
     const materialized = await ensureBookMaterialized(store.config.workspaceRoot, book);
     const owner = bookSessionOwner();
     const session = bookSessions.resolveForChat(owner, bookId, sessionId);
-    turn = beginChatTurn(session.id);
+    turn = beginChatTurn(session.id, turnId);
     turnSessionId = session.id;
     const signal = turn.signal;
     const acp = detectCursorEngine("book");
@@ -1466,10 +1457,12 @@ app.post("/v1/chat/cancel", async (req, res) => {
     res.status(400).json({ error: "sessionId is required" });
     return;
   }
-  chatCancels.get(sessionId)?.abort();
-  await sessions.cancelById(sessionId).catch(() => {});
-  await bookSessions.cancelById(sessionId).catch(() => {});
-  res.json({ ok: true });
+  const turnId = cleanTurnId(req.body?.turnId);
+  const cancelled = await chatTurns.cancel(sessionId, turnId, () => Promise.all([
+    sessions.cancelById(sessionId).catch(() => {}),
+    bookSessions.cancelById(sessionId).catch(() => {}),
+  ]));
+  res.json({ ok: true, cancelled });
 });
 
 app.post("/v1/chat/interact", (req, res) => {
@@ -1544,7 +1537,7 @@ app.post("/v1/chat", async (req, res) => {
     }
     const question = message || "请看附图。";
     const session = sessions.resolveForChat(owner, repo, sessionId);
-    turn = beginChatTurn(session.id);
+    turn = beginChatTurn(session.id, turnId);
     turnSessionId = session.id;
     const signal = turn.signal;
     openSse(res);

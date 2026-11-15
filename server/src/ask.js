@@ -346,6 +346,7 @@ export async function* streamAnswer({
         cwd: local?.present ? local.path : undefined,
         buildPrompt,
         agentMode,
+        signal,
         turnNote,
         staticFiles,
         workspaceRoot,
