@@ -8,6 +8,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: WxEdgeBack(
+          enabled: true,
           onBack: () => backs += 1,
           child: const Scaffold(body: Text('home')),
         ),
@@ -33,6 +34,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: WxEdgeBack(
+          enabled: true,
           onBack: () => backs += 1,
           child: const Scaffold(body: Text('home')),
         ),
@@ -43,5 +45,20 @@ void main() {
     await tester.pump();
     expect(backs, 0);
     expect(find.text('home'), findsOneWidget);
+  });
+
+  testWidgets('edge swipes are disabled by default and child taps still work', (tester) async {
+    var backs = 0;
+    var taps = 0;
+    await tester.pumpWidget(MaterialApp(home: WxEdgeBack(
+      onBack: () => backs++,
+      child: Scaffold(body: TextButton(onPressed: () => taps++, child: const Text('打开'))),
+    )));
+    await tester.dragFrom(const Offset(8, 200), const Offset(80, 0));
+    final width = tester.getSize(find.byType(WxEdgeBack)).width;
+    await tester.dragFrom(Offset(width - 8, 200), const Offset(-80, 0));
+    await tester.tap(find.text('打开'));
+    expect(backs, 0);
+    expect(taps, 1);
   });
 }

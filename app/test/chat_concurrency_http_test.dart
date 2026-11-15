@@ -11,6 +11,7 @@ void main() {
     final cancelled = <String>[];
     final cancelledTurns = <String?>[];
     final connected = Completer<void>();
+    final cancelReceived = Completer<void>();
     server.listen((request) async {
       final body = jsonDecode(await utf8.decoder.bind(request).join()) as Map;
       final id = body['sessionId'] as String;
@@ -19,6 +20,7 @@ void main() {
         cancelledTurns.add(body['turnId'] as String?);
         request.response.write('{}');
         await request.response.close();
+        if (!cancelReceived.isCompleted) cancelReceived.complete();
         return;
       }
       request.response.headers.contentType =
@@ -53,6 +55,7 @@ void main() {
       if (!firstDone.isCompleted) firstDone.complete();
     });
     final done = Completer<void>();
+    final secondErrors = <Object>[];
     final second = api
         .chatStream(
             owner: 'o', repo: 'r', message: 'two', history: [], sessionId: 'b')
@@ -62,30 +65,29 @@ void main() {
     }, onDone: () {
       if (!done.isCompleted) done.complete();
     }, onError: (Object error) {
-      if (!done.isCompleted) done.completeError(error);
+      secondErrors.add(error);
+      if (!done.isCompleted) done.complete();
     });
     try {
       await connected.future.timeout(const Duration(seconds: 5));
       await Future.wait([firstSeen.future, secondSeen.future])
           .timeout(const Duration(seconds: 5));
       api.cancelChat(sessionId: 'a');
+      await firstDone.future.timeout(const Duration(seconds: 5));
+      await cancelReceived.future.timeout(const Duration(seconds: 5));
       requests['b']!
           .write('data: {"type":"done","answer":"second completed"}\n\n');
       await requests['b']!.close();
       await done.future.timeout(const Duration(seconds: 5));
-      await firstDone.future.timeout(const Duration(seconds: 5));
       expect(firstErrors, everyElement(isA<OperationCancelled>()));
+      expect(secondErrors, isEmpty);
       expect(answers, ['second completed']);
-      // Allow the cancellation POST to finish before closing the test server.
-      for (var i = 0; i < 20 && cancelled.isEmpty; i++) {
-        await Future<void>.delayed(const Duration(milliseconds: 10));
-      }
       expect(cancelled, ['a']);
       expect(cancelledTurns, ['turn-a']);
     } finally {
-      await server.close(force: true);
       await first.cancel();
       await second.cancel();
+      await server.close(force: true);
     }
   });
 }

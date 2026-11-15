@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wenxiang/copy/errors.dart';
@@ -9,12 +7,8 @@ import 'package:wenxiang/theme.dart';
 
 void main() {
   testWidgets('log center lists recorded client errors', (tester) async {
-    final dir = Directory.systemTemp.createTempSync('wx-log-center-');
-    addTearDown(() {
-      if (dir.existsSync()) dir.deleteSync(recursive: true);
-    });
     final previous = ClientErrorLog.instance;
-    ClientErrorLog.instance = ClientErrorLog(root: dir);
+    ClientErrorLog.instance = ClientErrorLog(persist: false);
     addTearDown(() => ClientErrorLog.instance = previous);
 
     recordClientError('SocketException: Connection refused', kind: 'chat');

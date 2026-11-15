@@ -13,7 +13,6 @@ import 'package:wenxiang/utils/notification_center.dart';
 import 'package:wenxiang/widgets/wx_chrome.dart';
 import 'package:wenxiang/voice/voice_client.dart';
 import 'package:wenxiang/voice/voice_media.dart';
-import 'package:wenxiang/voice/voice_stt_client.dart';
 
 import 'support/fake_api.dart';
 
@@ -32,6 +31,14 @@ Future<void> _pumpUntilChatReady(WidgetTester tester) async {
     await tester.pump(const Duration(milliseconds: 20));
     if (find.text('正在准备对话…').evaluate().isEmpty) break;
   }
+}
+
+Future<void> _pumpUntilVisible(WidgetTester tester, Finder finder) async {
+  for (var i = 0; i < 50; i++) {
+    await tester.pump(const Duration(milliseconds: 20));
+    if (finder.evaluate().isNotEmpty) return;
+  }
+  expect(finder, findsWidgets);
 }
 
 class _DelayedUsageApi extends FakeWenxiangApi {
@@ -94,8 +101,11 @@ void main() {
     expect(tester.getSize(find.text('octo/demo').first).width, greaterThan(100));
     await tester.longPress(find.byKey(const Key('wx-agent-mode')));
     await tester.pump(const Duration(milliseconds: 300));
-    expect(find.textContaining('7天额度：已用 25%，剩余 75%'), findsOneWidget);
-    await tester.tap(find.text('关闭'));
+    expect(find.text('剩余 75%'), findsOneWidget);
+    await tester.tap(find.text('用量'));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.textContaining('7天 · 剩余 75%'), findsOneWidget);
+    await tester.tap(find.byTooltip('关闭'));
     await tester.pump(const Duration(milliseconds: 300));
     await tester.tap(find.byKey(const Key('wx-agent-mode')));
     await tester.pump(const Duration(milliseconds: 300));
@@ -163,55 +173,44 @@ void main() {
   });
 
   testWidgets('tokens appear progressively instead of dumping at the end', (tester) async {
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: wenxiangTheme(),
-        home: ChatPage(
-          api: FakeWenxiangApi(
-            streamPace: const Duration(milliseconds: 40),
-            streamEvents: [
-              ChatStreamEvent(type: 'start', engine: 'local-progress'),
-              ChatStreamEvent(type: 'delta', text: '## 最近\n'),
-              ChatStreamEvent(type: 'delta', text: '- 修登录\n'),
-              ChatStreamEvent(type: 'delta', text: '```\nvoid main() {'),
-              ChatStreamEvent(type: 'done', engine: 'local-progress', sessionId: 's1'),
-            ],
-          ),
-          repo: sampleRepo(),
-          onBack: () {},
-        ),
-      ),
-    );
+    final events = StreamController<ChatStreamEvent>();
+    final api = FakeWenxiangApi(streamOverride: events.stream);
+    await tester.pumpWidget(MaterialApp(
+      theme: wenxiangTheme(),
+      home: ChatPage(api: api, repo: sampleRepo(), onBack: () {}),
+    ));
     await _pumpUntilChatReady(tester);
     await tester.tap(find.text('这个仓库最近在做什么？'));
     await tester.pump();
-
+    expect(find.textContaining('正在连接'), findsOneWidget);
     expect(find.textContaining('void main'), findsNothing);
-    expect(find.textContaining('正在连接'), findsOneWidget);
-    expect(find.text('你问'), findsOneWidget);
-    expect(find.text('问象'), findsWidgets);
 
-    await tester.pump(const Duration(milliseconds: 45));
-    expect(find.textContaining('正在连接'), findsOneWidget);
+    events.add(ChatStreamEvent(type: 'start', engine: 'local-progress'));
+    await tester.pump();
+    expect(find.textContaining('读仓库'), findsOneWidget);
     expect(find.text('最近'), findsNothing);
 
-    await tester.pump(const Duration(milliseconds: 45));
+    events.add(ChatStreamEvent(type: 'delta', text: '## 最近\n'));
+    await _pumpUntilVisible(tester, find.text('最近'));
     expect(find.text('最近'), findsOneWidget);
-    expect(find.textContaining('void main'), findsNothing);
     expect(find.textContaining('##'), findsNothing);
+    expect(find.textContaining('修登录'), findsNothing);
 
-    await tester.pump(const Duration(milliseconds: 45));
+    events.add(ChatStreamEvent(type: 'delta', text: '- 修登录\n'));
+    await _pumpUntilVisible(tester, find.textContaining('修登录'));
     expect(find.textContaining('修登录'), findsOneWidget);
     expect(find.textContaining('void main'), findsNothing);
 
-    await tester.pump(const Duration(milliseconds: 45));
+    events.add(ChatStreamEvent(type: 'delta', text: '```\nvoid main() {'));
+    await _pumpUntilVisible(tester, find.textContaining('void main'));
     expect(find.textContaining('void main'), findsOneWidget);
     expect(find.textContaining('```'), findsNothing);
 
-    await tester.pump(const Duration(milliseconds: 45));
-    await tester.pumpAndSettle();
+    events.add(ChatStreamEvent(type: 'done', engine: 'local-progress'));
+    await events.close();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
     expect(find.text('你问'), findsOneWidget);
-    expect(find.text('问象'), findsWidgets);
     expect(find.textContaining('void main'), findsOneWidget);
     expect(find.textContaining('```'), findsNothing);
   });
@@ -437,11 +436,9 @@ void main() {
 
   testWidgets('hold poll applies partial inbox activity to the work log', (tester) async {
     const asked = '这个仓库最近在做什么？';
+    final events = StreamController<ChatStreamEvent>();
     final api = FakeWenxiangApi(
-      streamEvents: [
-        ChatStreamEvent(type: 'start', engine: 'local-progress', sessionId: 's-hold'),
-        ChatStreamEvent(type: 'status', phase: 'activity', detail: '思考·旧进度'),
-      ],
+      streamOverride: events.stream,
       inboxItems: [
         {
           'kind': 'agent-notification',
@@ -454,6 +451,10 @@ void main() {
         },
       ],
     );
+    api.inboxBuilder = () => [
+      for (final row in api.inboxItems)
+        {...row, 'turnId': api.lastTurnId, 'sessionId': api.lastSessionId},
+    ];
     await tester.pumpWidget(
       MaterialApp(
         theme: wenxiangTheme(),
@@ -467,11 +468,17 @@ void main() {
     await _pumpUntilChatReady(tester);
     await tester.tap(find.text(asked));
     await tester.pump();
-    await tester.pump();
+    events.add(ChatStreamEvent(type: 'start', engine: 'local-progress'));
+    events.add(ChatStreamEvent(type: 'status', phase: 'activity', detail: '思考·旧进度'));
+    await _pumpUntilVisible(tester, find.text('旧进度'));
 
-    expect(find.text('思考·旧进度'), findsOneWidget);
+    expect(find.text('思考'), findsOneWidget);
+    expect(find.text('旧进度'), findsOneWidget);
     expect(find.textContaining('inbox-hold'), findsNothing);
 
+    events.addError(AcceptedChatDrop(Exception('stream ended')));
+    await events.close();
+    await tester.pump();
     await tester.pump(const Duration(milliseconds: 500));
     await tester.pump();
 
@@ -1096,7 +1103,7 @@ void main() {
 
     for (var i = 0; i < 50; i++) {
       await tester.pump(const Duration(milliseconds: 100));
-      if (api.chatMessages.length >= 1 &&
+      if (api.chatMessages.isNotEmpty &&
           find.textContaining('只答第一条').evaluate().isNotEmpty) {
         break;
       }

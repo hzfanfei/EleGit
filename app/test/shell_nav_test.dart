@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wenxiang/models.dart';
+import 'package:wenxiang/chat/running_sessions.dart';
 import 'package:wenxiang/persist/app_memory.dart';
 import 'package:wenxiang/screens/shell_page.dart';
+import 'package:wenxiang/screens/chat_page.dart';
 import 'package:wenxiang/theme.dart';
 
 import 'support/fake_api.dart';
@@ -12,6 +14,14 @@ ThemeData _theme() => wenxiangTheme().copyWith(splashFactory: NoSplash.splashFac
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  tearDown(RunningSessions.stopAllForTesting);
+
+  // Chat's header has a repeating animation, so it never becomes settled.
+  Future<void> pumpChat(WidgetTester tester) async {
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byType(ChatPage), findsOneWidget);
+  }
 
   Future<AppMemory> memory() async {
     SharedPreferences.setMockInitialValues({});
@@ -54,7 +64,7 @@ void main() {
     expect(find.text('继续上次'), findsOneWidget);
     expect(find.text('打开对话'), findsOneWidget);
     await tester.tap(find.byKey(const Key('wx-home-last')));
-    await tester.pumpAndSettle();
+    await pumpChat(tester);
     expect(find.textContaining('从进度问起'), findsOneWidget);
   });
 
@@ -93,8 +103,7 @@ void main() {
     await tester.pump();
 
     await tester.tap(find.text('demo').first);
-    await tester.pump();
-    await tester.pumpAndSettle();
+    await pumpChat(tester);
 
     expect(api.checkoutCalls, 0);
     expect(find.textContaining('最近在修登录'), findsOneWidget);

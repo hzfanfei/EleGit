@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { describe, it } from "node:test";
 import { promisify } from "node:util";
+import { EventEmitter } from "node:events";
 import {
   ensureNgrok,
   findTunnelForPublicUrl,
@@ -17,6 +18,10 @@ import {
 } from "../src/ngrok.js";
 
 const execFileAsync = promisify(execFile);
+
+function fakeChild() {
+  return Object.assign(new EventEmitter(), { exitCode: null });
+}
 
 function tunnelBody(host) {
   return {
@@ -120,7 +125,7 @@ describe("ngrok autostart", () => {
           const host = fetches === 1 ? "https://missing.ngrok.app" : "https://demo.ngrok-free.dev";
           return tunnelBody(host);
         },
-        spawnImpl: () => ({ exitCode: null }),
+        spawnImpl: fakeChild,
         whichImpl: () => "ngrok",
       });
       assert.equal(result.reason, "spawned");
@@ -181,7 +186,7 @@ describe("ngrok autostart", () => {
       },
       spawnImpl: () => {
         spawned = true;
-        return { exitCode: null };
+        return fakeChild();
       },
       whichImpl: () => "ngrok",
     });

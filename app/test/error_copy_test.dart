@@ -24,6 +24,19 @@ void main() {
     expect(humanizeError(raw), isNot(contains('SocketException')));
   });
 
+  test('distinguishes connection setup failures from interrupted replies', () {
+    for (final reason in [
+      'SocketException: Failed host lookup: example.invalid',
+      'SocketException: Network is unreachable',
+      'ClientException: Connection refused',
+    ]) {
+      expect(humanizeError(reason), contains('连不上本机问象服务'));
+    }
+    expect(humanizeError('SocketException: Connection reset by peer'), contains('连接中断'));
+    // Recovery still treats connection failures after an accepted turn as drops.
+    expect(isChatTransportDrop('SocketException: Connection refused'), isTrue);
+  });
+
   test('maps auth failures without leaking stacks', () {
     expect(humanizeError('Exception: HTTP 401 Unauthorized'), contains('授权'));
     expect(humanizeError('Exception: HTTP 401 Unauthorized'), isNot(contains('Exception')));

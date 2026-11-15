@@ -38,6 +38,13 @@ String _explain(Object error) {
   if (_isLeftoverDest(lower)) return '本机目录不完整。请重试。';
   if (_isRepoMissing(lower)) return '找不到这个仓库。';
 
+  // These failures happen before a connection exists, including SocketException.
+  // Keep the broad transport-drop matcher below for recovering accepted turns.
+  if (lower.contains('connection refused') ||
+      lower.contains('failed host lookup') ||
+      lower.contains('network is unreachable')) {
+    return '连不上本机问象服务。请确认电脑上的服务已启动。';
+  }
   if (_isSseDrop(lower)) {
     return '连接中断了。请重试。';
   }

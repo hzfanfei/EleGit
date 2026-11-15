@@ -26,6 +26,7 @@ class FakeWenxiangApi extends WenxiangApi {
     this.checkoutStatusResult,
     this.checkoutStatusThrows,
     this.streamEvents,
+    this.streamOverride,
     this.streamThrows,
     this.streamDelay = Duration.zero,
     this.streamPace = Duration.zero,
@@ -58,6 +59,7 @@ class FakeWenxiangApi extends WenxiangApi {
   CheckoutSyncStatus? checkoutStatusResult;
   Object? checkoutStatusThrows;
   List<ChatStreamEvent>? streamEvents;
+  Stream<ChatStreamEvent>? streamOverride;
   Object? streamThrows;
   Duration streamDelay;
   Duration streamPace;
@@ -623,6 +625,10 @@ class FakeWenxiangApi extends WenxiangApi {
     chatMessages.add(message);
     chatHistories.add(List<ChatMessage>.from(history));
     if (streamThrows != null) throw streamThrows!;
+    if (streamOverride != null) {
+      yield* streamOverride!;
+      return;
+    }
     if (streamDelay > Duration.zero) {
       await Future<void>.delayed(streamDelay);
     }

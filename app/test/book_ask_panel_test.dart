@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -86,15 +88,8 @@ void main() {
 
     final sheetSize = ValueNotifier<double>(0.45);
     addTearDown(sheetSize.dispose);
-    final api = FakeWenxiangApi(
-      streamPace: const Duration(milliseconds: 80),
-      streamEvents: [
-        ChatStreamEvent(type: 'status', phase: 'connect'),
-        ChatStreamEvent(type: 'status', phase: 'book'),
-        ChatStreamEvent(type: 'delta', text: '墙纸是压抑的象征。'),
-        ChatStreamEvent(type: 'done', engine: 'acp'),
-      ],
-    );
+    final events = StreamController<ChatStreamEvent>();
+    final api = FakeWenxiangApi(streamOverride: events.stream);
 
     await tester.pumpWidget(
       MaterialApp(
@@ -132,16 +127,23 @@ void main() {
     await tester.testTextInput.receiveAction(TextInputAction.send);
     await tester.pump();
 
+    // The panel starts in the book phase, then follows actual server events.
+    expect(find.text('对照当前章节…'), findsWidgets);
+
+    events.add(ChatStreamEvent(type: 'status', phase: 'connect'));
+    await tester.pump();
     expect(find.text('正在连接问书…'), findsWidgets);
 
-    await tester.pump(const Duration(milliseconds: 90));
-    expect(find.text('正在连接问书…'), findsWidgets);
-
-    await tester.pump(const Duration(milliseconds: 90));
+    events.add(ChatStreamEvent(type: 'status', phase: 'book'));
+    await tester.pump();
     expect(find.text('对照当前章节…'), findsWidgets);
     expect(find.text('墙纸是压抑的象征。'), findsNothing);
 
+    events.add(ChatStreamEvent(type: 'delta', text: '墙纸是压抑的象征。'));
+    events.add(ChatStreamEvent(type: 'done', engine: 'acp'));
+    await events.close();
     await tester.pump(const Duration(milliseconds: 300));
+    expect(find.textContaining('墙纸是压抑的象征。'), findsWidgets);
   });
 
   testWidgets('history turns stay collapsed until opened', (tester) async {

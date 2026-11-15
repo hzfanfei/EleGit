@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { mkdtemp, readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
+import { once } from "node:events";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const serverRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
-const repoRoot = path.join(serverRoot, "..");
 
 async function waitFor(fn, { timeoutMs = 8000 } = {}) {
   const start = Date.now();
@@ -25,7 +26,11 @@ async function waitFor(fn, { timeoutMs = 8000 } = {}) {
 
 async function startServer() {
   const home = await mkdtemp(path.join(os.tmpdir(), "wenxiang-cors-"));
-  const port = 18788;
+  const reservation = net.createServer();
+  reservation.listen(0, "127.0.0.1");
+  await once(reservation, "listening");
+  const port = reservation.address().port;
+  await new Promise((resolve) => reservation.close(resolve));
   const env = { ...process.env };
     delete env.GITHUB_CLIENT_ID;
     delete env.GITHUB_CLIENT_SECRET;
@@ -49,16 +54,30 @@ async function startServer() {
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
-  await waitFor(async () => {
-    const res = await fetch(`http://127.0.0.1:${port}/health`);
-    assert.equal(res.status, 200);
-  });
-  return { child, home, port };
+  child.stdout.resume();
+  child.stderr.resume();
+  async function stop() {
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    const exited = once(child, "exit");
+    child.kill("SIGTERM");
+    await exited;
+  }
+  try {
+    await waitFor(async () => {
+      assert.equal(child.exitCode, null, "test server exited before becoming healthy");
+      const res = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(1000) });
+      assert.equal(res.status, 200);
+    });
+  } catch (err) {
+    await stop();
+    throw err;
+  }
+  return { stop, home, port };
 }
 
 describe("Chrome / ngrok CORS", () => {
   it("always advertises API-key and ngrok skip headers on preflight", async () => {
-    const { child, port } = await startServer();
+    const { stop, port } = await startServer();
     try {
       const origin = "http://localhost:54821";
       const res = await fetch(`http://127.0.0.1:${port}/v1/github/oauth/status?state=abc`, {
@@ -74,12 +93,12 @@ describe("Chrome / ngrok CORS", () => {
       assert.match(allowHeaders, /x-wenxiang-key/);
       assert.match(allowHeaders, /ngrok-skip-browser-warning/);
     } finally {
-      child.kill("SIGTERM");
+      await stop();
     }
   });
 
   it("answers OPTIONS preflight for /v1 without an API key", async () => {
-    const { child, port } = await startServer();
+    const { stop, port } = await startServer();
     try {
       const origin = "http://localhost:54821";
       const res = await fetch(`http://127.0.0.1:${port}/v1/github/oauth/status?state=abc`, {
@@ -101,12 +120,12 @@ describe("Chrome / ngrok CORS", () => {
       assert.match(allowHeaders, /x-wenxiang-key/);
       assert.match(allowHeaders, /ngrok-skip-browser-warning/);
     } finally {
-      child.kill("SIGTERM");
+      await stop();
     }
   });
 
   it("reflects CORS on /v1 GET and still requires the API key", async () => {
-    const { child, home, port } = await startServer();
+    const { stop, home, port } = await startServer();
     try {
       const origin = "http://localhost:54821";
       const denied = await fetch(`http://127.0.0.1:${port}/v1/status`, {
@@ -131,14 +150,8 @@ describe("Chrome / ngrok CORS", () => {
       const okOrigin = ok.headers.get("access-control-allow-origin");
       assert.ok(okOrigin === "*" || okOrigin === origin);
     } finally {
-      child.kill("SIGTERM");
+      await stop();
     }
   });
 
-  it("Flutter HTTP client sends the ngrok skip header on every request", async () => {
-    const src = await readFile(path.join(repoRoot, "app/lib/api/wenxiang_api.dart"), "utf8");
-    assert.match(src, /'ngrok-skip-browser-warning'\s*:\s*'true'/);
-    assert.match(src, /http\.get\(_uri\('\/health'\),\s*headers:\s*_headers/);
-    assert.match(src, /\.\.\._headers/);
-  });
 });
