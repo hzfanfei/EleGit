@@ -14,6 +14,53 @@ import 'package:wenxiang/voice/voice_media.dart';
 import 'support/fake_api.dart';
 
 void main() {
+  test('interrupted reply returns both scopes to idle and keeps diagnostics',
+      () async {
+    final previous = ClientErrorLog.instance;
+    final log = ClientErrorLog(persist: false);
+    ClientErrorLog.instance = log;
+    final errors = <String>[];
+    final api = _InterruptedVoiceApi();
+    final book = BookQuickVoiceSession(
+      api: api,
+      bookId: 'b',
+      chapterHint: '',
+      onChanged: () {},
+      readingPlace: () => const BookReadingPlace(),
+      historyForVoice: (_) => const [],
+      voiceMedia: FakeVoiceMedia(),
+      onError: errors.add,
+    );
+    final repo = RepoQuickVoiceSession(
+      api: api,
+      owner: 'o',
+      repo: 'r',
+      onChanged: () {},
+      historyForVoice: () => const [],
+      resolveSessionId: () => null,
+      voiceMedia: FakeVoiceMedia(),
+      onError: errors.add,
+    );
+    try {
+      await book.runVoiceTurnForTest('问题');
+      await repo.runVoiceTurnForTest('问题');
+      expect(book.phase, BookQuickVoicePhase.idle);
+      expect(repo.phase, BookQuickVoicePhase.idle);
+      expect(book.voiceCaption, isEmpty);
+      expect(repo.voiceCaption, isEmpty);
+      expect(errors, hasLength(2));
+      await log.idle;
+      final rows = await log.peek(10);
+      expect(rows, hasLength(2));
+      expect(rows.every((row) => row['kind'] == 'voice-turn'), isTrue);
+      expect(rows.every((row) => (row['stack'] as String).isNotEmpty), isTrue);
+    } finally {
+      book.dispose();
+      repo.dispose();
+      ClientErrorLog.instance = previous;
+    }
+  });
+
   test('quick voice playback failures retain diagnostics for both scopes',
       () async {
     final previous = ClientErrorLog.instance;
@@ -244,6 +291,34 @@ void main() {
     expect(session.phase, BookQuickVoicePhase.idle);
     session.dispose();
   });
+}
+
+class _InterruptedVoiceApi extends FakeWenxiangApi {
+  Stream<ChatStreamEvent> _reply(String scope) async* {
+    yield ChatStreamEvent(type: 'state', phase: 'speak');
+    throw AcceptedChatDrop(Exception('$scope reply stalled'));
+  }
+
+  @override
+  Stream<ChatStreamEvent> bookVoiceTurnStream({
+    required String bookId,
+    required String message,
+    required List<ChatMessage> history,
+    String? sessionId,
+    String? chapter,
+    String? ttsVoice,
+  }) => _reply('book');
+
+  @override
+  Stream<ChatStreamEvent> repoVoiceTurnStream({
+    required String owner,
+    required String repo,
+    required String message,
+    required List<ChatMessage> history,
+    String? sessionId,
+    String? ttsVoice,
+    bool agentMode = false,
+  }) => _reply('repo');
 }
 
 class _GatedBookVoiceApi extends FakeWenxiangApi {

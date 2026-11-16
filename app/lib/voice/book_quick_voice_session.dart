@@ -1,7 +1,5 @@
 import 'dart:async';
 
-import 'dart:typed_data';
-
 import 'package:flutter/foundation.dart';
 
 import '../api/wenxiang_api.dart';
@@ -86,6 +84,7 @@ class BookQuickVoiceSession implements QuickVoiceFabHost {
   late final HoldToSpeakSession _hold;
   VoiceMedia? _media;
   bool _disposed = false;
+  @override
   BookQuickVoicePhase phase = BookQuickVoicePhase.idle;
   String _thinkStatusLabel = '思考中…';
   String? _sessionId;
@@ -98,6 +97,7 @@ class BookQuickVoiceSession implements QuickVoiceFabHost {
   String _segmentCaption = '';
   String _voiceCaption = '';
 
+  @override
   HoldToSpeakSession get hold => _hold;
 
   void _reportPlaybackError(Object error, StackTrace stack) {
@@ -124,12 +124,14 @@ class BookQuickVoiceSession implements QuickVoiceFabHost {
       phase == BookQuickVoicePhase.thinking ||
       phase == BookQuickVoicePhase.speaking;
 
+  @override
   bool get showsStatus =>
       phase != BookQuickVoicePhase.idle ||
       _hold.holding ||
       _hold.holdPending ||
       _hold.sttBusy;
 
+  @override
   String get statusLabel {
     final hold = _hold;
     if (hold.holding && hold.holdCancel) return '松开取消';
@@ -162,6 +164,7 @@ class BookQuickVoiceSession implements QuickVoiceFabHost {
     onChanged();
   }
 
+  @override
   Future<void> pointerDown(double globalY) async {
     if (_hold.sttBusy || busy || _hold.holding || _hold.holdPending) {
       await cancelActiveFlow();
@@ -172,8 +175,10 @@ class BookQuickVoiceSession implements QuickVoiceFabHost {
     await _hold.beginHold(globalY);
   }
 
+  @override
   void pointerMove(double globalY) => _hold.moveHold(globalY);
 
+  @override
   Future<void> pointerUp() async {
     if (_hold.holding || _hold.holdPending) {
       phase = BookQuickVoicePhase.recognizing;
@@ -333,7 +338,13 @@ class BookQuickVoiceSession implements QuickVoiceFabHost {
       }
     } on OperationCancelled {
       // user interrupted
-    } catch (err) {
+    } catch (err, stack) {
+      ClientErrorLog.instance.note(
+        kind: 'voice-turn',
+        message: err.toString(),
+        summary: '问书快问快答回复中断',
+        stack: stack.toString(),
+      );
       onError?.call(err.toString());
     } finally {
       if (_replyActive && !_disposed) {

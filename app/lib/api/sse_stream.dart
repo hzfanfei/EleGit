@@ -11,6 +11,38 @@ class SseHeartbeatStale implements Exception {
   String toString() => 'SSE heartbeat stale';
 }
 
+class VoiceReplyStalled implements Exception {
+  @override
+  String toString() => '语音回复长时间没有新内容，请重试。';
+}
+
+/// Heartbeats prove the connection is alive, not that synthesis is progressing.
+/// Only quick voice uses this deadline; ordinary agent turns can think longer.
+Stream<ChatStreamEvent> streamQuickVoiceSseEvents({
+  required Stream<List<int>> byteStream,
+  required http.Client client,
+  required void Function() throwIfCancelled,
+  Duration progressTimeout = const Duration(seconds: 90),
+}) async* {
+  final events = streamWenxiangSseEvents(
+    byteStream: byteStream,
+    client: client,
+    throwIfCancelled: throwIfCancelled,
+    stopOnTerminal: true,
+  ).timeout(progressTimeout, onTimeout: (sink) {
+    client.close();
+    sink.addError(VoiceReplyStalled());
+    sink.close();
+  });
+  var sawTerminal = false;
+  await for (final event in events) {
+    if (event.type == 'done' || event.type == 'error') sawTerminal = true;
+    yield event;
+  }
+  throwIfCancelled();
+  if (!sawTerminal) throw Exception('语音回复连接已中断，请重试。');
+}
+
 /// Keep in sync with [startSseHeartbeat] default in `server/src/sse.js`.
 const wenxiangSseServerHeartbeatInterval = Duration(seconds: 5);
 
@@ -77,6 +109,7 @@ Stream<ChatStreamEvent> streamWenxiangSseEvents({
   required Stream<List<int>> byteStream,
   required http.Client client,
   required void Function() throwIfCancelled,
+  bool stopOnTerminal = false,
 }) async* {
   final parser = WenxiangSseBuffer();
   var lastAlive = DateTime.now();
@@ -95,7 +128,15 @@ Stream<ChatStreamEvent> streamWenxiangSseEvents({
       if (stale) throw SseHeartbeatStale();
       for (final frame in parser.push(chunk)) {
         if (frame.isAliveSignal) lastAlive = DateTime.now();
-        if (frame.event != null) yield frame.event!;
+        final event = frame.event;
+        if (event != null) {
+          yield event;
+          // End at the protocol boundary, without waiting for HTTP EOF.
+          if (stopOnTerminal &&
+              (event.type == 'done' || event.type == 'error')) {
+            return;
+          }
+        }
       }
     }
     if (stale) throw SseHeartbeatStale();

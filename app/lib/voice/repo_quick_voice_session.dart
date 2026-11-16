@@ -324,7 +324,13 @@ class RepoQuickVoiceSession implements QuickVoiceFabHost {
       }
     } on OperationCancelled {
       // user interrupted
-    } catch (err) {
+    } catch (err, stack) {
+      ClientErrorLog.instance.note(
+        kind: 'voice-turn',
+        message: err.toString(),
+        summary: '问象快问快答回复中断',
+        stack: stack.toString(),
+      );
       onError?.call(err.toString());
     } finally {
       if (_replyActive && !_disposed) {

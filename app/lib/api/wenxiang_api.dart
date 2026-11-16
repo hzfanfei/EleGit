@@ -1204,7 +1204,7 @@ class WenxiangApi {
         } catch (_) {}
         throw ApiException(error);
       }
-      yield* streamWenxiangSseEvents(
+      yield* streamQuickVoiceSseEvents(
         byteStream: res.stream,
         client: client,
         throwIfCancelled: () {
@@ -1215,7 +1215,7 @@ class WenxiangApi {
       if (_bookVoiceCancelled || err is OperationCancelled) {
         throw const OperationCancelled();
       }
-      if (err is SseHeartbeatStale) {
+      if (err is SseHeartbeatStale || err is VoiceReplyStalled) {
         throw AcceptedChatDrop(Exception(err.toString()));
       }
       rethrow;
@@ -1287,7 +1287,7 @@ class WenxiangApi {
         } catch (_) {}
         throw ApiException(error);
       }
-      yield* streamWenxiangSseEvents(
+      yield* streamQuickVoiceSseEvents(
         byteStream: res.stream,
         client: client,
         throwIfCancelled: () {
@@ -1298,7 +1298,7 @@ class WenxiangApi {
       if (_repoVoiceCancelled || err is OperationCancelled) {
         throw const OperationCancelled();
       }
-      if (err is SseHeartbeatStale) {
+      if (err is SseHeartbeatStale || err is VoiceReplyStalled) {
         throw AcceptedChatDrop(Exception(err.toString()));
       }
       rethrow;
