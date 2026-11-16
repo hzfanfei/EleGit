@@ -5,6 +5,20 @@ import 'package:wenxiang/persist/app_memory.dart';
 import 'package:wenxiang/persist/book_chat_store.dart';
 
 void main() {
+  test('loading book history repairs duplicate fragments within each anchor', () {
+    final anchor = BookAnchorChat.fromJson({
+      'id': 'chapter', 'updatedAt': '', 'messages': [
+        ChatMessage(role: 'user', content: '总结').toJson(),
+        ChatMessage(role: 'assistant', content: '检查中。===TASK_COMPLETED===已完成。\n\n总结内容。').toJson(),
+        ChatMessage(role: 'assistant', content: '已').toJson(),
+        ChatMessage(role: 'assistant', content: '示例：`===TASK_COMPLETED===`').toJson(),
+      ],
+    });
+    expect(anchor.messages.map((m) => m.content), [
+      '总结', '检查中。\n\n已完成。\n\n总结内容。', '示例：`===TASK_COMPLETED===`',
+    ]);
+  });
+
   test('bookAnchorId groups by chapter title', () {
     const a = BookReadingPlace(chapter: '第一章 开端');
     const b = BookReadingPlace(chapter: '第一章 开端', epubCfi: 'epubcfi(/6/4!)');

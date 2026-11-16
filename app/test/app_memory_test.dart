@@ -6,6 +6,26 @@ import 'package:wenxiang/persist/app_memory.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test('loading legacy history removes markers and duplicate final fragments', () async {
+    SharedPreferences.setMockInitialValues({});
+    final memory = AppMemory(await SharedPreferences.getInstance());
+    await memory.saveChats('octo/demo', RepoChatStore(
+      sessions: [], activeId: 's1', transcripts: {'s1': [
+        ChatMessage(role: 'user', content: '修改'),
+        ChatMessage(role: 'assistant', content: '正在打包。===TASK_COMPLETED===已移除卡片。\n\n下载 APK。', engine: 'acp'),
+        ChatMessage(role: 'assistant', content: '已'),
+        ChatMessage(role: 'assistant', content: '正在打包。===TASK_COMPLETED===已移除卡片。\n\n下载 APK。'),
+        ChatMessage(role: 'user', content: '下一轮'),
+        ChatMessage(role: 'assistant', content: '已'),
+      ]},
+    ));
+    final messages = memory.loadChats('octo/demo').transcripts['s1']!;
+    expect(messages.map((m) => m.content), [
+      '修改', '正在打包。\n\n已移除卡片。\n\n下载 APK。', '下一轮', '已',
+    ]);
+    expect(messages[1].engine, 'acp');
+  });
+
   test('remembers last repo and chat turns without storing secrets', () async {
     SharedPreferences.setMockInitialValues({});
     final memory = AppMemory(await SharedPreferences.getInstance());

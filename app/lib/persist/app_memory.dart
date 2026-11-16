@@ -7,6 +7,7 @@ import '../copy/cursor_model.dart';
 import '../models.dart';
 import '../voice/volc_tts_voices.dart';
 import 'book_chat_store.dart';
+import 'turn_answers.dart';
 
 /// Local-only place memory. Never stores tokens, API keys, or OAuth secrets.
 class AppMemory {
@@ -236,10 +237,10 @@ class RepoChatStore {
     if (raw is Map) {
       raw.forEach((key, value) {
         if (value is! List) return;
-        transcripts[key.toString()] = value
+        transcripts[key.toString()] = restoreTurnAnswers(value
             .whereType<Map>()
             .map((item) => ChatMessage.fromJson(Map<String, dynamic>.from(item)))
-            .toList();
+            .toList());
       });
     }
     return RepoChatStore(

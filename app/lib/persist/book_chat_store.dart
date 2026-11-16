@@ -1,4 +1,5 @@
 import '../models.dart';
+import 'turn_answers.dart';
 
 /// Where the reader was when a message was sent.
 class BookReadingPlace {
@@ -82,7 +83,7 @@ class BookAnchorChat {
     return BookAnchorChat(
       id: (json['id'] ?? bookAnchorId(place)).toString(),
       place: place,
-      messages: msgs,
+      messages: restoreTurnAnswers(msgs),
       updatedAt: (json['updatedAt'] ?? '').toString(),
     );
   }

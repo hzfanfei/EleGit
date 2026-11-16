@@ -2,9 +2,11 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models.dart';
-import '../utils/task_completion.dart';
 import 'app_memory.dart';
 import 'book_chat_store.dart';
+import 'turn_answers.dart';
+
+export 'turn_answers.dart' show stripTaskMarker, insertTurnAnswer;
 
 /// Bumps when a notification has been written into a saved chat.
 final ValueNotifier<int> chatBackfillTick = ValueNotifier<int>(0);
@@ -28,10 +30,6 @@ class InboxProgressHint {
 
 final ValueNotifier<InboxProgressHint?> inboxProgressHint =
     ValueNotifier<InboxProgressHint?>(null);
-
-String stripTaskMarker(String text) {
-  return parseTaskCompletion(text).text;
-}
 
 bool sameChatText(String a, String b) => stripTaskMarker(a) == stripTaskMarker(b);
 
@@ -97,44 +95,6 @@ int indexOfTurn(List<ChatMessage> messages, String turnId) {
     }
   }
   return found;
-}
-
-/// Places [text] after the user message at [userAt]. False when that reply
-/// is already stored on this turn.
-bool insertTurnAnswer(List<ChatMessage> messages, int userAt, String text) {
-  final clean = stripTaskMarker(text);
-  if (clean.isEmpty) return false;
-  var insertAt = userAt + 1;
-  ChatMessage? reply;
-  var changed = false;
-  while (insertAt < messages.length && messages[insertAt].role != 'user') {
-    final message = messages[insertAt];
-    final saved = stripTaskMarker(message.content);
-    final full = reply == null ? clean : stripTaskMarker(reply.content);
-    if (message.role == 'assistant' &&
-        (saved == full || saved.startsWith(full) || saved.endsWith(full) ||
-            full.startsWith(saved) || full.endsWith(saved))) {
-      if (reply == null) {
-        reply = message;
-        if (clean.length > saved.length) {
-          message.content = clean;
-          changed = true;
-        }
-      } else {
-        if (saved.length > full.length) reply.content = saved;
-        messages.removeAt(insertAt);
-        changed = true;
-        continue;
-      }
-    }
-    insertAt++;
-  }
-  if (reply != null) return changed;
-  messages.insert(
-    insertAt,
-    ChatMessage(role: 'assistant', content: clean, engine: 'acp'),
-  );
-  return true;
 }
 
 /// Append a finished answer into the saved repo or book chat.

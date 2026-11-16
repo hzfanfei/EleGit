@@ -238,11 +238,11 @@ void main() {
     final task = pool.session(repo, 's1', true);
     task.enqueue(user);
     await tester.pump();
-    await backfillChatFromNotice(sessionId: 's1', answer: '已完成。',
+    await backfillChatFromNotice(sessionId: 's1', answer: '已',
         owner: 'octo', repo: 'demo', turnId: 'live-turn');
     expect(repo.transcripts['s1'], [user]);
     expect(answerAfterTurn(memory.loadChats('octo/demo').transcripts['s1']!,
-        'live-turn'), '已完成。');
+        'live-turn'), '已');
     api.finish('s1', '正在打包。===TASK_COMPLETED===已完成。');
     await tester.pumpAndSettle();
     expect(task.busy, isFalse);

@@ -294,21 +294,6 @@ export async function* streamAnswer({
     let lastActivity = "";
     let settleTimer = null;
     let hintCleared = false;
-    let taskNotified = false;
-    function maybePublishTaskNotice() {
-      if (taskNotified || !workspaceRoot) return;
-      const notice = taskCompletionNotice(full, turnCtx);
-      if (!notice) return;
-      taskNotified = true;
-      publishInboxNotice(workspaceRoot, notice)
-        .then((item) => {
-          if (item) {
-            queue.push({ kind: "notification", item });
-            notify?.();
-          }
-        })
-        .catch(() => {});
-    }
     function clearSettle() {
       if (!settleTimer) return;
       clearTimeout(settleTimer);
@@ -357,7 +342,6 @@ export async function* streamAnswer({
           touchInboxMirror();
           queue.push({ kind: "delta", text: chunk });
           notify?.();
-          maybePublishTaskNotice();
           armSettle();
         },
         onActivity: (detail) => {
@@ -425,7 +409,9 @@ export async function* streamAnswer({
     if (handoffActive()) return;
     if (!fail && full) {
       clearLiveTurn(session?.id);
-      if (workspaceRoot && !taskNotified) {
+      // A marker announces the final section, not the end of its stream.
+      // Publishing from onDelta can freeze the inbox answer at its first char.
+      if (workspaceRoot) {
         const notice = taskCompletionNotice(full, turnCtx);
         if (notice) {
           try {

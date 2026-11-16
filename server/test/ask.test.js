@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { listInbox } from "../src/inbox.js";
 import { answerReadyNotice, buildCursorPrompt, detectCursorEngine, shouldPublishFinishedAnswer, streamAnswer, streamText, synthesizeLocalAnswer, taskCompletionNotice } from "../src/ask.js";
 
 const sampleProgress = {
@@ -84,6 +88,45 @@ describe("streamText", () => {
 });
 
 describe("streamAnswer", () => {
+  it("waits for the full final answer before publishing a completion notice", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "wenxiang-answer-"));
+    const events = [];
+    let duringStream;
+    try {
+      for await (const event of streamAnswer({
+        question: "去掉顶部卡片",
+        session: { id: "s1", owner: "acme", repo: "widget" },
+        workspaceRoot: root,
+        turnId: "split-final",
+        detectEngine: () => ({ id: "acp" }),
+        sessions: {
+          async prompt(_session, { onDelta }) {
+            onDelta("正在打包。===TASK_");
+            onDelta("COMPLETED===已");
+            // Give the former fire-and-forget publish enough time to persist.
+            await new Promise((resolve) => setTimeout(resolve, 80));
+            duringStream = await listInbox(root);
+            onDelta("去掉顶部触发价卡片。\n\n");
+            onDelta("[下载 APK](https://example.com/app.apk)");
+          },
+        },
+      })) events.push(event);
+      assert.deepEqual(duringStream, []);
+      const notices = events.filter((event) => event.type === "notification");
+      assert.equal(notices.length, 1);
+      const expected = "已去掉顶部触发价卡片。\n\n[下载 APK](https://example.com/app.apk)";
+      assert.equal(notices[0].item.answer, expected);
+      assert.equal(notices[0].item.turnId, "split-final");
+      const stored = await listInbox(root);
+      assert.equal(stored.length, 1);
+      assert.equal(stored[0].answer, expected);
+      assert.equal(stored[0].partial, false);
+      assert.equal(events.at(-1).type, "done");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("forwards ACP chunks as-is without rechunking", async () => {
     const events = [];
     for await (const event of streamAnswer({

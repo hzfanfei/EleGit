@@ -4,6 +4,36 @@ import 'package:wenxiang/persist/app_memory.dart';
 import 'package:wenxiang/persist/chat_backfill.dart';
 
 void main() {
+  test('final paragraph prefixes merge in either delivery order', () {
+    const full = '正在检查。\n\n正在打包。===TASK_COMPLETED===已去掉顶部卡片。\n\n下载 APK。';
+    for (final fragment in ['已', '已去掉', '已去掉顶部卡片。']) {
+      for (final answers in [[full, fragment], [fragment, full]]) {
+        final messages = [ChatMessage(role: 'user', content: '修改', turnId: 't1')];
+        insertTurnAnswer(messages, 0, answers[0]);
+        insertTurnAnswer(messages, 0, answers[1]);
+        expect(messages.length, 2);
+        expect(messages.last.content, stripTaskMarker(full));
+        expect(insertTurnAnswer(messages, 0, fragment), isFalse);
+      }
+    }
+  });
+
+  test('fragment cleanup keeps distinct replies, code examples and other turns', () {
+    final messages = [
+      ChatMessage(role: 'user', content: '修改', turnId: 't1'),
+      ChatMessage(role: 'assistant', content: '正在打包。\n\n已移除卡片。\n\n下载 APK。'),
+      ChatMessage(role: 'assistant', content: '已'),
+      ChatMessage(role: 'assistant', content: '补充说明：保留触发线。'),
+      ChatMessage(role: 'user', content: '确认', turnId: 't2'),
+      ChatMessage(role: 'assistant', content: '已'),
+    ];
+    expect(insertTurnAnswer(messages, 0, '已'), isTrue);
+    expect(messages.map((m) => m.content), [
+      '修改', '正在打包。\n\n已移除卡片。\n\n下载 APK。',
+      '补充说明：保留触发线。', '确认', '已',
+    ]);
+  });
+
   test('full stream and notification tail merge in either delivery order', () {
     const full = '正在打包。===TASK_COMPLETED===已支持组合多选。';
     const tail = '已支持组合多选。';
