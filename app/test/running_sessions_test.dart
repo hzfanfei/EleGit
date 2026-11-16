@@ -225,6 +225,32 @@ void main() {
         memory.loadChats('octo/demo').transcripts.containsKey('s1'), isFalse);
   });
 
+  testWidgets('inbox tail stays out of the live row and merges after done',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final memory = AppMemory(await SharedPreferences.getInstance());
+    final api = ControlledApi();
+    final pool = RunningSessions.of(api);
+    final repo = pool.repo(sampleRepo(), memory);
+    final user = ChatMessage(role: 'user', content: '修复', turnId: 'live-turn');
+    repo.transcripts['s1'] = [user];
+    await repo.persist();
+    final task = pool.session(repo, 's1', true);
+    task.enqueue(user);
+    await tester.pump();
+    await backfillChatFromNotice(sessionId: 's1', answer: '已完成。',
+        owner: 'octo', repo: 'demo', turnId: 'live-turn');
+    expect(repo.transcripts['s1'], [user]);
+    expect(answerAfterTurn(memory.loadChats('octo/demo').transcripts['s1']!,
+        'live-turn'), '已完成。');
+    api.finish('s1', '正在打包。===TASK_COMPLETED===已完成。');
+    await tester.pumpAndSettle();
+    expect(task.busy, isFalse);
+    expect(repo.transcripts['s1']!.length, 2);
+    expect(repo.transcripts['s1']!.last.content, '正在打包。\n\n已完成。');
+    expect(memory.loadChats('octo/demo').transcripts['s1']!.length, 2);
+  });
+
   for (final leave in [false, true]) {
     testWidgets('upload keeps its original session when leave=$leave',
         (tester) async {

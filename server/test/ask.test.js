@@ -145,6 +145,12 @@ describe("streamAnswer", () => {
 });
 
 describe("taskCompletionNotice", () => {
+  it("recognizes a marker glued to preceding progress but ignores inline code", () => {
+    const notice = taskCompletionNotice("正在打包。===TASK_COMPLETED===已支持组合多选。");
+    assert.equal(notice.answer, "已支持组合多选。");
+    assert.equal(taskCompletionNotice("示例：``===TASK_COMPLETED===``"), null);
+    assert.equal(taskCompletionNotice("示例：`===TASK_COMPLETED===`，随后===TASK_COMPLETED===完成。").answer, "完成。");
+  });
   it("recognizes completion after progress even when glued to the answer", () => {
     for (const separator of ["", "\n", "\r\n"]) {
       const notice = taskCompletionNotice(`正在复检最终文件。\r\n\r\n  ===TASK_COMPLETED===${separator}做好了：检查通过。`);

@@ -2,6 +2,19 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:wenxiang/utils/task_completion.dart';
 
 void main() {
+  test('marker glued to progress is stripped and separates the final answer', () {
+    final result = parseTaskCompletion(
+        '正在打包。===TASK_COMPLETED===已支持组合多选。');
+    expect(result.completed, isTrue);
+    expect(result.text, '正在打包。\n\n已支持组合多选。');
+    const example = '示例：``===TASK_COMPLETED===``';
+    expect(parseTaskCompletion(example).text, example);
+    expect(parseTaskCompletion(example).completed, isFalse);
+    final mixed = parseTaskCompletion(
+        '示例：`===TASK_COMPLETED===`，随后===TASK_COMPLETED===完成。');
+    expect(mixed.completed, isTrue);
+    expect(mixed.text, '示例：`===TASK_COMPLETED===`，随后\n\n完成。');
+  });
   test('completion is detected after progress with or without a newline', () {
     for (final separator in ['', '\n', '\r\n']) {
       final result =

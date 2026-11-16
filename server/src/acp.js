@@ -730,7 +730,9 @@ export function sanitizeAcpUserVisibleText(text) {
     /\n*Nothing breaks: auto mode keeps working[\s\S]*$/i,
     "",
   );
-  return out.trimEnd();
+  // Chunk-ending whitespace belongs to the stream (paragraphs, code, spaces).
+  // Only trim the gap left behind when removing an actual billing notice.
+  return out === raw ? raw : out.trimEnd();
 }
 
 /** User-visible assistant text from a session/update payload (excludes reasoning channel). */

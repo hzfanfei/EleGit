@@ -108,6 +108,18 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('glued marker split across chunks is hidden once complete',
+      (tester) async {
+    final source = ValueNotifier('正在打包。===TASK_');
+    await show(tester, source);
+    source.value += 'COMPLETED===已支持组合多选。';
+    await tester.pumpAndSettle();
+    expect(find.text('✓ 任务已完成'), findsOneWidget);
+    expect(find.textContaining('===TASK_COMPLETED==='), findsNothing);
+    expect(find.textContaining('正在打包。', findRichText: true), findsOneWidget);
+    expect(find.textContaining('已支持组合多选。', findRichText: true), findsOneWidget);
+  });
+
   testWidgets('code containing download links stays code', (tester) async {
     await show(
         tester, ValueNotifier('```md\n[安装](https://example.com/a.apk)\n```'));

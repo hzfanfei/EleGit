@@ -98,6 +98,7 @@ class RunningRepo {
   final Map<String, List<ChatMessage>> transcripts = {};
   String? activeId;
   final Set<String> _removedIds = {};
+  final Set<String> _streamingTurns = {};
 
   void removeSession(String id) {
     _removedIds.add(id);
@@ -126,7 +127,10 @@ class RunningRepo {
           continue;
         }
         if (message.role != 'assistant' || user?.turnId == null) continue;
-        final at = indexOfTurn(local, user!.turnId!);
+        // The live row owns this turn until its stream settles. Keep inbox
+        // backfill in storage so reconnect recovery can still read it.
+        if (_streamingTurns.contains(user!.turnId)) continue;
+        final at = indexOfTurn(local, user.turnId!);
         if (at >= 0) insertTurnAnswer(local, at, message.content);
       }
       if (local.isEmpty) local.addAll(entry.value);
@@ -214,6 +218,7 @@ class SessionExecution {
     try {
       while (queued.isNotEmpty && !stopped) {
         current = queued.removeAt(0);
+        if (current!.turnId != null) repo._streamingTurns.add(current!.turnId!);
         text = '';
         activity = '';
         phase = 'connect';
@@ -237,12 +242,14 @@ class SessionExecution {
               messages.skip(at + 1).firstWhere((m) => m.role == 'assistant');
           reply.engine = engine;
         }
+        repo._streamingTurns.remove(current!.turnId);
         await repo.persist();
         if (pool.api.ephemeral && answer.isNotEmpty && !stopped) {
           unawaited(NotificationCenter.instance.notifyTemporaryFinish(sessionId));
         }
       }
     } finally {
+      repo._streamingTurns.remove(current?.turnId);
       busy = false;
       holding = false;
       current = null;

@@ -102,17 +102,37 @@ int indexOfTurn(List<ChatMessage> messages, String turnId) {
 /// Places [text] after the user message at [userAt]. False when that reply
 /// is already stored on this turn.
 bool insertTurnAnswer(List<ChatMessage> messages, int userAt, String text) {
+  final clean = stripTaskMarker(text);
+  if (clean.isEmpty) return false;
   var insertAt = userAt + 1;
+  ChatMessage? reply;
+  var changed = false;
   while (insertAt < messages.length && messages[insertAt].role != 'user') {
     final message = messages[insertAt];
-    if (message.role == 'assistant' && sameChatText(message.content, text)) {
-      return false;
+    final saved = stripTaskMarker(message.content);
+    final full = reply == null ? clean : stripTaskMarker(reply.content);
+    if (message.role == 'assistant' &&
+        (saved == full || saved.startsWith(full) || saved.endsWith(full) ||
+            full.startsWith(saved) || full.endsWith(saved))) {
+      if (reply == null) {
+        reply = message;
+        if (clean.length > saved.length) {
+          message.content = clean;
+          changed = true;
+        }
+      } else {
+        if (saved.length > full.length) reply.content = saved;
+        messages.removeAt(insertAt);
+        changed = true;
+        continue;
+      }
     }
     insertAt++;
   }
+  if (reply != null) return changed;
   messages.insert(
     insertAt,
-    ChatMessage(role: 'assistant', content: text, engine: 'acp'),
+    ChatMessage(role: 'assistant', content: clean, engine: 'acp'),
   );
   return true;
 }

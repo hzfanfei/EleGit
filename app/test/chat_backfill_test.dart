@@ -4,6 +4,34 @@ import 'package:wenxiang/persist/app_memory.dart';
 import 'package:wenxiang/persist/chat_backfill.dart';
 
 void main() {
+  test('full stream and notification tail merge in either delivery order', () {
+    const full = '正在打包。===TASK_COMPLETED===已支持组合多选。';
+    const tail = '已支持组合多选。';
+    for (final answers in [[full, tail], [tail, full]]) {
+      final user = ChatMessage(role: 'user', content: '修复', turnId: 't1');
+      final messages = [user];
+      expect(insertTurnAnswer(messages, 0, answers[0]), isTrue);
+      insertTurnAnswer(messages, 0, answers[1]);
+      expect(messages.length, 2);
+      expect(identical(messages.first, user), isTrue);
+      expect(messages.last.content, '正在打包。\n\n$tail');
+      expect(insertTurnAnswer(messages, 0, tail), isFalse);
+    }
+  });
+
+  test('repairs existing duplicates without crossing a user turn', () {
+    final messages = [
+      ChatMessage(role: 'user', content: '修复', turnId: 't1'),
+      ChatMessage(role: 'assistant', content: '正在检查。\n\n已完成。'),
+      ChatMessage(role: 'assistant', content: '已完成。'),
+      ChatMessage(role: 'user', content: '继续', turnId: 't2'),
+      ChatMessage(role: 'assistant', content: '已完成。'),
+    ];
+    expect(insertTurnAnswer(messages, 0, '已完成。'), isTrue);
+    expect(messages.length, 4);
+    expect(answerAfterTurn(messages, 't1'), '正在检查。\n\n已完成。');
+    expect(answerAfterTurn(messages, 't2'), '已完成。');
+  });
   test('marker cleanup handles progress and preserves examples', () {
     expect(stripTaskMarker('正在检查。\r\n\r\n  ===TASK_COMPLETED===已完成。'),
         '正在检查。\r\n\r\n已完成。');

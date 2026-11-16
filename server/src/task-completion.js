@@ -1,6 +1,6 @@
 export const TASK_COMPLETED_MARKER = "===TASK_COMPLETED===";
 
-/** Find a control marker at a line start, outside fenced code examples. */
+/** Find a control marker outside fenced code and inline code examples. */
 export function findTaskCompletionMarker(source) {
   let fence = null;
   let offset = 0;
@@ -15,9 +15,17 @@ export function findTaskCompletionMarker(source) {
       const opening = trimmed.match(/^(`{3,}|~{3,})/);
       if (opening) {
         fence = opening[1];
-      } else if (trimmed.startsWith(TASK_COMPLETED_MARKER)) {
-        const index = offset + line.length - trimmed.length;
-        return { index, end: index + TASK_COMPLETED_MARKER.length };
+      } else {
+        let inlineFence = null;
+        for (const token of line.matchAll(/(`+)|===TASK_COMPLETED===/g)) {
+          if (token[1]) {
+            if (!inlineFence) inlineFence = token[1];
+            else if (inlineFence === token[1]) inlineFence = null;
+          } else if (!inlineFence) {
+            const index = offset + token.index;
+            return { index, end: index + TASK_COMPLETED_MARKER.length };
+          }
+        }
       }
     }
     offset += line.length + 1;

@@ -28,9 +28,28 @@ TaskCompletionText parseTaskCompletion(String source) {
       fence = opening.group(1);
       continue;
     }
+    String? inlineFence;
+    lines[i] = lines[i].replaceAllMapped(
+        RegExp(r'(`+)|===TASK_COMPLETED==='), (token) {
+      final ticks = token.group(1);
+      if (ticks != null) {
+        if (inlineFence == null) {
+          inlineFence = ticks;
+        } else if (inlineFence == ticks) {
+          inlineFence = null;
+        }
+      } else if (inlineFence == null) {
+        completed = true;
+        // A missing boundary must not glue progress to the final answer.
+        return token.start == 0 ||
+                lines[i].substring(0, token.start).trim().isEmpty
+            ? ''
+            : '\n\n';
+      }
+      return token.group(0)!;
+    });
     if (trimmed.startsWith(taskCompletionMarker)) {
-      completed = true;
-      lines[i] = trimmed.substring(taskCompletionMarker.length).trimLeft();
+      lines[i] = lines[i].trimLeft();
     }
   }
   return TaskCompletionText(lines.join('\n').trim(), completed);

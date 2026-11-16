@@ -473,6 +473,15 @@ describe("pushAcpToolActivity", () => {
 });
 
 describe("acpVisibleTextFromUpdate", () => {
+  it("preserves chunk-ending whitespace and standalone paragraph breaks", () => {
+    const chunks = ["正在打包。", "\r\n\r\n", "===TASK_", "COMPLETED===\n", "已完成。  "];
+    const answer = chunks.map((text) => acpVisibleTextFromUpdate({
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text },
+    })).join("");
+    assert.equal(answer, chunks.join(""));
+    assert.equal(sanitizeAcpUserVisibleText("code  \n"), "code  \n");
+  });
   it("forwards agent answer chunks only, not reasoning", () => {
     assert.equal(
       acpVisibleTextFromUpdate({
