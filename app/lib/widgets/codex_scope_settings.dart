@@ -29,12 +29,20 @@ class _CodexScopeSettingsState extends State<CodexScopeSettings> {
   Future<void> _refreshUsage() async {
     final api = widget.api;
     if (api == null || _usageLoading) return;
-    setState(() { _usageLoading = true; _usageFailed = false; });
+    setState(() {
+      _usageLoading = true;
+      _usageFailed = false;
+    });
     try {
       final usage = await api.codexUsage();
       if (mounted && widget.api == api) setState(() => _usage = usage);
     } catch (_) {
-      if (mounted && widget.api == api) setState(() { _usage = null; _usageFailed = true; });
+      if (mounted && widget.api == api) {
+        setState(() {
+          _usage = null;
+          _usageFailed = true;
+        });
+      }
     } finally {
       if (mounted) setState(() => _usageLoading = false);
     }
@@ -45,13 +53,19 @@ class _CodexScopeSettingsState extends State<CodexScopeSettings> {
     if (used is! num) return '额度数据暂不可用';
     final mins = window['windowDurationMins'];
     final duration = mins is num && mins > 0
-        ? (mins % 1440 == 0 ? '${mins ~/ 1440}天' : mins % 60 == 0 ? '${mins ~/ 60}小时' : '$mins分钟')
+        ? (mins % 1440 == 0
+            ? '${mins ~/ 1440}天'
+            : mins % 60 == 0
+                ? '${mins ~/ 60}小时'
+                : '$mins分钟')
         : '当前';
     final reset = window['resetsAt'];
     var resetText = '';
     if (reset is num && reset > 0) {
-      final date = DateTime.fromMillisecondsSinceEpoch((reset * 1000).round()).toLocal();
-      resetText = ' · ${date.month}月${date.day}日 ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')} 重置';
+      final date =
+          DateTime.fromMillisecondsSinceEpoch((reset * 1000).round()).toLocal();
+      resetText =
+          ' · ${date.month}月${date.day}日 ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')} 重置';
     }
     return '$duration额度剩余 ${(100 - used).clamp(0, 100).toStringAsFixed(used % 1 == 0 ? 0 : 1)}%$resetText';
   }
@@ -229,36 +243,74 @@ class _CodexScopeSettingsState extends State<CodexScopeSettings> {
     final enabled = !_loading && _testing == null && widget.api != null;
     final muted =
         Theme.of(context).textTheme.bodySmall?.copyWith(color: Wx.muted);
+    final isBook = scope == AskEngineScope.book;
+    final status = _saving.contains(scope)
+        ? '正在保存…'
+        : _failed == scope
+            ? '保存失败，当前配置未更改。$_error'
+            : _saved == scope
+                ? '已保存，下一次提问生效'
+                : '下一次提问生效';
     return Material(
       key: Key('codex-$key'),
       color: Wx.surface,
       shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(Wx.radius),
+          borderRadius: BorderRadius.circular(16),
           side: const BorderSide(color: Wx.hairline)),
       clipBehavior: Clip.antiAlias,
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Padding(
-            padding: const EdgeInsets.all(16),
-            child:
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(children: [
-                Expanded(
-                    child: Text(scope == AskEngineScope.book ? '问书' : '问象',
-                        style: Theme.of(context).textTheme.titleSmall)),
-                Text('Codex', style: muted),
-              ]),
-              const SizedBox(height: 4),
-              Text(
-                  scope == AskEngineScope.book ? '阅读理解与书中问答' : '仓库问答与 Agent 任务',
-                  style: muted),
-            ])),
-        const WxHairline(),
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: Wx.accent.withValues(alpha: .10),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(
+                isBook ? Icons.menu_book_rounded : Icons.terminal_rounded,
+                size: 19,
+                color: Wx.accent,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(isBook ? '问书' : '问象',
+                      style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 4),
+                  Text(isBook ? '阅读理解与书中问答' : '仓库问答与 Agent 任务', style: muted),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text('Codex', style: muted),
+          ]),
+        ),
         ListTile(
           key: Key('codex-$key-model'),
-          title: const Text('模型'),
-          subtitle: Text(model?['label'] as String? ??
-              (selected?.isNotEmpty == true ? selected! : '跟随本机默认模型')),
-          trailing: const Icon(Icons.chevron_right_rounded),
+          contentPadding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+          title: Text('当前模型', style: muted),
+          subtitle: Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              model?['label'] as String? ??
+                  (selected?.isNotEmpty == true ? selected! : '跟随本机默认模型'),
+              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                    fontSize: 21,
+                    fontWeight: FontWeight.w600,
+                    height: 1.3,
+                    letterSpacing: 0,
+                    color: Wx.text,
+                  ),
+            ),
+          ),
+          trailing:
+              const Icon(Icons.unfold_more_rounded, size: 22, color: Wx.accent),
           enabled: enabled && _models.isNotEmpty,
           onTap:
               _saving.contains(scope) ? null : () => _choose(scope, selected),
@@ -267,47 +319,62 @@ class _CodexScopeSettingsState extends State<CodexScopeSettings> {
             (model['supportsFast'] == true ||
                 (model['reasoningEfforts'] as List? ?? []).toSet().length > 1))
           Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-              child: _ModelTuning(
-                key: ValueKey('$key-$selected'),
-                efforts:
-                    (model['reasoningEfforts'] as List? ?? []).cast<String>(),
-                effort: (prefs['effort'] ?? model['defaultReasoningEffort'])
-                    as String?,
-                enabled: enabled && !_selecting.contains(scope),
-                fast: prefs['fast'] == true,
-                supportsFast: model['supportsFast'] == true,
-                onSave: ({effort, fast}) => _save(scope, selected!,
-                    effort: effort, fast: fast, select: false),
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: Wx.bg.withValues(alpha: .45),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
+                  child: _ModelTuning(
+                    key: ValueKey('$key-$selected'),
+                    efforts: (model['reasoningEfforts'] as List? ?? [])
+                        .cast<String>(),
+                    effort: (prefs['effort'] ?? model['defaultReasoningEffort'])
+                        as String?,
+                    enabled: enabled && !_selecting.contains(scope),
+                    fast: prefs['fast'] == true,
+                    supportsFast: model['supportsFast'] == true,
+                    onSave: ({effort, fast}) => _save(scope, selected!,
+                        effort: effort, fast: fast, select: false),
+                  ),
+                ),
               )),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 20),
+          child: WxHairline(),
+        ),
         Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Row(children: [
-              TextButton.icon(
-                onPressed: enabled ? () => _testSpeed(scope) : null,
-                icon: const Icon(Icons.speed_rounded, size: 18),
-                label: Text(_testing == scope ? '正在测速…' : '模型测速'),
-              ),
-              const Expanded(
-                  child: Text('会生成一段测试文字，消耗模型额度',
-                      style: TextStyle(fontSize: 11, color: Wx.muted))),
-            ])),
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
+            child: Wrap(
+                spacing: 12,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  TextButton.icon(
+                    onPressed: enabled ? () => _testSpeed(scope) : null,
+                    style: TextButton.styleFrom(
+                      foregroundColor: Wx.muted,
+                      padding: EdgeInsets.zero,
+                    ),
+                    icon: const Icon(Icons.speed_rounded, size: 18),
+                    label: Text(_testing == scope ? '正在测速…' : '模型测速'),
+                  ),
+                  Text(status,
+                      style: muted?.copyWith(
+                          color: _failed == scope ? Wx.danger : Wx.muted)),
+                ])),
         if (_speedResults[key] != null)
           Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
               child: Text(_speedResults[key]!, style: muted)),
         Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-            child: Text(
-                _saving.contains(scope)
-                    ? '正在保存…'
-                    : _failed == scope
-                        ? '保存失败，当前配置未更改。$_error'
-                        : _saved == scope
-                            ? '已保存，下一次提问生效'
-                            : '独立设置，下一次提问生效',
-                style: muted?.copyWith(
-                    color: _failed == scope ? Wx.danger : Wx.muted))),
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+            child: Text('测速会生成测试文字并消耗模型额度',
+                style: Theme.of(context)
+                    .textTheme
+                    .labelSmall
+                    ?.copyWith(color: Wx.muted))),
       ]),
     );
   }
@@ -317,27 +384,36 @@ class _CodexScopeSettingsState extends State<CodexScopeSettings> {
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text('智能问答', style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 6),
-        Text('统一使用 Codex，问书与问象的模型和参数分别设置。',
+        Text('问书与问象独立设置模型和参数。',
             style: Theme.of(context)
                 .textTheme
                 .bodySmall
                 ?.copyWith(color: Wx.muted)),
         const SizedBox(height: 16),
         if (widget.api != null)
-          Card(child: Padding(
+          Card(
+              child: Padding(
             padding: const EdgeInsets.all(12),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Row(children: [
                 const Expanded(child: Text('Codex 套餐用量')),
-                TextButton(onPressed: _usageLoading ? null : _refreshUsage, child: const Text('刷新')),
+                TextButton(
+                    onPressed: _usageLoading ? null : _refreshUsage,
+                    child: const Text('刷新')),
               ]),
-              if (_usageLoading) const Text('正在查询用量…')
-              else if (_usageFailed) const Text('用量查询失败，请点击刷新重试')
-              else if (_usage?['primary'] == null && _usage?['secondary'] == null)
+              if (_usageLoading)
+                const Text('正在查询用量…')
+              else if (_usageFailed)
+                const Text('用量查询失败，请点击刷新重试')
+              else if (_usage?['primary'] == null &&
+                  _usage?['secondary'] == null)
                 const Text('当前账号未返回额度信息')
               else ...[
-                if (_usage?['primary'] is Map) Text(_usageText(_usage!['primary'] as Map)),
-                if (_usage?['secondary'] is Map) Text(_usageText(_usage!['secondary'] as Map)),
+                if (_usage?['primary'] is Map)
+                  Text(_usageText(_usage!['primary'] as Map)),
+                if (_usage?['secondary'] is Map)
+                  Text(_usageText(_usage!['secondary'] as Map)),
               ],
             ]),
           )),
@@ -357,7 +433,7 @@ class _CodexScopeSettingsState extends State<CodexScopeSettings> {
             _error == null)
           const Text('暂无可用模型，请确认本机 Codex 已登录后重新进入设置。'),
         _card(AskEngineScope.book),
-        const SizedBox(height: 12),
+        const SizedBox(height: 16),
         _card(AskEngineScope.repo),
       ]);
 }
@@ -452,32 +528,22 @@ class _ModelTuningState extends State<_ModelTuning> {
     final muted =
         Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.muted);
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Row(children: [
-        if (adjustable) ...[
-          Text('思考强度', style: muted),
-          const SizedBox(width: 8),
-          Container(
-              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-              decoration: BoxDecoration(
-                  color: Wx.accent.withValues(alpha: 0.10),
-                  borderRadius: BorderRadius.circular(6)),
-              child: Text(current,
-                  style: const TextStyle(fontSize: 12, color: Wx.accent))),
-        ],
-        if (widget.supportsFast) ...[
-          if (adjustable) const Spacer(),
-          Text('快速模式', style: muted),
-          const SizedBox(width: 4),
-          SizedBox(
-              height: 36,
-              child: Switch(
-                value: fast,
-                onChanged: widget.enabled ? (v) => _save(fast: v) : null,
-                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              )),
-        ],
-      ]),
       if (adjustable) ...[
+        Row(children: [
+          Expanded(
+            child: Text('思考强度',
+                style: Theme.of(context)
+                    .textTheme
+                    .bodyMedium
+                    ?.copyWith(color: Wx.text)),
+          ),
+          const SizedBox(width: 8),
+          Text(current,
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: Wx.accent)),
+        ]),
         SliderTheme(
             data: SliderTheme.of(context).copyWith(
                 trackHeight: 3,
@@ -512,7 +578,34 @@ class _ModelTuningState extends State<_ModelTuning> {
           Text(_label(steps.last), style: muted),
         ]),
       ],
-      if (fast && widget.supportsFast) Text('加速响应，用量更高', style: muted),
+      if (widget.supportsFast) ...[
+        if (adjustable) ...[
+          const SizedBox(height: 14),
+          const WxHairline(),
+          const SizedBox(height: 8),
+        ],
+        Row(children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('快速模式',
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodyMedium
+                        ?.copyWith(color: Wx.text)),
+                const SizedBox(height: 3),
+                Text('加速响应，用量更高', style: muted),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Switch(
+            value: fast,
+            onChanged: widget.enabled ? (v) => _save(fast: v) : null,
+          ),
+        ]),
+      ],
     ]);
   }
 }

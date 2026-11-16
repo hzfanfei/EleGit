@@ -41,11 +41,52 @@ void main() {
     };
     await tester.pumpWidget(MaterialApp(
       theme: wenxiangTheme(),
-      home: Scaffold(body: SingleChildScrollView(child: CodexScopeSettings(api: api))),
+      home: Scaffold(
+          body: SingleChildScrollView(child: CodexScopeSettings(api: api))),
     ));
     await tester.pumpAndSettle();
     expect(find.text('7天额度剩余 75%'), findsOneWidget);
   });
+
+  for (final scale in [1.0, 1.5, 2.0]) {
+    testWidgets('model cards fit a narrow phone at text scale $scale',
+        (tester) async {
+      tester.view.physicalSize = const Size(320, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(MaterialApp(
+        theme: wenxiangTheme(),
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context).copyWith(
+            textScaler: TextScaler.linear(scale),
+          ),
+          child: child!,
+        ),
+        home: Scaffold(
+          body: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: CodexScopeSettings(api: _LongLabelApi()),
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      for (final scope in ['book', 'repo']) {
+        final card = find.byKey(Key('codex-$scope'));
+        final rect = tester.getRect(card);
+        expect(rect.left, greaterThanOrEqualTo(16));
+        expect(rect.right, lessThanOrEqualTo(304));
+        final toggle = find.descendant(of: card, matching: find.byType(Switch));
+        await tester.ensureVisible(toggle);
+        await tester.pumpAndSettle();
+        await tester.tap(toggle);
+        await tester.pumpAndSettle();
+        expect(tester.widget<Switch>(toggle).value, isTrue);
+        expect(tester.takeException(), isNull);
+      }
+    });
+  }
 
   testWidgets('settings page lists Volcengine voices and saves the pick',
       (tester) async {
@@ -412,6 +453,16 @@ void main() {
     expect(find.text('Codex Test A'), findsNWidgets(2));
     expect(find.textContaining('保存失败，当前配置未更改'), findsOneWidget);
   });
+}
+
+class _LongLabelApi extends FakeWenxiangApi {
+  @override
+  Future<Map<String, dynamic>> codexModels() async {
+    final result = await super.codexModels();
+    ((result['models'] as List).first as Map)['label'] =
+        'Codex Long Model Name · Extended Reasoning';
+    return result;
+  }
 }
 
 class _CapabilityApi extends FakeWenxiangApi {
