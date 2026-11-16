@@ -309,11 +309,10 @@ void main() {
     });
   }
 
-  testWidgets(
-      'model speed test uses the chosen scope and displays tokens per second',
+  testWidgets('model speed test animates the chosen scope until results arrive',
       (tester) async {
     SharedPreferences.setMockInitialValues({});
-    final api = FakeWenxiangApi();
+    final api = _PendingSpeedApi();
     await tester.pumpWidget(
         MaterialApp(theme: wenxiangTheme(), home: SettingsPage(api: api)));
     await tester.pumpAndSettle();
@@ -321,7 +320,23 @@ void main() {
         of: find.byKey(const Key('codex-book')), matching: find.text('模型测速'));
     await _reveal(tester, button);
     await tester.tap(button);
+    await tester.pump();
+    expect(find.text('正在测速…'), findsOneWidget);
+    final progress = find.byType(CircularProgressIndicator);
+    expect(
+        find.descendant(
+            of: find.byKey(const Key('codex-book')), matching: progress),
+        findsOneWidget);
+    expect(
+        find.descendant(
+            of: find.byKey(const Key('codex-repo')), matching: progress),
+        findsNothing);
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(tester.hasRunningAnimations, isTrue);
+    api.measured.complete();
     await tester.pumpAndSettle();
+    expect(progress, findsNothing);
+    expect(find.text('正在测速…'), findsNothing);
     expect(api.lastSpeedScope, AskEngineScope.book);
     expect(find.textContaining('42.5 token/秒'), findsOneWidget);
   });
@@ -453,6 +468,15 @@ void main() {
     expect(find.text('Codex Test A'), findsNWidgets(2));
     expect(find.textContaining('保存失败，当前配置未更改'), findsOneWidget);
   });
+}
+
+class _PendingSpeedApi extends FakeWenxiangApi {
+  final measured = Completer<void>();
+  @override
+  Future<Map<String, dynamic>> measureModelSpeed(AskEngineScope scope) async {
+    await measured.future;
+    return super.measureModelSpeed(scope);
+  }
 }
 
 class _LongLabelApi extends FakeWenxiangApi {

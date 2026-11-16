@@ -301,7 +301,7 @@ class _CodexScopeSettingsState extends State<CodexScopeSettings> {
               model?['label'] as String? ??
                   (selected?.isNotEmpty == true ? selected! : '跟随本机默认模型'),
               style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    fontSize: 21,
+                    fontSize: 17,
                     fontWeight: FontWeight.w600,
                     height: 1.3,
                     letterSpacing: 0,
@@ -357,7 +357,17 @@ class _CodexScopeSettingsState extends State<CodexScopeSettings> {
                       foregroundColor: Wx.muted,
                       padding: EdgeInsets.zero,
                     ),
-                    icon: const Icon(Icons.speed_rounded, size: 18),
+                    icon: SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: _testing == scope
+                          ? const CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Wx.accent,
+                              semanticsLabel: '正在测速',
+                            )
+                          : const Icon(Icons.speed_rounded, size: 18),
+                    ),
                     label: Text(_testing == scope ? '正在测速…' : '模型测速'),
                   ),
                   Text(status,
