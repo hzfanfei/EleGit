@@ -123,6 +123,7 @@ import {
   staticDir,
   staticDownloadAuthorized,
   staticFilesPrompt,
+  temporaryArtifactsFolder,
   contentTypeForStatic,
 } from "./static-files.js";
 import { clearInbox, listInbox, markInboxRead } from "./inbox.js";
@@ -191,7 +192,10 @@ const bookSessions = createSessionStore({
 });
 const chatTurns = createChatTurns();
 const temporaryChats = createTemporaryChats({
-  createChat: () => new TemporaryConversation(new TemporaryChat({ executable: resolveCodexExecutable(), model: acpModelId(process.env, undefined, "codex", "repo") })),
+  createChat: () => new TemporaryConversation(
+    new TemporaryChat({ executable: resolveCodexExecutable(), model: acpModelId(process.env, undefined, "codex", "repo") }),
+    { getStaticConfig: () => store.config },
+  ),
 });
 void cleanupAbandonedTemporaryChats();
 const temporaryCleanupTimer = setInterval(() => { void cleanupAbandonedTemporaryChats(); }, 5 * 60_000);
@@ -279,13 +283,17 @@ app.get(/^\/files\/(.+)$/, async (req, res) => {
       return;
     }
     const root = staticDir(store.config.workspaceRoot);
-    const { relative, abs } = resolveStaticFile(root, req.params[0]);
+    const { relative, abs } = resolveStaticFile(root, req.path.slice("/files/".length));
     const info = await stat(abs);
     if (!info.isFile()) {
       res.status(404).json({ error: "文件不存在", code: "static_missing" });
       return;
     }
     res.setHeader("Content-Type", contentTypeForStatic(relative));
+    if (relative.toLowerCase().startsWith(`${temporaryArtifactsFolder}/`)) {
+      res.setHeader("Content-Security-Policy", "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+    }
     res.setHeader("Content-Length", String(info.size));
     res.setHeader("Content-Disposition", staticContentDisposition(relative, relative));
     res.setHeader("Cache-Control", "private, no-cache");
@@ -1490,7 +1498,8 @@ app.post("/v1/temporary-chats/:id/stop", async (req, res) => {
 
 app.post("/v1/temporary-chats/:id/turn", async (req, res) => {
   try {
-    const chat = temporaryChats.get(req.params.id).chat;
+    const conversation = temporaryChats.get(req.params.id);
+    const { chat } = conversation;
     const message = String(req.body?.message || "").trim();
     const images = req.body?.images ?? [];
     if (!Array.isArray(images) || images.length > 4 || images.some((image) => typeof image !== "string" || image.length > 5_592_430 || !/^data:image\/(jpeg|png|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/.test(image))) {
@@ -1514,6 +1523,7 @@ app.post("/v1/temporary-chats/:id/turn", async (req, res) => {
         writeSseSafe(res, { type: "delta", text: delta });
       }, typeof req.body?.model === "string" ? req.body.model.slice(0, 200) : undefined, images,
       (detail) => writeSseSafe(res, { type: "status", detail }));
+      answer = [answer, await conversation.fileLinksReply()].filter(Boolean).join("\n\n");
       writeSseSafe(res, { type: "done", answer, engine: "codex" });
     } catch (err) {
       writeSseSafe(res, { type: "error", error: err.message || "临时会话失败" });

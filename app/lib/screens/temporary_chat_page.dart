@@ -60,18 +60,10 @@ class _TemporaryChatPageState extends State<TemporaryChatPage> {
                   child: ListView(shrinkWrap: true, children: [
                 const ListTile(
                     title: Text('本次生成文件'),
-                    subtitle: Text('结束临时会话后删除；已下载到手机的文件由你保留。')),
+                    subtitle: Text('已归档的文件可在静态资源区继续打开。')),
                 if (files.isEmpty) const ListTile(title: Text('暂无生成文件')),
                 for (final file in files)
-                  ListTile(
-                      leading: const Icon(Icons.download_outlined),
-                      title: Text('${file['path']}'),
-                      onTap: () async {
-                        final uri = widget.api.temporaryFileUri(
-                            id, '${file['path']}', '${data['downloadKey']}');
-                        await launchUrl(uri,
-                            mode: LaunchMode.externalApplication);
-                      }),
+                  _fileTile(file, id, '${data['downloadKey']}'),
               ])));
     } catch (err) {
       if (mounted) {
@@ -79,6 +71,20 @@ class _TemporaryChatPageState extends State<TemporaryChatPage> {
             .showSnackBar(SnackBar(content: Text(err.toString())));
       }
     }
+  }
+
+  Widget _fileTile(Map file, String id, String downloadKey) {
+    final path = '${file['path']}';
+    final onlineUrl = file['downloadUrl'] as String?;
+    final uri = onlineUrl == null
+        ? widget.api.temporaryFileUri(id, path, downloadKey)
+        : Uri.parse(onlineUrl);
+    return ListTile(
+      leading: const Icon(Icons.download_outlined),
+      title: Text(path),
+      subtitle: onlineUrl == null ? const Text('临时下载，退出前有效') : null,
+      onTap: () => launchUrl(uri, mode: LaunchMode.externalApplication),
+    );
   }
 
   @override

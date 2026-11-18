@@ -1235,7 +1235,7 @@ class _ChatPageState extends State<ChatPage> {
             },
             backTooltip: widget.temporary ? '结束临时会话' : '返回仓库',
             title: widget.temporary ? '临时会话' : widget.repo.fullName,
-            subtitle: widget.temporary ? '退出后清除对话和文件' : subtitle,
+            subtitle: widget.temporary ? '对话临时保留 · 产物归档' : subtitle,
             status: WxLinkQualityMark(api: widget.api),
             trailing: [
               _AgentModeChip(
@@ -1454,7 +1454,7 @@ class _EmptyChat extends StatelessWidget {
         Text(temporary ? '从空白开始。' : '从进度问起。', style: Theme.of(context).textTheme.headlineMedium),
         const SizedBox(height: 8),
         Text(
-          temporary ? '对话和文件仅用于本次临时会话，退出后清除。' : '连上本机问象后可直接问；否则会按本地进度简要回答。不编造。',
+          temporary ? '退出后清除对话，生成的产物默认保存到静态资源区。' : '连上本机问象后可直接问；否则会按本地进度简要回答。不编造。',
           style: Theme.of(context).textTheme.bodyMedium,
         ),
         const SizedBox(height: 28),

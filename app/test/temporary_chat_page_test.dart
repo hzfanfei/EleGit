@@ -134,7 +134,7 @@ void main() {
     expect(ChatImageCache.get(image.id), isNull);
   });
 
-  test('复用标准流协议并把生成文件转成仅本会话有效的下载链接', () async {
+  test('复用标准流协议，优先使用归档链接并保留临时下载', () async {
     final source = TemporaryApi();
     final api = TemporaryProjectApi(source);
     final session = await api.createSession('', '');
@@ -160,6 +160,12 @@ void main() {
         contains(
             '/temporary-files/${session.id}/outputs/a.txt?token=local-token'));
     expect(answer, isNot(contains(source.apiKey)));
+    const onlineUrl = 'https://example.test/files/temporary-artifacts/a.txt?token=static-token';
+    expect(api.linkFiles('[文件](outputs/a.txt)', session.id, {
+      'files': [
+        {'path': 'outputs/a.txt', 'downloadUrl': onlineUrl}
+      ],
+    }), '[文件]($onlineUrl)');
     await api.closeProject();
   });
 }

@@ -4,6 +4,7 @@ import path from "node:path";
 
 const SKIP_DIR = new Set(["node_modules"]);
 const MAX_FILES = 200;
+export const temporaryArtifactsFolder = "temporary-artifacts";
 
 const CONTENT_TYPES = {
   ".apk": "application/vnd.android.package-archive",
@@ -82,7 +83,7 @@ export function staticDownloadUrl(publicUrl, rel, token) {
   const encoded = String(rel || "")
     .split("/")
     .filter(Boolean)
-    .map((seg) => encodeURIComponent(seg))
+    .map((seg) => encodeURIComponent(seg).replace(/\(/g, "%28").replace(/\)/g, "%29"))
     .join("/");
   const url = `${base}/files/${encoded}`;
   const value = String(token || "").trim();
@@ -142,7 +143,6 @@ export async function listStaticFiles(workspaceRoot, { publicUrl, token } = {}) 
   const files = [];
 
   async function walk(rel) {
-    if (files.length >= MAX_FILES) return;
     const abs = rel ? path.join(root, rel) : root;
     let entries;
     try {
@@ -150,9 +150,7 @@ export async function listStaticFiles(workspaceRoot, { publicUrl, token } = {}) 
     } catch {
       return;
     }
-    entries.sort((a, b) => a.name.localeCompare(b.name));
     for (const entry of entries) {
-      if (files.length >= MAX_FILES) return;
       if (entry.name.startsWith(".") || entry.name.includes(":")) continue;
       const next = rel ? `${rel}/${entry.name}` : entry.name;
       if (entry.isDirectory()) {
@@ -182,7 +180,7 @@ export async function listStaticFiles(workspaceRoot, { publicUrl, token } = {}) 
 
   await walk("");
   files.sort((a, b) => String(b.mtime || "").localeCompare(String(a.mtime || "")));
-  return { dir: root, files };
+  return { dir: root, files: files.slice(0, MAX_FILES) };
 }
 
 export function openStaticFileStream(abs) {

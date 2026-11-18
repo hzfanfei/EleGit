@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter, on } from "node:events";
-import { lstat, readdir, realpath } from "node:fs/promises";
+import { copyFile, lstat, mkdir, readdir, realpath, rename, unlink } from "node:fs/promises";
 import path from "node:path";
+import { resolveStaticFile, staticDir, staticDownloadUrl, temporaryArtifactsFolder } from "./static-files.js";
 
 const terminal = new Set(["completed", "failed", "stopped"]);
 const conflict = (message) => Object.assign(new Error(message), { status: 409 });
+const displayAnswer = ({ answer, fileLinks }) => [answer, fileLinks].filter(Boolean).join("\n\n");
 
 export function validateTemporaryInput(body = {}) {
   const message = String(body.message || "").trim();
@@ -21,13 +23,14 @@ export function validateTemporaryInput(body = {}) {
   };
 }
 
-// All queue, recovery and decision state is volatile. Never goes through the
-// project session store, inbox, server content logs or static file library.
+// Conversation state is volatile. Only generated files are copied to the static library.
 export class TemporaryConversation {
-  constructor(chat) {
+  constructor(chat, { getStaticConfig } = {}) {
     this.chat = chat;
+    this.getStaticConfig = getStaticConfig;
     this.turns = [];
     this.files = [];
+    this.publishedFiles = new Map();
     this.events = new EventEmitter();
     this.downloadKey = randomUUID();
     this.requests = new Map();
@@ -37,7 +40,7 @@ export class TemporaryConversation {
 
   changed() { this.version++; this.events.emit("change"); }
   snapshot() {
-    return { version: this.version, busy: Boolean(this.current), files: this.files, turns: this.turns.map(({ options, images, ...turn }) => ({ ...turn, imageCount: images.length })) };
+    return { version: this.version, busy: Boolean(this.current), files: this.files, turns: this.turns.map(({ options, images, fileLinks, ...turn }) => ({ ...turn, answer: displayAnswer({ answer: turn.answer, fileLinks }), imageCount: images.length })) };
   }
 
   submit(body) {
@@ -89,7 +92,7 @@ export class TemporaryConversation {
       if (!turn.options.planning && !turn.proposedPlan) turn.decision = null;
       turn.finishedAt = Date.now();
       for (const step of turn.steps) if (!step.finishedAt) step.finishedAt = turn.finishedAt;
-      await this.scanFiles().catch(() => {});
+      turn.fileLinks = await this.fileLinksReply();
       turn.status = finalStatus;
       this.current = null;
       this.changed();
@@ -200,23 +203,78 @@ export class TemporaryConversation {
     this.changed();
   }
 
+  async fileLinksReply() {
+    try {
+      const { links = [], failed } = await this.scanFiles() || {};
+      const sections = [];
+      if (links.length) sections.push(`**产物文件**\n\n${links.map(({ path: relative, downloadUrl }) => {
+        const label = relative.replace(/[\r\n]/g, " ").replace(/[\\[\]]/g, "\\$&");
+        return `- [${label}](${downloadUrl})`;
+      }).join("\n")}`);
+      if (failed) sections.push("有产物未能归档，请在退出前从本次生成文件列表下载。");
+      return sections.join("\n\n");
+    } catch {
+      return "读取本次产物失败，请检查生成文件。";
+    }
+  }
+
   async scanFiles() {
     if (!this.chat.cwd || this.closed) return;
     const files = [];
+    const links = [];
+    const config = this.getStaticConfig?.();
+    const batch = randomUUID();
+    let failed = false;
     const visit = async (directory, prefix = "") => {
       for (const entry of await readdir(directory, { withFileTypes: true })) {
-        if (files.length >= 200 || entry.name.startsWith(".") || entry.isSymbolicLink()) continue;
+        if (this.closed) return;
+        if (entry.name.startsWith(".") || entry.name === "node_modules" || entry.isSymbolicLink()) continue;
         const relative = prefix + entry.name;
         const abs = path.join(directory, entry.name);
         if (entry.isDirectory()) await visit(abs, relative + "/");
         else if (entry.isFile()) {
           const info = await lstat(abs);
-          files.push({ path: relative, size: info.size });
+          if (!info.isFile()) continue;
+          const file = { path: relative, size: info.size };
+          files.push(file);
+          if (!config) continue;
+          try {
+            if (await this.publishFile(file, info, config, batch)) links.push(file);
+          } catch {
+            failed = true;
+          }
         }
       }
     };
     await visit(this.chat.cwd);
-    this.files = files;
+    if (!this.closed) this.files = files;
+    return { links, failed };
+  }
+
+  async publishFile(file, info, config, batch) {
+    const { workspaceRoot, publicUrl, staticToken } = config;
+    if (!publicUrl || !staticToken) throw new Error("静态资源链接未配置");
+    const revision = `${info.size}:${info.mtimeMs}:${info.ctimeMs}`;
+    const published = this.publishedFiles.get(file.path);
+    if (published?.revision === revision) {
+      file.downloadUrl = staticDownloadUrl(publicUrl, published.path, staticToken);
+      return false;
+    }
+
+    const destination = `${temporaryArtifactsFolder}/${batch}/${file.path}`;
+    const { abs: target } = resolveStaticFile(staticDir(workspaceRoot), encodeURIComponent(destination));
+    const directory = path.dirname(target);
+    await mkdir(directory, { recursive: true });
+    const staging = path.join(directory, `.${randomUUID()}.tmp`);
+    try {
+      await copyFile(await this.resolveFile(file.path), staging);
+      await rename(staging, target);
+    } finally {
+      await unlink(staging).catch(() => {});
+    }
+    this.publishedFiles.set(file.path, { revision, path: destination });
+    file.downloadUrl = staticDownloadUrl(publicUrl, destination, staticToken);
+    return true;
   }
 
   async resolveFile(relative) {
@@ -245,10 +303,11 @@ export class TemporaryConversation {
       try {
         yield { type: "start", engine: "codex" };
         while (!this.closed && !signal?.aborted) {
-          if (turn.answer.length > offset) { yield { type: "delta", text: turn.answer.slice(offset), engine: "codex" }; offset = turn.answer.length; }
+          const answer = displayAnswer(turn);
+          if (answer.length > offset) { yield { type: "delta", text: answer.slice(offset), engine: "codex" }; offset = answer.length; }
           if (terminal.has(turn.status)) {
             if (turn.error) throw new Error(turn.error);
-            yield { type: "done", text: turn.answer, engine: "codex" }; return;
+            yield { type: "done", text: answer, engine: "codex" }; return;
           }
           await changes.next();
         }

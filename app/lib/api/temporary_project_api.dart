@@ -317,13 +317,16 @@ class TemporaryProjectApi extends WenxiangApi {
         }
         final relative = Uri.decodeComponent(uri.path).replaceAll('\\', '/');
         final files = (snapshot['files'] as List? ?? [])
-            .whereType<Map>()
-            .map((f) => '${f['path']}');
-        final file = files
-            .where((f) => relative == f || relative.endsWith('/$f'))
-            .firstOrNull;
+            .whereType<Map>();
+        final file = files.where((file) {
+          final path = '${file['path']}';
+          return relative == path || relative.endsWith('/$path');
+        }).firstOrNull;
         if (file == null) return match[0]!;
-        return '[${match[1]}](${source.temporaryFileUri(id, file, '${snapshot['downloadKey']}')})';
+        final onlineUrl = file['downloadUrl'] as String?;
+        final url = onlineUrl ??
+            source.temporaryFileUri(id, '${file['path']}', '${snapshot['downloadKey']}').toString();
+        return '[${match[1]}]($url)';
       });
 
   @override

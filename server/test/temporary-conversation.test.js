@@ -8,6 +8,7 @@ import { TemporaryConversation } from '../src/temporary-conversation.js';
 import { createTemporaryChats } from '../src/temporary-chat.js';
 import { attachTemporaryDownloads, attachTemporaryRoutes } from '../src/temporary-chat-routes.js';
 import { createVoiceSession } from '../src/voice-session.js';
+import { listStaticFiles, resolveStaticFile } from '../src/static-files.js';
 
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
@@ -159,6 +160,50 @@ test('temporary file downloads reject traversal and links outside workspace; clo
     await assert.rejects(c.resolveFile('outside/something'), err => err.status === 403 || err.code === 'ENOENT');
   } finally { await c.close(); }
   await assert.rejects(stat(root), { code: 'ENOENT' });
+});
+
+test('generated files get stable online links and stay in the static library after close', async () => {
+  const workspace = await mkdtemp(path.join(os.tmpdir(), 'wx-publish-test-'));
+  const previous = process.env.WENXIANG_STATIC_DIR;
+  const staticRoot = path.join(workspace, 'static');
+  process.env.WENXIANG_STATIC_DIR = staticRoot;
+  const chat = fakeChat();
+  chat.cwd = path.join(workspace, 'session');
+  const config = { workspaceRoot: workspace, publicUrl: 'https://example.test', staticToken: 'static-token' };
+  const conversation = new TemporaryConversation(chat, { getStaticConfig: () => config });
+  const relative = 'outputs/画稿 (100%).svg';
+  try {
+    await mkdir(path.join(chat.cwd, 'outputs'), { recursive: true });
+    await writeFile(path.join(chat.cwd, relative), 'first');
+    await writeFile(path.join(chat.cwd, '说明.txt'), 'notes');
+    await writeFile(path.join(chat.cwd, '.env'), 'private');
+    const answer = await conversation.fileLinksReply();
+    const svg = conversation.files.find(file => file.path === relative);
+    assert.match(svg.downloadUrl, /%28.*%25%29\.svg\?token=static-token$/);
+    assert.ok(answer.includes(`[${relative}](${svg.downloadUrl})`));
+    assert.equal(conversation.files.length, 2);
+    assert.equal(await conversation.fileLinksReply(), '');
+
+    await writeFile(path.join(chat.cwd, relative), 'revised');
+    await conversation.fileLinksReply();
+    const revised = conversation.files.find(file => file.path === relative);
+    assert.notEqual(svg.downloadUrl, revised.downloadUrl);
+    await conversation.close();
+    await assert.rejects(stat(chat.cwd), { code: 'ENOENT' });
+    const readLink = ({ downloadUrl }) => readFile(resolveStaticFile(
+      staticRoot, new URL(downloadUrl).pathname.slice('/files/'.length),
+    ).abs, 'utf8');
+    assert.equal(await readLink(svg), 'first');
+    assert.equal(await readLink(revised), 'revised');
+    const listed = await listStaticFiles(workspace, { publicUrl: config.publicUrl, token: config.staticToken });
+    assert.equal(listed.files.length, 3);
+    assert.ok(listed.files.some(file => file.downloadUrl === revised.downloadUrl));
+  } finally {
+    await conversation.close();
+    if (previous === undefined) delete process.env.WENXIANG_STATIC_DIR;
+    else process.env.WENXIANG_STATIC_DIR = previous;
+    await rm(workspace, { recursive: true, force: true });
+  }
 });
 
 test('HTTP polling resumes accepted work; file links expire when session closes', async () => {
