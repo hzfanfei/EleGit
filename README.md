@@ -4,6 +4,8 @@
 
 配置说明（中文）：[配置说明.md](./配置说明.md)
 
+[在第二台 Windows 电脑部署问象并连接独立 Android App](./第二台电脑部署教程.md)
+
 用户计划 / PRD 在 Project store：
 
 - `/cursor/stores/bc-d0755f26-a3ad-4de8-b86a-7c66b6eb5ff3/docs/wenxiang-plan.md`
