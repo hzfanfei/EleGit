@@ -18,6 +18,7 @@ import '../copy/time.dart';
 import '../models.dart';
 import '../persist/app_memory.dart';
 import '../persist/chat_backfill.dart';
+import '../persist/turn_answers.dart' show mergeFinalTurnAnswer;
 import '../persist/book_reader_prefs.dart';
 import '../theme.dart';
 import '../voice/device_media.dart';
@@ -102,7 +103,7 @@ class _ChatPageState extends State<ChatPage> {
 
   final _input = TextEditingController();
   final _focus = FocusNode();
-  final _scroll = ScrollController();
+  final _scroll = ScrollController(keepScrollOffset: false);
   late final RunningSessions _running;
   late final RunningRepo _repoState;
   Map<String, List<ChatMessage>> get _transcripts => _repoState.transcripts;
@@ -129,13 +130,15 @@ class _ChatPageState extends State<ChatPage> {
   bool _usageLoading = false;
   Timer? _usageTimer;
   ChatStreamEvent? _decision;
-  String? _appearUserKey;
-  int? _editingIndex;
-  String? _lastUser;
-  List<ChatImageAttachment> _lastImages = const [];
-  final List<_DraftImage> _draftImages = [];
-  bool _readingImages = false;
-  bool _uploadingImages = false;
+  ChatMessage? _appearingQuestion;
+  ChatMessage? _editingMessage;
+  final _sessionViews = <String, _SessionView>{};
+  _SessionView get _sessionView =>
+      _sessionViews.putIfAbsent(_sessionId ?? '', _SessionView.new);
+  List<_DraftImage> get _draftImages => _sessionView.images;
+  final _checkingResults = <ChatMessage>{};
+  bool get _readingImages => _sessionView.readingImages;
+  bool get _uploadingImages => _sessionView.uploadingImages;
   bool _voiceReady = false;
   bool _voiceCall = false;
   String _voiceHint = '还没配语音密钥。请在本机问象服务的 .env 里配置。';
@@ -155,6 +158,8 @@ class _ChatPageState extends State<ChatPage> {
   bool _userScrolledAwayFromBottom = false;
   bool _pendingNewBelow = false;
   bool _autoFollowing = false;
+  bool _restoringScroll = false;
+  int _scrollEpoch = 0;
   bool _preparingChat = true;
   bool _creatingSession = false;
   bool get _sessionPending => _preparingChat || _creatingSession;
@@ -198,7 +203,9 @@ class _ChatPageState extends State<ChatPage> {
       onChanged: () {
         if (mounted) setState(() {});
       },
-      historyForVoice: () => _messages,
+      historyForVoice: () => _messages
+          .where((message) => message.outcome != ChatTurnOutcome.queueCancelled)
+          .toList(),
       resolveSessionId: () => _sessionId,
       onSessionId: _rememberSessionId,
       onTurnRecorded: ({
@@ -214,7 +221,7 @@ class _ChatPageState extends State<ChatPage> {
             ChatMessage(role: 'user', content: question, via: 'voice'),
             ChatMessage(role: 'assistant', content: answer, engine: engine, via: 'voice'),
           ]);
-          _appearUserKey = '${_sessionId ?? ''}:${_messages.length - 2}';
+          _appearingQuestion = _messages[_messages.length - 2];
         });
         if (sessionId != null && sessionId.isNotEmpty) {
           _rememberSessionId(sessionId);
@@ -246,7 +253,7 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   void _onScrollPosition() {
-    if (!_scroll.hasClients || !mounted || _autoFollowing) return;
+    if (!_scroll.hasClients || !mounted || _autoFollowing || _restoringScroll) return;
     if (_nearBottom && (_userScrolledAwayFromBottom || _pendingNewBelow)) {
       setState(() {
         _userScrolledAwayFromBottom = false;
@@ -256,7 +263,7 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   bool _onChatScrollNotification(ScrollNotification notification) {
-    if (_autoFollowing) return false;
+    if (_autoFollowing || _restoringScroll) return false;
     if (notification is ScrollUpdateNotification && notification.dragDetails != null) {
       if (!_nearBottom && !_userScrolledAwayFromBottom) {
         setState(() => _userScrolledAwayFromBottom = true);
@@ -273,13 +280,14 @@ class _ChatPageState extends State<ChatPage> {
 
   /// While typewriter ticks, avoid stacked [animateTo] calls (they jitter short lists).
   void _followTypewriterTail() {
+    if (_restoringScroll) return;
     if (_userScrolledAwayFromBottom || !_nearBottom) {
       if (!_pendingNewBelow) setState(() => _pendingNewBelow = true);
       return;
     }
     _streamScrollTimer?.cancel();
     _streamScrollTimer = Timer(const Duration(milliseconds: 48), () {
-      if (!mounted || !_scroll.hasClients) return;
+      if (!mounted || !_scroll.hasClients || _restoringScroll) return;
       final pos = _scroll.position;
       if (pos.pixels <= 0.5) return;
       if (_lastFollowExtent == 0 && _nearBottom) return;
@@ -291,6 +299,7 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   void _jumpToLatest({bool force = false}) {
+    if (_restoringScroll) return;
     if (force) {
       _userScrolledAwayFromBottom = false;
       _pendingNewBelow = false;
@@ -301,8 +310,9 @@ class _ChatPageState extends State<ChatPage> {
       }
       return;
     }
+    final epoch = _scrollEpoch;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      if (!_scroll.hasClients || !mounted) return;
+      if (!_scroll.hasClients || !mounted || epoch != _scrollEpoch) return;
       final pos = _scroll.position;
       if (pos.pixels <= 1) return;
       _autoFollowing = true;
@@ -317,7 +327,7 @@ class _ChatPageState extends State<ChatPage> {
           );
         }
       } finally {
-        _autoFollowing = false;
+        if (epoch == _scrollEpoch) _autoFollowing = false;
       }
     });
   }
@@ -632,9 +642,9 @@ class _ChatPageState extends State<ChatPage> {
         final keepHasTurns = keep != null && (_transcripts[keep]?.isNotEmpty ?? false);
         if (!keepHasTurns && (keep == null || !_sessions.any((session) => session.id == keep))) {
           if (list.isNotEmpty) {
-            _sessionId = list.firstWhere((s) => s.active, orElse: () => list.first).id;
+            _selectSession(list.firstWhere((s) => s.active, orElse: () => list.first).id);
           } else if (_sessions.isNotEmpty) {
-            _sessionId = _sessions.first.id;
+            _selectSession(_sessions.first.id);
           }
         }
       });
@@ -660,16 +670,9 @@ class _ChatPageState extends State<ChatPage> {
       if (!mounted) return;
       setState(() {
         _sessions.insert(0, created);
-        _sessionId = created.id;
         _transcripts[created.id] = [];
-        _live = false;
-        _editingIndex = null;
-        _input.clear();
-        _draftImages.clear();
-        _lastUser = null;
-        _lastImages = const [];
+        _selectSession(created.id);
       });
-      _shownTurnId = null;
       _syncExecution(force: true);
       await _persist();
     } catch (err) {
@@ -683,12 +686,7 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _switchSession(ChatSession session) async {
-    setState(() {
-      _sessionId = session.id;
-      _live = false;
-      _editingIndex = null;
-    });
-    _shownTurnId = null;
+    setState(() => _selectSession(session.id));
     _syncExecution(force: true);
     _persist();
     if (widget.temporary) _warmAcp();
@@ -702,9 +700,9 @@ class _ChatPageState extends State<ChatPage> {
       setState(() {
         _repoState.removeSession(session.id);
         if (_sessionId == session.id) {
-          _sessionId = _sessions.isEmpty ? null : _sessions.first.id;
-          _live = false;
+          _selectSession(_sessions.firstOrNull?.id);
         }
+        _sessionViews.remove(session.id);
       });
       if (_sessionId == null || _sessions.isEmpty) {
         _typewriter.reset();
@@ -721,6 +719,42 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
+  void _selectSession(String? id) {
+    if (_sessionId == id) return;
+    final previous = _sessionView;
+    previous.input = _input.value;
+    if (!_restoringScroll && _scroll.hasClients) {
+      previous.offset = _scroll.offset;
+    }
+    _sessionId = id;
+    final next = _sessionView;
+    _input.value = next.input;
+    _editingMessage = null;
+    _appearingQuestion = null;
+    _shownTurnId = null;
+    _cancelStreamScrollFollow();
+    _autoFollowing = false;
+    _pendingNewBelow = false;
+    _userScrolledAwayFromBottom = false;
+    _restoringScroll = true;
+    final epoch = ++_scrollEpoch;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || epoch != _scrollEpoch) return;
+      if (_scroll.hasClients) {
+        final position = _scroll.position;
+        position.jumpTo(next.offset.clamp(0.0, position.maxScrollExtent));
+      }
+      _userScrolledAwayFromBottom = !_nearBottom;
+      _restoringScroll = false;
+    });
+  }
+
+  void _renameSessionView(String next) {
+    final view = _sessionViews.remove(_sessionId ?? '');
+    if (view != null) _sessionViews[next] = view;
+    _sessionId = next;
+  }
+
   void _rememberSessionId(String? next) {
     if (next == null || next.isEmpty || next == _sessionId) return;
     final old = _sessionId ?? '';
@@ -728,7 +762,7 @@ class _ChatPageState extends State<ChatPage> {
     if (prior != null) {
       _transcripts[next] = prior;
     }
-    _sessionId = next;
+    _renameSessionView(next);
     if (!_sessions.any((s) => s.id == next)) {
       _sessions.insert(
         0,
@@ -743,88 +777,81 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
-  void _beginEdit(int index) {
-    if (index < 0 || index >= _messages.length) return;
+  void _beginEdit(ChatMessage message) {
+    final index = _messages.indexOf(message);
+    if (index < 0 || _sessionPending || _readingImages || _uploadingImages) return;
     if (_processingUserIndex == index) return;
-    final queued = _isQueuedUserMessage(index, _messages[index]);
+    final queued = _isQueuedUserMessage(message);
     if (!queued && (_busy || _live)) return;
-    setState(() => _editingIndex = index);
+    setState(() => _editingMessage = message);
   }
 
   void _cancelEdit() {
-    if (_editingIndex == null) return;
-    setState(() => _editingIndex = null);
+    if (_editingMessage == null) return;
+    setState(() => _editingMessage = null);
   }
 
-  Future<void> _commitEdit(int index, String text) async {
+  Future<void> _commitEdit(ChatMessage message, String text) async {
+    final index = _messages.indexOf(message);
     final next = text.trim();
-    if (index < 0 || index >= _messages.length) return;
-    final message = _messages[index];
+    if (index < 0 || _sessionPending || _readingImages || _uploadingImages) {
+      return;
+    }
     if (next.isEmpty && message.images.isEmpty) return;
-    final queued = _isQueuedUserMessage(index, message) && _processingUserIndex != index;
+    final queued =
+        _isQueuedUserMessage(message) && _processingUserIndex != index;
     if (queued) {
       setState(() {
         message.content = next;
-        _editingIndex = null;
+        _editingMessage = null;
       });
       await _persist();
       return;
     }
     if (_busy || _live) {
-      if (mounted) setState(() => _editingIndex = null);
+      if (mounted) setState(() => _editingMessage = null);
       return;
     }
     final prefix = List<ChatMessage>.from(_messages.take(index));
+    setState(() => _creatingSession = true);
     try {
-      final created = await widget.api.createSession(widget.repo.owner, widget.repo.name);
+      final created =
+          await widget.api.createSession(widget.repo.owner, widget.repo.name);
       if (!mounted) return;
       setState(() {
-        _editingIndex = null;
         _sessions.insert(0, created);
-        _sessionId = created.id;
         _transcripts[created.id] = prefix;
+        _selectSession(created.id);
       });
     } catch (_) {
       if (!mounted) return;
       setState(() {
-        _editingIndex = null;
+        _editingMessage = null;
         _messages
           ..clear()
           ..addAll(prefix);
       });
+    } finally {
+      if (mounted) setState(() => _creatingSession = false);
     }
-    await _persist();
-    await _send(next, List<ChatImageAttachment>.from(message.images));
+    await _send(next, message.images);
   }
 
   int get _queuedCount => _execution?.queued.length ?? 0;
 
-  bool _isQueuedUserMessage(int index, ChatMessage message) {
-    if (message.role != 'user') return false;
-    if (_execution?.queued.contains(message) ?? false) return true;
-    final active = _processingUserIndex;
-    return _busy && active != null && index > active;
+  bool _isQueuedUserMessage(ChatMessage message) {
+    return message.role == 'user' &&
+        (_execution?.queued.contains(message) ?? false);
   }
 
-  Future<void> _removeQueuedTurn(int index) async {
-    if (index < 0 || index >= _messages.length) return;
-    final message = _messages[index];
-    if (!_isQueuedUserMessage(index, message)) return;
-    if (_processingUserIndex == index) return;
+  Future<void> _removeQueuedTurn(ChatMessage message) async {
+    if (!_isQueuedUserMessage(message)) return;
     HapticFeedback.selectionClick();
     setState(() {
-      _messages.removeAt(index);
+      _messages.remove(message);
       _execution?.queued.remove(message);
-      if (_processingUserIndex != null && _processingUserIndex! > index) {
-        _processingUserIndex = _processingUserIndex! - 1;
-      }
-      if (_editingIndex != null) {
-        if (_editingIndex == index) {
-          _editingIndex = null;
-        } else if (_editingIndex! > index) {
-          _editingIndex = _editingIndex! - 1;
-        }
-      }
+      _processingUserIndex = _execution?.userIndex;
+      if (_editingMessage == message) _editingMessage = null;
     });
     await _persist();
   }
@@ -844,7 +871,8 @@ class _ChatPageState extends State<ChatPage> {
         _sttBusy) {
       return;
     }
-    final room = chatImageMaxCount - _draftImages.length;
+    final target = _sessionView;
+    final room = chatImageMaxCount - target.images.length;
     if (room <= 0) {
       _snack('最多带 4 张图');
       return;
@@ -871,7 +899,7 @@ class _ChatPageState extends State<ChatPage> {
       ),
     );
     if (source == null || !mounted) return;
-    setState(() => _readingImages = true);
+    setState(() => target.readingImages = true);
     try {
       if (source == ImageSource.camera) {
         final status = await Permission.camera.request();
@@ -917,11 +945,11 @@ class _ChatPageState extends State<ChatPage> {
       if (!mounted) return;
       if (skipped) _snack('有图片太大，已跳过');
       if (stored.isEmpty) return;
-      setState(() => _draftImages.addAll(stored));
+      setState(() => target.images.addAll(stored));
     } catch (_) {
       if (mounted) _snack('没能读取图片');
     } finally {
-      if (mounted) setState(() => _readingImages = false);
+      if (mounted) setState(() => target.readingImages = false);
     }
   }
 
@@ -948,11 +976,14 @@ class _ChatPageState extends State<ChatPage> {
     final targetId = _sessionId!;
     final targetMessages = _messages;
     final targetMode = _agentMode;
-    final drafts = List<_DraftImage>.from(_draftImages);
+    final targetView = _sessionView;
+    final drafts = List<_DraftImage>.from(targetView.images);
     HapticFeedback.selectionClick();
-    _editingIndex = null;
-    _input.clear();
-    if (usingDrafts) _draftImages.clear();
+    _editingMessage = null;
+    if (usingDrafts) {
+      _input.clear();
+      targetView.images.clear();
+    }
 
     List<ChatImageAttachment> images;
     if (!usingDrafts) {
@@ -960,7 +991,7 @@ class _ChatPageState extends State<ChatPage> {
     } else if (drafts.isEmpty) {
       images = const [];
     } else {
-      setState(() => _uploadingImages = true);
+      setState(() => targetView.uploadingImages = true);
       try {
         final uploaded = <ChatImageAttachment>[];
         for (final draft in drafts) {
@@ -973,11 +1004,16 @@ class _ChatPageState extends State<ChatPage> {
       } catch (err) {
         if (mounted) {
           setState(() {
-            _uploadingImages = false;
-            if (_sessionId == targetId) {
+            targetView.uploadingImages = false;
+            if (identical(_sessionView, targetView)) {
               if (_input.text.isEmpty) _input.text = text;
-              _draftImages.addAll(drafts);
+            } else if (targetView.input.text.isEmpty) {
+              targetView.input = TextEditingValue(
+                text: text,
+                selection: TextSelection.collapsed(offset: text.length),
+              );
             }
+            targetView.images.addAll(drafts);
           });
           _snack(humanizeError(err));
         }
@@ -986,12 +1022,8 @@ class _ChatPageState extends State<ChatPage> {
     }
 
     if (!_sessions.any((s) => s.id == targetId)) {
-      if (mounted) setState(() => _uploadingImages = false);
+      if (mounted) setState(() => targetView.uploadingImages = false);
       return;
-    }
-    if (mounted && _sessionId == targetId) {
-      _lastUser = text;
-      _lastImages = images;
     }
     final message = ChatMessage(
       role: 'user', content: text, via: voice ? 'voice' : null,
@@ -1001,15 +1033,53 @@ class _ChatPageState extends State<ChatPage> {
     _running.session(_repoState, targetId, targetMode).enqueue(message);
     if (mounted) {
       setState(() {
-        _uploadingImages = false;
+        targetView.uploadingImages = false;
         if (_sessionId == targetId) {
-          _rememberInputMode(voice);
-          _appearUserKey = '$targetId:${targetMessages.length - 1}';
+          if (usingDrafts) _rememberInputMode(voice);
+          _appearingQuestion = message;
         }
       });
-      _jumpToLatest(force: true);
+      if (_sessionId == targetId) _jumpToLatest(force: true);
     }
     await _repoState.persist();
+  }
+
+  void _retryTurn(ChatMessage question) {
+    if (_busy || !_messages.contains(question)) return;
+    unawaited(_send(question.content, question.images));
+  }
+
+  Future<void> _checkTimedOutTurn(ChatMessage question) async {
+    final session = _sessionId;
+    final turn = question.turnId;
+    if (session == null ||
+        turn == null ||
+        question.outcome != ChatTurnOutcome.timedOut ||
+        _checkingResults.contains(question)) {
+      return;
+    }
+    final messages = _messages;
+    setState(() => _checkingResults.add(question));
+    try {
+      final answer =
+          await widget.api.finalChatAnswer(sessionId: session, turnId: turn);
+      final index = messages.indexOf(question);
+      if (index < 0 ||
+          !_transcripts.containsValue(messages) ||
+          question.outcome != ChatTurnOutcome.timedOut) {
+        return;
+      }
+      if (answer == null || !mergeFinalTurnAnswer(messages, index, answer)) {
+        if (mounted && _sessionId == session) _snack('还没有收到最终答复，可以稍后再查看');
+        return;
+      }
+      await _repoState.persist();
+      _running.changed();
+    } catch (error) {
+      if (mounted && _sessionId == session) _snack(humanizeError(error));
+    } finally {
+      if (mounted) setState(() => _checkingResults.remove(question));
+    }
   }
 
   Future<void> _submitDecision({
@@ -1052,10 +1122,11 @@ class _ChatPageState extends State<ChatPage> {
     final task = _execution;
     final sessionChanged = task != null && task.sessionId != _sessionId;
     if (sessionChanged) {
-      _sessionId = task.sessionId;
+      _renameSessionView(task.sessionId);
     }
     final busy = task?.busy ?? false;
-    final active = busy ? task : null;
+    final live = busy && task?.current != null && !task!.stopped;
+    final active = live ? task : null;
     final executionChanged = active != _shownExecution;
     if (executionChanged) {
       _shownExecution?.replyText.removeListener(_syncReplyText);
@@ -1081,6 +1152,7 @@ class _ChatPageState extends State<ChatPage> {
         !sessionChanged &&
         !executionChanged &&
         busy == wasBusy &&
+        live == _live &&
         messageCount == _shownMessageCount &&
         queueCount == _shownQueueCount &&
         userIndex == _processingUserIndex &&
@@ -1089,7 +1161,7 @@ class _ChatPageState extends State<ChatPage> {
     }
     setState(() {
       _busy = busy;
-      _live = _busy;
+      _live = live;
       _shownMessageCount = messageCount;
       _shownQueueCount = queueCount;
       _processingUserIndex = userIndex;
@@ -1105,7 +1177,7 @@ class _ChatPageState extends State<ChatPage> {
   void _stop() => _execution?.stop();
 
   void _onChatBackfill() {
-    if (!mounted || _busy) return;
+    if (!mounted) return;
     _mergeBackfill();
   }
 
@@ -1120,8 +1192,7 @@ class _ChatPageState extends State<ChatPage> {
     );
     if (!mounted || task == null) return;
     if (task.repo.repo.fullName == widget.repo.fullName) {
-      _sessionId = task.sessionId;
-      _shownTurnId = null;
+      setState(() => _selectSession(task.sessionId));
       _syncExecution(force: true);
       await _persist();
     } else {
@@ -1282,6 +1353,108 @@ class _ChatPageState extends State<ChatPage> {
     super.dispose();
   }
 
+  Widget _messageList(int itemCount) {
+    final messages = _messages;
+    final liveAt =
+        _live ? (_processingUserIndex ?? messages.length - 1) + 1 : null;
+    const liveKey = ValueKey('wx-live-reply');
+
+    return NotificationListener<ScrollNotification>(
+      key: ValueKey(_scrollEpoch),
+      onNotification: _onChatScrollNotification,
+      child: ListView.builder(
+        key: const Key('wx-chat-list'),
+        controller: _scroll,
+        reverse: true,
+        padding: EdgeInsets.fromLTRB(
+          4,
+          12,
+          4,
+          _kChatListBottomInset + (_draftImages.isEmpty ? 0 : _kChatDraftStrip),
+        ),
+        itemCount: itemCount,
+        findChildIndexCallback: (key) {
+          if (key == liveKey) {
+            return liveAt == null ? null : itemCount - 1 - liveAt;
+          }
+          if (key is! ObjectKey) return null;
+          final index = messages.indexOf(key.value as ChatMessage);
+          if (index < 0) return null;
+          final row = liveAt != null && index >= liveAt ? index + 1 : index;
+          return itemCount - 1 - row;
+        },
+        itemBuilder: (context, index) {
+          final row = itemCount - 1 - index;
+          if (row == liveAt) {
+            return _LiveTurn(
+              key: liveKey,
+              api: widget.api,
+              openAnswerLink: widget.openAnswerLink,
+              text: _typewriter.visible,
+              engine: _liveEngine,
+              phase: _livePhase,
+              activity: _liveActivity,
+              holdPollOk: _holdPollOk,
+            );
+          }
+          final at = liveAt != null && row > liveAt ? row - 1 : row;
+          final message = messages[at];
+          final queued = _isQueuedUserMessage(message);
+          ChatMessage? retryQuestion;
+          if (message.role == 'error' && message.turnId != null) {
+            final questionAt = indexOfTurn(messages, message.turnId!);
+            if (questionAt >= 0) retryQuestion = messages[questionAt];
+          } else if (message.outcome == ChatTurnOutcome.queueCancelled) {
+            retryQuestion = message;
+          }
+          ChatTurnOutcome? replyOutcome;
+          if (message.role == 'assistant') {
+            for (var i = at - 1; i >= 0; i--) {
+              if (messages[i].role != 'user') continue;
+              replyOutcome = messages[i].outcome;
+              break;
+            }
+          }
+          final retry = retryQuestion;
+          return _FinishedTurn(
+            key: ObjectKey(message),
+            api: widget.api,
+            openAnswerLink: widget.openAnswerLink,
+            ttsVoice: widget.memory?.ttsVoice(),
+            appear: identical(_appearingQuestion, message),
+            message: message,
+            queued: queued,
+            editing: _editingMessage == message,
+            replyOutcome: replyOutcome,
+            onEdit: message.role == 'user' &&
+                    _processingUserIndex != at &&
+                    !_sessionPending &&
+                    !_readingImages &&
+                    !_uploadingImages &&
+                    (queued || !_busy)
+                ? () => _beginEdit(message)
+                : null,
+            onCancelEdit: _cancelEdit,
+            onSubmitEdit: (text) => _commitEdit(message, text),
+            onRemoveQueue: queued ? () => _removeQueuedTurn(message) : null,
+            onRetry: retry != null &&
+                    !_busy &&
+                    !_sessionPending &&
+                    !_uploadingImages &&
+                    !_readingImages
+                ? () => _retryTurn(retry)
+                : null,
+            checkingResult: _checkingResults.contains(message),
+            onCheckResult: message.outcome == ChatTurnOutcome.timedOut &&
+                    message.turnId != null
+                ? () => _checkTimedOutTurn(message)
+                : null,
+          );
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final session = _currentSession;
@@ -1376,61 +1549,7 @@ class _ChatPageState extends State<ChatPage> {
                     ? (_sessionPending
                         ? WxBusy(label: sessionWait)
                         : _EmptyChat(onPick: _send, temporary: widget.temporary))
-                    : NotificationListener<ScrollNotification>(
-                        onNotification: _onChatScrollNotification,
-                        child: ListView.builder(
-                          key: const Key('wx-chat-list'),
-                          controller: _scroll,
-                          reverse: true,
-                          padding: EdgeInsets.fromLTRB(
-                            4,
-                            12,
-                            4,
-                            _kChatListBottomInset + (_draftImages.isEmpty ? 0 : _kChatDraftStrip),
-                          ),
-                          itemCount: itemCount,
-                          itemBuilder: (context, index) {
-                      final chronological = itemCount - 1 - index;
-                      if (chronological < _messages.length) {
-                        final message = _messages[chronological];
-                        return _FinishedTurn(
-                          key: ValueKey('m-$chronological-${message.role}'),
-                          api: widget.api,
-                          openAnswerLink: widget.openAnswerLink,
-                          ttsVoice: widget.memory?.ttsVoice(),
-                          appear: message.role == 'user' &&
-                              _appearUserKey == '${_sessionId ?? ''}:$chronological',
-                          message: message,
-                          queued: _isQueuedUserMessage(chronological, message),
-                          editing: _editingIndex == chronological,
-                          onEdit: message.role == 'user' &&
-                                  _processingUserIndex != chronological &&
-                                  (_isQueuedUserMessage(chronological, message) ||
-                                      (!_busy && !_live))
-                              ? () => _beginEdit(chronological)
-                              : null,
-                          onCancelEdit: _cancelEdit,
-                          onSubmitEdit: (text) => _commitEdit(chronological, text),
-                          onRemoveQueue: _isQueuedUserMessage(chronological, message)
-                              ? () => _removeQueuedTurn(chronological)
-                              : null,
-                          onRetry: message.role == 'error' && _lastUser != null && !_busy && !_uploadingImages
-                              ? () => _send(_lastUser, _lastImages)
-                              : null,
-                        );
-                      }
-                      return _LiveTurn(
-                        api: widget.api,
-                        openAnswerLink: widget.openAnswerLink,
-                        text: _typewriter.visible,
-                        engine: _liveEngine,
-                        phase: _livePhase,
-                        activity: _liveActivity,
-                        holdPollOk: _holdPollOk,
-                      );
-                    },
-                        ),
-                      ),
+                    : _messageList(itemCount),
                 if (_pendingNewBelow && itemCount > 0)
                   Positioned(
                     left: 0,
@@ -1672,6 +1791,7 @@ class _EditableUserTurn extends StatefulWidget {
     required this.api,
     this.queued = false,
     required this.editing,
+    this.status,
     this.onEdit,
     this.onCancel,
     this.onSubmit,
@@ -1682,6 +1802,7 @@ class _EditableUserTurn extends StatefulWidget {
   final WenxiangApi api;
   final bool queued;
   final bool editing;
+  final Widget? status;
   final VoidCallback? onEdit;
   final VoidCallback? onCancel;
   final Future<void> Function(String text)? onSubmit;
@@ -1717,12 +1838,7 @@ class _EditableUserTurnState extends State<_EditableUserTurn> {
       railColor: Wx.hairline,
       railWidth: 2,
       bottom: 20,
-      footer: widget.queued
-          ? Text(
-              '排队中',
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.muted),
-            )
-          : null,
+      footer: widget.status,
       trailing: widget.editing
           ? null
           : widget.queued
@@ -1873,6 +1989,9 @@ class _FinishedTurn extends StatelessWidget {
     this.onSubmitEdit,
     this.onRemoveQueue,
     this.onRetry,
+    this.replyOutcome,
+    this.checkingResult = false,
+    this.onCheckResult,
   });
   final WenxiangApi api;
   final ChatMessage message;
@@ -1886,6 +2005,35 @@ class _FinishedTurn extends StatelessWidget {
   final Future<void> Function(String text)? onSubmitEdit;
   final VoidCallback? onRemoveQueue;
   final VoidCallback? onRetry;
+  final ChatTurnOutcome? replyOutcome;
+  final bool checkingResult;
+  final VoidCallback? onCheckResult;
+
+  Widget? _userStatus(BuildContext context) {
+    final label = queued
+        ? '排队中'
+        : switch (message.outcome) {
+            ChatTurnOutcome.stopped => '已停止',
+            ChatTurnOutcome.queueCancelled => '已取消排队',
+            ChatTurnOutcome.timedOut => '等待超时，尚未收到最终答复',
+            null => null,
+          };
+    if (label == null) return null;
+    final style =
+        Theme.of(context).textTheme.labelSmall?.copyWith(color: Wx.muted);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: style),
+        if (checkingResult)
+          WxInlineBusy('正在查看结果…', style: style)
+        else if (onCheckResult != null)
+          TextButton(onPressed: onCheckResult, child: const Text('查看结果')),
+        if (onRetry != null)
+          TextButton(onPressed: onRetry, child: const Text('重新发送')),
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1895,6 +2043,7 @@ class _FinishedTurn extends StatelessWidget {
         api: api,
         queued: queued,
         editing: editing,
+        status: _userStatus(context),
         onEdit: onEdit,
         onCancel: onCancelEdit,
         onSubmit: onSubmitEdit,
@@ -1909,13 +2058,16 @@ class _FinishedTurn extends StatelessWidget {
         child: WxErrorPanel(
           error: message.content,
           onRetry: onRetry,
-          retryLabel: '重试上一问',
+          retryLabel: '重试此问题',
         ),
       );
     }
     final note = engineFootnote(message.engine);
     return _VoiceTurn(
-      voice: '问象',
+      voice: replyOutcome == ChatTurnOutcome.stopped ||
+              replyOutcome == ChatTurnOutcome.timedOut
+          ? '问象 · 部分答复'
+          : '问象',
       voiceColor: Wx.text,
       railColor: Wx.hairline,
       railWidth: 2,
@@ -1964,6 +2116,7 @@ String _livePhaseLabel(String phase) {
 
 class _LiveTurn extends StatelessWidget {
   const _LiveTurn({
+    super.key,
     required this.api,
     required this.text,
     this.openAnswerLink,
@@ -2739,7 +2892,7 @@ class _Composer extends StatelessWidget {
                           ),
                           IconButton(
                             key: const Key('wx-chat-stop'),
-                            tooltip: '停止当前',
+                            tooltip: queueCount > 0 ? '停止当前并取消排队' : '停止当前',
                             visualDensity: VisualDensity.compact,
                             onPressed: onStop,
                             icon: const Icon(Icons.stop_circle_outlined, size: 26, color: Wx.text),
@@ -2822,6 +2975,14 @@ class _NewMessagesPill extends StatelessWidget {
       ),
     );
   }
+}
+
+class _SessionView {
+  TextEditingValue input = TextEditingValue.empty;
+  final images = <_DraftImage>[];
+  double offset = 0;
+  bool readingImages = false;
+  bool uploadingImages = false;
 }
 
 class _DraftImage {

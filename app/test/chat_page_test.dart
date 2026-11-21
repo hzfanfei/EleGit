@@ -607,7 +607,7 @@ void main() {
 
     expect(find.textContaining('连接断了'), findsNothing);
     expect(find.textContaining('连接中断'), findsNothing);
-    expect(find.text('重试上一问'), findsNothing);
+    expect(find.text('重试此问题'), findsNothing);
     final mark = tester.widget<WxLoading>(find.byKey(const Key('wx-working-mark')));
     expect(mark.color, Wx.holdPoll);
 
@@ -616,7 +616,7 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
   });
 
-  testWidgets('hold ending without an answer does not show the connection error', (tester) async {
+  testWidgets('after a hold timeout the same turn can retrieve a late reply', (tester) async {
     final api = FakeWenxiangApi(
       streamThrows: AcceptedChatDrop(
         Exception(
@@ -644,8 +644,22 @@ void main() {
 
     expect(find.textContaining('连接中断'), findsNothing);
     expect(find.textContaining('Connection closed'), findsNothing);
-    expect(find.text('重试上一问'), findsNothing);
+    expect(find.text('重试此问题'), findsNothing);
     expect(find.byKey(const Key('wx-working-mark')), findsNothing);
+    expect(find.text('等待超时，尚未收到最终答复'), findsOneWidget);
+
+    api.inboxItems = [
+      {'sessionId': 's1', 'turnId': 'other-turn', 'answer': '别的问题的回复'},
+      {'sessionId': 's1', 'turnId': api.lastTurnId, 'answer': '尚未结束', 'partial': true},
+      {'sessionId': 's1', 'turnId': api.lastTurnId, 'answer': '迟到的最终答复'},
+    ];
+    await tester.tap(find.text('查看结果'));
+    await tester.pump();
+    expect(find.text('迟到的最终答复'), findsOneWidget);
+    expect(find.text('等待超时，尚未收到最终答复'), findsNothing);
+    expect(find.text('尚未结束'), findsNothing);
+    expect(find.text('别的问题的回复'), findsNothing);
+    expect(api.chatMessages, ['这个仓库最近在做什么？']);
 
     RunningSessions.stopAllForTesting();
     await tester.pumpWidget(const SizedBox.shrink());

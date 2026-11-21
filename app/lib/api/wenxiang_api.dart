@@ -1744,6 +1744,21 @@ class WenxiangApi {
     } catch (_) {}
   }
 
+  Future<String?> finalChatAnswer({
+    required String sessionId,
+    required String turnId,
+  }) async {
+    final inbox = await fetchInbox();
+    for (final row in (inbox['items'] as List? ?? const []).whereType<Map>()) {
+      if (row['turnId'] != turnId || row['partial'] == true) continue;
+      final session = row['sessionId']?.toString() ?? '';
+      if (session.isNotEmpty && session != sessionId) continue;
+      final answer = row['answer']?.toString().trim();
+      if (answer != null && answer.isNotEmpty) return answer;
+    }
+    return null;
+  }
+
   Future<Map<String, dynamic>> fetchInbox() async {
     final res = await http
         .get(_uri('/v1/inbox'), headers: _headers)

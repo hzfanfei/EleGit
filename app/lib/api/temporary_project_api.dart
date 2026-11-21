@@ -391,6 +391,36 @@ class TemporaryProjectApi extends WenxiangApi {
   @override
   void cancelRepoVoiceTurn() => source.cancelTemporaryVoice();
   @override
+  Future<String?> finalChatAnswer({
+    required String sessionId,
+    required String turnId,
+  }) async {
+    final snapshot = await source.temporaryChatRequest(sessionId);
+    final turns = {
+      for (final turn in (snapshot['turns'] as List? ?? const []).whereType<Map>())
+        turn['id']: turn,
+    };
+    final visited = <Object?>{};
+    final answer = StringBuffer();
+    var turn = turns[turnId];
+    while (turn != null && visited.add(turn['id'])) {
+      final text = turn['answer']?.toString().trim() ?? '';
+      if (text.isNotEmpty) {
+        if (answer.isNotEmpty) answer.write('\n\n');
+        answer.write(text);
+      }
+      final next = turn['continuationId'];
+      if (next == null) {
+        return turn['status'] == 'completed' && answer.isNotEmpty
+            ? linkFiles(answer.toString(), sessionId, snapshot)
+            : null;
+      }
+      turn = turns[next];
+    }
+    return null;
+  }
+
+  @override
   Future<Map<String, dynamic>> fetchInbox() async => {'items': []};
 
   Future<void> closeProject() async {

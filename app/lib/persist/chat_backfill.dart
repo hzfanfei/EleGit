@@ -175,7 +175,7 @@ RepoChatStore? appendRepoTranscript(
   if (id.isEmpty) return null;
   final userAt = indexOfTurn(list, id);
   if (userAt >= 0) {
-    if (!insertTurnAnswer(list, userAt, text)) return null;
+    if (!mergeFinalTurnAnswer(list, userAt, text)) return null;
   } else {
     if (question.isNotEmpty) {
       list.add(ChatMessage(role: 'user', content: question, turnId: id));

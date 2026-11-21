@@ -4,6 +4,31 @@ import 'package:wenxiang/persist/app_memory.dart';
 import 'package:wenxiang/persist/chat_backfill.dart';
 
 void main() {
+  test('a final notice clears a timed-out turn even if its partial text matches', () {
+    final question = ChatMessage(
+      role: 'user',
+      content: '问题',
+      turnId: 't1',
+      outcome: ChatTurnOutcome.timedOut,
+    );
+    final store = RepoChatStore(
+      sessions: const [],
+      activeId: 's1',
+      transcripts: {
+        's1': [question, ChatMessage(role: 'assistant', content: '已写好的答复')],
+      },
+    );
+    final updated = appendRepoTranscript(
+      store,
+      sessionId: 's1',
+      turnId: 't1',
+      answer: '已写好的答复',
+    );
+    final saved = updated!.transcripts['s1']!;
+    expect(saved.first.outcome, isNull);
+    expect(saved, hasLength(2));
+  });
+
   test('final paragraph prefixes merge in either delivery order', () {
     const full = '正在检查。\n\n正在打包。===TASK_COMPLETED===已去掉顶部卡片。\n\n下载 APK。';
     for (final fragment in ['已', '已去掉', '已去掉顶部卡片。']) {

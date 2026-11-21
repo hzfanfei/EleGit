@@ -22,6 +22,7 @@ import 'support/fake_api.dart';
 class ControlledApi extends FakeWenxiangApi {
   final streams = <String, StreamController<ChatStreamEvent>>{};
   final histories = <String, List<ChatMessage>>{};
+  final attachments = <String, List<ChatImageAttachment>>{};
   final cancelled = <String>[];
   final cancelledTurns = <String?>[];
 
@@ -37,6 +38,7 @@ class ControlledApi extends FakeWenxiangApi {
     List<ChatImageAttachment> images = const [],
   }) {
     histories[sessionId!] = List.of(history);
+    attachments[sessionId] = List.of(images);
     final stream = StreamController<ChatStreamEvent>();
     streams[sessionId] = stream;
     return stream.stream;
@@ -117,6 +119,190 @@ Future<void> openRunning(WidgetTester tester) async {
 
 void main() {
   tearDown(RunningSessions.stopAllForTesting);
+
+  testWidgets(
+      'live reply and error stay with their question ahead of the queue',
+      (tester) async {
+    final api = ControlledApi();
+    final pool = RunningSessions.of(api);
+    final repo = pool.repo(sampleRepo(), null);
+    final question = ChatMessage(
+      role: 'user',
+      content: '最早的图片问题',
+      turnId: 'original-turn',
+      images: const [
+        ChatImageAttachment(id: 'retry-image', mimeType: 'image/png')
+      ],
+    );
+    repo.transcripts['s1'] = [question];
+    pool.session(repo, 's1', false).enqueue(question);
+    await tester.pumpWidget(MaterialApp(
+      theme: wenxiangTheme(),
+      home: ChatPage(api: api, repo: sampleRepo(), onBack: () {}),
+    ));
+    await ready(tester);
+
+    final input = find.byKey(const Key('wx-chat-input'));
+    await tester.enterText(input, '下一条排队问题');
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('wx-chat-send')));
+    await ready(tester);
+    final replyTop =
+        tester.getTopLeft(find.byKey(const Key('wx-live-reply'))).dy;
+    expect(replyTop, greaterThan(tester.getTopLeft(find.text('最早的图片问题')).dy));
+    expect(replyTop, lessThan(tester.getTopLeft(find.text('下一条排队问题')).dy));
+
+    final first = api.streams['s1']!;
+    first.add(ChatStreamEvent(type: 'error', error: '图片处理失败'));
+    unawaited(first.close());
+    await ready(tester);
+    final messages = repo.transcripts['s1']!;
+    expect(messages.map((m) => m.role), ['user', 'error', 'user']);
+    expect(messages[1].turnId, question.turnId);
+
+    api.finish('s1', '下一条已答完');
+    await ready(tester);
+    await tester.enterText(input, '正在写的草稿');
+    await tester.pump();
+    final retry = find.text('重试此问题');
+    await tester.ensureVisible(retry);
+    await tester.tap(retry);
+    await ready(tester);
+    expect(api.histories['s1']!.last.content, question.content);
+    expect(api.attachments['s1']!.single.id, 'retry-image');
+    expect(find.text('正在写的草稿'), findsOneWidget);
+    pool.stopAll();
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets(
+      'stopping keeps labelled partial replies and cancels queued turns',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final memory = AppMemory(await SharedPreferences.getInstance());
+    final api = ControlledApi();
+    final pool = RunningSessions.of(api);
+    await tester.pumpWidget(MaterialApp(
+      theme: wenxiangTheme(),
+      home:
+          ChatPage(api: api, repo: sampleRepo(), memory: memory, onBack: () {}),
+    ));
+    await ready(tester);
+    await tester.tap(find.text('这个仓库最近在做什么？'));
+    await ready(tester);
+    api.streams['s1']!.add(ChatStreamEvent(type: 'delta', text: '第一条的部分内容。'));
+    await ready(tester);
+    final input = find.byKey(const Key('wx-chat-input'));
+    await tester.enterText(input, '排队但没有执行');
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('wx-chat-send')));
+    await ready(tester);
+    await tester.tap(find.byTooltip('停止当前并取消排队'));
+    await ready(tester);
+
+    expect(find.text('已停止'), findsOneWidget);
+    expect(find.text('已取消排队'), findsOneWidget);
+    expect(find.text('问象 · 部分答复'), findsOneWidget);
+    final saved = memory.loadChats('octo/demo').transcripts['s1']!;
+    expect(saved.first.outcome, ChatTurnOutcome.stopped);
+    expect(saved[1].content, '第一条的部分内容。');
+    expect(saved.last.outcome, ChatTurnOutcome.queueCancelled);
+    expect(api.histories['s1']!.length, 1);
+
+    await tester.enterText(input, '停止后发出的新问题');
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('wx-chat-send')));
+    await ready(tester);
+    expect(api.histories['s1']!.any((m) => m.content == '排队但没有执行'), isFalse);
+    pool.stopAll();
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets(
+      'switching sessions restores each draft, attachments and scroll offset',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final memory = AppMemory(await SharedPreferences.getInstance());
+    final api = FakeWenxiangApi();
+    api.sessions
+      ..clear()
+      ..addAll([
+        for (var i = 1; i <= 2; i++)
+          ChatSession(
+              id: 's$i',
+              title: '会话 $i',
+              createdAt: '',
+              updatedAt: '',
+              active: i == 1),
+      ]);
+    await memory.saveChats(
+      'octo/demo',
+      RepoChatStore(
+        activeId: 's1',
+        sessions: api.sessions,
+        transcripts: {
+          for (final session in api.sessions)
+            session.id: [
+              for (var i = 0; i < 30; i++)
+                ChatMessage(role: 'user', content: '${session.id} 的历史问题 $i'),
+            ],
+        },
+      ),
+    );
+    final picker = ImagePickerPlatform.instance;
+    ImagePickerPlatform.instance = TestImagePicker();
+    addTearDown(() => ImagePickerPlatform.instance = picker);
+    await tester.pumpWidget(MaterialApp(
+      theme: wenxiangTheme(),
+      home:
+          ChatPage(api: api, repo: sampleRepo(), memory: memory, onBack: () {}),
+    ));
+    await ready(tester);
+
+    ScrollPosition position() => tester
+        .state<ScrollableState>(find
+            .descendant(
+              of: find.byKey(const Key('wx-chat-list')),
+              matching: find.byType(Scrollable),
+            )
+            .first)
+        .position;
+
+    Future<void> selectSession(String title) async {
+      await menu(tester, '历史会话');
+      await tester.tap(find.text(title).last);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+    }
+
+    final input = find.byKey(const Key('wx-chat-input'));
+    await tester.enterText(input, '会话一的草稿');
+    await tester.tap(find.byKey(const Key('wx-chat-attach')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.text('从相册选择'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byTooltip('移除'), findsOneWidget);
+    position().jumpTo(500);
+    await ready(tester);
+
+    await selectSession('会话 2');
+    expect(find.text('会话一的草稿'), findsNothing);
+    expect(find.byTooltip('移除'), findsNothing);
+    expect(position().pixels, 0);
+    await tester.enterText(input, '会话二的草稿');
+    position().jumpTo(250);
+    await ready(tester);
+
+    await selectSession('会话 1');
+    expect(find.text('会话一的草稿'), findsOneWidget);
+    expect(find.byTooltip('移除'), findsOneWidget);
+    expect(position().pixels, closeTo(500, 1));
+    await selectSession('会话 2');
+    expect(find.text('会话二的草稿'), findsOneWidget);
+    expect(position().pixels, closeTo(250, 1));
+  });
 
   testWidgets(
       'reply deltas notify the active reply without refreshing the pool',
@@ -305,6 +491,7 @@ void main() {
       await menu(tester, '新建会话');
       final newId = pool.repo(sampleRepo(), null).activeId;
       expect(newId, isNot('s1'));
+      expect(find.text('正在上传图片…'), findsNothing);
       await tester.enterText(
           find.byKey(const Key('wx-chat-input')), 'new draft');
       if (leave) await tester.pumpWidget(const SizedBox());

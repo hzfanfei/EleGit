@@ -7,6 +7,7 @@ import '../copy/errors.dart';
 import '../models.dart';
 import '../persist/app_memory.dart';
 import '../persist/chat_backfill.dart';
+import '../persist/turn_answers.dart' show mergeFinalTurnAnswer;
 import '../utils/notification_center.dart';
 import '../voice/background_work.dart';
 
@@ -131,7 +132,12 @@ class RunningRepo {
         // backfill in storage so reconnect recovery can still read it.
         if (_streamingTurns.contains(user!.turnId)) continue;
         final at = indexOfTurn(local, user.turnId!);
-        if (at >= 0) insertTurnAnswer(local, at, message.content);
+        if (at < 0) continue;
+        if (user.outcome == ChatTurnOutcome.timedOut) {
+          insertTurnAnswer(local, at, message.content);
+        } else {
+          mergeFinalTurnAnswer(local, at, message.content);
+        }
       }
       if (local.isEmpty) local.addAll(entry.value);
     }
@@ -181,20 +187,29 @@ class SessionExecution {
   int? get userIndex => current == null ? null : messages.indexOf(current!);
   void enqueue(ChatMessage message) {
     queued.add(message);
-    if (!busy) {
-      busy = true;
-      stopped = false;
-      unawaited(_drain());
-    }
+    if (!busy) _start();
     pool.changed();
   }
 
+  void _start() {
+    busy = true;
+    stopped = false;
+    unawaited(_drain());
+  }
+
   void stop() {
-    if (!busy) return;
+    if (!busy || stopped) return;
     stopped = true;
     _holdTimeout?.cancel();
+    for (final question in queued) {
+      question.outcome = ChatTurnOutcome.queueCancelled;
+    }
     queued.clear();
-    pool.api.cancelChat(sessionId: sessionId, turnId: current?.turnId);
+    final question = current;
+    if (question != null) {
+      question.outcome = ChatTurnOutcome.stopped;
+      pool.api.cancelChat(sessionId: sessionId, turnId: question.turnId);
+    }
     unawaited(_subscription?.cancel().catchError((Object _) {}));
     _completeStream();
     _wakePoll();
@@ -215,24 +230,29 @@ class SessionExecution {
   Future<void> _drain() async {
     await BackgroundWork.acquire();
     try {
-      while (queued.isNotEmpty && !stopped) {
-        current = queued.removeAt(0);
-        if (current!.turnId != null) repo._streamingTurns.add(current!.turnId!);
+      while (queued.isNotEmpty &&
+          !stopped &&
+          !repo._removedIds.contains(sessionId)) {
+        final question = queued.removeAt(0);
+        current = question;
+        if (question.turnId != null) repo._streamingTurns.add(question.turnId!);
         _replyText.value = '';
         activity = '';
         phase = 'connect';
         holding = false;
+        pollOk = true;
         decision = null;
         engine = null;
         pool.changed();
+        Object? failure;
         try {
           await _run();
         } catch (error) {
-          if (!pool.api.ephemeral) recordClientError(error, kind: 'chat');
-          messages.add(ChatMessage(role: 'error', content: error.toString()));
+          if (!stopped) failure = error;
         }
+        if (repo._removedIds.contains(sessionId)) break;
         final answer = stripTaskMarker(text);
-        final at = messages.indexOf(current!);
+        final at = messages.indexOf(question);
         if (at >= 0 &&
             answer.isNotEmpty &&
             insertTurnAnswer(messages, at, answer)) {
@@ -241,12 +261,31 @@ class SessionExecution {
               messages.skip(at + 1).firstWhere((m) => m.role == 'assistant');
           reply.engine = engine;
         }
-        repo._streamingTurns.remove(current!.turnId);
-        await repo.persist();
-        if (pool.api.ephemeral && answer.isNotEmpty && !stopped) {
-          unawaited(NotificationCenter.instance.notifyTemporaryFinish(sessionId));
+        if (at >= 0 && failure != null) {
+          if (!pool.api.ephemeral) recordClientError(failure, kind: 'chat');
+          final next =
+              messages.indexWhere((message) => message.role == 'user', at + 1);
+          messages.insert(
+            next < 0 ? messages.length : next,
+            ChatMessage(
+                role: 'error',
+                content: failure.toString(),
+                turnId: question.turnId),
+          );
+        }
+        repo._streamingTurns.remove(question.turnId);
+        current = null;
+        decision = null;
+        if (!stopped) await repo.persist();
+        if (pool.api.ephemeral &&
+            answer.isNotEmpty &&
+            failure == null &&
+            question.outcome == null) {
+          unawaited(
+              NotificationCenter.instance.notifyTemporaryFinish(sessionId));
         }
       }
+      if (stopped) await repo.persist();
     } finally {
       repo._streamingTurns.remove(current?.turnId);
       busy = false;
@@ -254,6 +293,7 @@ class SessionExecution {
       current = null;
       decision = null;
       _replyText.value = '';
+      if (queued.isNotEmpty && !repo._removedIds.contains(sessionId)) _start();
       pool.changed();
       await BackgroundWork.release();
     }
@@ -271,7 +311,8 @@ class SessionExecution {
       owner: repo.repo.owner,
       repo: repo.repo.name,
       message: current!.content.trim().isEmpty ? '请看附图。' : current!.content,
-      history: messages.take(at + 1).where((m) => m.role != 'error').toList(),
+      history: messages.take(at + 1).where((m) =>
+          m.role != 'error' && m.outcome != ChatTurnOutcome.queueCancelled).toList(),
       sessionId: sessionId,
       agentMode: agentMode,
       turnId: current!.turnId,
@@ -329,14 +370,14 @@ class SessionExecution {
     if (!finished &&
         (failure is AcceptedChatDrop ||
             (accepted && (failure == null || isChatTransportDrop(cause!))))) {
-      await _hold();
+      final received = await _hold();
+      if (!received && !stopped) current!.outcome = ChatTurnOutcome.timedOut;
     } else if (failure != null) {
-      if (!pool.api.ephemeral) recordClientError(failure!, kind: 'chat');
-      messages.add(ChatMessage(role: 'error', content: failure.toString()));
+      throw failure!;
     }
   }
 
-  Future<void> _hold() async {
+  Future<bool> _hold() async {
     holding = true;
     phase = 'hold';
     var expired = false;
@@ -349,7 +390,7 @@ class SessionExecution {
       while (!stopped && !expired) {
         try {
           final response = await pool.api.fetchInbox();
-          if (stopped) return;
+          if (stopped) return false;
           pollOk = true;
           final rows = ((response['items'] as List?) ?? [])
               .whereType<Map>()
@@ -364,7 +405,7 @@ class SessionExecution {
               if (pool.api.ephemeral) {
                 await NotificationCenter.instance.notifyTemporaryFinish(sessionId);
               } else { await NotificationCenter.instance.notifyPolledFinish(row); }
-              return;
+              return true;
             }
           }
           final saved = repo.memory?.loadChats(repo.repo.fullName);
@@ -372,16 +413,18 @@ class SessionExecution {
               saved?.transcripts[sessionId] ?? [], current!.turnId ?? '');
           if (answer != null) {
             _replyText.value = answer;
-            return;
+            return true;
           }
         } catch (_) {
           pollOk = false;
         }
+        if (expired || stopped) break;
         pool.changed();
         _pollWait = Completer<void>();
         _pollTimer = Timer(const Duration(milliseconds: 400), _wakePoll);
         await _pollWait!.future;
       }
+      return false;
     } finally {
       _holdTimeout?.cancel();
       _pollTimer?.cancel();

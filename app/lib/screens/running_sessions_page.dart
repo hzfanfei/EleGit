@@ -103,7 +103,7 @@ class _RunningSessionRow extends StatelessWidget {
                 ),
               ),
               IconButton(
-                tooltip: '中断',
+                tooltip: task.queued.isNotEmpty ? '中断并取消排队' : '中断',
                 onPressed: task.stopped ? null : task.stop,
                 icon: const Icon(Icons.stop_circle_outlined,
                     color: Wx.danger, size: 21),

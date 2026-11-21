@@ -3,6 +3,15 @@ import '../utils/task_completion.dart';
 
 String stripTaskMarker(String text) => parseTaskCompletion(text).text;
 
+/// Apply a final reply, including clearing a timed-out turn whose answer arrived late.
+bool mergeFinalTurnAnswer(List<ChatMessage> messages, int userAt, String text) {
+  if (stripTaskMarker(text).isEmpty) return false;
+  final user = messages[userAt];
+  final timedOut = user.outcome == ChatTurnOutcome.timedOut;
+  if (timedOut) user.outcome = null;
+  return insertTurnAnswer(messages, userAt, text) || timedOut;
+}
+
 bool _isReplyFragment(String fragment, String full) {
   if (fragment.isEmpty) return true;
   return full.startsWith(fragment) ||

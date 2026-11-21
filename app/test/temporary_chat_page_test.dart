@@ -194,4 +194,24 @@ void main() {
     }), '[文件]($onlineUrl)');
     await api.closeProject();
   });
+
+  test('查询临时结果沿原始轮次找到后续答复', () async {
+    final source = TemporaryApi();
+    final api = TemporaryProjectApi(source);
+    final session = await api.createSession('', '');
+    source.turns[session.id]!.addAll([
+      {'id': 'original', 'answer': '已列出计划', 'continuationId': 'continued'},
+      {'id': 'continued', 'answer': '正在处理', 'status': 'running'},
+      {'id': 'other', 'answer': '其他答复', 'status': 'completed'},
+    ]);
+
+    Future<String?> lookup() =>
+        api.finalChatAnswer(sessionId: session.id, turnId: 'original');
+    expect(await lookup(), isNull);
+    source.turns[session.id]![1]
+      ..['answer'] = '续接已完成'
+      ..['status'] = 'completed';
+    expect(await lookup(), '已列出计划\n\n续接已完成');
+    await api.closeProject();
+  });
 }
