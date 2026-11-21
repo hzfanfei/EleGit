@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models.dart';
+import '../utils/task_completion.dart';
 import 'app_memory.dart';
 import 'book_chat_store.dart';
 import 'turn_answers.dart';
@@ -34,14 +35,18 @@ final ValueNotifier<InboxProgressHint?> inboxProgressHint =
 bool sameChatText(String a, String b) => stripTaskMarker(a) == stripTaskMarker(b);
 
 /// Assistant text stored on this turn, before the next user message.
-String? answerAfterTurn(List<ChatMessage> messages, String turnId) {
+String? answerAfterTurn(List<ChatMessage> messages, String turnId) =>
+    replyAfterTurn(messages, turnId)?.content;
+
+ChatMessage? replyAfterTurn(List<ChatMessage> messages, String turnId) {
   final userAt = indexOfTurn(messages, turnId);
   if (userAt < 0) return null;
   for (var i = userAt + 1; i < messages.length; i++) {
     final message = messages[i];
     if (message.role == 'user') return null;
-    if (message.role == 'assistant' && message.content.trim().isNotEmpty) {
-      return message.content;
+    if (message.role == 'assistant' &&
+        (message.content.trim().isNotEmpty || message.taskCompleted)) {
+      return message;
     }
   }
   return null;
@@ -108,13 +113,13 @@ Future<bool> backfillChatFromNotice({
   String bookId = '',
   String turnId = '',
 }) async {
-  final text = stripTaskMarker(answer);
+  final completion = parseTaskCompletion(answer);
   final id = sessionId.trim();
-  if (text.isEmpty || id.isEmpty) return false;
+  if ((completion.text.isEmpty && !completion.completed) || id.isEmpty) return false;
   final prefs = await SharedPreferences.getInstance();
   final wrote = bookId.trim().isNotEmpty
-      ? await _backfillBook(prefs, bookId.trim(), id, question.trim(), text, turnId.trim())
-      : await _backfillRepo(prefs, owner.trim(), repo.trim(), id, question.trim(), text, turnId.trim());
+      ? await _backfillBook(prefs, bookId.trim(), id, question.trim(), answer, turnId.trim())
+      : await _backfillRepo(prefs, owner.trim(), repo.trim(), id, question.trim(), answer, turnId.trim());
   if (wrote) chatBackfillTick.value = chatBackfillTick.value + 1;
   return wrote;
 }
@@ -168,19 +173,23 @@ RepoChatStore? appendRepoTranscript(
   String question = '',
   String turnId = '',
 }) {
-  final text = stripTaskMarker(answer);
-  if (text.isEmpty) return null;
+  final completion = parseTaskCompletion(answer);
+  if (completion.text.isEmpty && !completion.completed) return null;
   final list = List<ChatMessage>.from(store.transcripts[sessionId] ?? const []);
   final id = turnId.trim();
   if (id.isEmpty) return null;
   final userAt = indexOfTurn(list, id);
   if (userAt >= 0) {
-    if (!mergeFinalTurnAnswer(list, userAt, text)) return null;
+    if (!mergeFinalTurnAnswer(list, userAt, completion.text,
+        taskCompleted: completion.completed)) {
+      return null;
+    }
   } else {
     if (question.isNotEmpty) {
       list.add(ChatMessage(role: 'user', content: question, turnId: id));
     }
-    list.add(ChatMessage(role: 'assistant', content: text, engine: 'acp'));
+    list.add(ChatMessage(role: 'assistant', content: completion.text,
+        engine: 'acp', taskCompleted: completion.completed));
   }
   final transcripts = Map<String, List<ChatMessage>>.from(store.transcripts);
   transcripts[sessionId] = list;
@@ -235,8 +244,8 @@ BookChatStore? appendBookTranscript(
   String question = '',
   String turnId = '',
 }) {
-  final text = stripTaskMarker(answer);
-  if (text.isEmpty) return null;
+  final completion = parseTaskCompletion(answer);
+  if (completion.text.isEmpty && !completion.completed) return null;
   if (store.sessionId != null &&
       store.sessionId!.isNotEmpty &&
       store.sessionId != sessionId &&
@@ -257,12 +266,16 @@ BookChatStore? appendBookTranscript(
   if (id.isEmpty) return null;
   final userAt = indexOfTurn(list, id);
   if (userAt >= 0) {
-    if (!insertTurnAnswer(list, userAt, text)) return null;
+    if (!insertTurnAnswer(list, userAt, completion.text,
+        taskCompleted: completion.completed)) {
+      return null;
+    }
   } else {
     if (question.isNotEmpty) {
       list.add(ChatMessage(role: 'user', content: question, turnId: id));
     }
-    list.add(ChatMessage(role: 'assistant', content: text, engine: 'acp'));
+    list.add(ChatMessage(role: 'assistant', content: completion.text,
+        engine: 'acp', taskCompleted: completion.completed));
   }
   final updated = store.upsertAnchorMessages(
     anchorId: anchorId,

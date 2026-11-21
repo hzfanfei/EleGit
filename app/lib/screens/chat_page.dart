@@ -21,6 +21,7 @@ import '../persist/chat_backfill.dart';
 import '../persist/turn_answers.dart' show mergeFinalTurnAnswer;
 import '../persist/book_reader_prefs.dart';
 import '../theme.dart';
+import '../utils/task_completion.dart';
 import '../voice/device_media.dart';
 import '../voice/repo_quick_voice_session.dart';
 import '../voice/volc_tts_voices.dart';
@@ -203,32 +204,9 @@ class _ChatPageState extends State<ChatPage> {
       onChanged: () {
         if (mounted) setState(() {});
       },
-      historyForVoice: () => _messages
-          .where((message) => message.outcome != ChatTurnOutcome.queueCancelled)
-          .toList(),
+      historyForVoice: () => _messages,
       resolveSessionId: () => _sessionId,
-      onSessionId: _rememberSessionId,
-      onTurnRecorded: ({
-        required String question,
-        required String answer,
-        String? engine,
-        String? sessionId,
-      }) async {
-        if (!mounted) return;
-        setState(() {
-          _rememberInputMode(true);
-          _messages.addAll([
-            ChatMessage(role: 'user', content: question, via: 'voice'),
-            ChatMessage(role: 'assistant', content: answer, engine: engine, via: 'voice'),
-          ]);
-          _appearingQuestion = _messages[_messages.length - 2];
-        });
-        if (sessionId != null && sessionId.isNotEmpty) {
-          _rememberSessionId(sessionId);
-        }
-        await _persist();
-        _jumpToLatest(force: true);
-      },
+      onTurnRecorded: _recordQuickVoiceTurn,
       onError: (message) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
@@ -250,6 +228,46 @@ class _ChatPageState extends State<ChatPage> {
     _loadVoice();
     _voiceHoldTipVisible = !(widget.memory?.voiceHoldTipDismissed() ?? false);
     _scroll.addListener(_onScrollPosition);
+  }
+
+  Future<void> _recordQuickVoiceTurn({
+    required String question,
+    required String answer,
+    required String? originSessionId,
+    String? engine,
+    String? sessionId,
+  }) async {
+    final id = originSessionId ?? sessionId;
+    if (!mounted || (id != null && _repoState.isSessionRemoved(id))) return;
+    final selected = _sessionId == originSessionId;
+    final completion = parseTaskCompletion(answer);
+    final user = ChatMessage(role: 'user', content: question, via: 'voice');
+    setState(() {
+      if (id != null) {
+        if (selected && originSessionId == null) {
+          _rememberSessionId(id);
+          _repoState.activeId = id;
+        } else {
+          _ensureSession(id);
+        }
+      }
+      _transcripts.putIfAbsent(id ?? '', () => []).addAll([
+        user,
+        ChatMessage(
+          role: 'assistant',
+          content: completion.text,
+          engine: engine,
+          via: 'voice',
+          taskCompleted: completion.completed,
+        ),
+      ]);
+      if (selected) {
+        _rememberInputMode(true);
+        _appearingQuestion = user;
+      }
+    });
+    if (selected) _jumpToLatest(force: true);
+    await _repoState.persist();
   }
 
   void _onScrollPosition() {
@@ -763,15 +781,19 @@ class _ChatPageState extends State<ChatPage> {
       _transcripts[next] = prior;
     }
     _renameSessionView(next);
-    if (!_sessions.any((s) => s.id == next)) {
+    _ensureSession(next);
+  }
+
+  void _ensureSession(String id) {
+    if (!_sessions.any((s) => s.id == id)) {
       _sessions.insert(
         0,
         ChatSession(
-          id: next,
+          id: id,
           title: '新会话',
           createdAt: '',
           updatedAt: '',
-          active: true,
+          active: id == _sessionId,
         ),
       );
     }
@@ -1357,7 +1379,8 @@ class _ChatPageState extends State<ChatPage> {
     final messages = _messages;
     final liveAt =
         _live ? (_processingUserIndex ?? messages.length - 1) + 1 : null;
-    const liveKey = ValueKey('wx-live-reply');
+    final liveQuestion = _shownExecution?.current;
+    final liveKey = liveQuestion == null ? null : _ReplyRowKey(liveQuestion);
 
     return NotificationListener<ScrollNotification>(
       key: ValueKey(_scrollEpoch),
@@ -1374,31 +1397,69 @@ class _ChatPageState extends State<ChatPage> {
         ),
         itemCount: itemCount,
         findChildIndexCallback: (key) {
-          if (key == liveKey) {
-            return liveAt == null ? null : itemCount - 1 - liveAt;
-          }
           if (key is! ObjectKey) return null;
-          final index = messages.indexOf(key.value as ChatMessage);
+          if (key == liveKey && liveAt != null) return itemCount - 1 - liveAt;
+          var index = messages.indexOf(key.value as ChatMessage);
           if (index < 0) return null;
+          if (key is _ReplyRowKey) {
+            // A live row becomes the first answer under the same question.
+            index++;
+            while (index < messages.length &&
+                messages[index].role != 'assistant' &&
+                messages[index].role != 'user') {
+              index++;
+            }
+            if (index == messages.length ||
+                messages[index].role != 'assistant') {
+              return null;
+            }
+          }
           final row = liveAt != null && index >= liveAt ? index + 1 : index;
           return itemCount - 1 - row;
         },
         itemBuilder: (context, index) {
           final row = itemCount - 1 - index;
           if (row == liveAt) {
-            return _LiveTurn(
+            return _AnswerTurn(
               key: liveKey,
               api: widget.api,
               openAnswerLink: widget.openAnswerLink,
-              text: _typewriter.visible,
-              engine: _liveEngine,
-              phase: _livePhase,
-              activity: _liveActivity,
-              holdPollOk: _holdPollOk,
+              live: (
+                text: _typewriter.visible,
+                engine: _liveEngine,
+                phase: _livePhase,
+                activity: _liveActivity,
+                holdPollOk: _holdPollOk,
+              ),
             );
           }
           final at = liveAt != null && row > liveAt ? row - 1 : row;
           final message = messages[at];
+          if (message.role != 'user' && message.role != 'error') {
+            var primary = true;
+            ChatMessage? question;
+            for (var i = at - 1; i >= 0; i--) {
+              final previous = messages[i];
+              if (previous.role == 'user') {
+                question = previous;
+                break;
+              }
+              if (previous.role == 'assistant') primary = false;
+            }
+            return _AnswerTurn(
+              key: message.role == 'assistant' &&
+                      primary &&
+                      question != null &&
+                      !identical(question, liveQuestion)
+                  ? _ReplyRowKey(question)
+                  : ObjectKey(message),
+              api: widget.api,
+              openAnswerLink: widget.openAnswerLink,
+              ttsVoice: widget.memory?.ttsVoice(),
+              answer: message,
+              outcome: question?.outcome,
+            );
+          }
           final queued = _isQueuedUserMessage(message);
           ChatMessage? retryQuestion;
           if (message.role == 'error' && message.turnId != null) {
@@ -1407,25 +1468,14 @@ class _ChatPageState extends State<ChatPage> {
           } else if (message.outcome == ChatTurnOutcome.queueCancelled) {
             retryQuestion = message;
           }
-          ChatTurnOutcome? replyOutcome;
-          if (message.role == 'assistant') {
-            for (var i = at - 1; i >= 0; i--) {
-              if (messages[i].role != 'user') continue;
-              replyOutcome = messages[i].outcome;
-              break;
-            }
-          }
           final retry = retryQuestion;
           return _FinishedTurn(
             key: ObjectKey(message),
             api: widget.api,
-            openAnswerLink: widget.openAnswerLink,
-            ttsVoice: widget.memory?.ttsVoice(),
             appear: identical(_appearingQuestion, message),
             message: message,
             queued: queued,
             editing: _editingMessage == message,
-            replyOutcome: replyOutcome,
             onEdit: message.role == 'user' &&
                     _processingUserIndex != at &&
                     !_sessionPending &&
@@ -1605,7 +1655,7 @@ class _ChatPageState extends State<ChatPage> {
           ),
             ],
           ),
-          if (!_busy && !_live)
+          if (!_busy && !_live && _quickVoice.belongsToSelectedSession)
             Positioned(
               left: 8,
               right: 0,
@@ -1929,12 +1979,14 @@ class _AnswerMarkdown extends StatelessWidget {
     required this.api,
     required this.source,
     required this.mdStyle,
+    required this.taskCompleted,
     this.openLink,
   });
 
   final WenxiangApi api;
   final ValueListenable<String> source;
   final WxMarkdownStyle mdStyle;
+  final bool taskCompleted;
   final Future<bool> Function(Uri uri)? openLink;
 
   Future<void> _openLink(BuildContext context, String href) async {
@@ -1966,6 +2018,7 @@ class _AnswerMarkdown extends StatelessWidget {
         source: source,
         mdStyle: mdStyle,
         api: api,
+        taskCompleted: taskCompleted,
         onTapLink: (href, text) {
           unawaited(_openLink(context, href));
         },
@@ -1979,8 +2032,6 @@ class _FinishedTurn extends StatelessWidget {
     super.key,
     required this.api,
     required this.message,
-    this.openAnswerLink,
-    this.ttsVoice,
     this.appear = false,
     this.queued = false,
     this.editing = false,
@@ -1989,14 +2040,11 @@ class _FinishedTurn extends StatelessWidget {
     this.onSubmitEdit,
     this.onRemoveQueue,
     this.onRetry,
-    this.replyOutcome,
     this.checkingResult = false,
     this.onCheckResult,
   });
   final WenxiangApi api;
   final ChatMessage message;
-  final Future<bool> Function(Uri uri)? openAnswerLink;
-  final String? ttsVoice;
   final bool appear;
   final bool queued;
   final bool editing;
@@ -2005,7 +2053,6 @@ class _FinishedTurn extends StatelessWidget {
   final Future<void> Function(String text)? onSubmitEdit;
   final VoidCallback? onRemoveQueue;
   final VoidCallback? onRetry;
-  final ChatTurnOutcome? replyOutcome;
   final bool checkingResult;
   final VoidCallback? onCheckResult;
 
@@ -2052,46 +2099,12 @@ class _FinishedTurn extends StatelessWidget {
       if (!appear) return turn;
       return WxAppear(child: turn);
     }
-    if (message.role == 'error') {
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 22),
-        child: WxErrorPanel(
-          error: message.content,
-          onRetry: onRetry,
-          retryLabel: '重试此问题',
-        ),
-      );
-    }
-    final note = engineFootnote(message.engine);
-    return _VoiceTurn(
-      voice: replyOutcome == ChatTurnOutcome.stopped ||
-              replyOutcome == ChatTurnOutcome.timedOut
-          ? '问象 · 部分答复'
-          : '问象',
-      voiceColor: Wx.text,
-      railColor: Wx.hairline,
-      railWidth: 2,
-      bottom: 16,
-      footer: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (note.isNotEmpty)
-            Text(
-              note,
-              style: Theme.of(context).textTheme.labelSmall,
-            ),
-          WxAnswerActions(
-            text: message.content,
-            api: api,
-            ttsVoice: ttsVoice,
-          ),
-        ],
-      ),
-      child: _AnswerMarkdown(
-        api: api,
-        source: ValueNotifier<String>(message.content),
-        mdStyle: chatMarkdownStyle(Theme.of(context)),
-        openLink: openAnswerLink,
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 22),
+      child: WxErrorPanel(
+        error: message.content,
+        onRetry: onRetry,
+        retryLabel: '重试此问题',
       ),
     );
   }
@@ -2114,73 +2127,121 @@ String _livePhaseLabel(String phase) {
   }
 }
 
-class _LiveTurn extends StatelessWidget {
-  const _LiveTurn({
+class _ReplyRowKey extends ObjectKey {
+  const _ReplyRowKey(ChatMessage super.value);
+}
+
+typedef _LiveReply = ({
+  ValueListenable<String> text,
+  ValueListenable<String?> engine,
+  ValueNotifier<String> phase,
+  ValueNotifier<String> activity,
+  ValueNotifier<bool> holdPollOk,
+});
+
+class _AnswerTurn extends StatefulWidget {
+  const _AnswerTurn({
     super.key,
     required this.api,
-    required this.text,
     this.openAnswerLink,
-    required this.engine,
-    required this.phase,
-    required this.activity,
-    required this.holdPollOk,
+    this.ttsVoice,
+    this.live,
+    this.answer,
+    this.outcome,
   });
   final WenxiangApi api;
   final Future<bool> Function(Uri uri)? openAnswerLink;
-  final ValueNotifier<String> text;
-  final ValueNotifier<String?> engine;
-  final ValueNotifier<String> phase;
-  final ValueNotifier<String> activity;
-  final ValueNotifier<bool> holdPollOk;
+  final String? ttsVoice;
+  final _LiveReply? live;
+  final ChatMessage? answer;
+  final ChatTurnOutcome? outcome;
+
+  @override
+  State<_AnswerTurn> createState() => _AnswerTurnState();
+}
+
+class _AnswerTurnState extends State<_AnswerTurn> {
+  late WxMarkdownStyle _style;
+  ValueListenable<String> _finishedText = const AlwaysStoppedAnimation('');
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _style = chatMarkdownStyle(Theme.of(context));
+  }
+
+  Widget _engineLabel(BuildContext context, String? engine) {
+    final label = engineFootnote(engine);
+    return label.isEmpty
+        ? const SizedBox.shrink()
+        : Text(label, style: Theme.of(context).textTheme.labelSmall);
+  }
+
+  Widget _liveStatus(_LiveReply live) {
+    return ValueListenableBuilder<String>(
+      valueListenable: live.text,
+      child: _WorkingNote(
+        phase: live.phase,
+        activity: live.activity,
+        holdPollOk: live.holdPollOk,
+        hideWhenIdle: true,
+      ),
+      builder: (context, value, child) => value.isEmpty
+          ? _WorkingNote(
+              phase: live.phase,
+              activity: live.activity,
+              holdPollOk: live.holdPollOk,
+            )
+          : Padding(padding: const EdgeInsets.only(top: 8), child: child),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final waiting = _WorkingNote(
-      phase: phase,
-      activity: activity,
-      holdPollOk: holdPollOk,
-    );
+    final live = widget.live;
+    final answer = widget.answer;
+    if (answer != null && answer.content != _finishedText.value) {
+      _finishedText = AlwaysStoppedAnimation(answer.content);
+    }
+    final partial = widget.outcome == ChatTurnOutcome.stopped ||
+        widget.outcome == ChatTurnOutcome.timedOut;
     return _VoiceTurn(
-      voice: '问象',
+      voice: partial ? '问象 · 部分答复' : '问象',
       voiceColor: Wx.text,
       railColor: Wx.hairline,
       railWidth: 2,
       bottom: 16,
-      footer: ValueListenableBuilder<String?>(
-        valueListenable: engine,
-        builder: (context, value, _) {
-          final label = engineFootnote(value);
-          if (label.isEmpty) return const SizedBox.shrink();
-          return Text(
-            label,
-            style: Theme.of(context).textTheme.labelSmall,
-          );
-        },
-      ),
-      child: ValueListenableBuilder<String>(
-        valueListenable: text,
-        builder: (context, value, child) => value.isEmpty ? waiting : child!,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _AnswerMarkdown(
-              api: api,
-              source: text,
-              mdStyle: chatMarkdownStyle(Theme.of(context)),
-              openLink: openAnswerLink,
-            ),
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: _WorkingNote(
-                phase: phase,
-                activity: activity,
-                holdPollOk: holdPollOk,
-                hideWhenIdle: true,
-              ),
+      footer: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (live != null)
+            ValueListenableBuilder<String?>(
+              valueListenable: live.engine,
+              builder: (context, engine, _) => _engineLabel(context, engine),
+            )
+          else if (answer != null) ...[
+            _engineLabel(context, answer.engine),
+            WxAnswerActions(
+              text: answer.content,
+              api: widget.api,
+              ttsVoice: widget.ttsVoice,
             ),
           ],
-        ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _AnswerMarkdown(
+            api: widget.api,
+            source: live?.text ?? _finishedText,
+            mdStyle: _style,
+            openLink: widget.openAnswerLink,
+            taskCompleted: answer?.taskCompleted ?? false,
+          ),
+          if (live != null) _liveStatus(live),
+        ],
       ),
     );
   }

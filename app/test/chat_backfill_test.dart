@@ -4,6 +4,30 @@ import 'package:wenxiang/persist/app_memory.dart';
 import 'package:wenxiang/persist/chat_backfill.dart';
 
 void main() {
+  test('completion from a notice survives merging, copying and restoring history', () {
+    final first = RepoChatStore(
+      sessions: const [],
+      activeId: 's1',
+      transcripts: {
+        's1': [
+          ChatMessage(role: 'user', content: '问题', turnId: 't1'),
+          ChatMessage(role: 'assistant', content: '完整答复。\n\n已核对。'),
+        ],
+      },
+    );
+    final updated = appendRepoTranscript(
+      first,
+      sessionId: 's1',
+      turnId: 't1',
+      answer: '===TASK_COMPLETED===已核对。',
+    )!;
+    final restored = RepoChatStore.fromJson(updated.toJson());
+    final reply = restored.transcripts['s1']!.last;
+    expect(reply.content, '完整答复。\n\n已核对。');
+    expect(reply.taskCompleted, isTrue);
+    expect(restored.transcripts['s1'], hasLength(2));
+  });
+
   test('a final notice clears a timed-out turn even if its partial text matches', () {
     final question = ChatMessage(
       role: 'user',

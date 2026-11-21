@@ -1,11 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 // ignore: depend_on_referenced_packages
 import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
 import 'package:wenxiang/persist/chat_backfill.dart';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wenxiang/chat/running_sessions.dart';
@@ -16,6 +16,9 @@ import 'package:wenxiang/screens/shell_page.dart';
 import 'package:wenxiang/screens/running_sessions_page.dart';
 import 'package:wenxiang/copy/running_status.dart';
 import 'package:wenxiang/theme.dart';
+import 'package:wenxiang/voice/repo_quick_voice_session.dart';
+import 'package:wenxiang/voice/voice_media.dart';
+import 'package:wenxiang/widgets/book_quick_voice_fab.dart';
 
 import 'support/fake_api.dart';
 
@@ -63,6 +66,39 @@ class UploadApi extends ControlledApi {
   Future<ChatImageAttachment> uploadChatImage(
           {required Uint8List bytes, required String mimeType}) =>
       upload.future;
+}
+
+class _ScopedVoiceApi extends FakeWenxiangApi {
+  _ScopedVoiceApi() : super(voiceReady: true);
+
+  final requests = <({String? id, List<String> history})>[];
+  final replies = <StreamController<ChatStreamEvent>>[];
+
+  @override
+  Stream<ChatStreamEvent> repoVoiceTurnStream({
+    required String owner,
+    required String repo,
+    required String message,
+    required List<ChatMessage> history,
+    String? sessionId,
+    String? ttsVoice,
+    bool agentMode = false,
+  }) {
+    requests.add((id: sessionId, history: history.map((m) => m.content).toList()));
+    final reply = StreamController<ChatStreamEvent>();
+    replies.add(reply);
+    return reply.stream;
+  }
+}
+
+class _GatedVoiceMedia extends FakeVoiceMedia {
+  final firstStop = Completer<void>();
+
+  @override
+  Future<void> stopPlayback() async {
+    await super.stopPlayback();
+    if (stopPlayCalls == 1) await firstStop.future;
+  }
 }
 
 class TestImagePicker extends ImagePickerPlatform {
@@ -120,6 +156,144 @@ Future<void> openRunning(WidgetTester tester) async {
 void main() {
   tearDown(RunningSessions.stopAllForTesting);
 
+  testWidgets('quick voice keeps its original session before and after switching',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final memory = AppMemory(await SharedPreferences.getInstance());
+    final api = _ScopedVoiceApi();
+    final media = _GatedVoiceMedia();
+    api.sessions
+      ..clear()
+      ..addAll([
+        ChatSession(id: 's1', title: '会话甲', createdAt: '', updatedAt: '', active: true),
+        ChatSession(id: 's2', title: '会话乙', createdAt: '', updatedAt: '', active: false),
+      ]);
+    await memory.saveChats(
+      'octo/demo',
+      RepoChatStore(
+        activeId: 's1',
+        sessions: api.sessions,
+        transcripts: {
+          's1': [ChatMessage(role: 'user', content: '甲的上下文')],
+          's2': [ChatMessage(role: 'user', content: '乙的上下文')],
+        },
+      ),
+    );
+    await tester.pumpWidget(MaterialApp(
+      theme: wenxiangTheme(),
+      home: ChatPage(
+        api: api,
+        repo: sampleRepo(),
+        memory: memory,
+        voiceMedia: media,
+        onBack: () {},
+      ),
+    ));
+    await ready(tester);
+    final voice = tester.widget<BookQuickVoiceFab>(
+      find.byType(BookQuickVoiceFab),
+    ).session as RepoQuickVoiceSession;
+    unawaited(voice.runVoiceTurnForTest('甲的语音问题'));
+    await ready(tester);
+    await menu(tester, '历史会话');
+    await tester.tap(find.text('会话乙').last);
+    await ready(tester);
+    expect(find.text('乙的上下文'), findsOneWidget);
+    expect(api.requests, isEmpty);
+
+    media.firstStop.complete();
+    await ready(tester);
+    expect(api.requests.single.id, 's1');
+    expect(api.requests.single.history, ['甲的上下文']);
+    api.replies.first
+      ..add(ChatStreamEvent(type: 'meta', sessionId: 's1'))
+      ..add(ChatStreamEvent(type: 'done', sessionId: 's1', text: '甲的语音答复'));
+    unawaited(api.replies.first.close());
+    await ready(tester);
+    expect(find.text('乙的上下文'), findsOneWidget);
+    expect(find.text('甲的语音答复'), findsNothing);
+    final saved = memory.loadChats('octo/demo');
+    expect(saved.activeId, 's2');
+    expect(saved.transcripts['s1']!.last.content, '甲的语音答复');
+    expect(saved.transcripts['s2']!.last.content, '乙的上下文');
+
+    unawaited(voice.runVoiceTurnForTest('乙的语音问题'));
+    await ready(tester);
+    expect(api.requests.last.id, 's2');
+    expect(api.requests.last.history, ['乙的上下文']);
+    api.replies.last.add(ChatStreamEvent(type: 'done', sessionId: 's2', text: '乙的语音答复'));
+    unawaited(api.replies.last.close());
+    await ready(tester);
+    expect(find.text('乙的语音答复'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('completing a reply preserves expanded details, selection and history badge',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final memory = AppMemory(await SharedPreferences.getInstance());
+    final api = ControlledApi();
+    String? copied;
+    final messenger = tester.binding.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.setData') {
+        copied = (call.arguments as Map)['text'] as String;
+      }
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(SystemChannels.platform, null));
+
+    Widget chat(FakeWenxiangApi api) => MaterialApp(
+      theme: wenxiangTheme(),
+      home: ChatPage(api: api, repo: sampleRepo(), memory: memory, onBack: () {}),
+    );
+    await tester.pumpWidget(chat(api));
+    await ready(tester);
+    await tester.tap(find.text('这个仓库最近在做什么？'));
+    await ready(tester);
+    const answer = '<details>\n<summary>验证详情</summary>\n\n可以选中的原文\n</details>';
+    api.streams['s1']!.add(ChatStreamEvent(
+      type: 'delta',
+      text: '$answer\n\n===TASK_COMPLETED===',
+    ));
+    await ready(tester);
+    await tester.pump(const Duration(seconds: 2));
+    await tester.tap(find.text('验证详情'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    final region = tester.state<SelectionAreaState>(
+      find.byType(SelectionArea),
+    ).selectableRegion;
+    region.selectAll();
+    await tester.pump();
+    expect(find.text('✓ 任务已完成'), findsOneWidget);
+
+    // The final event may carry the same Markdown without the stream marker.
+    api.finish('s1', answer);
+    await ready(tester);
+    expect(find.textContaining('可以选中的原文', findRichText: true), findsOneWidget);
+    final finishedRegion = tester.state<SelectionAreaState>(
+      find.byType(SelectionArea),
+    ).selectableRegion;
+    expect(identical(region, finishedRegion), isTrue);
+    finishedRegion.contextMenuButtonItems
+        .firstWhere((item) => item.type == ContextMenuButtonType.copy)
+        .onPressed
+        ?.call();
+    await tester.pump();
+    expect(copied, contains('可以选中的原文'));
+    expect(find.text('✓ 任务已完成'), findsOneWidget);
+
+    final stored = memory.loadChats('octo/demo').transcripts['s1']!.last;
+    expect(stored.content, answer);
+    expect(stored.taskCompleted, isTrue);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(chat(FakeWenxiangApi()));
+    await ready(tester);
+    expect(find.text('✓ 任务已完成'), findsOneWidget);
+    expect(find.textContaining('===TASK_COMPLETED==='), findsNothing);
+  });
+
   testWidgets(
       'live reply and error stay with their question ahead of the queue',
       (tester) async {
@@ -148,7 +322,7 @@ void main() {
     await tester.tap(find.byKey(const Key('wx-chat-send')));
     await ready(tester);
     final replyTop =
-        tester.getTopLeft(find.byKey(const Key('wx-live-reply'))).dy;
+        tester.getTopLeft(find.byKey(const Key('wx-work-log'))).dy;
     expect(replyTop, greaterThan(tester.getTopLeft(find.text('最早的图片问题')).dy));
     expect(replyTop, lessThan(tester.getTopLeft(find.text('下一条排队问题')).dy));
 

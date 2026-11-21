@@ -4,12 +4,21 @@ import '../utils/task_completion.dart';
 String stripTaskMarker(String text) => parseTaskCompletion(text).text;
 
 /// Apply a final reply, including clearing a timed-out turn whose answer arrived late.
-bool mergeFinalTurnAnswer(List<ChatMessage> messages, int userAt, String text) {
-  if (stripTaskMarker(text).isEmpty) return false;
+bool mergeFinalTurnAnswer(
+  List<ChatMessage> messages,
+  int userAt,
+  String text, {
+  bool taskCompleted = false,
+}) {
+  final answer = parseTaskCompletion(text);
+  final completed = taskCompleted || answer.completed;
+  if (answer.text.isEmpty && !completed) return false;
   final user = messages[userAt];
   final timedOut = user.outcome == ChatTurnOutcome.timedOut;
   if (timedOut) user.outcome = null;
-  return insertTurnAnswer(messages, userAt, text) || timedOut;
+  return insertTurnAnswer(messages, userAt, answer.text,
+          taskCompleted: completed) ||
+      timedOut;
 }
 
 bool _isReplyFragment(String fragment, String full) {
@@ -23,15 +32,23 @@ bool _isReplyFragment(String fragment, String full) {
 
 /// Merge snapshots of one answer without crossing the next user message.
 /// Keep distinct assistant messages and the longest version of each snapshot.
-bool insertTurnAnswer(List<ChatMessage> messages, int userAt, String text) {
-  final clean = stripTaskMarker(text);
-  if (clean.isEmpty) return false;
+bool insertTurnAnswer(
+  List<ChatMessage> messages,
+  int userAt,
+  String text, {
+  bool taskCompleted = false,
+}) {
+  final answer = parseTaskCompletion(text);
+  final clean = answer.text;
+  final completed = taskCompleted || answer.completed;
+  if (clean.isEmpty && !completed) return false;
   var insertAt = userAt + 1;
   ChatMessage? reply;
   var changed = false;
   while (insertAt < messages.length && messages[insertAt].role != 'user') {
     final message = messages[insertAt];
-    final saved = stripTaskMarker(message.content);
+    final parsed = parseTaskCompletion(message.content);
+    final saved = parsed.text;
     final full = reply == null ? clean : stripTaskMarker(reply.content);
     if (message.role == 'assistant' &&
         (_isReplyFragment(saved, full) || _isReplyFragment(full, saved))) {
@@ -42,8 +59,13 @@ bool insertTurnAnswer(List<ChatMessage> messages, int userAt, String text) {
           message.content = longest;
           changed = true;
         }
+        if (!message.taskCompleted && (completed || parsed.completed)) {
+          message.taskCompleted = true;
+          changed = true;
+        }
       } else {
         if (saved.length > full.length) reply.content = saved;
+        reply.taskCompleted |= message.taskCompleted || parsed.completed;
         messages.removeAt(insertAt);
         changed = true;
         continue;
@@ -53,7 +75,13 @@ bool insertTurnAnswer(List<ChatMessage> messages, int userAt, String text) {
   }
   if (reply != null) return changed;
   messages.insert(
-      insertAt, ChatMessage(role: 'assistant', content: clean, engine: 'acp'));
+      insertAt,
+      ChatMessage(
+        role: 'assistant',
+        content: clean,
+        engine: 'acp',
+        taskCompleted: completed,
+      ));
   return true;
 }
 
@@ -62,8 +90,10 @@ List<ChatMessage> restoreTurnAnswers(List<ChatMessage> messages) {
   final restored = <ChatMessage>[];
   for (final message in messages) {
     if (message.role == 'assistant') {
-      message.content = stripTaskMarker(message.content);
-      if (message.content.isEmpty) continue;
+      final answer = parseTaskCompletion(message.content);
+      message.content = answer.text;
+      message.taskCompleted |= answer.completed;
+      if (message.content.isEmpty && !message.taskCompleted) continue;
     }
     restored.add(message);
   }
@@ -75,7 +105,8 @@ List<ChatMessage> restoreTurnAnswers(List<ChatMessage> messages) {
         .where((message) => message.role == 'assistant')
         .toList();
     for (final answer in answers) {
-      insertTurnAnswer(restored, i, answer.content);
+      insertTurnAnswer(restored, i, answer.content,
+          taskCompleted: answer.taskCompleted);
     }
   }
   return restored;

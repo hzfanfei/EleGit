@@ -231,6 +231,7 @@ class ChatMessage {
     this.via,
     this.turnId,
     this.outcome,
+    this.taskCompleted = false,
     List<ChatImageAttachment> images = const [],
   }) : images = List<ChatImageAttachment>.unmodifiable(images);
 
@@ -243,6 +244,7 @@ class ChatMessage {
   /// Identifies the user question and any error associated with that question.
   final String? turnId;
   ChatTurnOutcome? outcome;
+  bool taskCompleted;
   final List<ChatImageAttachment> images;
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) {
@@ -256,6 +258,7 @@ class ChatMessage {
       outcome: ChatTurnOutcome.values
           .where((outcome) => outcome.name == json['outcome'])
           .firstOrNull,
+      taskCompleted: json['taskCompleted'] == true,
       images: chatImagesFromJson(json['images']),
     );
   }
@@ -267,6 +270,7 @@ class ChatMessage {
         if (via != null && via!.isNotEmpty) 'via': via,
         if (turnId != null && turnId!.isNotEmpty) 'turnId': turnId,
         if (outcome != null) 'outcome': outcome!.name,
+        if (taskCompleted) 'taskCompleted': true,
         if (images.isNotEmpty) 'images': images.map((image) => image.toJson()).toList(),
       };
 }

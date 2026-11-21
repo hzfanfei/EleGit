@@ -9,6 +9,7 @@ import '../persist/app_memory.dart';
 import '../persist/chat_backfill.dart';
 import '../persist/turn_answers.dart' show mergeFinalTurnAnswer;
 import '../utils/notification_center.dart';
+import '../utils/task_completion.dart';
 import '../voice/background_work.dart';
 
 /// Owns executions independently of routes. Each API connection has its own pool.
@@ -101,6 +102,8 @@ class RunningRepo {
   final Set<String> _removedIds = {};
   final Set<String> _streamingTurns = {};
 
+  bool isSessionRemoved(String id) => _removedIds.contains(id);
+
   void removeSession(String id) {
     _removedIds.add(id);
     sessions.removeWhere((s) => s.id == id);
@@ -134,9 +137,11 @@ class RunningRepo {
         final at = indexOfTurn(local, user.turnId!);
         if (at < 0) continue;
         if (user.outcome == ChatTurnOutcome.timedOut) {
-          insertTurnAnswer(local, at, message.content);
+          insertTurnAnswer(local, at, message.content,
+              taskCompleted: message.taskCompleted);
         } else {
-          mergeFinalTurnAnswer(local, at, message.content);
+          mergeFinalTurnAnswer(local, at, message.content,
+              taskCompleted: message.taskCompleted);
         }
       }
       if (local.isEmpty) local.addAll(entry.value);
@@ -174,6 +179,7 @@ class SessionExecution {
   String activity = '';
   String phase = 'connect';
   String? engine;
+  bool _taskCompleted = false;
   ChatStreamEvent? decision;
   Timer? _pollTimer;
   Timer? _holdTimeout;
@@ -237,6 +243,7 @@ class SessionExecution {
         current = question;
         if (question.turnId != null) repo._streamingTurns.add(question.turnId!);
         _replyText.value = '';
+        _taskCompleted = false;
         activity = '';
         phase = 'connect';
         holding = false;
@@ -251,11 +258,11 @@ class SessionExecution {
           if (!stopped) failure = error;
         }
         if (repo._removedIds.contains(sessionId)) break;
-        final answer = stripTaskMarker(text);
+        final answer = parseTaskCompletion(text);
         final at = messages.indexOf(question);
         if (at >= 0 &&
-            answer.isNotEmpty &&
-            insertTurnAnswer(messages, at, answer)) {
+            insertTurnAnswer(messages, at, answer.text,
+                taskCompleted: _taskCompleted || answer.completed)) {
           // Preserve the engine label on the answer stored for this turn.
           final reply =
               messages.skip(at + 1).firstWhere((m) => m.role == 'assistant');
@@ -278,7 +285,7 @@ class SessionExecution {
         decision = null;
         if (!stopped) await repo.persist();
         if (pool.api.ephemeral &&
-            answer.isNotEmpty &&
+            (answer.text.isNotEmpty || _taskCompleted || answer.completed) &&
             failure == null &&
             question.outcome == null) {
           unawaited(
@@ -336,7 +343,7 @@ class SessionExecution {
           _replyText.value += event.text;
           if (!sessionChanged && engine == previousEngine) return;
         case 'done':
-          if (event.text.isNotEmpty) _replyText.value = event.text;
+          if (event.text.isNotEmpty) _replaceReplyText(event.text);
           finished = true;
           activity = '';
         case 'status':
@@ -377,6 +384,11 @@ class SessionExecution {
     }
   }
 
+  void _replaceReplyText(String next) {
+    _taskCompleted |= parseTaskCompletion(text).completed;
+    _replyText.value = next;
+  }
+
   Future<bool> _hold() async {
     holding = true;
     phase = 'hold';
@@ -400,7 +412,7 @@ class SessionExecution {
           if (row != null) {
             activity = (row['activity'] ?? '').toString();
             final answer = (row['answer'] ?? '').toString();
-            if (answer.isNotEmpty) _replyText.value = answer;
+            if (answer.isNotEmpty) _replaceReplyText(answer);
             if (row['partial'] != true && answer.isNotEmpty) {
               if (pool.api.ephemeral) {
                 await NotificationCenter.instance.notifyTemporaryFinish(sessionId);
@@ -409,10 +421,11 @@ class SessionExecution {
             }
           }
           final saved = repo.memory?.loadChats(repo.repo.fullName);
-          final answer = answerAfterTurn(
+          final answer = replyAfterTurn(
               saved?.transcripts[sessionId] ?? [], current!.turnId ?? '');
           if (answer != null) {
-            _replyText.value = answer;
+            _taskCompleted |= answer.taskCompleted;
+            _replaceReplyText(answer.content);
             return true;
           }
         } catch (_) {

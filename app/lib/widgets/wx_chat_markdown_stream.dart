@@ -140,6 +140,7 @@ class WxChatMarkdownStream extends StatefulWidget {
     required this.mdStyle,
     this.api,
     this.showCaret = false,
+    this.taskCompleted = false,
     this.onTapLink,
   });
 
@@ -153,6 +154,7 @@ class WxChatMarkdownStream extends StatefulWidget {
 
   /// When true, a blinking caret is appended after the pending block.
   final bool showCaret;
+  final bool taskCompleted;
 
   /// Optional callback for link taps (e.g. open in browser).
   final void Function(String href, String text)? onTapLink;
@@ -165,6 +167,7 @@ class _WxChatMarkdownStreamState extends State<WxChatMarkdownStream> {
   static final _listStart = RegExp(r'^\s*(?:[-*+] |\d+\. )');
   final ChatMarkdownBlockParser _parser = ChatMarkdownBlockParser();
   final _completedViews = <({String source, Widget view})>[];
+  ({String source, int index, Widget view})? _pendingView;
   String _lastSource = '';
   bool _taskCompleted = false;
   @override
@@ -181,7 +184,9 @@ class _WxChatMarkdownStreamState extends State<WxChatMarkdownStream> {
         oldWidget.api != widget.api ||
         (oldWidget.onTapLink == null) != (widget.onTapLink == null)) {
       _completedViews.clear();
+      _pendingView = null;
     }
+    if (oldWidget.showCaret != widget.showCaret) _pendingView = null;
     if (!identical(oldWidget.source, widget.source)) {
       oldWidget.source.removeListener(_onSourceChanged);
       widget.source.addListener(_onSourceChanged);
@@ -247,19 +252,28 @@ class _WxChatMarkdownStreamState extends State<WxChatMarkdownStream> {
       }
     }
     final pending = _parser.pending;
+    if (pending.isEmpty) {
+      _pendingView = null;
+    } else if (_pendingView?.source != pending ||
+        _pendingView?.index != completed.length) {
+      _pendingView = (
+        source: pending,
+        index: completed.length,
+        view: _block(completed.length, pending, pending: true),
+      );
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (_taskCompleted)
+        if (_taskCompleted || widget.taskCompleted)
           const Padding(
             padding: EdgeInsets.only(bottom: 8),
             child:
                 Text('✓ 任务已完成', style: TextStyle(color: Wx.ok, fontSize: 12)),
           ),
         for (final block in _completedViews) block.view,
-        if (pending.isNotEmpty)
-          _block(completed.length, pending, pending: true),
+        if (_pendingView case final pending?) pending.view,
         if (widget.showCaret && pending.isNotEmpty)
           const Padding(
             padding: EdgeInsets.only(top: 2),

@@ -21,7 +21,6 @@ class RepoQuickVoiceSession implements QuickVoiceFabHost {
     required this.onChanged,
     required this.historyForVoice,
     required this.resolveSessionId,
-    this.onSessionId,
     this.onTurnRecorded,
     this.sttClient,
     this.voiceMedia,
@@ -51,10 +50,10 @@ class RepoQuickVoiceSession implements QuickVoiceFabHost {
   final VoidCallback onChanged;
   final List<ChatMessage> Function() historyForVoice;
   final String? Function() resolveSessionId;
-  final void Function(String? id)? onSessionId;
   final Future<void> Function({
     required String question,
     required String answer,
+    required String? originSessionId,
     String? engine,
     String? sessionId,
   })? onTurnRecorded;
@@ -78,7 +77,8 @@ class RepoQuickVoiceSession implements QuickVoiceFabHost {
   @override
   BookQuickVoicePhase phase = BookQuickVoicePhase.idle;
   String _thinkStatusLabel = '思考中…';
-  String? _sessionId;
+  _VoiceDestination? _destination;
+  int _generation = 0;
   bool _replyActive = false;
   int _voiceRate = 24000;
   String _voiceFormat = 'pcm';
@@ -109,6 +109,9 @@ class RepoQuickVoiceSession implements QuickVoiceFabHost {
       _hold.holding ||
       _hold.holdPending ||
       _hold.sttBusy;
+
+  bool get belongsToSelectedSession =>
+      !showsStatus || _destination?.sessionId == resolveSessionId();
 
   @override
   String get statusLabel {
@@ -151,10 +154,12 @@ class RepoQuickVoiceSession implements QuickVoiceFabHost {
 
   @override
   Future<void> pointerDown(double globalY) async {
+    final destination = _captureDestination();
     if (_hold.sttBusy || busy || _hold.holding || _hold.holdPending) {
       await cancelActiveFlow();
     }
     if (_disposed) return;
+    _destination = destination;
     phase = BookQuickVoicePhase.listening;
     onChanged();
     await _hold.beginHold(globalY);
@@ -197,10 +202,10 @@ class RepoQuickVoiceSession implements QuickVoiceFabHost {
     _segmentCaption = chunk;
   }
 
-  void Function()? _playbackStartForCaption(String captionAtEnqueue) {
+  void Function()? _playbackStartForCaption(String captionAtEnqueue, int generation) {
     if (captionAtEnqueue.isEmpty) return null;
     return () {
-      if (_disposed || !_replyActive) return;
+      if (_disposed || !_replyActive || generation != _generation) return;
       _voiceCaption = captionAtEnqueue;
       onChanged();
     };
@@ -219,6 +224,8 @@ class RepoQuickVoiceSession implements QuickVoiceFabHost {
   @override
   Future<void> cancelActiveFlow() async {
     if (_disposed) return;
+    _generation++;
+    _destination = null;
     _replyActive = false;
     api.cancelRepoVoiceTurn();
     _resetVoiceFormat();
@@ -233,13 +240,29 @@ class RepoQuickVoiceSession implements QuickVoiceFabHost {
     unawaited(cancelActiveFlow());
   }
 
+  _VoiceDestination _captureDestination() => _VoiceDestination(
+        sessionId: resolveSessionId(),
+        history: historyForVoice()
+            .where((message) =>
+                message.role != 'error' &&
+                message.outcome != ChatTurnOutcome.queueCancelled)
+            .toList(),
+        agentMode: resolveAgentMode?.call() ?? false,
+        ttsVoice: resolveTtsVoice?.call(),
+      );
+
   Future<void> _onTranscript(String text) async {
     final question = text.trim();
     if (question.isEmpty) {
+      _destination = null;
       phase = BookQuickVoicePhase.idle;
       onChanged();
       return;
     }
+    final destination = _destination ??= _captureDestination();
+    final generation = ++_generation;
+    bool isCurrent() => !_disposed && generation == _generation;
+    var replySessionId = destination.sessionId;
     _replyActive = true;
     _clearCaption();
     phase = BookQuickVoicePhase.thinking;
@@ -248,23 +271,21 @@ class RepoQuickVoiceSession implements QuickVoiceFabHost {
 
     _media ??= voiceMedia ?? DeviceVoiceMedia();
     _resetVoiceFormat();
-    await _media!.stopPlayback();
-    final history = historyForVoice().where((m) => m.role != 'error').toList();
-    final sid = _sessionId ?? resolveSessionId();
     try {
+      await _media!.stopPlayback();
+      if (!isCurrent()) return;
       await for (final event in api.repoVoiceTurnStream(
         owner: owner,
         repo: repo,
         message: question,
-        history: history,
-        sessionId: sid,
-        ttsVoice: resolveTtsVoice?.call(),
-        agentMode: resolveAgentMode?.call() ?? false,
+        history: destination.history,
+        sessionId: destination.sessionId,
+        ttsVoice: destination.ttsVoice,
+        agentMode: destination.agentMode,
       )) {
-        if (!_replyActive) break;
+        if (!isCurrent()) break;
         if (event.type == 'meta') {
-          _sessionId = event.sessionId ?? _sessionId;
-          onSessionId?.call(_sessionId);
+          replySessionId = event.sessionId ?? replySessionId;
         } else if (event.type == 'state') {
           final serverPhase = event.phase?.trim() ?? '';
           if (serverPhase == 'speak') {
@@ -298,22 +319,23 @@ class RepoQuickVoiceSession implements QuickVoiceFabHost {
               format: _voiceFormat,
               codec: _voiceCodec,
               segmentCaption: captionAtEnqueue,
-              onPlaybackStart: _playbackStartForCaption(captionAtEnqueue),
+              onPlaybackStart:
+                  _playbackStartForCaption(captionAtEnqueue, generation),
             )
                 .catchError((Object err, StackTrace stack) {
-              if (_replyActive) _reportPlaybackError(err, stack);
+              if (isCurrent()) _reportPlaybackError(err, stack);
             }),
           );
         } else if (event.type == 'done') {
           final answer = event.text.trim();
-          _sessionId = event.sessionId ?? _sessionId;
-          onSessionId?.call(_sessionId);
+          replySessionId = event.sessionId ?? replySessionId;
           if (answer.isNotEmpty) {
             await onTurnRecorded?.call(
               question: question,
               answer: answer,
               engine: event.engine,
-              sessionId: _sessionId,
+              originSessionId: destination.sessionId,
+              sessionId: replySessionId,
             );
           }
         } else if (event.type == 'error') {
@@ -331,19 +353,20 @@ class RepoQuickVoiceSession implements QuickVoiceFabHost {
         summary: '问象快问快答回复中断',
         stack: stack.toString(),
       );
-      onError?.call(err.toString());
+      if (isCurrent()) onError?.call(err.toString());
     } finally {
-      if (_replyActive && !_disposed) {
+      if (isCurrent() && _replyActive) {
         phase = BookQuickVoicePhase.speaking;
         onChanged();
         try {
           await _media?.waitForPlaybackQueue();
         } catch (err, stack) {
-          if (!_disposed) _reportPlaybackError(err, stack);
+          if (isCurrent()) _reportPlaybackError(err, stack);
         }
       }
-      _replyActive = false;
-      if (!_disposed) {
+      if (isCurrent()) {
+        _replyActive = false;
+        _destination = null;
         _clearCaption();
         phase = BookQuickVoicePhase.idle;
         onChanged();
@@ -365,4 +388,18 @@ class RepoQuickVoiceSession implements QuickVoiceFabHost {
     _hold.dispose();
     _media?.dispose();
   }
+}
+
+class _VoiceDestination {
+  const _VoiceDestination({
+    required this.sessionId,
+    required this.history,
+    required this.agentMode,
+    required this.ttsVoice,
+  });
+
+  final String? sessionId;
+  final List<ChatMessage> history;
+  final bool agentMode;
+  final String? ttsVoice;
 }
