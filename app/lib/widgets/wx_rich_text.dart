@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../theme.dart';
+import '../utils/markdown_syntax.dart';
 import '../utils/text_fit.dart';
 
 enum RichKind { prose, code }
@@ -135,39 +136,24 @@ final _gluedTableSep = RegExp(r'\|\s*:?-{3,}:?\s*\|');
 /// from being swallowed by the paragraph above it.
 String normalizeChatMarkdownTables(String input) {
   if (input.isEmpty || !input.contains('|')) return input;
-  final text = input.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
-  final expanded = <String>[];
-  var inFence = false;
-  for (final line in text.split('\n')) {
-    if (line.trimLeft().startsWith('```')) {
-      inFence = !inFence;
-      expanded.add(line);
-      continue;
+  final text = input.contains('\r')
+      ? input.replaceAll('\r\n', '\n').replaceAll('\r', '\n')
+      : input;
+  return mapOutsideMarkdownLiterals(text, (prose) {
+    final out = <String>[];
+    for (final raw in prose.split('\n')) {
+      for (final line in _reflowFlattenedTableLine(raw).split('\n')) {
+        if (out.isNotEmpty &&
+            out.last.trim().isNotEmpty &&
+            !isMarkdownTableLine(out.last) &&
+            isMarkdownTableLine(line)) {
+          out.add('');
+        }
+        out.add(line);
+      }
     }
-    if (inFence) {
-      expanded.add(line);
-      continue;
-    }
-    expanded.addAll(_reflowFlattenedTableLine(line).split('\n'));
-  }
-  final out = <String>[];
-  var fence = false;
-  for (final line in expanded) {
-    if (line.trimLeft().startsWith('```')) {
-      fence = !fence;
-      out.add(line);
-      continue;
-    }
-    if (!fence &&
-        out.isNotEmpty &&
-        out.last.trim().isNotEmpty &&
-        !isMarkdownTableLine(out.last) &&
-        isMarkdownTableLine(line)) {
-      out.add('');
-    }
-    out.add(line);
-  }
-  return out.join('\n');
+    return out.join('\n');
+  });
 }
 
 String _reflowFlattenedTableLine(String line) {

@@ -11,17 +11,20 @@ class WxAnswerBlock extends StatelessWidget {
       required this.source,
       required this.mdStyle,
       this.api,
+      this.streaming = false,
       this.onTapLink});
 
   final String source;
   final WxMarkdownStyle mdStyle;
   final WenxiangApi? api;
+  final bool streaming;
   final void Function(String href, String text)? onTapLink;
 
   Widget _markdown(String text) => WxUnifiedMarkdownBody(
         data: text,
         mdStyle: mdStyle,
         api: api,
+        streaming: streaming,
         onTapLink: (label, href, _) {
           if (href != null && href.trim().isNotEmpty) {
             onTapLink?.call(href, label);
@@ -47,12 +50,15 @@ class WxAnswerBlock extends StatelessWidget {
             side: const BorderSide(color: Wx.hairline),
             borderRadius: BorderRadius.circular(8)),
         child: ExpansionTile(
-          initiallyExpanded: details.group(1) != null,
+          initiallyExpanded: details.group(1) != null || (!closed && !streaming),
           title: Text(details.group(2)!,
               style: mdStyle.body.copyWith(fontWeight: FontWeight.w600)),
           subtitle: closed
               ? null
-              : const Text('内容接收中…', style: TextStyle(fontSize: 12)),
+              : Text(
+                  streaming ? '内容接收中…' : '折叠段语法未闭合',
+                  style: const TextStyle(fontSize: 12),
+                ),
           tilePadding: const EdgeInsets.symmetric(horizontal: 12),
           childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
           children: [_markdown(body)],

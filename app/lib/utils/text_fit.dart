@@ -1,3 +1,5 @@
+import 'markdown_syntax.dart';
+
 /// Inserts wrap opportunities into long ASCII runs so a phone column can
 /// show the whole token without a horizontal scroller.
 String breakLongRuns(String text, {int every = 8}) {
@@ -18,13 +20,9 @@ String breakLongRuns(String text, {int every = 8}) {
   return buf.toString();
 }
 
-final _protectedMarkdown = RegExp(
-  r'<img\b[^>]*>|!\[[^\]]*\]\([^)\n]*\)|\[[^\]\n]*\]\([^)\n]*\)|`[^`\n]+`',
-);
-
-final _chatFenceOpen = RegExp(r'^(```+|~~~+)');
 final _chatOrdered = RegExp(r'^\d+\.\s');
 final _chatRule = RegExp(r'^(?:\*{3,}|-{3,}|_{3,})[ \t]*$');
+final _chatParagraphBreak = RegExp(r'\n{2,}');
 
 /// Chat replies often break lines once where a new paragraph was meant.
 /// Markdown keeps those lines in one block, so the phone shows them stacked.
@@ -34,48 +32,12 @@ final _chatRule = RegExp(r'^(?:\*{3,}|-{3,}|_{3,})[ \t]*$');
 /// bullets are separated so each item is its own block.
 String separateChatParagraphs(String markdown) {
   if (markdown.isEmpty) return markdown;
-  final text = markdown.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
-  return _mapChatOutsideFences(text, (prose) {
-    return prose.split(RegExp(r'\n{2,}')).map(_separateChatBlock).join('\n\n');
+  final text = markdown.contains('\r')
+      ? markdown.replaceAll('\r\n', '\n').replaceAll('\r', '\n')
+      : markdown;
+  return mapOutsideMarkdownLiterals(text, (prose) {
+    return prose.split(_chatParagraphBreak).map(_separateChatBlock).join('\n\n');
   });
-}
-
-String _mapChatOutsideFences(String markdown, String Function(String prose) rewrite) {
-  final lines = markdown.split('\n');
-  final out = <String>[];
-  var fence = '';
-  final buf = <String>[];
-  void flushText() {
-    if (buf.isEmpty) return;
-    out.add(rewrite(buf.join('\n')));
-    buf.clear();
-  }
-
-  for (final line in lines) {
-    final open = _chatFenceOpen.firstMatch(line);
-    if (fence.isEmpty && open != null) {
-      flushText();
-      fence = open.group(1)!;
-      out.add(line);
-      continue;
-    }
-    if (fence.isNotEmpty && line.startsWith(fence) && line.trim() == fence) {
-      out.add(line);
-      fence = '';
-      continue;
-    }
-    if (fence.isNotEmpty) {
-      out.add(line);
-      continue;
-    }
-    buf.add(line);
-  }
-  if (fence.isNotEmpty) {
-    out.addAll(buf);
-  } else {
-    flushText();
-  }
-  return out.join('\n');
 }
 
 bool _chatStructuralLine(String line) {
@@ -89,7 +51,6 @@ bool _chatStructuralLine(String line) {
     return true;
   }
   if (_chatOrdered.hasMatch(trimmed)) return true;
-  if (_chatFenceOpen.hasMatch(trimmed)) return true;
   if (_chatRule.hasMatch(trimmed)) return true;
   return false;
 }
@@ -203,7 +164,12 @@ List<String> _groupChatProse(String line) {
 const _chatSentenceClosers = '）」』”"';
 
 List<String> _cutChatSentences(String text) {
+  if (!text.contains('。') && !text.contains('！') && !text.contains('？')) {
+    return [text];
+  }
   final cuts = <int>[];
+  final protected = markdownProtectedInline.allMatches(text).iterator;
+  var hasProtected = protected.moveNext();
   var bold = false;
   var code = false;
   var square = 0;
@@ -211,6 +177,11 @@ List<String> _cutChatSentences(String text) {
   var corner = 0;
   var curly = 0;
   for (var i = 0; i < text.length; i++) {
+    if (hasProtected && i == protected.current.start) {
+      i = protected.current.end - 1;
+      hasProtected = protected.moveNext();
+      continue;
+    }
     final ch = text[i];
     if (!code && i + 1 < text.length && ch == '*' && text[i + 1] == '*') {
       bold = !bold;
@@ -245,7 +216,7 @@ List<String> _cutChatSentences(String text) {
     while (end < text.length && _chatSentenceClosers.contains(text[end])) {
       end++;
     }
-    if (text.substring(end).trim().isNotEmpty) cuts.add(end);
+    if (end < text.length) cuts.add(end);
   }
   if (cuts.isEmpty) return [text];
   final out = <String>[];
@@ -261,7 +232,7 @@ List<String> _cutChatSentences(String text) {
 }
 
 /// Soft-wrap long ASCII in chat markdown prose without touching tables,
-/// fenced code, or link and image targets (those must stay byte-for-byte).
+/// code, math or link and image targets.
 /// Bare URLs become markdown links here so a wrap mark cannot land inside
 /// the target and knock the link back into the surrounding sentence.
 String prepareChatMarkdownForDisplay(
@@ -270,31 +241,21 @@ String prepareChatMarkdownForDisplay(
 }) {
   if (data.isEmpty) return data;
   final tableLine = isTableLine ?? (_) => false;
-  var inFence = false;
-  final out = <String>[];
-  for (final line in data.split('\n')) {
-    final trimmed = line.trimLeft();
-    if (trimmed.startsWith('```')) {
-      inFence = !inFence;
-      out.add(line);
-      continue;
-    }
-    if (inFence ||
-        line.trim().isEmpty ||
-        tableLine(line) ||
-        trimmed.startsWith('|')) {
-      out.add(line);
-      continue;
-    }
-    out.add(_breakOutsideProtected(line));
-  }
-  return out.join('\n');
+  return mapOutsideMarkdownLiterals(data, (prose) {
+    return prose.split('\n').map((line) {
+      final trimmed = line.trimLeft();
+      if (trimmed.isEmpty || trimmed.startsWith('|') || tableLine(line)) {
+        return line;
+      }
+      return _breakOutsideProtected(line);
+    }).join('\n');
+  });
 }
 
 String _breakOutsideProtected(String line) {
   final out = StringBuffer();
   var last = 0;
-  for (final match in _protectedMarkdown.allMatches(line)) {
+  for (final match in markdownProtectedInline.allMatches(line)) {
     out.write(_breakAndLink(line.substring(last, match.start)));
     out.write(match.group(0));
     last = match.end;

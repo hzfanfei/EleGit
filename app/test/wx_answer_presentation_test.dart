@@ -6,7 +6,7 @@ import 'package:wenxiang/widgets/wx_rich_text.dart';
 
 void main() {
   Future<void> show(WidgetTester tester, ValueNotifier<String> source,
-      {void Function(String, String)? onLink}) async {
+      {void Function(String, String)? onLink, bool streaming = false}) async {
     await tester.pumpWidget(MaterialApp(
         theme: wenxiangTheme(),
         home: Scaffold(
@@ -16,6 +16,7 @@ void main() {
                     child: WxChatMarkdownStream(
                         source: source,
                         mdStyle: chatMarkdownStyle(wenxiangTheme()),
+                        streaming: streaming,
                         onTapLink: onLink))))));
     await tester.pumpAndSettle();
   }
@@ -53,7 +54,8 @@ void main() {
   testWidgets('details remain expanded while streaming and when completed',
       (tester) async {
     final source = ValueNotifier('<details>\n<summary>验证详情</summary>\n\n第一项');
-    await show(tester, source);
+    await show(tester, source, streaming: true);
+    expect(find.text('内容接收中…'), findsOneWidget);
     await tester.tap(find.text('验证详情'));
     await tester.pumpAndSettle();
     expect(find.textContaining('第一项', findRichText: true), findsOneWidget);
@@ -62,6 +64,18 @@ void main() {
     expect(find.textContaining('第二项', findRichText: true), findsOneWidget);
     expect(find.text('内容接收中…'), findsNothing);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('unclosed details switch to a readable final state',
+      (tester) async {
+    final source =
+        ValueNotifier('<details open>\n<summary>验证详情</summary>\n\n已收到的正文');
+    await show(tester, source, streaming: true);
+    expect(find.text('内容接收中…'), findsOneWidget);
+    await show(tester, source);
+    expect(find.text('内容接收中…'), findsNothing);
+    expect(find.text('折叠段语法未闭合'), findsOneWidget);
+    expect(find.textContaining('已收到的正文', findRichText: true), findsOneWidget);
   });
 
   testWidgets(

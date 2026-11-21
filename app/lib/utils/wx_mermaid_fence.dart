@@ -1,17 +1,24 @@
-/// One prose or mermaid segment after splitting markdown.
-class WxMarkdownMermaidSegment {
-  const WxMarkdownMermaidSegment.prose(this.prose)
-      : mermaidCode = null,
-        mermaidClosed = true;
+import 'markdown_syntax.dart';
 
-  const WxMarkdownMermaidSegment.mermaid(this.mermaidCode, this.mermaidClosed)
-      : prose = null;
+class WxMarkdownSegment {
+  const WxMarkdownSegment.prose(this.prose)
+      : code = null,
+        language = '',
+        closed = true,
+        isMermaid = false;
+
+  const WxMarkdownSegment.fenced(
+    this.code,
+    this.language, {
+    required this.closed,
+    required this.isMermaid,
+  }) : prose = null;
 
   final String? prose;
-  final String? mermaidCode;
-  final bool mermaidClosed;
-
-  bool get isMermaid => mermaidCode != null;
+  final String? code;
+  final String language;
+  final bool closed;
+  final bool isMermaid;
 }
 
 const _mermaidDiagramPrefixes = <String>[
@@ -79,18 +86,6 @@ String normalizeMermaidFenceSource(String openLang, String body) {
   return '${lang.trim()}\n$trimmedBody';
 }
 
-bool isMermaidFenceOpenLine(String line) {
-  final stripped = line.trimLeft();
-  if (!stripped.startsWith('```')) return false;
-  final lang = stripped.substring(3).trim();
-  return isMermaidFenceLang(lang);
-}
-
-bool isMermaidFenceCloseLine(String line) {
-  final stripped = line.trimLeft();
-  return stripped.startsWith('```') && stripped.replaceAll('`', '').trim().isEmpty;
-}
-
 const _reflowDiagramTypes = <String>[
   'stateDiagram-v2',
   'sequenceDiagram',
@@ -116,65 +111,70 @@ const _reflowDiagramTypes = <String>[
 ];
 
 final _flowDirection = RegExp(r'^(TD|TB|LR|RL|BT)\b', caseSensitive: false);
+final _gluedMermaidStart = RegExp(r'(?<![\\`])```(?!`)([^`\n]+)$');
 
 /// ACP text deltas sometimes arrive with newlines removed, so a fence shows up
 /// as ` ```mermaidflowchart TD A-->B ``` ` and never becomes a diagram.
 String restoreFlattenedMermaidFences(String input) {
   if (!input.contains('```')) return input;
-  final text = input.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
-  final out = StringBuffer();
-  var i = 0;
-  while (i < text.length) {
-    final start = _fenceOpenAt(text, i);
-    if (start < 0) {
-      out.write(text.substring(i));
-      break;
-    }
-    out.write(text.substring(i, start));
-    final close = _fenceCloseAt(text, start + 3);
-    if (close < 0) {
-      out.write(text.substring(start));
-      break;
-    }
-    final inner = text.substring(start + 3, close);
-    final reflowed = _reflowMermaidInner(inner);
-    if (out.isNotEmpty && !out.toString().endsWith('\n')) out.writeln();
-    if (reflowed == null) {
-      out
-        ..write('```')
-        ..write(inner)
-        ..write('```');
+  final scanner = MarkdownLiteralScanner();
+  final lines = <String>[];
+  for (final line in input.split('\n')) {
+    final open = scanner.fence;
+    final trimmed = line.trimLeft();
+    if (open != null &&
+        open.marker == '```' &&
+        isMermaidFenceLang(open.info) &&
+        trimmed.startsWith('```') &&
+        !trimmed.startsWith('````') &&
+        trimmed.substring(3).trim().isNotEmpty) {
+      // The closing marker and the next paragraph can share a line.
+      scanner.consume('```');
+      lines.add('```');
+      lines.add(_reflowMermaidLine(trimmed.substring(3).trimLeft(), scanner));
+    } else if (scanner.consume(line) || !line.contains('```')) {
+      lines.add(line);
     } else {
-      out.write(reflowed);
+      lines.add(_reflowMermaidLine(line, scanner));
     }
-    final after = close + 3;
-    if (after < text.length && text[after] != '\n') out.writeln();
-    i = after;
+  }
+  return lines.join('\n');
+}
+
+String _reflowMermaidLine(String line, MarkdownLiteralScanner scanner) {
+  final out = StringBuffer();
+  var cursor = 0;
+  var protectedEnd = 0;
+  for (final match in markdownProtectedInline.allMatches(line)) {
+    protectedEnd = match.end;
+    final span = match[0]!;
+    if (!span.startsWith('```') || span.startsWith('````')) continue;
+    final diagram = _reflowMermaidInner(span.substring(3, span.length - 3));
+    if (diagram == null) continue;
+    out.write(line.substring(cursor, match.start));
+    if (match.start > cursor) out.writeln();
+    out.write(diagram);
+    if (match.end < line.length) out.writeln();
+    cursor = match.end;
+  }
+  final glued = _gluedMermaidStart.firstMatch(line);
+  if (glued != null &&
+      glued.start >= protectedEnd &&
+      isMermaidFenceLang(glued[1]!)) {
+    out.write(line.substring(cursor, glued.start));
+    if (glued.start > cursor) out.writeln();
+    final opening = glued[0]!;
+    scanner.consume(opening);
+    out.write(opening);
+  } else {
+    out.write(line.substring(cursor));
   }
   return out.toString();
 }
 
-int _fenceOpenAt(String text, int from) {
-  var i = from;
-  while (i < text.length) {
-    final at = text.indexOf('```', i);
-    if (at < 0) return -1;
-    final glued = (at > 0 && text[at - 1] == '`') || (at + 3 < text.length && text[at + 3] == '`');
-    if (!glued) return at;
-    i = at + 1;
-  }
-  return -1;
-}
-
-int _fenceCloseAt(String text, int from) => _fenceOpenAt(text, from);
-
 String? _reflowMermaidInner(String inner) {
   final trimmed = inner.trim();
   if (trimmed.isEmpty) return null;
-  if (trimmed.contains('\n')) {
-    final first = trimmed.split('\n').first.trim().toLowerCase();
-    if (first == 'mermaid' || firstLineLooksLikeMermaidDiagram(first)) return null;
-  }
   var source = trimmed;
   if (source.toLowerCase().startsWith('mermaid')) {
     final rest = source.substring('mermaid'.length);
@@ -385,90 +385,64 @@ String _splitSequenceStatements(String body) {
   return s;
 }
 
-/// Splits [markdown] so every mermaid-class fence is its own segment.
-List<WxMarkdownMermaidSegment> splitMarkdownByMermaidFences(String markdown) {
+/// Extracts standalone code fences before handing prose to GptMarkdown.
+List<WxMarkdownSegment> splitMarkdownFences(
+  String markdown, {
+  bool includeCode = true,
+}) {
   if (markdown.isEmpty) return const [];
-
-  final normalized = restoreFlattenedMermaidFences(
+  if (!markdown.contains('```') && !markdown.contains('~~~')) {
+    return [WxMarkdownSegment.prose(markdown)];
+  }
+  final text = restoreFlattenedMermaidFences(
     markdown.replaceAll('\r\n', '\n').replaceAll('\r', '\n'),
   );
-  final lines = normalized.split('\n');
-  final segments = <WxMarkdownMermaidSegment>[];
-  final proseBuf = StringBuffer();
-  final mermaidBuf = StringBuffer();
-  var inMermaid = false;
-  var mermaidOpenLang = '';
+  final segments = <WxMarkdownSegment>[];
+  final scanner = MarkdownLiteralScanner();
+  var proseStart = 0;
+  var fenceStart = 0;
+  var codeStart = 0;
 
-  void flushProse() {
-    final text = proseBuf.toString();
-    proseBuf.clear();
-    if (text.trim().isEmpty) return;
-    segments.add(WxMarkdownMermaidSegment.prose(text));
+  void addProse(int end) {
+    final prose = text.substring(proseStart, end);
+    if (prose.trim().isNotEmpty) segments.add(WxMarkdownSegment.prose(prose));
   }
 
-  void flushMermaid({required bool closed}) {
-    final code = mermaidBuf.toString().trimRight();
-    mermaidBuf.clear();
-    inMermaid = false;
-    segments.add(
-      WxMarkdownMermaidSegment.mermaid(
-        normalizeMermaidFenceSource(mermaidOpenLang, code),
-        closed,
-      ),
-    );
-    mermaidOpenLang = '';
+  void addFence(MarkdownCodeFence open, int codeEnd, int end,
+      {required bool closed}) {
+    final code = text.substring(codeStart, codeEnd);
+    final mermaid = isMermaidFenceLang(open.info) ||
+        (open.info.isEmpty && looksLikeMermaidSource(code));
+    if (!includeCode && !mermaid) return;
+    addProse(fenceStart);
+    segments.add(WxMarkdownSegment.fenced(
+      mermaid ? normalizeMermaidFenceSource(open.info, code) : code,
+      open.info,
+      closed: closed,
+      isMermaid: mermaid,
+    ));
+    proseStart = end;
   }
 
-  for (final line in lines) {
-    if (inMermaid) {
-      if (isMermaidFenceCloseLine(line)) {
-        flushMermaid(closed: true);
-      } else {
-        mermaidBuf.writeln(line);
-      }
-      continue;
+  var cursor = 0;
+  while (cursor < text.length) {
+    final newline = text.indexOf('\n', cursor);
+    final lineEnd = newline == -1 ? text.length : newline;
+    final next = newline == -1 ? text.length : newline + 1;
+    final open = scanner.fence;
+    scanner.consume(text.substring(cursor, lineEnd));
+    if (open == null && scanner.fence != null) {
+      fenceStart = cursor;
+      codeStart = next;
+    } else if (open != null && scanner.fence == null) {
+      final codeEnd = cursor == codeStart ? cursor : cursor - 1;
+      addFence(open, codeEnd, next, closed: true);
     }
-
-    if (isMermaidFenceOpenLine(line)) {
-      flushProse();
-      inMermaid = true;
-      mermaidOpenLang = line.trimLeft().substring(3).trim();
-      continue;
-    }
-
-    proseBuf.writeln(line);
+    cursor = next;
   }
-
-  if (inMermaid) {
-    flushMermaid(closed: false);
-  } else {
-    flushProse();
+  if (scanner.fence case final open?) {
+    addFence(open, text.length, text.length, closed: false);
   }
-
+  addProse(text.length);
   return segments;
-}
-
-String markdownSourceForMermaidSegment(WxMarkdownMermaidSegment segment) {
-  if (!segment.isMermaid) return segment.prose ?? '';
-  final buf = StringBuffer('```mermaid\n');
-  final code = segment.mermaidCode ?? '';
-  buf.write(code);
-  if (segment.mermaidClosed) {
-    if (code.isNotEmpty && !code.endsWith('\n')) buf.writeln();
-    buf.writeln('```');
-  }
-  return buf.toString();
-}
-
-List<String> expandMarkdownBlockByMermaid(String block) {
-  if (block.trim().isEmpty) return const [];
-  final segments = splitMarkdownByMermaidFences(block);
-  if (segments.length == 1 && !segments.single.isMermaid) {
-    return [block];
-  }
-  return [
-    for (final seg in segments)
-      if (seg.isMermaid || (seg.prose ?? '').trim().isNotEmpty)
-        markdownSourceForMermaidSegment(seg),
-  ];
 }

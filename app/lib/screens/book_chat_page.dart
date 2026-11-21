@@ -218,6 +218,7 @@ class _BookChatPageState extends State<BookChatPage> {
 
   @override
   Widget build(BuildContext context) {
+    final mdStyle = chatMarkdownStyle(Theme.of(context));
     return Scaffold(
       body: Column(
         children: [
@@ -268,8 +269,9 @@ class _BookChatPageState extends State<BookChatPage> {
                           children: [
                             WxChatMarkdownStream(
                               source: _typewriter.visible,
-                              mdStyle: chatMarkdownStyle(Theme.of(context)),
+                              mdStyle: mdStyle,
                               api: widget.api,
+                              streaming: true,
                               showCaret: true,
                             ),
                             ValueListenableBuilder<String>(
@@ -308,7 +310,7 @@ class _BookChatPageState extends State<BookChatPage> {
                     children: [
                       WxChatMarkdownStream(
                         source: ValueNotifier<String>(msg.content),
-                        mdStyle: chatMarkdownStyle(Theme.of(context)),
+                        mdStyle: mdStyle,
                         api: widget.api,
                         showCaret: false,
                       ),

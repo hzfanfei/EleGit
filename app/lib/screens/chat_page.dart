@@ -1980,6 +1980,7 @@ class _AnswerMarkdown extends StatelessWidget {
     required this.source,
     required this.mdStyle,
     required this.taskCompleted,
+    required this.streaming,
     this.openLink,
   });
 
@@ -1987,6 +1988,7 @@ class _AnswerMarkdown extends StatelessWidget {
   final ValueListenable<String> source;
   final WxMarkdownStyle mdStyle;
   final bool taskCompleted;
+  final bool streaming;
   final Future<bool> Function(Uri uri)? openLink;
 
   Future<void> _openLink(BuildContext context, String href) async {
@@ -2019,6 +2021,7 @@ class _AnswerMarkdown extends StatelessWidget {
         mdStyle: mdStyle,
         api: api,
         taskCompleted: taskCompleted,
+        streaming: streaming,
         onTapLink: (href, text) {
           unawaited(_openLink(context, href));
         },
@@ -2239,6 +2242,7 @@ class _AnswerTurnState extends State<_AnswerTurn> {
             mdStyle: _style,
             openLink: widget.openAnswerLink,
             taskCompleted: answer?.taskCompleted ?? false,
+            streaming: live != null,
           ),
           if (live != null) _liveStatus(live),
         ],

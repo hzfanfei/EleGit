@@ -18,6 +18,7 @@ class WxMermaidSvgBlock extends StatefulWidget {
     required this.closed,
     required this.api,
     required this.serverTheme,
+    this.streaming = false,
     this.backgroundColor = 'transparent',
     this.shellColor,
     this.monoStyle,
@@ -25,6 +26,7 @@ class WxMermaidSvgBlock extends StatefulWidget {
 
   final String code;
   final bool closed;
+  final bool streaming;
   final WenxiangApi? api;
   final String serverTheme;
   final String backgroundColor;
@@ -50,7 +52,7 @@ class _WxMermaidSvgBlockState extends State<WxMermaidSvgBlock> {
   @override
   void initState() {
     super.initState();
-    _bindDiagram(notify: false);
+    _bindDiagram();
   }
 
   @override
@@ -61,48 +63,32 @@ class _WxMermaidSvgBlockState extends State<WxMermaidSvgBlock> {
         oldWidget.serverTheme != widget.serverTheme ||
         oldWidget.backgroundColor != widget.backgroundColor ||
         oldWidget.api != widget.api) {
-      _bindDiagram(notify: true);
+      _bindDiagram();
     }
   }
 
-  void _publish(VoidCallback fn, {required bool notify}) {
-    if (notify) {
-      setState(fn);
-    } else {
-      fn();
-    }
-  }
-
-  void _bindDiagram({required bool notify}) {
-    if (!widget.closed || widget.code.trim().isEmpty) {
-      _publish(() {
-        _png = null;
-        _svg = null;
-        _error = null;
-      }, notify: notify);
+  void _bindDiagram() {
+    final gen = ++_requestGen;
+    _png = null;
+    _svg = null;
+    _error = null;
+    if (!widget.closed) return;
+    if (widget.code.trim().isEmpty) {
+      _error = '图表源码为空';
       return;
     }
     final api = widget.api;
     if (api == null) {
-      _publish(() => _error = '未连接问象服务，无法渲染图表', notify: notify);
+      _error = '未连接问象服务，无法渲染图表';
       return;
     }
     final key = _cacheKey;
     final cached = WxMermaidCache.instance.peek(key);
     if (cached != null) {
-      _publish(() {
-        _png = cached.png;
-        _svg = cached.svg;
-        _error = null;
-      }, notify: notify);
+      _png = cached.png;
+      _svg = cached.svg;
       return;
     }
-    final gen = ++_requestGen;
-    _publish(() {
-      _png = null;
-      _svg = null;
-      _error = null;
-    }, notify: notify);
     WxMermaidCache.instance
         .load(
           key,
@@ -150,7 +136,8 @@ class _WxMermaidSvgBlockState extends State<WxMermaidSvgBlock> {
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
               child: Row(
                 children: [
-                  Icon(Icons.account_tree_outlined, size: 16, color: Wx.muted),
+                  const Icon(Icons.account_tree_outlined,
+                      size: 16, color: Wx.muted),
                   const SizedBox(width: 8),
                   Text(
                     '图表',
@@ -162,7 +149,7 @@ class _WxMermaidSvgBlockState extends State<WxMermaidSvgBlock> {
                       fontFamilyFallback: Wx.fontFallback,
                     ),
                   ),
-                  if (!widget.closed) ...[
+                  if (!widget.closed && widget.streaming) ...[
                     const SizedBox(width: 6),
                     Text(
                       '生成中',
@@ -188,42 +175,24 @@ class _WxMermaidSvgBlockState extends State<WxMermaidSvgBlock> {
   }
 
   Widget _body() {
-    if (!widget.closed) {
-      return SizedBox(
+    if (!widget.closed && widget.streaming) {
+      return const SizedBox(
         height: 88,
         child: Center(
           child: Text(
-            '正在绘制图表…',
-            style: TextStyle(color: Wx.muted, fontSize: 13, fontFamilyFallback: Wx.fontFallback),
+            '正在接收图表…',
+            style: TextStyle(
+              color: Wx.muted,
+              fontSize: 13,
+              fontFamilyFallback: Wx.fontFallback,
+            ),
           ),
         ),
       );
     }
 
-    if (_error != null) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            _error!,
-            style: TextStyle(
-              color: Wx.danger,
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              fontFamilyFallback: Wx.fontFallback,
-            ),
-          ),
-          const SizedBox(height: 8),
-          WxFencedCode(
-            code: widget.code.trim(),
-            language: 'mermaid',
-            framed: false,
-            style: widget.monoStyle ?? const TextStyle(fontFamily: 'ui-monospace', fontSize: 13),
-          ),
-        ],
-      );
-    }
+    final error = widget.closed ? _error : '图表语法未闭合，已显示源码';
+    if (error != null) return _sourceFallback(error);
 
     if (_png == null && _svg == null) {
       return const SizedBox(
@@ -245,17 +214,18 @@ class _WxMermaidSvgBlockState extends State<WxMermaidSvgBlock> {
           );
           return Align(
             alignment: Alignment.center,
-            child: GestureDetector(
-              onTap: () => _openFullscreen(png: png),
-              child: Image.memory(
-                png,
-                width: box.width,
-                height: box.height,
-                fit: BoxFit.contain,
-                filterQuality: FilterQuality.high,
-                gaplessPlayback: true,
-                errorBuilder: (_, __, ___) => _svgFallback(maxW),
+            child: Image.memory(
+              png,
+              width: box.width,
+              height: box.height,
+              fit: BoxFit.contain,
+              filterQuality: FilterQuality.high,
+              gaplessPlayback: true,
+              frameBuilder: (_, child, frame, __) => GestureDetector(
+                onTap: frame == null ? null : () => _openFullscreen(png: png),
+                child: child,
               ),
+              errorBuilder: (_, __, ___) => _svgFallback(maxW),
             ),
           );
         }
@@ -276,10 +246,7 @@ class _WxMermaidSvgBlockState extends State<WxMermaidSvgBlock> {
   Widget _svgFallback(double maxW) {
     final svg = _svg;
     if (svg == null || svg.isEmpty) {
-      return Text(
-        '图表无法显示',
-        style: TextStyle(color: Wx.danger, fontSize: 13, fontFamilyFallback: Wx.fontFallback),
-      );
+      return _sourceFallback('图表无法显示');
     }
     final pixels = readSvgViewBoxSize(svg);
     final box = fitDiagramBox(
@@ -289,22 +256,46 @@ class _WxMermaidSvgBlockState extends State<WxMermaidSvgBlock> {
     );
     return Align(
       alignment: Alignment.center,
-      child: GestureDetector(
-        onTap: () => _openFullscreen(svg: svg),
-        child: SvgPicture.string(
-          svg,
-          fit: BoxFit.contain,
-          width: box.width,
-          height: box.height,
-          theme: const SvgTheme(currentColor: Wx.text),
-          errorBuilder: (_, __, ___) => Text(
-            '图表无法显示',
-            style: TextStyle(color: Wx.danger, fontSize: 13, fontFamilyFallback: Wx.fontFallback),
-          ),
+      child: SvgPicture.string(
+        svg,
+        fit: BoxFit.contain,
+        width: box.width,
+        height: box.height,
+        theme: const SvgTheme(currentColor: Wx.text),
+        imageBuilder: (_, child) => GestureDetector(
+          onTap: () => _openFullscreen(svg: svg),
+          child: child,
         ),
+        errorBuilder: (_, __, ___) => _sourceFallback('图表无法显示'),
       ),
     );
   }
+
+  Widget _sourceFallback(String message) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            message,
+            style: const TextStyle(
+              color: Wx.danger,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              fontFamilyFallback: Wx.fontFallback,
+            ),
+          ),
+          if (widget.code.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            WxFencedCode(
+              code: widget.code,
+              language: 'mermaid',
+              framed: false,
+              style: widget.monoStyle ??
+                  const TextStyle(fontFamily: 'ui-monospace', fontSize: 13),
+            ),
+          ],
+        ],
+      );
 }
 
 /// Full-screen diagram. A tap closes it. Pinch or the buttons zoom,

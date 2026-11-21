@@ -102,7 +102,7 @@ class _BookMarkdownBodyState extends State<BookMarkdownBody> {
       data: _prepared,
       mdStyle: widget.mdStyle,
       api: widget.api,
-      softWrapProse: false,
+      prepareChatSource: false,
       onTapLink: (text, href, title) {
         final target = (href ?? '').trim();
         if (target.isEmpty) return;

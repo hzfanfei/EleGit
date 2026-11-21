@@ -22,6 +22,7 @@ Future<void> _pumpWithSource(
             source: source,
             mdStyle: chatMarkdownStyle(wenxiangTheme()),
             showCaret: showCaret,
+            streaming: showCaret,
           ),
         ),
       ),
@@ -127,6 +128,56 @@ void main() {
       expect(find.byKey(const Key('wx-md-code')), findsOneWidget);
       expect(find.textContaining('**'), findsNothing);
       expect(find.textContaining('```'), findsNothing);
+    });
+
+    testWidgets('保留波浪号和长围栏里的源码、空行和缩进', (tester) async {
+      const body = '  graph TD  \nleft | right\nabcdefghijklmnop\n\n'
+          '```mermaid\nA --> B\n```\n  ';
+      for (final (opening, closing) in [('~~~', '~~~~'), ('````', '`````')]) {
+        await _pumpWithSource(
+          tester,
+          '开头\n\n  ${opening}text\n$body\n  $closing\n\n末尾',
+        );
+        final code = tester.widget<WxFencedCode>(find.byType(WxFencedCode));
+        expect(code.language, 'text');
+        expect(code.code, body);
+        expect(find.byKey(const Key('wx-mermaid-diagram')), findsNothing);
+        expect(_mdText('末尾'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      }
+    });
+
+    testWidgets('多行和行内 LaTeX 直接渲染', (tester) async {
+      const inline = r'\(\frac{1234567890}{2}\)';
+      const display = r'\begin{aligned}x &= 1234567890\\ y &= 2\end{aligned}';
+      await _pumpWithSource(
+        tester,
+        '公式 $inline\n\n\$\$\n$display\n\$\$ 结尾，价格 \$30。',
+      );
+      expect(
+        find.byWidgetPredicate((widget) => widget.runtimeType.toString() == 'Math',
+            description: 'rendered LaTeX'),
+        findsNWidgets(2),
+      );
+      final rendered = tester.widgetList<GptMarkdown>(find.byType(GptMarkdown));
+      expect(rendered.any((widget) => widget.data.contains(display)), isTrue);
+      expect(rendered.any((widget) => widget.data.contains(inline)), isTrue);
+      expect(find.text(display), findsNothing);
+      expect(_mdText('结尾，价格 \$30。'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('残缺的 Mermaid 在生成时等待，结束后显示源码', (tester) async {
+      const source = '~~~mermaid\ngraph TD\n  A --> B';
+      await _pumpWithSource(tester, source, showCaret: true);
+      expect(find.text('正在接收图表…'), findsOneWidget);
+      expect(find.byType(WxFencedCode), findsNothing);
+      await _pumpWithSource(tester, source);
+      expect(find.text('正在接收图表…'), findsNothing);
+      expect(find.text('图表语法未闭合，已显示源码'), findsOneWidget);
+      final fallback = tester.widget<WxFencedCode>(find.byType(WxFencedCode));
+      expect(fallback.code, 'graph TD\n  A --> B');
+      expect(tester.takeException(), isNull);
     });
 
     testWidgets('引用与分割线', (tester) async {

@@ -39,19 +39,20 @@ class WxMermaidCache {
   }
 
   /// One network render per diagram. Later callers share the in-flight future.
-  Future<MermaidRender> load(String key, Future<MermaidRender> Function() fetch) {
+  Future<MermaidRender> load(
+      String key, Future<MermaidRender> Function() fetch) {
     final hit = peek(key);
     if (hit != null) return Future<MermaidRender>.value(hit);
     final pending = _inflight[key];
     if (pending != null) return pending;
-    final future = fetch().then((value) {
-      remember(key, value);
+    late final Future<MermaidRender> future;
+    future = Future<MermaidRender>.sync(fetch).then((value) {
+      if (identical(_inflight[key], future)) remember(key, value);
       return value;
-    });
-    _inflight[key] = future;
-    future.whenComplete(() {
+    }).whenComplete(() {
       if (identical(_inflight[key], future)) _inflight.remove(key);
     });
+    _inflight[key] = future;
     return future;
   }
 
