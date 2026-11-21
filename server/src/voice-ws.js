@@ -83,7 +83,7 @@ function resolveAsr(config, hooks) {
       onPartial: hooks.onPartial,
       onFinal: hooks.onFinal,
       onSpeechStart: hooks.onSpeechStart,
-      onError: (detail) => hooks.onAsrError?.({ message: detail?.message, err: detail }),
+      onError: (detail) => hooks.onAsrError?.({ message: detail?.message, err: detail, utteranceOnly: true }),
     });
   }
 
@@ -216,7 +216,7 @@ export function attachVoiceGateway(httpServer, {
       onPartial: (text) => holder.session?.onTranscript(text, { final: false }),
       onFinal: (text) => holder.session?.onTranscript(text, { final: true }),
       // Interruption is driven by ASR finals in voice-session, not VAD speech_start.
-      onAsrError: (detail) => holder.session?.onAsrFailure?.(detail?.message),
+      onAsrError: (detail) => holder.session?.onAsrFailure?.(detail?.message, detail),
     });
     const session = createVoiceSession({
       config,

@@ -13,6 +13,7 @@ const MAX_WAV_BYTES = 8 * 1024 * 1024;
 const ENDPOINT_SILENCE_MS = 700;
 const MIN_ENDPOINT_BYTES = 12800;
 const SPEECH_START_BYTES = 6400;
+const ASR_TIMEOUT_MS = 10000;
 const TTS_TIMEOUT_MS = 25000;
 
 function trim(value) {
@@ -228,6 +229,7 @@ export async function minimaxTtsStream(minimax, text, { signal, onPcm, connectIm
     socket.send(JSON.stringify({ event: "task_flush" }));
     let total = 0;
     let odd = null;
+    let finished = false;
     while (!signal?.aborted) {
       const msg = await next();
       if (!msg) break;
@@ -249,9 +251,13 @@ export async function minimaxTtsStream(minimax, text, { signal, onPcm, connectIm
           await onPcm?.(pcm);
         }
       }
-      if (msg.event === "task_flushed" || msg.event === "task_finished") break;
+      if (msg.event === "task_flushed" || msg.event === "task_finished") {
+        finished = true;
+        break;
+      }
     }
     if (!signal?.aborted) {
+      if (!finished) throw new Error("minimax tts connection closed before synthesis finished");
       try {
         socket.send(JSON.stringify({ event: "task_finish" }));
       } catch {
@@ -367,36 +373,48 @@ export function createMinimaxAsr({
   onSpeechStart,
   endpointSilenceMs = ENDPOINT_SILENCE_MS,
   minEndpointBytes = MIN_ENDPOINT_BYTES,
+  requestTimeoutMs = ASR_TIMEOUT_MS,
   fetchImpl = fetch,
 } = {}) {
   const chunks = [];
   let started = false;
   let chain = Promise.resolve();
   let generation = 0;
+  let activeRequest = null;
 
   function transcribe(buf) {
     const ticket = generation;
-    chain = chain
-      .then(async () => {
-        if (ticket !== generation) return;
-        if (!buf?.length) {
-          onFinal?.("");
-          return;
-        }
+    chain = chain.then(async () => {
+      if (ticket !== generation) return;
+      if (!buf?.length) {
+        onFinal?.("");
+        return;
+      }
+      const request = new AbortController();
+      activeRequest = request;
+      const timer = setTimeout(() => request.abort(new Error("minimax asr timeout")), requestTimeoutMs);
+      try {
         const text = await minimaxAsrTranscribe(minimax, buf, {
           sampleRate: minimax?.inputRate || 16000,
+          signal: request.signal,
           fetchImpl,
           onDelta: (_delta, soFar) => {
-            if (ticket !== generation) return;
+            if (ticket !== generation || request.signal.aborted) return;
             if (soFar) onPartial?.(soFar);
           },
         });
+        request.signal.throwIfAborted();
         if (ticket !== generation) return;
         onFinal?.(text);
-      })
-      .catch((err) => {
-        onError?.({ message: String(err.message || err) });
-      });
+      } catch (err) {
+        if (ticket === generation) {
+          onError?.({ message: String(request.signal.reason?.message || err?.message || err) });
+        }
+      } finally {
+        clearTimeout(timer);
+        if (activeRequest === request) activeRequest = null;
+      }
+    });
     return chain;
   }
 
@@ -412,13 +430,20 @@ export function createMinimaxAsr({
     },
   });
 
+  function discard() {
+    generation += 1;
+    activeRequest?.abort();
+    activeRequest = null;
+    chain = Promise.resolve();
+    chunks.length = 0;
+    gate.reset();
+  }
+
   return {
     speechFloorRms: CALL_MIN_RMS,
     async start() {
       started = true;
-      chain = Promise.resolve();
-      chunks.length = 0;
-      gate.reset();
+      discard();
     },
     push(pcm) {
       if (!started || !pcm) return;
@@ -430,15 +455,10 @@ export function createMinimaxAsr({
       }
       gate.push(buf);
     },
-    discard() {
-      generation += 1;
-      chunks.length = 0;
-      gate.reset();
-    },
+    discard,
     stop() {
       started = false;
-      chunks.length = 0;
-      gate.reset();
+      discard();
     },
     async finalize() {
       started = false;

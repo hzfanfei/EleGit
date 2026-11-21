@@ -399,30 +399,8 @@ void main() {
 
   testWidgets('a socket that dies mid-call is opened again', (tester) async {
     final clients = <FakeVoiceClient>[];
-    final key = GlobalKey<CallPageState>();
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: wenxiangTheme(),
-        home: CallPage(
-          key: key,
-          api: FakeWenxiangApi(voiceReady: true),
-          repo: sampleRepo(),
-          onBack: () {},
-          media: FakeVoiceMedia(),
-          clientFactory: () {
-            final client = FakeVoiceClient();
-            clients.add(client);
-            return client;
-          },
-        ),
-      ),
-    );
-    await tester.pump();
-    await tester.pump();
-    await tester.tap(find.text('开始通话'));
-    await tester.pump();
+    final state = await _startReconnectableCall(tester, clients);
     expect(clients, hasLength(1));
-    expect(key.currentState!.isLive, isTrue);
 
     clients.first.emit(VoiceEvent(type: 'caption', role: 'user', text: '我读到第三章', finalCaption: true));
     await tester.pump();
@@ -430,15 +408,89 @@ void main() {
     clients.first.end(); // error + close must schedule only one reconnect
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 1));
-    expect(key.currentState!.linkResets, 1);
-    expect(key.currentState!.isLive, isTrue);
+    expect(state.linkResets, 1);
+    expect(state.isLive, isTrue);
     expect(clients, hasLength(2));
     expect(clients.last.sent.any((msg) => msg['type'] == 'hello'), isTrue);
     expect(clients.last.sent.first['history'], [{'role': 'user', 'content': '我读到第三章'}]);
     expect(find.text('通话断了'), findsNothing);
+    expect(find.text('重连中'), findsOneWidget);
   });
 
-  testWidgets('a live channel error hangs up onto a single retry', (tester) async {
+  testWidgets('successful channel reconnects replenish the retry budget', (tester) async {
+    final clients = <FakeVoiceClient>[];
+    final state = await _startReconnectableCall(tester, clients);
+    for (var attempt = 1; attempt <= 7; attempt++) {
+      clients.last.emit(VoiceEvent(type: 'error', code: 'channel', hint: '通话断了'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 1));
+      expect(clients, hasLength(attempt + 1));
+      clients.last.emit(VoiceEvent(type: 'state', state: 'listening'));
+      await tester.pump();
+      expect(state.isLive, isTrue);
+      expect(state.linkResets, 0);
+      expect(find.text('重连中'), findsNothing);
+    }
+  });
+
+  testWidgets('repeated failures back off and stop after the retry budget', (tester) async {
+    final clients = <FakeVoiceClient>[];
+    final state = await _startReconnectableCall(tester, clients);
+    for (final delay in [0, 400, 800, 1600, 3200, 6400]) {
+      final count = clients.length;
+      clients.last.end();
+      await tester.pump();
+      if (delay > 0) {
+        await tester.pump(Duration(milliseconds: delay - 1));
+        expect(clients, hasLength(count));
+      }
+      await tester.pump(const Duration(milliseconds: 1));
+      expect(clients, hasLength(count + 1));
+      expect(state.linkResets, count);
+    }
+    clients.last.end();
+    await tester.pump();
+    expect(state.isLive, isFalse);
+    expect(state.linkResets, 6);
+    expect(find.text('重试'), findsOneWidget);
+  });
+
+  testWidgets('a stale playback failure cannot hang up a reconnected call', (tester) async {
+    final media = _FailingPlaybackMedia();
+    final clients = <FakeVoiceClient>[];
+    final state = await _startReconnectableCall(tester, clients, media: media);
+    clients.first.emit(VoiceEvent(type: 'state', state: 'speaking'));
+    clients.first.emit(VoiceEvent(type: 'pcm', pcm: Uint8List.fromList([1, 0])));
+    await tester.pump();
+    clients.first.end();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
+    expect(clients, hasLength(2));
+    clients.last.emit(VoiceEvent(type: 'state', state: 'listening'));
+    await tester.pump();
+    media.playback.completeError(TimeoutException('stale playback'));
+    await tester.pump();
+    expect(state.isLive, isTrue);
+    expect(clients.last.hangupCalls, 0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a turn failure is visible and clears when the next answer starts', (tester) async {
+    final clients = <FakeVoiceClient>[];
+    final state = await _startReconnectableCall(tester, clients);
+    const notice = '语音回答中断了，请再问一次';
+    clients.last.emit(VoiceEvent(
+      type: 'caption', role: 'assistant', code: 'turn_notice', text: notice, finalCaption: true,
+    ));
+    await tester.pump();
+    expect(state.isLive, isTrue);
+    expect(find.text(notice), findsOneWidget);
+    clients.last.emit(VoiceEvent(type: 'state', state: 'thinking'));
+    await tester.pump();
+    expect(find.text(notice), findsNothing);
+  });
+
+  testWidgets('a terminal voice error hangs up onto a single retry', (tester) async {
     final client = FakeVoiceClient();
     final key = GlobalKey<CallPageState>();
     await tester.pumpWidget(
@@ -462,7 +514,7 @@ void main() {
     await tester.pump();
     expect(key.currentState!.isLive, isTrue);
 
-    client.emit(VoiceEvent(type: 'error', code: 'channel', hint: '通话断了'));
+    client.emit(VoiceEvent(type: 'error', code: 'unconfigured', hint: '通话断了'));
     await tester.pump();
     expect(key.currentState!.isLive, isFalse);
     expect(find.text('通话断了'), findsOneWidget);
@@ -696,6 +748,49 @@ void main() {
     expect(find.text('开始通话'), findsNothing);
     expect(find.text('在听'), findsNothing);
   });
+}
+
+Future<CallPageState> _startReconnectableCall(
+  WidgetTester tester,
+  List<FakeVoiceClient> clients, {
+  VoiceMedia? media,
+}) async {
+  final key = GlobalKey<CallPageState>();
+  await tester.pumpWidget(MaterialApp(
+    theme: wenxiangTheme(),
+    home: CallPage(
+      key: key,
+      api: FakeWenxiangApi(voiceReady: true),
+      repo: sampleRepo(),
+      onBack: () {},
+      media: media ?? _LiveMicMedia(),
+      clientFactory: () {
+        final client = FakeVoiceClient();
+        clients.add(client);
+        return client;
+      },
+    ),
+  ));
+  await tester.pump();
+  await tester.tap(find.text('开始通话'));
+  await tester.pump();
+  clients.last.emit(VoiceEvent(type: 'state', state: 'listening'));
+  await tester.pump();
+  return key.currentState!;
+}
+
+class _FailingPlaybackMedia extends FakeVoiceMedia {
+  final playback = Completer<void>();
+
+  @override
+  Future<void> playPcm(
+    Uint8List pcm, {
+    int sampleRate = 24000,
+    String format = 'pcm',
+    String codec = 'raw',
+    String segmentCaption = '',
+    void Function()? onPlaybackStart,
+  }) => playback.future;
 }
 
 class _DroppingMicMedia extends FakeVoiceMedia {

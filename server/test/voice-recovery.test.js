@@ -4,6 +4,7 @@ import { createVoiceSession } from "../src/voice-session.js";
 import { EventEmitter } from "node:events";
 import { createOpenAiAsr } from "../src/voice-openai.js";
 import { decodeAdpcm } from "../src/adpcm.js";
+import { createMinimaxAsr } from "../src/minimax-speech.js";
 
 const tick = () => new Promise((r) => setImmediate(r));
 
@@ -111,6 +112,100 @@ it("ends a broken recognition session if restarting fails", async () => {
   assert.equal(session.state, "idle");
   assert.ok(messages.some((m) => m.type === "error" && m.code === "channel"));
   session.hangup();
+});
+
+it("a failed MiniMax utterance leaves the recognition queue running", async () => {
+  const messages = [];
+  let starts = 0;
+  let stops = 0;
+  const session = createVoiceSession({
+    config: { ready: true },
+    send: (msg) => messages.push(msg),
+    asr: { async start() { starts++; }, stop() { stops++; } },
+  });
+  try {
+    await session.start({ bookId: "book" });
+    session.onAsrFailure("minimax asr timeout", { utteranceOnly: true });
+    await tick();
+    assert.equal(starts, 1);
+    assert.equal(stops, 0);
+    assert.equal(session.state, "listening");
+    assert.ok(messages.some((m) => m.type === "caption" && m.code === "turn_notice"));
+  } finally {
+    session.hangup();
+  }
+});
+
+it("a partial TTS failure sends a retry notice instead of a completed answer", async () => {
+  const messages = [];
+  const audio = [];
+  const tts = async () => assert.fail("must not replay a sentence with a delivered prefix");
+  tts.stream = async (_text, _signal, send) => {
+    await send(Buffer.alloc(9600));
+    throw new Error("minimax tts connection closed before synthesis finished");
+  };
+  const session = createVoiceSession({
+    config: { ready: true }, send: (msg) => messages.push(msg), sendAudio: (pcm) => audio.push(pcm),
+    prepareContext: async () => ({ book: {}, materialized: {} }),
+    ask: async function* () { yield { type: "done", answer: "这是应当完整朗读的回答。" }; },
+    tts,
+  });
+  try {
+    await session.start({ bookId: "book" });
+    session.onTranscript("讲讲这一章", { final: true });
+    await tick();
+    assert.equal(audio.length, 1);
+    const final = messages.filter((m) => m.role === "assistant" && m.final);
+    assert.equal(final.length, 1);
+    assert.equal(final[0].code, "turn_notice");
+    assert.ok(messages.some((m) => m.state === "audio_done"));
+    session.playbackDone();
+    assert.equal(session.state, "listening");
+  } finally {
+    session.hangup();
+  }
+});
+
+it("keeps the start of a follow-up crossing the end of playback", { timeout: 3000 }, async () => {
+  const asked = [];
+  const messages = [];
+  let recognized;
+  const followup = new Promise((resolve) => { recognized = resolve; });
+  const asr = createMinimaxAsr({
+    minimax: {},
+    endpointSilenceMs: 520,
+    minEndpointBytes: 17600,
+    fetchImpl: async () => new Response('data: {"delta":"主人公后来去哪儿","finish":true}\n'),
+    onFinal: (text) => session.onTranscript(text, { final: true }),
+  });
+  const session = createVoiceSession({
+    config: { ready: true }, send: (msg) => messages.push(msg), sendAudio() {}, asr,
+    prepareContext: async () => ({ book: {}, materialized: {} }),
+    ask: async function* (opts) {
+      asked.push(opts.question);
+      if (asked.length === 2) recognized();
+      yield { type: "done", answer: "这一章介绍人物如何面对变化。" };
+    },
+    tts: async () => Buffer.alloc(48000),
+  });
+  const voice = Buffer.alloc(640);
+  for (let i = 0; i < voice.length; i += 2) voice.writeInt16LE(1600, i);
+  const silence = Buffer.alloc(640);
+  try {
+    await session.start({ bookId: "book" });
+    session.onTranscript("讲讲这一章", { final: true });
+    await tick();
+    assert.ok(messages.some((m) => m.state === "audio_done"));
+    for (let i = 0; i < 12; i++) session.onPcm(voice);
+    assert.equal(session.state, "speaking");
+    session.playbackDone();
+    for (let i = 0; i < 9; i++) session.onPcm(voice);
+    for (let i = 0; i < 26; i++) session.onPcm(silence);
+    await followup;
+    assert.deepEqual(asked, ["讲讲这一章", "主人公后来去哪儿"]);
+  } finally {
+    session.hangup();
+  }
 });
 
 it("restores call history into the next book question after reconnect", async () => {

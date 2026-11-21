@@ -49,6 +49,8 @@ function sleep(ms, signal) {
   });
 }
 const PLAYBACK_BARGE_BYTES = 16000 * 2 * 0.25;
+// A shorter voiced run can finish after the speaker stops, but must outlast a tap.
+const PLAYBACK_TAIL_SPEECH_BYTES = 16000 * 2 * 0.12;
 /**
  * A quiet interruption can sit under the recognizer speech floor, so its gate threw the
  * words away and the call went quiet. Lift it to talking level for such recognizers,
@@ -303,20 +305,24 @@ export function createVoiceSession({
     bargeGapTimer = null;
   }
 
-  function flushPlaybackSpeechToAsr() {
-    if (!bargeChunks.length) return;
+  function pushPlaybackSpeech(chunks) {
     heardPcmSinceTurn = true;
     const floor = asr?.speechFloorRms;
     if (floor) bargeLiftUntil = Date.now() + BARGE_LIFT_MS;
+    const buffered = Buffer.concat(floor ? chunks.map((c) => liftQuietSpeech(c, floor)) : chunks);
+    speechBytesSinceTurn += buffered.length;
+    asr?.push?.(buffered);
+  }
+
+  function flushPlaybackSpeechToAsr() {
+    if (!bargeChunks.length) return;
     const chunks = bargeChunks;
     bargeChunks = [];
     bargeSpeechBytes = 0;
     bargeHardBytes = 0;
     bargeHardStreakBytes = 0;
-    const buffered = Buffer.concat(floor ? chunks.map((c) => liftQuietSpeech(c, floor)) : chunks);
-    speechBytesSinceTurn += buffered.length;
     playbackUserSpeech = true;
-    asr?.push?.(buffered);
+    pushPlaybackSpeech(chunks);
     // Endpoint ASR waits for silence before a final; stop playback as
     // soon as the mic proves real speech over the speaker, then answer on the final.
     const busy = machine.state === "speaking" || machine.state === "thinking";
@@ -380,6 +386,9 @@ export function createVoiceSession({
   }
 
   function finishListen() {
+    const followup = playbackOpen && bargeHardStreakBytes >= PLAYBACK_TAIL_SPEECH_BYTES
+      ? bargeChunks
+      : null;
     clearPlaybackTimer();
     resetPlaybackBarge();
     playbackOpen = false;
@@ -390,6 +399,7 @@ export function createVoiceSession({
       machine.listen();
       emit({ type: "state", state: "listening" });
     }
+    if (followup) pushPlaybackSpeech(followup);
   }
 
   function armPlaybackWatch() {
@@ -566,7 +576,10 @@ export function createVoiceSession({
         summary: ttsFailed ? "语音通话合成失败" : "语音通话问答失败",
       });
       if (ttsFailed) {
-        emit({ type: "caption", role: "assistant", text: "这句没说成，再说一次", final: true });
+        emit({
+          type: "caption", role: "assistant", code: "turn_notice",
+          text: "语音回答中断了，请再问一次", final: true,
+        });
       } else {
         await sayRetry("这句没说成，再说一次", signal);
       }
@@ -699,7 +712,7 @@ export function createVoiceSession({
       if (lifted === bytes ? rms >= CALL_MIN_RMS : pcmRms(lifted) >= CALL_MIN_RMS) speechBytesSinceTurn += bytes.length;
       asr?.push?.(lifted);
     },
-    onAsrFailure(message) {
+    onAsrFailure(message, { utteranceOnly = false } = {}) {
       if (!started || closed) return;
       if (asrRecovering) return;
       const asrMsg = String(message || "failed");
@@ -707,8 +720,12 @@ export function createVoiceSession({
       noteServerLog({ kind: "voice-asr", message: asrMsg, summary: "语音识别失败" });
       const busy = playbackOpen || machine.state === "speaking" || machine.state === "thinking";
       if (!busy) {
-        emit({ type: "caption", role: "assistant", text: "没听清，再说一次", final: true });
+        emit({
+          type: "caption", role: "assistant", code: "turn_notice",
+          text: "没听清，再说一次", final: true,
+        });
       }
+      if (utteranceOnly) return;
       asrRecovering = true;
       Promise.resolve()
         .then(async () => {

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { once } from "node:events";
 import { Readable } from "node:stream";
 import { describe, it } from "node:test";
 import {
@@ -7,7 +8,7 @@ import {
   minimaxTtsStream,
 } from "../src/minimax-speech.js";
 
-function scriptedSocket() {
+function scriptedSocket({ finish = true } = {}) {
   const listeners = { message: [], close: [], error: [] };
   const sent = [];
   let announced = false;
@@ -31,7 +32,8 @@ function scriptedSocket() {
         queueMicrotask(() => {
           deliver({ event: "task_continued", data: { audio: "0102" } });
           deliver({ event: "task_continued", data: { audio: "0304" } });
-          deliver({ event: "task_flushed" });
+          if (finish) deliver({ event: "task_flushed" });
+          else socket.close();
         });
       }
     },
@@ -98,6 +100,17 @@ describe("minimax speech", () => {
     assert.deepEqual(Buffer.concat(parts), Buffer.from([1, 2, 3, 4]));
   });
 
+  it("reports a synthesis disconnect after emitting audio but before completion", async () => {
+    const socket = scriptedSocket({ finish: false });
+    const parts = [];
+    await assert.rejects(
+      minimaxTtsStream({}, "你好。", { connectImpl: () => socket, onPcm: (pcm) => parts.push(pcm) }),
+      /connection closed before synthesis finished/,
+    );
+    assert.deepEqual(Buffer.concat(parts), Buffer.from([1, 2, 3, 4]));
+    assert.equal(socket.sent.some((msg) => msg.event === "task_finish"), false);
+  });
+
   it("uploads one wav and concatenates streamed asr deltas", async () => {
     const partials = [];
     const text = await minimaxAsrTranscribe(
@@ -149,5 +162,75 @@ describe("minimax speech", () => {
     await asr.finalize();
     assert.deepEqual(partials, ["在听"]);
     assert.equal(finalText, "在听");
+  });
+
+  it("times out a stalled recognition stream and processes the next utterance", { timeout: 3000 }, async () => {
+    const errors = [];
+    let requests = 0;
+    let firstSignal;
+    let resolvePartial;
+    let resolveFinal;
+    const firstPartial = new Promise((resolve) => { resolvePartial = resolve; });
+    const final = new Promise((resolve) => { resolveFinal = resolve; });
+    const asr = createMinimaxAsr({
+      minimax: {},
+      endpointSilenceMs: 5,
+      requestTimeoutMs: 100,
+      onPartial: (text) => { if (text === "上句") resolvePartial(); },
+      onFinal: resolveFinal,
+      onError: (err) => errors.push(err.message),
+      fetchImpl: async (_url, { signal }) => {
+        if (++requests === 1) {
+          firstSignal = signal;
+          return { ok: true, body: Readable.from((async function* () {
+            yield Buffer.from('data: {"delta":"上句","finish":false}\n');
+            if (!signal.aborted) await once(signal, "abort");
+            throw signal.reason;
+          })()) };
+        }
+        return new Response('data: {"delta":"下句","finish":true}\n');
+      },
+    });
+    const speak = () => {
+      asr.push(Buffer.alloc(19200, 8));
+      asr.push(Buffer.alloc(640));
+    };
+    try {
+      await asr.start();
+      speak();
+      await firstPartial;
+      speak();
+      assert.equal(await final, "下句");
+      assert.equal(requests, 2);
+      assert.equal(firstSignal.aborted, true);
+      assert.deepEqual(errors, ["minimax asr timeout"]);
+    } finally {
+      asr.stop();
+    }
+  });
+
+  it("cancels discarded recognition without reporting an error for that utterance", { timeout: 3000 }, async () => {
+    let resolveOpened;
+    const opened = new Promise((resolve) => { resolveOpened = resolve; });
+    const results = [];
+    const asr = createMinimaxAsr({
+      minimax: {},
+      pushToTalk: true,
+      onFinal: (text) => results.push(text),
+      onError: (err) => results.push(err.message),
+      fetchImpl: async (_url, { signal }) => {
+        resolveOpened(signal);
+        await once(signal, "abort");
+        throw signal.reason;
+      },
+    });
+    await asr.start();
+    asr.push(Buffer.alloc(640));
+    const pending = asr.finalize();
+    const signal = await opened;
+    asr.discard();
+    await pending;
+    assert.equal(signal.aborted, true);
+    assert.deepEqual(results, []);
   });
 });

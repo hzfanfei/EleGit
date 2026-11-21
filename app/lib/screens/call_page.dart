@@ -98,6 +98,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
 
   String _phase = 'idle';
   String? _error;
+  String? _turnNotice;
   Object? _fault;
   bool _detailOpen = false;
   bool _live = false;
@@ -127,6 +128,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
   int _micReopens = 0;
   int _linkResets = 0;
   static const _maxLinkResets = 6;
+  Timer? _linkRetry;
   bool _closing = false;
   bool _relinking = false;
   bool _watchPostPlaybackMic = false;
@@ -184,10 +186,10 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
     _segmentCaption = chunk;
   }
 
-  void Function()? _playbackStartForCaption(String captionAtEnqueue) {
+  void Function()? _playbackStartForCaption(String captionAtEnqueue, int hold) {
     if (captionAtEnqueue.isEmpty) return null;
     return () {
-      if (!mounted || _disposing) return;
+      if (!mounted || !_live || _disposing || hold != _listenHold) return;
       setState(() {
         _voiceCaption = captionAtEnqueue;
         _assistantPreview = '';
@@ -237,12 +239,11 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
     }
   }
 
-  /// Live call shows only three labels: 在听 while the mic takes a turn, 思考中 until
-  /// playback starts or while the speaker sits idle mid-reply, 在说 only while audio plays.
   String get statusLabel {
     if (_checking && !_live) return '';
     if (_error != null && !_live) return _error!;
     if (_live) {
+      if (_phase == 'connecting' && _linkResets > 0) return '重连中';
       if (_playing) return '在说';
       if (_phase == 'thinking' || _phase == 'speaking') return '思考中';
       return '在听';
@@ -276,6 +277,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
     }
     setState(() {
       _error = null;
+      _turnNotice = null;
       _fault = null;
       _detailOpen = false;
       _phase = 'connecting';
@@ -338,58 +340,65 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
       );
       _sayHello(client);
     } catch (err) {
-      _drop(cause: err);
+      _onSocketGone(err);
     }
   }
 
   /// The bytes stuck in a send buffer are only dropped by tearing the socket down.
   /// Open another one and keep the call, instead of ending it on the first stall.
-  void _onSocketGone(Object? cause) {
+  void _onSocketGone(Object? cause, {String hint = '通话断了'}) {
     if (!_live || _closing || _relinking || _disposing) return;
     if (widget.client != null || _linkResets >= _maxLinkResets) {
-      _drop(cause: cause);
+      _fail(hint, cause: cause);
       return;
     }
     _linkResets += 1;
     _relinking = true;
+    _cancelPlaybackEnd();
+    unawaited(_media.stopPlayback().catchError((_) {}));
+    setState(() {
+      _phase = 'connecting';
+      _playing = false;
+      _turnNotice = null;
+      _clearThinkMist();
+      _clearAssistantSubtitle();
+    });
+    final delay = _linkResets == 1
+        ? Duration.zero
+        : Duration(milliseconds: 400 << (_linkResets - 2));
     // onDone is still on the stack. Cancelling that subscription here never finishes.
-    Timer(Duration.zero, () {
-      if (!_live || _closing || _disposing) { _relinking = false; return; }
+    _linkRetry = Timer(delay, () {
+      _linkRetry = null;
       _relink();
     });
   }
 
   void _relink() {
-    _relinking = true;
-    _cancelPlaybackEnd();
-    _speakerIdleTimer?.cancel();
-    _speakerIdleTimer = null;
     final previous = _sub;
     _sub = null;
     _client?.hangup();
     unawaited(previous?.cancel());
-    unawaited(_media.stopPlayback().catchError((_) {}));
     _relinking = false;
     if (!_live || _closing || _disposing || !mounted) return;
-    setState(() {
-      _phase = 'listening';
-      _playing = false;
-      _clearAssistantSubtitle();
-    });
     _openSocket(_newClient());
   }
 
   void _onEvent(VoiceEvent event) {
-    if (!mounted || _disposing) return;
+    if (!mounted || !_live || _disposing || _relinking) return;
     if (event.type == 'error') {
       final hint = event.hint?.isNotEmpty == true
           ? event.hint!
           : (event.code == 'unconfigured' ? '还没配语音密钥' : '通话断了');
       final raw = event.detail?.trim() ?? '';
+      if (event.code == 'channel') {
+        _onSocketGone(raw.isEmpty ? null : raw, hint: hint);
+        return;
+      }
       _fail(hint, cause: raw.isEmpty ? null : raw);
       return;
     }
     if (event.type == 'state' && event.state != null) {
+      if (event.state == 'listening') _linkResets = 0;
       _applyState(_mapState(event.state!));
       return;
     }
@@ -398,6 +407,10 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
       return;
     }
     if (event.type == 'caption' && event.text.isNotEmpty) {
+      if (event.code == 'turn_notice') {
+        setState(() => _turnNotice = event.text);
+        return;
+      }
       setState(() {
         if (event.role == 'user') {
           _userLive = event.text;
@@ -431,14 +444,17 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
         });
       }
       final captionAtEnqueue = _segmentCaption;
+      final hold = _listenHold;
       unawaited(
         _media.playPcm(
           event.pcm!,
           sampleRate: event.outputRate,
           segmentCaption: captionAtEnqueue,
-          onPlaybackStart: _playbackStartForCaption(captionAtEnqueue),
+          onPlaybackStart: _playbackStartForCaption(captionAtEnqueue, hold),
         ).catchError((Object err) {
-          if (_live && !_disposing) _fail('声音播放失败，请重试', cause: err);
+          if (_live && !_disposing && hold == _listenHold) {
+            _fail('声音播放失败，请重试', cause: err);
+          }
         }),
       );
       _watchSpeakerIdle();
@@ -462,6 +478,9 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
   /// Only barge / hangup / relink should bump [_listenHold] and drop a pending drain.
   void _cancelPlaybackEnd() {
     _postPlaybackCheck?.cancel();
+    _speakerIdleTimer?.cancel();
+    _speakerIdleTimer = null;
+    _watchingSpeaker = false;
     _watchPostPlaybackMic = false;
     _listenHold += 1;
     _playbackEndPending = false;
@@ -485,6 +504,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
     _media.waitForPlaybackQueue().catchError((Object err) {
       if (_live && !_disposing && hold == _listenHold) _fail('声音播放中断，请重试', cause: err);
     }).whenComplete(() {
+      if (hold != _listenHold) return;
       _watchingSpeaker = false;
       if (!mounted || _disposing || !_playing || _phase != 'speaking') return;
       if (seq != _pcmSeq) {
@@ -533,6 +553,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
     setState(() {
       _phase = next == 'audio_done' ? 'listening' : next;
       if (next == 'thinking') {
+        _turnNotice = null;
         _answerAudioDone = false;
         _playbackEndPending = false;
         _clearAssistantSubtitle();
@@ -557,8 +578,8 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
       if (_live && !_disposing && hold == _listenHold) _fail('声音播放中断，请重试', cause: err);
       return;
     }
-    _playbackEndPending = false;
     if (!mounted || _disposing || hold != _listenHold) return;
+    _playbackEndPending = false;
     if (_phase != 'speaking' && !_answerAudioDone) return;
     _answerAudioDone = false;
     _client?.played();
@@ -675,7 +696,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
       if (_watchBargeMic && peak > _bargeMicPeak) _bargeMicPeak = peak;
       if (_watchPostPlaybackMic && peak > _postPlaybackPeak) _postPlaybackPeak = peak;
       _noteHeard(peak);
-      _client?.sendPcm(pcm);
+      if (!_relinking) _client?.sendPcm(pcm);
     }, onError: (_) {
       _reviveMic(epoch);
     }, onDone: () {
@@ -732,18 +753,11 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
     }
   }
 
-  void _drop({String hint = '通话断了', Object? cause}) {
-    hangup(pop: false);
-    if (!mounted) return;
-    setState(() {
-      _error = hint;
-      _fault = cause;
-      _detailOpen = false;
-    });
-  }
-
   void hangup({bool pop = false}) {
     _closing = true;
+    _linkRetry?.cancel();
+    _linkRetry = null;
+    _relinking = false;
     _freeBackground();
     _cancelPlaybackEnd();
     _micEpoch++;
@@ -752,8 +766,6 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
     _micRetry = null;
     _bargeMicCheck?.cancel();
     _bargeMicCheck = null;
-    _speakerIdleTimer?.cancel();
-    _speakerIdleTimer = null;
     _voiceFade?.cancel();
     _voiceFade = null;
     _voiceLevel = 0;
@@ -764,6 +776,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
     _micSub?.cancel();
     _micSub = null;
     _client?.hangup();
+    _client = null;
     unawaited(_media.stopMic());
     unawaited(_media.stopPlayback());
     if (_captions.isNotEmpty) {
@@ -772,6 +785,7 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
     }
     _live = false;
     _phase = 'idle';
+    _turnNotice = null;
     _playing = false;
     if (!_disposing && mounted) {
       setState(() {});
@@ -875,6 +889,15 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (_turnNotice != null)
+              Semantics(
+                liveRegion: true,
+                child: Text(
+                  _turnNotice!,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
             Expanded(child: _callStageBody(context)),
             if (!_live) _faultDetail(context),
           ],
@@ -972,8 +995,8 @@ class CallPageState extends State<CallPage> with TickerProviderStateMixin {
             Padding(
               padding: const EdgeInsets.only(top: 10),
               child: Text(
-                '在听',
-                key: const Key('call-listening-under-orb'),
+                statusLabel,
+                key: statusLabel == '在听' ? const Key('call-listening-under-orb') : null,
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       color: Wx.muted,
                       fontWeight: FontWeight.w500,
