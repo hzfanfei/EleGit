@@ -1422,6 +1422,9 @@ class _ChatPageState extends State<ChatPage> {
         key: const Key('wx-chat-list'),
         controller: _scroll,
         reverse: true,
+        // The top-aligned Stack lets short conversations start at the top.
+        // Keep offset zero at the newest reply once the list fills the viewport.
+        shrinkWrap: true,
         padding: EdgeInsets.fromLTRB(
           4,
           12,

@@ -185,6 +185,11 @@ void main() {
     await tester.pump();
     expect(find.textContaining('正在连接'), findsOneWidget);
     expect(find.textContaining('void main'), findsNothing);
+    final question = find.text('你问');
+    expect(tester.getTopLeft(question).dy, lessThan(150));
+    await tester.pump(const Duration(milliseconds: 300));
+    final questionTop = tester.getTopLeft(question).dy;
+    expect(_chatScrollState(tester).position.maxScrollExtent, 0);
 
     events.add(ChatStreamEvent(type: 'start', engine: 'local-progress'));
     await tester.pump();
@@ -201,6 +206,7 @@ void main() {
     await _pumpUntilVisible(tester, find.textContaining('修登录'));
     expect(find.textContaining('修登录'), findsOneWidget);
     expect(find.textContaining('void main'), findsNothing);
+    expect(tester.getTopLeft(question).dy, closeTo(questionTop, 1));
 
     events.add(ChatStreamEvent(type: 'delta', text: '```\nvoid main() {'));
     await _pumpUntilVisible(tester, find.textContaining('void main'));
@@ -236,6 +242,7 @@ void main() {
     final scrollable = _chatScrollState(tester);
     final position = scrollable.position;
     expect(position.maxScrollExtent, greaterThan(80));
+    expect(position.pixels, 0);
     position.jumpTo(10);
     events.add(ChatStreamEvent(type: 'delta', text: '继续输出'));
     await tester.pump();
