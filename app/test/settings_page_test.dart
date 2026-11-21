@@ -8,6 +8,7 @@ import 'package:wenxiang/screens/log_center_page.dart';
 import 'package:wenxiang/screens/settings_page.dart';
 import 'package:wenxiang/theme.dart';
 import 'package:wenxiang/widgets/codex_scope_settings.dart';
+import 'package:wenxiang/widgets/wx_chrome.dart';
 
 import 'support/fake_api.dart';
 
@@ -322,7 +323,7 @@ void main() {
     await tester.tap(button);
     await tester.pump();
     expect(find.text('正在测速…'), findsOneWidget);
-    final progress = find.byType(CircularProgressIndicator);
+    final progress = find.byType(WxLoading);
     expect(
         find.descendant(
             of: find.byKey(const Key('codex-book')), matching: progress),

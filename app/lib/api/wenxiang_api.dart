@@ -320,6 +320,7 @@ class WenxiangApi {
 
   http.Client? _checkoutClient;
   final Map<String, _ChatRequest> _chatRequests = {};
+  final _chatImageRequests = <String, Future<Uint8List>>{};
   http.Client? _bookVoiceClient;
   http.Client? _repoVoiceClient;
   http.Client? _speakClient;
@@ -1491,7 +1492,16 @@ class WenxiangApi {
 
   Future<Uint8List> fetchChatImage(String id) async {
     final cached = ChatImageCache.get(id);
-    if (cached != null) return Uint8List.fromList(cached);
+    if (cached != null) return cached;
+    return _chatImageRequests.putIfAbsent(
+      id,
+      () => _downloadChatImage(id).whenComplete(() {
+        _chatImageRequests.remove(id);
+      }),
+    );
+  }
+
+  Future<Uint8List> _downloadChatImage(String id) async {
     final res = await http.get(
       _uri('/v1/chat/images/${Uri.encodeComponent(id)}'),
       headers: {

@@ -6,6 +6,7 @@ import '../api/wenxiang_api.dart';
 import '../theme.dart';
 import '../voice/device_media.dart';
 import '../voice/voice_media.dart';
+import 'wx_chrome.dart';
 import 'wx_rich_text.dart';
 
 /// One spoken summary at a time. Tapping another answer stops the current one.
@@ -36,23 +37,24 @@ class AnswerSpeech extends ChangeNotifier {
       await stop(api);
       return;
     }
-    await stop(api);
+    final stopping = stop(api);
     final token = ++_token;
     activeId = id;
     thinking = true;
     playing = false;
     notifyListeners();
     try {
-      await for (final event in api.speakSummaryStream(text: text, ttsVoice: ttsVoice)) {
+      await stopping;
+      if (token != _token) return;
+      await for (final event
+          in api.speakSummaryStream(text: text, ttsVoice: ttsVoice)) {
         if (token != _token) return;
         if (event.type == 'state' && event.phase == 'speak') {
-          thinking = false;
-          playing = true;
-          notifyListeners();
-        } else if (event.type == 'audio' && event.pcm != null && event.pcm!.isNotEmpty) {
-          thinking = false;
-          playing = true;
-          notifyListeners();
+          _markPlaying();
+        } else if (event.type == 'audio' &&
+            event.pcm != null &&
+            event.pcm!.isNotEmpty) {
+          _markPlaying();
           unawaited(
             media.playPcm(
               event.pcm!,
@@ -92,6 +94,13 @@ class AnswerSpeech extends ChangeNotifier {
         notifyListeners();
       }
     }
+  }
+
+  void _markPlaying() {
+    if (playing) return;
+    thinking = false;
+    playing = true;
+    notifyListeners();
   }
 
   Future<void> stop(WenxiangApi api) async {
@@ -160,6 +169,12 @@ class _SpeakAnswerButton extends StatefulWidget {
 
 class _SpeakAnswerButtonState extends State<_SpeakAnswerButton> {
   late final String _id = 'speak-${identityHashCode(this)}';
+  ({bool thinking, bool playing}) _status = (thinking: false, playing: false);
+
+  ({bool thinking, bool playing}) get _currentStatus => (
+        thinking: widget.speech.thinkingFor(_id),
+        playing: widget.speech.playingFor(_id),
+      );
 
   @override
   void initState() {
@@ -173,6 +188,7 @@ class _SpeakAnswerButtonState extends State<_SpeakAnswerButton> {
     if (oldWidget.speech != widget.speech) {
       oldWidget.speech.removeListener(_onSpeech);
       widget.speech.addListener(_onSpeech);
+      _status = _currentStatus;
     }
   }
 
@@ -183,7 +199,8 @@ class _SpeakAnswerButtonState extends State<_SpeakAnswerButton> {
   }
 
   void _onSpeech() {
-    if (mounted) setState(() {});
+    final status = _currentStatus;
+    if (mounted && status != _status) setState(() => _status = status);
   }
 
   Future<void> _toggle() async {
@@ -203,17 +220,12 @@ class _SpeakAnswerButtonState extends State<_SpeakAnswerButton> {
 
   @override
   Widget build(BuildContext context) {
-    final thinking = widget.speech.thinkingFor(_id);
-    final playing = widget.speech.playingFor(_id);
+    final (:thinking, :playing) = _status;
     return IconButton(
       tooltip: playing || thinking ? '停止朗读' : '朗读总结',
       onPressed: () => unawaited(_toggle()),
       icon: thinking
-          ? const SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(strokeWidth: 1.6, color: Wx.muted),
-            )
+          ? const WxLoading(size: 16, color: Wx.muted)
           : Icon(
               playing ? Icons.volume_up : Icons.volume_up_outlined,
               size: 18,

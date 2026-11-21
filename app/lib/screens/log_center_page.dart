@@ -23,6 +23,8 @@ class LogCenterPage extends StatefulWidget {
 class _LogCenterPageState extends State<LogCenterPage> {
   List<Map<String, dynamic>> _entries = const [];
   bool _loading = true;
+  bool _clearing = false;
+  int _loadEpoch = 0;
   Object? _loadError;
   String? _remoteHint;
 
@@ -35,33 +37,43 @@ class _LogCenterPageState extends State<LogCenterPage> {
   }
 
   Future<void> _reload() async {
+    final epoch = ++_loadEpoch;
     setState(() {
       _loading = true;
       _loadError = null;
     });
+    final remote = _loadRemote();
     try {
       await ClientErrorLog.instance.idle;
       final local = await ClientErrorLog.instance.peek(200);
-      var remote = const <Map<String, dynamic>>[];
-      String? remoteHint;
-      final api = widget.api;
-      if (api != null) {
-        try {
-          remote = await api.fetchErrorLogs(limit: 200);
-        } catch (err) {
-          remoteHint = '服务端日志拉取失败，仅显示本机记录。';
-        }
+      if (!mounted || epoch != _loadEpoch) return;
+      if (_entries.isEmpty && local.isNotEmpty) {
+        setState(() => _entries =
+            mergeLogCenterEntries(local: local, remote: const [], limit: 200));
       }
-      if (!mounted) return;
+      final (entries, hint) = await remote;
+      if (!mounted || epoch != _loadEpoch) return;
       setState(() {
-        _remoteHint = remoteHint;
-        _entries = mergeLogCenterEntries(local: local, remote: remote, limit: 200);
+        _remoteHint = hint;
+        _entries =
+            mergeLogCenterEntries(local: local, remote: entries, limit: 200);
       });
     } catch (err) {
-      if (!mounted) return;
+      if (!mounted || epoch != _loadEpoch) return;
       setState(() => _loadError = err);
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted && epoch == _loadEpoch) setState(() => _loading = false);
+    }
+  }
+
+  Future<(List<Map<String, dynamic>>, String?)> _loadRemote() async {
+    const empty = <Map<String, dynamic>>[];
+    final api = widget.api;
+    if (api == null) return (empty, null);
+    try {
+      return (await api.fetchErrorLogs(limit: 200), null);
+    } catch (_) {
+      return (empty, '服务端日志拉取失败，仅显示本机记录。');
     }
   }
 
@@ -78,21 +90,23 @@ class _LogCenterPageState extends State<LogCenterPage> {
         ],
       ),
     );
-    if (ok != true || !mounted) return;
-    await ClientErrorLog.instance.clear();
-    final api = widget.api;
-    if (api != null) {
-      try {
-        await api.clearErrorLogs();
-      } catch (_) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('本机已清空，但服务端日志清空失败，刷新后可能仍会出现。')),
-          );
-        }
+    if (ok != true || !mounted || _loading || _clearing) return;
+    setState(() => _clearing = true);
+    try {
+      await ClientErrorLog.instance.clear();
+      await widget.api?.clearErrorLogs();
+    } catch (err) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('清空日志失败：$err')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        await _reload();
+        if (mounted) setState(() => _clearing = false);
       }
     }
-    await _reload();
   }
 
   void _openEntry(Map<String, dynamic> entry) {
@@ -223,14 +237,20 @@ class _LogCenterPageState extends State<LogCenterPage> {
               backTooltip: '返回',
               trailing: [
                 IconButton(
-                  tooltip: '刷新',
-                  onPressed: _loading ? null : () => unawaited(_reload()),
-                  icon: const Icon(Icons.refresh_rounded, size: 22),
+                  tooltip: _loading ? '正在刷新日志…' : '刷新',
+                  onPressed: _loading || _clearing ? null : _reload,
+                  icon: _loading && _entries.isNotEmpty && !_clearing
+                      ? const WxLoading(size: 20)
+                      : const Icon(Icons.refresh_rounded, size: 22),
                 ),
                 IconButton(
-                  tooltip: '清空',
-                  onPressed: _entries.isEmpty || _loading ? null : () => unawaited(_confirmClear()),
-                  icon: const Icon(Icons.delete_outline_rounded, size: 22),
+                  tooltip: _clearing ? '正在清空日志…' : '清空',
+                  onPressed: _entries.isEmpty || _loading || _clearing
+                      ? null
+                      : _confirmClear,
+                  icon: _clearing
+                      ? const WxLoading(size: 20)
+                      : const Icon(Icons.delete_outline_rounded, size: 22),
                 ),
               ],
             ),
@@ -244,13 +264,13 @@ class _LogCenterPageState extends State<LogCenterPage> {
 
   Widget _body(BuildContext context) {
     if (_loading && _entries.isEmpty) {
-      return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+      return const WxBusy(label: '正在读取日志…');
     }
     if (_loadError != null) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(Wx.inset),
-          child: Text('加载失败：$_loadError', style: Theme.of(context).textTheme.bodyMedium),
+          child: WxErrorPanel(error: _loadError!, onRetry: _reload),
         ),
       );
     }
@@ -267,7 +287,9 @@ class _LogCenterPageState extends State<LogCenterPage> {
       );
     }
     return RefreshIndicator(
-      onRefresh: _reload,
+      onRefresh: () async {
+        if (!_clearing) await _reload();
+      },
       child: ListView.separated(
         padding: const EdgeInsets.fromLTRB(Wx.inset, 12, Wx.inset, 32),
         itemCount: _entries.length + (_remoteHint != null ? 1 : 0),

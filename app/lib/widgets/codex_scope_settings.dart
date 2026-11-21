@@ -361,11 +361,7 @@ class _CodexScopeSettingsState extends State<CodexScopeSettings> {
                       width: 18,
                       height: 18,
                       child: _testing == scope
-                          ? const CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Wx.accent,
-                              semanticsLabel: '正在测速',
-                            )
+                          ? const WxLoading(size: 18)
                           : const Icon(Icons.speed_rounded, size: 18),
                     ),
                     label: Text(_testing == scope ? '正在测速…' : '模型测速'),
@@ -413,7 +409,7 @@ class _CodexScopeSettingsState extends State<CodexScopeSettings> {
                     child: const Text('刷新')),
               ]),
               if (_usageLoading)
-                const Text('正在查询用量…')
+                const WxInlineBusy('正在查询用量…')
               else if (_usageFailed)
                 const Text('用量查询失败，请点击刷新重试')
               else if (_usage?['primary'] == null &&
@@ -430,7 +426,8 @@ class _CodexScopeSettingsState extends State<CodexScopeSettings> {
         if (widget.api != null) const SizedBox(height: 12),
         if (_loading)
           const Padding(
-              padding: EdgeInsets.only(bottom: 12), child: Text('正在加载模型…')),
+              padding: EdgeInsets.only(bottom: 12),
+              child: WxInlineBusy('正在加载模型…')),
         if (widget.api == null) const Text('连接本机服务后可设置模型。'),
         if (_error != null && _failed == null)
           Padding(

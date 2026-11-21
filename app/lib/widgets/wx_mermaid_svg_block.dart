@@ -7,6 +7,7 @@ import '../api/wenxiang_api.dart';
 import '../theme.dart';
 import '../utils/wx_diagram_fit.dart';
 import '../utils/wx_mermaid_cache.dart';
+import 'wx_chrome.dart';
 import 'wx_rich_text.dart';
 
 /// Server-rendered Mermaid (SVG via companion `/v1/mermaid/render`).
@@ -225,18 +226,9 @@ class _WxMermaidSvgBlockState extends State<WxMermaidSvgBlock> {
     }
 
     if (_png == null && _svg == null) {
-      return SizedBox(
+      return const SizedBox(
         height: 120,
-        child: Center(
-          child: SizedBox(
-            width: 22,
-            height: 22,
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-              color: Wx.muted.withValues(alpha: 0.75),
-            ),
-          ),
-        ),
+        child: Center(child: WxInlineBusy('正在生成图表…', color: Wx.muted)),
       );
     }
 

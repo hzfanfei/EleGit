@@ -35,7 +35,7 @@ class _SettingsPageState extends State<SettingsPage> {
   late String _voiceId;
   VoiceServiceProfile _voiceProfile = const VoiceServiceProfile();
   bool _saving = false;
-  bool _savingVoiceStack = false;
+  VoiceStackChoice? _pendingVoiceStack;
   String? _saveError;
   String? _voiceStackError;
   bool _probing = false;
@@ -47,6 +47,8 @@ class _SettingsPageState extends State<SettingsPage> {
   String? _previewError;
   AppVersion? _appVersion;
   bool _appVersionLoading = false;
+  bool _notificationSaving = false;
+  String? _notificationError;
 
   @override
   void initState() {
@@ -131,6 +133,7 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _runProbe() async {
+    if (_probing) return;
     if (widget.api == null) {
       setState(() => _probeError = '尚未连接本机问象服务');
       return;
@@ -154,9 +157,13 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Future<void> _selectVoiceStack(VoiceStackChoice choice) async {
     final stack = voiceStackId(choice);
-    if (stack == _voiceProfile.activeVoiceStack || _savingVoiceStack) return;
+    if (stack == _voiceProfile.activeVoiceStack ||
+        _pendingVoiceStack != null ||
+        _saving) {
+      return;
+    }
     setState(() {
-      _savingVoiceStack = true;
+      _pendingVoiceStack = choice;
       _voiceStackError = null;
     });
     try {
@@ -165,18 +172,19 @@ class _SettingsPageState extends State<SettingsPage> {
     } catch (err) {
       if (mounted) setState(() => _voiceStackError = err.toString());
     } finally {
-      if (mounted) setState(() => _savingVoiceStack = false);
+      if (mounted) setState(() => _pendingVoiceStack = null);
     }
   }
 
   Future<void> _selectVoice(TtsVoiceOption voice) async {
+    if (_saving || _pendingVoiceStack != null) return;
     setState(() {
       _voiceId = voice.id;
       _saveError = null;
       _saving = true;
     });
-    await _memory?.saveTtsVoice(voice.id);
     try {
+      await _memory?.saveTtsVoice(voice.id);
       await widget.api?.setTtsVoice(voice.id);
     } catch (err) {
       if (mounted) {
@@ -184,6 +192,22 @@ class _SettingsPageState extends State<SettingsPage> {
       }
     } finally {
       if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _setNotifications(bool enabled) async {
+    final api = widget.api;
+    if (api == null || _notificationSaving) return;
+    setState(() {
+      _notificationSaving = true;
+      _notificationError = null;
+    });
+    try {
+      await NotificationCenter.instance.setEnabled(api, want: enabled);
+    } catch (err) {
+      if (mounted) setState(() => _notificationError = '通知设置保存失败：$err');
+    } finally {
+      if (mounted) setState(() => _notificationSaving = false);
     }
   }
 
@@ -271,11 +295,6 @@ class _SettingsPageState extends State<SettingsPage> {
                         .bodySmall
                         ?.copyWith(color: Wx.muted),
                   ),
-                  if (_savingVoiceStack) ...[
-                    const SizedBox(height: 10),
-                    Text('正在同步到本机服务…',
-                        style: Theme.of(context).textTheme.labelSmall),
-                  ],
                   if (_voiceStackError != null) ...[
                     const SizedBox(height: 10),
                     Text(
@@ -305,8 +324,12 @@ class _SettingsPageState extends State<SettingsPage> {
                             selected:
                                 voiceStackId(VoiceStackChoice.values[i]) ==
                                     _voiceProfile.activeVoiceStack,
-                            onTap: () =>
-                                _selectVoiceStack(VoiceStackChoice.values[i]),
+                            saving: _pendingVoiceStack ==
+                                VoiceStackChoice.values[i],
+                            onTap: _pendingVoiceStack != null || _saving
+                                ? null
+                                : () => _selectVoiceStack(
+                                    VoiceStackChoice.values[i]),
                           ),
                         ],
                       ],
@@ -339,11 +362,6 @@ class _SettingsPageState extends State<SettingsPage> {
                           .labelSmall
                           ?.copyWith(color: Wx.faint),
                     ),
-                  ],
-                  if (_saving) ...[
-                    const SizedBox(height: 10),
-                    Text('正在同步到本机服务…',
-                        style: Theme.of(context).textTheme.labelSmall),
                   ],
                   if (_saveError != null) ...[
                     const SizedBox(height: 10),
@@ -392,7 +410,10 @@ class _SettingsPageState extends State<SettingsPage> {
                               voice: group.value[i],
                               selected: group.value[i].id == _voiceId,
                               defaultVoiceId: defaultVoiceId,
-                              onTap: () => _selectVoice(group.value[i]),
+                              saving: _saving && group.value[i].id == _voiceId,
+                              onTap: _saving || _pendingVoiceStack != null
+                                  ? null
+                                  : () => _selectVoice(group.value[i]),
                               onPreview: widget.api == null
                                   ? null
                                   : () =>
@@ -421,7 +442,9 @@ class _SettingsPageState extends State<SettingsPage> {
                   FilledButton.tonal(
                     onPressed:
                         _probing || widget.api == null ? null : _runProbe,
-                    child: Text(_probing ? '检测中…' : '运行检测'),
+                    child: _probing
+                        ? const WxInlineBusy('正在检测通路…')
+                        : const Text('运行检测'),
                   ),
                   if (_probeError != null) ...[
                     const SizedBox(height: 10),
@@ -474,23 +497,22 @@ class _SettingsPageState extends State<SettingsPage> {
                         clipBehavior: Clip.antiAlias,
                         child: SwitchListTile(
                           value: isEnabled,
-                          onChanged: (val) {
-                            NotificationCenter.instance
-                                .setEnabled(widget.api!, want: val)
-                                .catchError((Object err) {
-                              if (!mounted) return null;
-                              setState(() => _saveError = err.toString());
-                              return null;
-                            });
-                          },
+                          onChanged:
+                              _notificationSaving ? null : _setNotifications,
                           title: const Text('开启本地通知'),
-                          subtitle: Text(
-                            status,
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(color: Wx.muted),
-                          ),
+                          subtitle: _notificationSaving
+                              ? const WxInlineBusy('正在更新通知设置…')
+                              : Text(
+                                  _notificationError ?? status,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodySmall
+                                      ?.copyWith(
+                                        color: _notificationError == null
+                                            ? Wx.muted
+                                            : Wx.danger,
+                                      ),
+                                ),
                           secondary: Icon(
                             isEnabled
                                 ? Icons.notifications_active_rounded
@@ -752,17 +774,17 @@ class _VoiceStackTile extends StatelessWidget {
     required this.choice,
     required this.selected,
     required this.onTap,
+    required this.saving,
   });
 
   final VoiceStackChoice choice;
   final bool selected;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
+  final bool saving;
 
   @override
   Widget build(BuildContext context) {
     return InkWell(
-      splashFactory: NoSplash.splashFactory,
-      overlayColor: const WidgetStatePropertyAll(Colors.transparent),
       onTap: onTap,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
@@ -785,7 +807,9 @@ class _VoiceStackTile extends StatelessWidget {
                 ],
               ),
             ),
-            if (selected)
+            if (saving)
+              const WxInlineBusy('同步中…')
+            else if (selected)
               const Icon(Icons.check_rounded, color: Wx.accent, size: 20),
           ],
         ),
@@ -800,6 +824,7 @@ class _VoiceTile extends StatelessWidget {
     required this.selected,
     required this.defaultVoiceId,
     required this.onTap,
+    required this.saving,
     this.onPreview,
     this.previewLoading = false,
     this.previewDisabled = false,
@@ -808,7 +833,8 @@ class _VoiceTile extends StatelessWidget {
   final TtsVoiceOption voice;
   final bool selected;
   final String defaultVoiceId;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
+  final bool saving;
   final VoidCallback? onPreview;
   final bool previewLoading;
   final bool previewDisabled;
@@ -822,8 +848,6 @@ class _VoiceTile extends StatelessWidget {
         children: [
           Expanded(
             child: InkWell(
-              splashFactory: NoSplash.splashFactory,
-              overlayColor: const WidgetStatePropertyAll(Colors.transparent),
               onTap: onTap,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -844,8 +868,8 @@ class _VoiceTile extends StatelessWidget {
           ),
           if (onPreview != null)
             IconButton(
-              onPressed: previewDisabled && !previewLoading ? null : onPreview,
-              tooltip: '试听',
+              onPressed: previewDisabled ? null : onPreview,
+              tooltip: previewLoading ? '正在准备试听…' : '试听',
               visualDensity: VisualDensity.compact,
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
@@ -854,7 +878,9 @@ class _VoiceTile extends StatelessWidget {
                   : const Icon(Icons.volume_up_rounded,
                       size: 22, color: Wx.muted),
             ),
-          if (selected)
+          if (saving)
+            const WxInlineBusy('同步中…')
+          else if (selected)
             const Icon(Icons.check_rounded, color: Wx.accent, size: 20),
         ],
       ),

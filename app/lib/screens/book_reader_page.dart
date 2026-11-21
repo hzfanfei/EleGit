@@ -58,6 +58,9 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
   bool _chapterLoading = false;
   bool _loadingTail = false;
   bool _maintainingPrefetch = false;
+  Object? _tailError;
+  int _chapterNavigation = 0;
+  int? _prefetchedTail;
   final Map<int, Future<String?>> _chapterFetches = {};
   BookReadingManifest? _manifest;
   int _rangeFirst = 0;
@@ -80,10 +83,8 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
   BookReaderPrefs? _readerPrefs;
   ReaderSettings _settings = const ReaderSettings();
   String _chapterHint = '';
-  String _progressLabel = '';
+  final _progressLabel = ValueNotifier('');
   String _openingHint = '正在读取目录…';
-  double _bookProgress = 0;
-  double _scrollFraction = 0;
   late final BookQuickVoiceSession _quickVoice;
   bool _voiceReady = false;
   bool _voiceCall = false;
@@ -99,6 +100,7 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
   // otherwise swallow link clicks when wrapped in a GestureDetector).
   Offset? _chromeTapDown;
   Duration? _chromeTapDownAt;
+  bool get _hasChapter => _chapterMarkdownByIndex.containsKey(_rangeFirst);
 
   static const _askExpandedSheet = kBookAskHalfFraction;
   static const _askFullSheet = kBookAskFullFraction;
@@ -154,8 +156,8 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
     WidgetsBinding.instance.addObserver(this);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       unawaited(_openBook());
-      _scheduleChromeHide();
       _applySystemChrome();
     });
   }
@@ -192,56 +194,53 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
   }
 
   Future<void> _openBook() async {
-    SharedPreferences? prefs = widget.prefs;
-    if (prefs == null) {
-      prefs = await SharedPreferences.getInstance();
-      if (!mounted) return;
-      _hydratePrefs(prefs);
-      setState(() {});
-    }
+    final navigation = ++_chapterNavigation;
+    setState(() {
+      _loadError = null;
+      _openingHint = '正在读取目录…';
+    });
     try {
-      await _progress?.markOpened(widget.book.id);
-    } catch (_) {}
-    try {
-      if (mounted) setState(() => _openingHint = '正在读取目录…');
-      final manifest = await widget.api.fetchBookReadingManifest(widget.book.id);
+      if (_progress == null) {
+        final prefs = await SharedPreferences.getInstance();
+        if (!mounted) return;
+        setState(() => _hydratePrefs(prefs));
+      }
+      unawaited(
+          _progress?.markOpened(widget.book.id).catchError((Object _) {}));
+      final manifest =
+          await widget.api.fetchBookReadingManifest(widget.book.id);
       if (!mounted) return;
       if (manifest.chapters.isEmpty) {
         setState(() => _loadError = '本书没有可读章节，请确认 companion 已物化 EPUB。');
         return;
       }
-      final resume = _progress!.resume(widget.book.id);
-      final first = (resume?.chapterIndex ?? 0).clamp(0, manifest.chapters.length - 1);
+      final resume = _progress?.resume(widget.book.id);
+      final first =
+          (resume?.chapterIndex ?? 0).clamp(0, manifest.chapters.length - 1);
       setState(() {
         _manifest = manifest;
         _chapterLoading = true;
         _openingHint = '正在载入章节…';
-        _rangeFirst = first;
-        _rangeLast = first;
-        _activeChapterIndex = first;
       });
-      _updateChapterHint(first);
-      await _loadChapterRange(first, first);
-      if (!mounted) return;
-      setState(() {
-        _activeChapterIndex = first;
-        _openingHint = '';
-        _updateChapterHint(first);
-      });
+      await _fetchChapterMarkdown(first);
+      if (!mounted || navigation != _chapterNavigation) return;
       // Only restore pixel offset when resume was single-chapter; multi-chapter
       // scroll offsets would jump past the only loaded chapter and look blank.
       final restoreScroll = resume != null &&
-          (resume.throughChapterIndex == null || resume.lastChapter == resume.chapterIndex);
-      final offset = restoreScroll ? (resume!.scrollOffset) : 0.0;
-      _restoreScrollOffset(offset);
-      unawaited(_maintainPrefetch());
+          (resume.throughChapterIndex == null ||
+              resume.lastChapter == resume.chapterIndex);
+      _showChapter(first, restoreScroll ? resume.scrollOffset : 0);
     } catch (err) {
-      if (!mounted) return;
-      setState(() => _loadError = err);
+      if (!mounted || navigation != _chapterNavigation) return;
+      setState(() {
+        _chapterLoading = false;
+        _loadError = err;
+      });
     }
   }
 
   void _restoreScrollOffset(double offset) {
+    final navigation = _chapterNavigation;
     void apply() {
       if (!_scrollController.hasClients) return;
       final max = _scrollController.position.maxScrollExtent;
@@ -251,10 +250,12 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
     }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || navigation != _chapterNavigation) return;
       apply();
       unawaited(_maintainPrefetch());
       // Markdown layout may grow after first frame.
       WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || navigation != _chapterNavigation) return;
         apply();
         unawaited(_maintainPrefetch());
       });
@@ -286,34 +287,18 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
     });
   }
 
-  Future<void> _loadChapterRange(int first, int last) async {
-    final manifest = _manifest;
-    if (manifest == null) return;
+  void _showChapter(int index, double offset) {
+    _saveDebounce?.cancel();
     setState(() {
-      _chapterLoading = true;
-      _rangeFirst = first;
-      _rangeLast = first;
+      _chapterLoading = false;
+      _loadingTail = false;
+      _tailError = null;
+      _rangeFirst = _rangeLast = _activeChapterIndex = index;
+      _updateChapterHint(index);
     });
-    try {
-      for (var i = first; i <= last; i++) {
-        await _fetchChapterMarkdown(i);
-        if (!mounted) return;
-        setState(() => _rangeLast = i);
-      }
-      if (!mounted) return;
-      setState(() => _chapterLoading = false);
-      _publishReadingPlace();
-      _refreshProgressLabels();
-    } catch (err) {
-      if (!mounted) return;
-      setState(() => _chapterLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('加载章节失败：$err'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    }
+    _publishReadingPlace();
+    _restoreScrollOffset(offset);
+    _scheduleChromeHide();
   }
 
   Future<void> _onBookLink(String href, String text) async {
@@ -338,26 +323,57 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
 
   Future<void> _jumpToChapter(int index, {double scrollOffset = 0}) async {
     final manifest = _manifest;
-    if (manifest == null || index < 0 || index >= manifest.chapters.length) return;
-    await _loadChapterRange(index, index);
-    if (!mounted) return;
-    setState(() => _activeChapterIndex = index);
-    _updateChapterHint(index);
-    _publishReadingPlace();
-    _restoreScrollOffset(scrollOffset);
-    unawaited(_maintainPrefetch());
+    if (manifest == null || index < 0 || index >= manifest.chapters.length) {
+      return;
+    }
+    final navigation = ++_chapterNavigation;
+    if (_chapterMarkdownByIndex[index] == null) {
+      setState(() {
+        _chapterLoading = true;
+        _loadingTail = false;
+      });
+      try {
+        await _fetchChapterMarkdown(index);
+      } catch (err) {
+        if (!mounted || navigation != _chapterNavigation) return;
+        setState(() => _chapterLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('加载章节失败：$err'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        _scheduleChromeHide();
+        return;
+      }
+    }
+    if (mounted && navigation == _chapterNavigation) {
+      _showChapter(index, scrollOffset);
+    }
   }
 
   Future<void> _maintainPrefetch() async {
     final manifest = _manifest;
-    if (_maintainingPrefetch || _chapterLoading || manifest == null) return;
+    if (_maintainingPrefetch ||
+        _chapterLoading ||
+        manifest == null ||
+        !_hasChapter ||
+        _tailError != null) {
+      return;
+    }
+    final navigation = _chapterNavigation;
     _maintainingPrefetch = true;
     try {
-      for (final index in readerPrefetchTargets(
-        rangeLast: _rangeLast,
-        chapterCount: manifest.chapters.length,
-      )) {
-        unawaited(_fetchChapterMarkdown(index));
+      if (_prefetchedTail != _rangeLast) {
+        _prefetchedTail = _rangeLast;
+        for (final index in readerPrefetchTargets(
+          rangeLast: _rangeLast,
+          chapterCount: manifest.chapters.length,
+        )) {
+          // A speculative fetch can fail. The visible request below can retry.
+          unawaited(
+              _fetchChapterMarkdown(index).catchError((Object _) => null));
+        }
       }
       if (!_scrollController.hasClients) return;
       final pos = _scrollController.position;
@@ -371,30 +387,31 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
       }
       final next = _rangeLast + 1;
       if (_chapterMarkdownByIndex[next] == null) {
-        if (mounted) setState(() => _loadingTail = true);
+        setState(() => _loadingTail = true);
         try {
           await _fetchChapterMarkdown(next);
         } catch (err) {
-          if (!mounted) return;
-          setState(() => _loadingTail = false);
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('加载下一章失败：$err'),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
+          if (!mounted || navigation != _chapterNavigation) return;
+          setState(() {
+            _loadingTail = false;
+            _tailError = err;
+          });
           return;
         }
-        if (!mounted) return;
-        setState(() => _loadingTail = false);
       }
-      if (!mounted || _chapterMarkdownByIndex[next] == null) return;
-      setState(() => _rangeLast = next);
+      if (!mounted || navigation != _chapterNavigation) return;
+      setState(() {
+        _loadingTail = false;
+        _rangeLast = next;
+      });
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) unawaited(_maintainPrefetch());
       });
     } finally {
       _maintainingPrefetch = false;
+      if (mounted && navigation != _chapterNavigation) {
+        unawaited(_maintainPrefetch());
+      }
     }
   }
 
@@ -463,26 +480,11 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
   void _refreshProgressLabels() {
     final count = _manifest?.chapters.length ?? 0;
     final continuous = _continuousProgress();
-    final label = readerProgressLabel(
+    _progressLabel.value = readerProgressLabel(
       chapterIndex: continuous.chapterIndex,
       chapterCount: count,
       chapterScrollFraction: continuous.chapterScrollFraction,
     );
-    final progress = readerBookProgress(
-      chapterIndex: continuous.chapterIndex,
-      chapterCount: count,
-      chapterScrollFraction: continuous.chapterScrollFraction,
-    );
-    final frac = continuous.chapterScrollFraction;
-    if (label != _progressLabel ||
-        (progress - _bookProgress).abs() > 0.002 ||
-        (frac - _scrollFraction).abs() > 0.02) {
-      setState(() {
-        _progressLabel = label;
-        _bookProgress = progress;
-        _scrollFraction = frac;
-      });
-    }
   }
 
   void _onScroll() {
@@ -501,7 +503,7 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
 
   void _scheduleChromeHide() {
     _chromeHide?.cancel();
-    if (!_chromeVisible) return;
+    if (!_chromeVisible || !_hasChapter) return;
     _chromeHide = Timer(const Duration(seconds: 5), () {
       if (!mounted) return;
       setState(() => _chromeVisible = false);
@@ -572,8 +574,9 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
 
   Future<void> _saveProgress() async {
     final store = _progress;
-    if (store == null) return;
-    final offset = _scrollController.hasClients ? _scrollController.offset : 0.0;
+    if (store == null || !_hasChapter) return;
+    final offset =
+        _scrollController.hasClients ? _scrollController.offset : 0.0;
     await store.saveResume(
       widget.book.id,
       BookReadingResume(
@@ -657,6 +660,7 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
     _askScrollController.dispose();
     _sheetSize.dispose();
     _readingPlace.dispose();
+    _progressLabel.dispose();
     super.dispose();
   }
 
@@ -684,7 +688,7 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
               child: Center(
                 child: Padding(
                   padding: Wx.pagePadding,
-                  child: Text(_loadError.toString(), textAlign: TextAlign.center),
+                  child: WxErrorPanel(error: _loadError!, onRetry: _openBook),
                 ),
               ),
             ),
@@ -780,89 +784,141 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
                     child: ColoredBox(
                       key: const Key('book-reader-body'),
                       color: palette.paper,
-                      child: _chapterMarkdownByIndex.isEmpty
-                        ? _OpeningSkeleton(
-                            palette: palette,
-                            title: widget.book.title,
-                            hint: _openingHint.isEmpty ? '正在载入章节…' : _openingHint,
-                            padding: EdgeInsets.fromLTRB(
-                              _settings.horizontalPadding,
-                              topContentPad,
-                              _settings.horizontalPadding,
-                              kQuickVoiceFabClearance,
-                            ),
-                          )
-                        : SelectionArea(
-                            onSelectionChanged: (content) {
-                              // A tap collapses the caret and still reports content.
-                              // Only a real selection should swallow the next tap.
-                              _textSelected = (content?.plainText ?? '').isNotEmpty;
-                            },
-                            child: ListView.builder(
-                            controller: _scrollController,
-                            cacheExtent: 2400,
-                            padding: EdgeInsets.fromLTRB(
-                              _settings.horizontalPadding,
-                              topContentPad,
-                              _settings.horizontalPadding,
-                              kQuickVoiceFabClearance,
-                            ),
-                            itemCount: (_rangeLast - _rangeFirst + 1) + (_loadingTail ? 1 : 0),
-                            itemBuilder: (context, itemIndex) {
-                              final span = _rangeLast - _rangeFirst + 1;
-                              if (itemIndex >= span) {
-                                return const Padding(
-                                  padding: EdgeInsets.symmetric(vertical: 24),
-                                  child: Center(child: WxLoading()),
-                                );
-                              }
-                              final chapterIndex = _rangeFirst + itemIndex;
-                              final md = _chapterMarkdownByIndex[chapterIndex];
-                              if (md == null) {
-                                return const Padding(
-                                  padding: EdgeInsets.symmetric(vertical: 24),
-                                  child: Center(child: WxLoading()),
-                                );
-                              }
-                              final chapter = manifest?.chapters[chapterIndex];
-                              final title = chapter?.title.trim() ?? '';
-                              final heading = title.isEmpty ? '第 ${chapterIndex + 1} 章' : title;
-                              final body = md.trim().isEmpty ? '本章暂无正文。' : md;
-                              return RepaintBoundary(
-                                child: Padding(
-                                  padding: EdgeInsets.only(top: itemIndex == 0 ? 0 : 28),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                                    children: [
-                                      Text(
-                                        heading,
-                                        style: bookReaderChapterStyle(
-                                          palette: palette,
-                                          settings: _settings,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 16),
-                                      BookMarkdownBody(
-                                        api: widget.api,
-                                        bookId: widget.book.id,
-                                        chapterFile: chapter?.file ?? '',
-                                        spineHref: chapter?.href,
-                                        chapterTitle: heading,
-                                        data: body,
-                                        mdStyle: mdStyle,
-                                        onTapLink: _onBookLink,
-                                        onConsumeTap: () => _linkTappedThisGesture = true,
-                                      ),
-                                    ],
-                                  ),
+                      child: !_hasChapter
+                          ? _OpeningSkeleton(
+                              palette: palette,
+                              title: widget.book.title,
+                              hint: _openingHint,
+                              padding: EdgeInsets.fromLTRB(
+                                _settings.horizontalPadding,
+                                topContentPad,
+                                _settings.horizontalPadding,
+                                kQuickVoiceFabClearance,
+                              ),
+                            )
+                          : SelectionArea(
+                              onSelectionChanged: (content) {
+                                // A tap collapses the caret and still reports content.
+                                // Only a real selection should swallow the next tap.
+                                _textSelected =
+                                    (content?.plainText ?? '').isNotEmpty;
+                              },
+                              child: ListView.builder(
+                                controller: _scrollController,
+                                padding: EdgeInsets.fromLTRB(
+                                  _settings.horizontalPadding,
+                                  topContentPad,
+                                  _settings.horizontalPadding,
+                                  kQuickVoiceFabClearance,
                                 ),
-                              );
-                            },
+                                itemCount: (_rangeLast - _rangeFirst + 1) +
+                                    (_loadingTail || _tailError != null
+                                        ? 1
+                                        : 0),
+                                itemBuilder: (context, itemIndex) {
+                                  final span = _rangeLast - _rangeFirst + 1;
+                                  if (itemIndex >= span) {
+                                    return Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                          vertical: 24),
+                                      child: _tailError == null
+                                          ? Center(
+                                              child: WxInlineBusy('正在加载下一章…',
+                                                  color: palette.ink),
+                                            )
+                                          : WxErrorPanel(
+                                              error: _tailError!,
+                                              retryLabel: '重试加载下一章',
+                                              onRetry: () {
+                                                setState(
+                                                    () => _tailError = null);
+                                                unawaited(_maintainPrefetch());
+                                              },
+                                            ),
+                                    );
+                                  }
+                                  final chapterIndex = _rangeFirst + itemIndex;
+                                  final md =
+                                      _chapterMarkdownByIndex[chapterIndex];
+                                  if (md == null) {
+                                    return const Padding(
+                                      padding:
+                                          EdgeInsets.symmetric(vertical: 24),
+                                      child: Center(child: WxLoading()),
+                                    );
+                                  }
+                                  final chapter =
+                                      manifest?.chapters[chapterIndex];
+                                  final title = chapter?.title.trim() ?? '';
+                                  final heading = title.isEmpty
+                                      ? '第 ${chapterIndex + 1} 章'
+                                      : title;
+                                  final body =
+                                      md.trim().isEmpty ? '本章暂无正文。' : md;
+                                  return Padding(
+                                    key: ValueKey(chapterIndex),
+                                    padding: EdgeInsets.only(
+                                        top: itemIndex == 0 ? 0 : 28),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
+                                      children: [
+                                        Text(
+                                          heading,
+                                          style: bookReaderChapterStyle(
+                                            palette: palette,
+                                            settings: _settings,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 16),
+                                        BookMarkdownBody(
+                                          api: widget.api,
+                                          bookId: widget.book.id,
+                                          chapterFile: chapter?.file ?? '',
+                                          spineHref: chapter?.href,
+                                          chapterTitle: heading,
+                                          data: body,
+                                          mdStyle: mdStyle,
+                                          onTapLink: _onBookLink,
+                                          onConsumeTap: () =>
+                                              _linkTappedThisGesture = true,
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                },
+                              ),
                             ),
-                          ),
                     ),
                   ),
                 ),
+                if (_chapterLoading && _hasChapter)
+                  Positioned(
+                    top: topContentPad,
+                    left: Wx.inset,
+                    right: Wx.inset,
+                    child: IgnorePointer(
+                      child: Center(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: palette.paper,
+                            borderRadius: BorderRadius.circular(Wx.radius),
+                            border: Border.all(
+                                color: palette.muted.withValues(alpha: 0.3)),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 8),
+                            child: WxInlineBusy(
+                              '正在打开章节…',
+                              color: palette.ink,
+                              style: TextStyle(color: palette.ink),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
                 Positioned.fill(
                   child: IgnorePointer(
                     ignoring: _scrimOpacity(fraction) <= 0,
@@ -890,17 +946,21 @@ class _BookReaderPageState extends State<BookReaderPage> with WidgetsBindingObse
                       duration: Wx.motion,
                       curve: Wx.motionCurve,
                       opacity: _chromeVisible ? 1 : 0,
-                      child: BookReaderChrome(
-                        title: widget.book.title,
-                        chapter: _chapterHint.isEmpty
-                            ? '第 ${_activeChapterIndex + 1} 章'
-                            : _chapterHint,
-                        progressLabel: _progressLabel,
-                        palette: palette,
-                        onBack: _leave,
-                        onOpenToc: _showToc,
-                        onOpenSettings: _showSettings,
-                        onCall: _voiceCall ? () => unawaited(_askPanelKey.currentState?.openCall()) : null,
+                      child: ValueListenableBuilder<String>(
+                        valueListenable: _progressLabel,
+                        builder: (context, progress, _) => BookReaderChrome(
+                          title: widget.book.title,
+                          chapter: _chapterHint,
+                          progressLabel: progress,
+                          palette: palette,
+                          onBack: _leave,
+                          onOpenToc: _hasChapter ? _showToc : null,
+                          onOpenSettings: _showSettings,
+                          onCall: _voiceCall
+                              ? () => unawaited(
+                                  _askPanelKey.currentState?.openCall())
+                              : null,
+                        ),
                       ),
                     ),
                   ),
@@ -998,8 +1058,9 @@ class _OpeningSkeleton extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 10),
-          Text(
+          WxInlineBusy(
             hint,
+            color: palette.ink,
             style: TextStyle(fontSize: 13, color: palette.muted),
           ),
           const SizedBox(height: 22),

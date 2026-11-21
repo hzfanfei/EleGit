@@ -33,39 +33,40 @@ class WxLoading extends StatefulWidget {
   State<WxLoading> createState() => _WxLoadingState();
 }
 
-class _WxLoadingState extends State<WxLoading> with SingleTickerProviderStateMixin {
-  late final AnimationController _anim = AnimationController(
+class _WxLoadingState extends State<WxLoading>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _animation = AnimationController(
     vsync: this,
     duration: Wx.breath,
-  )..repeat();
+  );
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _animation.value = 0.5;
+    } else if (!_animation.isAnimating) {
+      _animation.repeat();
+    }
+  }
 
   @override
   void dispose() {
-    _anim.dispose();
+    _animation.dispose();
     super.dispose();
-  }
-
-  double _strokeOpacity() {
-    final t = _anim.value;
-    final wave = t < 0.5 ? t * 2 : (1 - t) * 2;
-    return 0.28 + 0.72 * wave;
   }
 
   @override
   Widget build(BuildContext context) {
-    final color = widget.color ?? Wx.accent;
     return Semantics(
       label: '正在加载',
-      child: SizedBox(
-        width: widget.size,
-        height: widget.size,
-        child: AnimatedBuilder(
-          animation: _anim,
-          builder: (context, _) {
-            return CustomPaint(
-              painter: _MarkPainter(color: color, barOpacity: _strokeOpacity()),
-            );
-          },
+      child: RepaintBoundary(
+        child: CustomPaint(
+          size: Size.square(widget.size),
+          painter: _MarkPainter(
+            color: widget.color ?? Wx.accent,
+            animation: _animation,
+          ),
         ),
       ),
     );
@@ -73,10 +74,17 @@ class _WxLoadingState extends State<WxLoading> with SingleTickerProviderStateMix
 }
 
 class _MarkPainter extends CustomPainter {
-  _MarkPainter({required this.color, this.barOpacity = 1});
+  _MarkPainter({required this.color, this.animation})
+      : super(repaint: animation);
 
   final Color color;
-  final double barOpacity;
+  final Animation<double>? animation;
+
+  double get barOpacity {
+    final t = animation?.value ?? 0.5;
+    final wave = t < 0.5 ? t * 2 : (1 - t) * 2;
+    return 0.28 + 0.72 * wave;
+  }
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -108,7 +116,7 @@ class _MarkPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _MarkPainter oldDelegate) {
-    return oldDelegate.barOpacity != barOpacity || oldDelegate.color != color;
+    return oldDelegate.animation != animation || oldDelegate.color != color;
   }
 }
 
@@ -419,14 +427,43 @@ class WxBusy extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: Column(
+      child: Semantics(
+        liveRegion: true,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ExcludeSemantics(
+              excluding: label != null,
+              child: const WxLoading(size: 28),
+            ),
+            if (label != null) ...[
+              const SizedBox(height: 14),
+              Text(label!, style: Theme.of(context).textTheme.bodyMedium),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class WxInlineBusy extends StatelessWidget {
+  const WxInlineBusy(this.label, {super.key, this.style, this.color});
+
+  final String label;
+  final TextStyle? style;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      liveRegion: true,
+      child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const WxLoading(size: 28),
-          if (label != null) ...[
-            const SizedBox(height: 14),
-            Text(label!, style: Theme.of(context).textTheme.bodyMedium),
-          ],
+          ExcludeSemantics(child: WxLoading(size: 16, color: color)),
+          const SizedBox(width: 8),
+          Flexible(child: Text(label, style: style)),
         ],
       ),
     );

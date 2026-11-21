@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wenxiang/api/wenxiang_api.dart';
@@ -10,8 +12,47 @@ import 'support/fake_api.dart';
 
 ThemeData _theme() => wenxiangTheme().copyWith(splashFactory: NoSplash.splashFactory);
 
+class _SlowSearchApi extends FakeWenxiangApi {
+  final firstSearch = Completer<List<RepoItem>>();
+
+  @override
+  Future<List<RepoItem>> localRepos(String query) =>
+      query == 'slow' ? firstSearch.future : super.localRepos(query);
+}
+
 void main() {
-  testWidgets('repos list shows owner, privacy and opens after checkout', (tester) async {
+  testWidgets('a slow search does not replace the newer results',
+      (tester) async {
+    final api = _SlowSearchApi();
+    await tester.pumpWidget(MaterialApp(
+      theme: _theme(),
+      home: ReposPage(api: api, onOpen: (_) {}, onAuthorized: () async {}),
+    ));
+    await tester.pumpAndSettle();
+
+    final search = find.byType(TextField);
+    await tester.enterText(search, 'slow');
+    await tester.pump();
+    expect(find.text('正在读取仓库…'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 500));
+
+    await tester.enterText(search, 'demo');
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pumpAndSettle();
+    final repo = find.descendant(
+      of: find.byType(ListView),
+      matching: find.text('demo'),
+    );
+    expect(repo, findsOneWidget);
+
+    api.firstSearch.complete([]);
+    await tester.pumpAndSettle();
+    expect(repo, findsOneWidget);
+    expect(find.text('没有找到仓库'), findsNothing);
+  });
+
+  testWidgets('repos list shows owner, privacy and opens after checkout',
+      (tester) async {
     final api = FakeWenxiangApi(
       checkoutDelay: const Duration(milliseconds: 40),
       checkoutStatusResult: CheckoutSyncStatus(

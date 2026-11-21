@@ -118,6 +118,35 @@ Future<void> openRunning(WidgetTester tester) async {
 void main() {
   tearDown(RunningSessions.stopAllForTesting);
 
+  testWidgets(
+      'reply deltas notify the active reply without refreshing the pool',
+      (tester) async {
+    final api = ControlledApi();
+    final pool = RunningSessions.of(api);
+    final repo = pool.repo(sampleRepo(), null);
+    final message = ChatMessage(role: 'user', content: '问题', turnId: 'turn');
+    repo.transcripts['s1'] = [message];
+    final task = pool.session(repo, 's1', false);
+    task.enqueue(message);
+    await tester.pump();
+
+    var poolUpdates = 0;
+    pool.addListener(() => poolUpdates += 1);
+    final replies = <String>[];
+    task.replyText.addListener(() => replies.add(task.replyText.value));
+    api.streams['s1']!
+      ..add(ChatStreamEvent(type: 'delta', text: '第一段'))
+      ..add(ChatStreamEvent(type: 'delta', text: '。'));
+    await tester.pump();
+    expect(replies, ['第一段', '第一段。']);
+    expect(poolUpdates, 0);
+
+    api.finish('s1', '第一段。');
+    await tester.pump();
+    expect(poolUpdates, greaterThan(0));
+    expect(repo.transcripts['s1']!.last.content, '第一段。');
+  });
+
   test('running status uses only the newest block without thought or commands', () {
     expect(latestRunningActivity('思考·**旧的思考**\n旧的内容\n\n跑脚本\n'
         'powershell -command private-command · 已跑 8 秒'), '执行脚本 · 已跑 8 秒');

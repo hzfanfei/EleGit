@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:characters/characters.dart';
 import 'package:flutter/foundation.dart';
@@ -17,59 +18,61 @@ class WxTypewriterStream {
 
   String _pending = '';
   int _shown = 0;
+  int _shownEnd = 0;
+  int _lastClusterStart = 0;
+  Iterator<String>? _remaining;
+  int _remainingCount = 0;
   Timer? _timer;
-  bool _finishing = false;
   Completer<void>? _finishCompleter;
   DateTime? _finishUntil;
 
   String get fullText => _pending;
 
-  bool get isIdle => _shown >= _pending.characters.length && _timer == null;
+  bool get isIdle => _shownEnd == _pending.length && _timer == null;
 
   void reset() {
-    _stopTimer();
-    _finishing = false;
-    _finishCompleter = null;
-    _finishUntil = null;
+    _finish();
     _pending = '';
     _shown = 0;
+    _shownEnd = 0;
+    _lastClusterStart = 0;
+    _remaining = null;
     visible.value = '';
   }
 
   void push(String chunk) {
     if (chunk.isEmpty) return;
     _pending += chunk;
+    _remaining = null;
     _ensureTimer();
   }
 
   void replacePending(String text) {
     _pending = text;
-    final len = _pending.characters.length;
-    if (_shown > len) _shown = len;
-    visible.value = _pending.characters.take(_shown).toString();
-    _ensureTimer();
+    _setVisiblePrefix(text.characters.take(_shown));
+    if (_shownEnd < text.length) {
+      _ensureTimer();
+    } else {
+      _finish();
+    }
   }
 
   void flushNow() {
-    _shown = _pending.characters.length;
-    visible.value = _pending;
-    _stopTimer();
-    _finishing = false;
-    _completeFinish();
+    _setVisiblePrefix(_pending.characters);
+    _finish();
   }
 
-  Future<void> animateToEnd({Duration budget = const Duration(milliseconds: 360)}) async {
-    if (_shown >= _pending.characters.length) return;
-    _finishing = true;
-    _finishUntil = DateTime.now().add(budget);
+  Future<void> animateToEnd(
+      {Duration budget = const Duration(milliseconds: 360)}) async {
+    if (_shownEnd == _pending.length) return;
+    final completer = _finishCompleter ??= Completer<void>();
+    _finishUntil ??= DateTime.now().add(budget);
     _ensureTimer();
-    final completer = Completer<void>();
-    _finishCompleter = completer;
     return completer.future;
   }
 
   void dispose() {
-    _stopTimer();
+    _finish();
     visible.dispose();
   }
 
@@ -77,19 +80,51 @@ class WxTypewriterStream {
     _timer ??= Timer.periodic(tick, (_) => _onTick());
   }
 
-  void _stopTimer() {
+  void _finish() {
     _timer?.cancel();
     _timer = null;
+    _finishUntil = null;
+    _remaining = null;
+    _finishCompleter?.complete();
+    _finishCompleter = null;
   }
 
-  int get _pendingLen => _pending.characters.length;
+  void _setVisiblePrefix(Characters prefix) {
+    _shown = prefix.length;
+    _shownEnd = prefix.string.length;
+    _lastClusterStart = _shownEnd - (prefix.isEmpty ? 0 : prefix.last.length);
+    _remaining = null;
+    visible.value = prefix.string;
+  }
+
+  void _prepareRemaining() {
+    if (_remaining != null) return;
+    // A later chunk can extend the last visible grapheme, e.g. a split emoji.
+    final tail = _pending.substring(_lastClusterStart).characters;
+    var remaining = tail.iterator;
+    _remainingCount = tail.length;
+    if (_shown > 0 && remaining.moveNext()) {
+      if (_lastClusterStart + remaining.current.length == _shownEnd) {
+        _remainingCount -= 1;
+      } else {
+        _shownEnd = _lastClusterStart;
+        _shown -= 1;
+        remaining = tail.iterator;
+      }
+    }
+    _remaining = remaining;
+  }
 
   int _stepForLag(int lag) {
     if (lag <= 0) return 0;
-    if (_finishing && _finishUntil != null) {
-      final ms = _finishUntil!.difference(DateTime.now()).inMilliseconds;
-      if (ms <= 0) return lag;
-      final ticksLeft = (ms / tick.inMilliseconds).ceil().clamp(1, 48);
+    final finishUntil = _finishUntil;
+    if (finishUntil != null) {
+      final remaining = finishUntil.difference(DateTime.now());
+      if (remaining <= Duration.zero) return lag;
+      final ticksLeft =
+          (remaining.inMicroseconds / math.max(1, tick.inMicroseconds))
+              .ceil()
+              .clamp(1, 48);
       return (lag / ticksLeft).ceil().clamp(1, lag);
     }
     if (lag > 160) return 20;
@@ -99,22 +134,21 @@ class WxTypewriterStream {
   }
 
   void _onTick() {
-    final lag = _pendingLen - _shown;
-    if (lag <= 0) {
-      _stopTimer();
-      _finishing = false;
-      _completeFinish();
+    _prepareRemaining();
+    final step = _stepForLag(_remainingCount);
+    if (step == 0) {
+      _finish();
       return;
     }
-    final step = _stepForLag(lag);
-    _shown = (_shown + step).clamp(0, _pendingLen);
-    visible.value = _pending.characters.take(_shown).toString();
+    final remaining = _remaining!;
+    for (var i = 0; i < step && remaining.moveNext(); i++) {
+      _lastClusterStart = _shownEnd;
+      _shownEnd += remaining.current.length;
+      _shown += 1;
+      _remainingCount -= 1;
+    }
+    if (_remainingCount == 0) _finish();
+    visible.value = _pending.substring(0, _shownEnd);
     onReveal?.call();
-  }
-
-  void _completeFinish() {
-    final c = _finishCompleter;
-    _finishCompleter = null;
-    if (c != null && !c.isCompleted) c.complete();
   }
 }

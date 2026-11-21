@@ -3,6 +3,23 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:wenxiang/widgets/wx_typewriter_stream.dart';
 
 void main() {
+  testWidgets('rejoins a grapheme split across streamed chunks',
+      (tester) async {
+    final typewriter = WxTypewriterStream();
+    addTearDown(typewriter.dispose);
+
+    typewriter.push('前👩');
+    await tester.pump(const Duration(milliseconds: 32));
+    expect(typewriter.visible.value, '前👩');
+
+    typewriter.push('\u200d💻后');
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(typewriter.visible.value, '前👩‍💻');
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(typewriter.visible.value, '前👩‍💻后');
+    expect(typewriter.isIdle, isTrue);
+  });
+
   test('reveals characters gradually then finishes', () async {
     final tw = WxTypewriterStream(tick: const Duration(milliseconds: 10));
     addTearDown(tw.dispose);

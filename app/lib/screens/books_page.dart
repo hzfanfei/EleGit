@@ -14,14 +14,12 @@ class BooksPage extends StatefulWidget {
     required this.api,
     required this.onBack,
     required this.onRead,
-    this.opening = false,
     this.prefs,
   });
 
   final WenxiangApi api;
   final VoidCallback onBack;
   final Future<void> Function(BookItem book, {bool expandAsk}) onRead;
-  final bool opening;
   final SharedPreferences? prefs;
 
   @override
@@ -32,6 +30,8 @@ class _BooksPageState extends State<BooksPage> {
   List<BookItem> _books = [];
   Object? _error;
   bool _loading = true;
+  int _loadEpoch = 0;
+  String? _deletingBook;
 
   @override
   void initState() {
@@ -42,6 +42,7 @@ class _BooksPageState extends State<BooksPage> {
   }
 
   Future<void> _load() async {
+    final epoch = ++_loadEpoch;
     setState(() {
       _loading = true;
       _error = null;
@@ -53,23 +54,18 @@ class _BooksPageState extends State<BooksPage> {
       final sorted = progress == null
           ? books
           : sortByLastOpened(books, (book) => progress.openedAt(book.id));
-      if (!mounted) return;
+      if (!mounted || epoch != _loadEpoch) return;
       setState(() => _books = sorted);
     } catch (err) {
-      if (!mounted) return;
+      if (!mounted || epoch != _loadEpoch) return;
       setState(() => _error = err);
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted && epoch == _loadEpoch) setState(() => _loading = false);
     }
   }
 
-  Future<void> _read(BookItem book, {bool expandAsk = false}) async {
-    if (widget.opening) return;
-    await widget.onRead(book, expandAsk: expandAsk);
-  }
-
   Future<void> _confirmDelete(BookItem book) async {
-    if (widget.opening) return;
+    if (_deletingBook != null) return;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -81,7 +77,8 @@ class _BooksPageState extends State<BooksPage> {
         ],
       ),
     );
-    if (ok != true || !mounted) return;
+    if (ok != true || !mounted || _deletingBook != null) return;
+    setState(() => _deletingBook = book.id);
     try {
       await widget.api.deleteBook(book.id);
       final prefs = await _prefs();
@@ -98,6 +95,8 @@ class _BooksPageState extends State<BooksPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(err.toString())),
       );
+    } finally {
+      if (mounted) setState(() => _deletingBook = null);
     }
   }
 
@@ -141,13 +140,14 @@ class _BooksPageState extends State<BooksPage> {
                 icon: const Icon(Icons.travel_explore_outlined, size: 20),
               ),
               IconButton(
-                tooltip: '刷新',
+                tooltip: _loading ? '正在刷新书单…' : '刷新',
                 onPressed: _loading ? null : _load,
-                icon: const Icon(Icons.refresh, size: 20),
+                icon: _loading && _books.isNotEmpty
+                    ? const WxLoading(size: 20)
+                    : const Icon(Icons.refresh, size: 20),
               ),
             ],
           ),
-          if (_loading) const LinearProgressIndicator(minHeight: 2),
           const WxHairline(),
           if (_error != null)
             Padding(
@@ -187,9 +187,10 @@ class _BooksPageState extends State<BooksPage> {
           return _BookCard(
             api: widget.api,
             book: book,
-            onRead: () => _read(book),
-            onAsk: () => _read(book, expandAsk: true),
-            onDelete: () => _confirmDelete(book),
+            onRead: () => widget.onRead(book),
+            onAsk: () => widget.onRead(book, expandAsk: true),
+            deleting: _deletingBook == book.id,
+            onDelete: _deletingBook == null ? () => _confirmDelete(book) : null,
           );
         },
       ),
@@ -204,13 +205,15 @@ class _BookCard extends StatelessWidget {
     required this.onRead,
     required this.onAsk,
     required this.onDelete,
+    required this.deleting,
   });
 
   final WenxiangApi api;
   final BookItem book;
   final VoidCallback onRead;
   final VoidCallback onAsk;
-  final VoidCallback onDelete;
+  final VoidCallback? onDelete;
+  final bool deleting;
 
   @override
   Widget build(BuildContext context) {
@@ -272,10 +275,13 @@ class _BookCard extends StatelessWidget {
                 top: -6,
                 right: -6,
                 child: IconButton(
-                  tooltip: '删除',
+                  tooltip: deleting ? '正在删除书籍…' : '删除',
                   visualDensity: VisualDensity.compact,
                   onPressed: onDelete,
-                  icon: Icon(Icons.delete_outline, size: 18, color: Wx.danger),
+                  icon: deleting
+                      ? const WxLoading(size: 18)
+                      : const Icon(Icons.delete_outline,
+                          size: 18, color: Wx.danger),
                 ),
               ),
             ],
@@ -287,14 +293,24 @@ class _BookCard extends StatelessWidget {
 
   Widget _cover() {
     if (book.hasCover) {
-      return Image.network(
-        api.bookCoverUri(book.id).toString(),
-        headers: api.headers,
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => _placeholder(),
-        loadingBuilder: (context, child, progress) {
-          if (progress == null) return child;
-          return _placeholder();
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          final pixelRatio = MediaQuery.devicePixelRatioOf(context);
+          return Image(
+            image: ResizeImage(
+              NetworkImage(api.bookCoverUri(book.id).toString(),
+                  headers: api.headers),
+              width: (constraints.maxWidth * pixelRatio).ceil().clamp(1, 4096),
+              height:
+                  (constraints.maxHeight * pixelRatio).ceil().clamp(1, 4096),
+              policy: ResizeImagePolicy.fit,
+            ),
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => _placeholder(),
+            frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+              return frame == null ? _placeholder() : child;
+            },
+          );
         },
       );
     }

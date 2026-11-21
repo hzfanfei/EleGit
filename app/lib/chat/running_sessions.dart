@@ -162,7 +162,9 @@ class SessionExecution {
   bool stopped = false;
   bool holding = false;
   bool pollOk = true;
-  String text = '';
+  final _replyText = ValueNotifier<String>('');
+  ValueListenable<String> get replyText => _replyText;
+  String get text => _replyText.value;
   String activity = '';
   String phase = 'connect';
   String? engine;
@@ -177,9 +179,6 @@ class SessionExecution {
       repo.transcripts.putIfAbsent(sessionId, () => []);
   String get title => current?.content ?? '会话';
   int? get userIndex => current == null ? null : messages.indexOf(current!);
-  List<int> get queuedIndices =>
-      queued.map(messages.indexOf).where((i) => i >= 0).toList();
-
   void enqueue(ChatMessage message) {
     queued.add(message);
     if (!busy) {
@@ -219,7 +218,7 @@ class SessionExecution {
       while (queued.isNotEmpty && !stopped) {
         current = queued.removeAt(0);
         if (current!.turnId != null) repo._streamingTurns.add(current!.turnId!);
-        text = '';
+        _replyText.value = '';
         activity = '';
         phase = 'connect';
         holding = false;
@@ -254,7 +253,7 @@ class SessionExecution {
       holding = false;
       current = null;
       decision = null;
-      text = '';
+      _replyText.value = '';
       pool.changed();
       await BackgroundWork.release();
     }
@@ -282,18 +281,21 @@ class SessionExecution {
       if (stopped) return;
       accepted = true;
       final id = event.sessionId;
-      if (id != null && id.isNotEmpty && id != sessionId) {
+      final sessionChanged = id != null && id.isNotEmpty && id != sessionId;
+      if (sessionChanged) {
         final transcript = repo.transcripts.remove(sessionId);
         sessionId = id;
         if (transcript != null) repo.transcripts[id] = transcript;
         pool._executions[id] = this;
       }
+      final previousEngine = engine;
       if (event.engine != null) engine = event.engine;
       switch (event.type) {
         case 'delta':
-          text += event.text;
+          _replyText.value += event.text;
+          if (!sessionChanged && engine == previousEngine) return;
         case 'done':
-          if (event.text.isNotEmpty) text = event.text;
+          if (event.text.isNotEmpty) _replyText.value = event.text;
           finished = true;
           activity = '';
         case 'status':
@@ -357,7 +359,7 @@ class SessionExecution {
           if (row != null) {
             activity = (row['activity'] ?? '').toString();
             final answer = (row['answer'] ?? '').toString();
-            if (answer.isNotEmpty) text = answer;
+            if (answer.isNotEmpty) _replyText.value = answer;
             if (row['partial'] != true && answer.isNotEmpty) {
               if (pool.api.ephemeral) {
                 await NotificationCenter.instance.notifyTemporaryFinish(sessionId);
@@ -369,7 +371,7 @@ class SessionExecution {
           final answer = answerAfterTurn(
               saved?.transcripts[sessionId] ?? [], current!.turnId ?? '');
           if (answer != null) {
-            text = answer;
+            _replyText.value = answer;
             return;
           }
         } catch (_) {

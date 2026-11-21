@@ -108,7 +108,10 @@ class _ChatPageState extends State<ChatPage> {
   Map<String, List<ChatMessage>> get _transcripts => _repoState.transcripts;
   List<ChatSession> get _sessions => _repoState.sessions;
   SessionExecution? get _execution => _running.execution(_sessionId);
+  SessionExecution? _shownExecution;
   String? _shownTurnId;
+  int _shownMessageCount = 0;
+  int _shownQueueCount = 0;
   late final WxTypewriterStream _typewriter;
   final ValueNotifier<String?> _liveEngine = ValueNotifier(null);
   final ValueNotifier<String> _livePhase = ValueNotifier('connect');
@@ -121,7 +124,6 @@ class _ChatPageState extends State<ChatPage> {
   bool _live = false;
   bool _busy = false;
   int? _processingUserIndex;
-  List<int> get _queuedUserIndices => _execution?.queuedIndices ?? <int>[];
   bool _agentMode = false;
   Map<String, dynamic>? _codexUsage;
   bool _usageLoading = false;
@@ -132,6 +134,7 @@ class _ChatPageState extends State<ChatPage> {
   String? _lastUser;
   List<ChatImageAttachment> _lastImages = const [];
   final List<_DraftImage> _draftImages = [];
+  bool _readingImages = false;
   bool _uploadingImages = false;
   bool _voiceReady = false;
   bool _voiceCall = false;
@@ -153,6 +156,8 @@ class _ChatPageState extends State<ChatPage> {
   bool _pendingNewBelow = false;
   bool _autoFollowing = false;
   bool _preparingChat = true;
+  bool _creatingSession = false;
+  bool get _sessionPending => _preparingChat || _creatingSession;
   late final RepoQuickVoiceSession _quickVoice;
 
   static const _scrollBottomThreshold = 80.0;
@@ -232,7 +237,7 @@ class _ChatPageState extends State<ChatPage> {
     _loadSessions().whenComplete(() {
       if (mounted) {
         setState(() => _preparingChat = false);
-        _syncExecution();
+        _syncExecution(force: true);
       }
     });
     _loadVoice();
@@ -648,6 +653,8 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _newSession() async {
+    if (_sessionPending) return;
+    setState(() => _creatingSession = true);
     try {
       final created = await widget.api.createSession(widget.repo.owner, widget.repo.name);
       if (!mounted) return;
@@ -663,13 +670,15 @@ class _ChatPageState extends State<ChatPage> {
         _lastImages = const [];
       });
       _shownTurnId = null;
-      _syncExecution();
+      _syncExecution(force: true);
       await _persist();
     } catch (err) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(humanizeError(err))),
       );
+    } finally {
+      if (mounted) setState(() => _creatingSession = false);
     }
   }
 
@@ -680,7 +689,7 @@ class _ChatPageState extends State<ChatPage> {
       _editingIndex = null;
     });
     _shownTurnId = null;
-    _syncExecution();
+    _syncExecution(force: true);
     _persist();
     if (widget.temporary) _warmAcp();
   }
@@ -701,6 +710,7 @@ class _ChatPageState extends State<ChatPage> {
         _typewriter.reset();
         _liveEngine.value = null;
       }
+      _syncExecution(force: true);
       if (_sessions.isEmpty) await _newSession();
       await _persist();
     } catch (err) {
@@ -787,11 +797,11 @@ class _ChatPageState extends State<ChatPage> {
     await _send(next, List<ChatImageAttachment>.from(message.images));
   }
 
-  int get _queuedCount => _queuedUserIndices.length;
+  int get _queuedCount => _execution?.queued.length ?? 0;
 
   bool _isQueuedUserMessage(int index, ChatMessage message) {
     if (message.role != 'user') return false;
-    if (_queuedUserIndices.contains(index)) return true;
+    if (_execution?.queued.contains(message) ?? false) return true;
     final active = _processingUserIndex;
     return _busy && active != null && index > active;
   }
@@ -827,7 +837,13 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _pickImages() async {
-    if (_uploadingImages || _preparingChat || _holding || _sttBusy) return;
+    if (_readingImages ||
+        _uploadingImages ||
+        _sessionPending ||
+        _holding ||
+        _sttBusy) {
+      return;
+    }
     final room = chatImageMaxCount - _draftImages.length;
     if (room <= 0) {
       _snack('最多带 4 张图');
@@ -855,14 +871,16 @@ class _ChatPageState extends State<ChatPage> {
       ),
     );
     if (source == null || !mounted) return;
-    if (source == ImageSource.camera) {
-      final status = await Permission.camera.request();
-      if (!status.isGranted) {
-        if (mounted) _snack('需要相机权限才能拍照');
-        return;
-      }
-    }
+    setState(() => _readingImages = true);
     try {
+      if (source == ImageSource.camera) {
+        final status = await Permission.camera.request();
+        if (!mounted) return;
+        if (!status.isGranted) {
+          _snack('需要相机权限才能拍照');
+          return;
+        }
+      }
       final picker = ImagePicker();
       final files = <XFile>[];
       if (source == ImageSource.gallery) {
@@ -885,11 +903,12 @@ class _ChatPageState extends State<ChatPage> {
       final stored = <_DraftImage>[];
       var skipped = false;
       for (final file in files.take(room)) {
-        final bytes = await file.readAsBytes();
-        if (bytes.length > chatImageMaxBytes) {
+        if (await file.length() > chatImageMaxBytes) {
           skipped = true;
           continue;
         }
+        final bytes = await file.readAsBytes();
+        if (!mounted) return;
         stored.add(_DraftImage(
           bytes: bytes,
           mimeType: chatImageMime(mimeType: file.mimeType, path: file.path),
@@ -901,6 +920,8 @@ class _ChatPageState extends State<ChatPage> {
       setState(() => _draftImages.addAll(stored));
     } catch (_) {
       if (mounted) _snack('没能读取图片');
+    } finally {
+      if (mounted) setState(() => _readingImages = false);
     }
   }
 
@@ -911,8 +932,9 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
-  Future<void> _send([String? preset, List<ChatImageAttachment>? reuseImages]) async {
-    if (_uploadingImages) return;
+  Future<void> _send(
+      [String? preset, List<ChatImageAttachment>? reuseImages]) async {
+    if (_sessionPending || _readingImages || _uploadingImages) return;
     final text = (preset ?? _input.text).trim();
     final voice = _composeFromVoice;
     _composeFromVoice = false;
@@ -927,6 +949,7 @@ class _ChatPageState extends State<ChatPage> {
     final targetMessages = _messages;
     final targetMode = _agentMode;
     final drafts = List<_DraftImage>.from(_draftImages);
+    HapticFeedback.selectionClick();
     _editingIndex = null;
     _input.clear();
     if (usingDrafts) _draftImages.clear();
@@ -970,8 +993,6 @@ class _ChatPageState extends State<ChatPage> {
       _lastUser = text;
       _lastImages = images;
     }
-    HapticFeedback.selectionClick();
-
     final message = ChatMessage(
       role: 'user', content: text, via: voice ? 'voice' : null,
       turnId: mintTurnId(), images: images,
@@ -1015,36 +1036,64 @@ class _ChatPageState extends State<ChatPage> {
     _running.changed();
   }
 
-  void _syncExecution() {
+  void _syncReplyText() {
+    final next = _shownExecution?.text ?? '';
+    final previous = _typewriter.fullText;
+    if (next == previous) return;
+    if (next.startsWith(previous)) {
+      _typewriter.push(next.substring(previous.length));
+    } else {
+      _typewriter.replacePending(next);
+    }
+  }
+
+  void _syncExecution({bool force = false}) {
     if (!mounted) return;
     final task = _execution;
-    if (task != null && task.sessionId != _sessionId) {
+    final sessionChanged = task != null && task.sessionId != _sessionId;
+    if (sessionChanged) {
       _sessionId = task.sessionId;
+    }
+    final busy = task?.busy ?? false;
+    final active = busy ? task : null;
+    final executionChanged = active != _shownExecution;
+    if (executionChanged) {
+      _shownExecution?.replyText.removeListener(_syncReplyText);
+      _shownExecution = active;
+      active?.replyText.addListener(_syncReplyText);
     }
     final turnId = task?.current?.turnId;
     final wasBusy = _busy;
-    if (turnId != _shownTurnId || task == null || !task.busy) {
-      _typewriter.flushNow();
+    if (executionChanged || turnId != _shownTurnId) {
       _typewriter.reset();
       _shownTurnId = turnId;
-    }
-    final next = task?.text ?? '';
-    if (task?.busy == true && next != _typewriter.fullText) {
-      if (next.startsWith(_typewriter.fullText)) {
-        _typewriter.push(next.substring(_typewriter.fullText.length));
-      } else {
-        _typewriter.replacePending(next);
-      }
+      _syncReplyText();
     }
     _liveEngine.value = task?.engine;
     _liveActivity.value = task?.activity ?? '';
     _livePhase.value = task?.phase ?? 'connect';
     _holdPollOk.value = task?.pollOk ?? true;
+    final messageCount = _messages.length;
+    final queueCount = _queuedCount;
+    final userIndex = task?.userIndex;
+    final decision = task?.decision;
+    if (!force &&
+        !sessionChanged &&
+        !executionChanged &&
+        busy == wasBusy &&
+        messageCount == _shownMessageCount &&
+        queueCount == _shownQueueCount &&
+        userIndex == _processingUserIndex &&
+        decision == _decision) {
+      return;
+    }
     setState(() {
-      _busy = task?.busy ?? false;
+      _busy = busy;
       _live = _busy;
-      _processingUserIndex = task?.userIndex;
-      _decision = task?.decision;
+      _shownMessageCount = messageCount;
+      _shownQueueCount = queueCount;
+      _processingUserIndex = userIndex;
+      _decision = decision;
     });
     if (wasBusy && !_busy) {
       unawaited(_refreshCodexUsage());
@@ -1073,7 +1122,7 @@ class _ChatPageState extends State<ChatPage> {
     if (task.repo.repo.fullName == widget.repo.fullName) {
       _sessionId = task.sessionId;
       _shownTurnId = null;
-      _syncExecution();
+      _syncExecution(force: true);
       await _persist();
     } else {
       await Navigator.of(context).push<void>(MaterialPageRoute(builder: (context) => ChatPage(
@@ -1092,6 +1141,7 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _openSessions() async {
+    String? closingId;
     await showModalBottomSheet<void>(
       context: context,
       backgroundColor: Wx.surface,
@@ -1101,68 +1151,85 @@ class _ChatPageState extends State<ChatPage> {
       ),
       builder: (context) {
         return StatefulBuilder(
-          builder: (context, setSheet) {
+          builder: (sheetContext, setSheet) {
             return SafeArea(
-              child: ListView(
+              child: ListView.builder(
                 shrinkWrap: true,
                 padding: const EdgeInsets.fromLTRB(Wx.inset, 8, Wx.inset, 20),
-                children: [
-                  Center(
-                    child: Container(
-                      width: 36,
-                      height: 3,
-                      margin: const EdgeInsets.only(bottom: 16),
-                      decoration: BoxDecoration(
-                        color: Wx.hairline,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  ),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          '历史会话',
-                          key: const Key('wx-session-sheet'),
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                      ),
-                      TextButton.icon(
-                        onPressed: _preparingChat
-                            ? null
-                            : () async {
-                                Navigator.pop(context);
-                                await _newSession();
-                              },
-                        icon: const Icon(Icons.add_comment_outlined, size: 18),
-                        label: const Text('新建'),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  const WxHairline(),
-                  const SizedBox(height: 8),
-                  if (_sessions.isEmpty)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(0, 8, 0, 16),
-                      child: Text('还没有会话', style: Theme.of(context).textTheme.bodyMedium),
-                    ),
-                  for (final session in _sessions)
-                    _SessionRow(
+                itemCount: 1 + _sessions.length,
+                itemBuilder: (context, index) {
+                  if (index > 0) {
+                    final session = _sessions[index - 1];
+                    return _SessionRow(
                       session: session,
                       selected: session.id == _sessionId,
-                      onOpen: () {
-                        Navigator.pop(context);
-                        _switchSession(session);
-                      },
-                      onClose: _busy
+                      closing: closingId == session.id,
+                      onOpen: closingId != null
+                          ? null
+                          : () {
+                              Navigator.pop(context);
+                              _switchSession(session);
+                            },
+                      onClose: _busy || closingId != null
                           ? null
                           : () async {
+                              setSheet(() => closingId = session.id);
                               await _closeSession(session);
-                              setSheet(() {});
+                              if (sheetContext.mounted) {
+                                setSheet(() => closingId = null);
+                              }
                             },
-                    ),
-                ],
+                    );
+                  }
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 36,
+                          height: 3,
+                          margin: const EdgeInsets.only(bottom: 16),
+                          decoration: BoxDecoration(
+                            color: Wx.hairline,
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                      ),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              '历史会话',
+                              key: const Key('wx-session-sheet'),
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                          ),
+                          TextButton.icon(
+                            onPressed: _sessionPending || closingId != null
+                                ? null
+                                : () async {
+                                    Navigator.pop(context);
+                                    await _newSession();
+                                  },
+                            icon: const Icon(Icons.add_comment_outlined,
+                                size: 18),
+                            label: const Text('新建'),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      const WxHairline(),
+                      const SizedBox(height: 8),
+                      if (_sessions.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(0, 8, 0, 16),
+                          child: Text('还没有会话',
+                              style: Theme.of(context).textTheme.bodyMedium),
+                        ),
+                    ],
+                  );
+                },
               ),
             );
           },
@@ -1197,6 +1264,7 @@ class _ChatPageState extends State<ChatPage> {
     widget.api.linkEpoch.removeListener(_onLinkChanged);
     chatBackfillTick.removeListener(_onChatBackfill);
     _running.removeListener(_syncExecution);
+    _shownExecution?.replyText.removeListener(_syncReplyText);
     _quickVoice.dispose();
     _disposeStt();
     _micSub?.cancel();
@@ -1221,6 +1289,7 @@ class _ChatPageState extends State<ChatPage> {
         ? ''
         : session.title;
     final itemCount = _messages.length + (_live ? 1 : 0);
+    final sessionWait = _creatingSession ? '正在新建会话…' : '正在准备对话…';
     return PopScope(
       canPop: false,
       child: Scaffold(
@@ -1245,7 +1314,7 @@ class _ChatPageState extends State<ChatPage> {
                 loading: _usageLoading,
                 onRefreshUsage: _refreshCodexUsage,
                 repoName: widget.repo.name,
-                enabled: !_busy && !_preparingChat,
+                enabled: !_busy && !_sessionPending,
                 onChanged: (value) {
                   setState(() => _agentMode = value);
                   widget.memory?.saveAgentMode(widget.repo.fullName, value);
@@ -1255,13 +1324,13 @@ class _ChatPageState extends State<ChatPage> {
                 IconButton(
                   key: const Key('wx-call'),
                   tooltip: '电话',
-                  onPressed: _preparingChat || _busy || _live ? null : _openCall,
+                  onPressed: _sessionPending || _busy || _live ? null : _openCall,
                   icon: const Icon(Icons.phone_outlined),
                 ),
               PopupMenuButton<String>(
                 key: const Key('wx-chat-more'),
                 tooltip: '更多',
-                enabled: !_preparingChat,
+                enabled: !_sessionPending,
                 color: Wx.surface,
                 surfaceTintColor: Colors.transparent,
                 icon: WxRunningMoreIcon(running: _running),
@@ -1276,7 +1345,7 @@ class _ChatPageState extends State<ChatPage> {
                   PopupMenuItem(
                     key: const Key('wx-chat-new-session'),
                     value: 'new',
-                    enabled: !_preparingChat,
+                    enabled: !_sessionPending,
                     child: const Text('新建会话'),
                   ),
                   const PopupMenuItem(
@@ -1294,15 +1363,19 @@ class _ChatPageState extends State<ChatPage> {
             ],
           ),
           const WxHairline(),
+          if (_sessionPending && itemCount > 0)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(Wx.inset, 10, Wx.inset, 4),
+              child: WxInlineBusy(sessionWait),
+            ),
           Expanded(
             child: Stack(
               clipBehavior: Clip.none,
               children: [
                 itemCount == 0
-                    ? _EmptyChat(
-                        onPick: _preparingChat ? null : _send,
-                        temporary: widget.temporary,
-                      )
+                    ? (_sessionPending
+                        ? WxBusy(label: sessionWait)
+                        : _EmptyChat(onPick: _send, temporary: widget.temporary))
                     : NotificationListener<ScrollNotification>(
                         onNotification: _onChatScrollNotification,
                         child: ListView.builder(
@@ -1384,7 +1457,7 @@ class _ChatPageState extends State<ChatPage> {
             focus: _focus,
             busy: _busy,
             queueCount: _queuedCount,
-            preparing: _preparingChat,
+            preparing: _sessionPending,
             voiceReady: _voiceReady,
             voiceInputMode: _voiceInputMode,
             holding: _holding || _holdPending,
@@ -1402,7 +1475,9 @@ class _ChatPageState extends State<ChatPage> {
             onSend: _send,
             onStop: _stop,
             draftBytes: [for (final draft in _draftImages) draft.bytes],
-            uploadingImages: _uploadingImages,
+            imageWait: _uploadingImages
+                ? '正在上传图片…'
+                : _readingImages ? '正在读取图片…' : null,
             onPickImages: _pickImages,
             onRemoveDraft: (index) {
               if (index < 0 || index >= _draftImages.length) return;
@@ -1423,15 +1498,8 @@ class _ChatPageState extends State<ChatPage> {
                 child: BookQuickVoiceFab(
                   session: _quickVoice,
                   palette: _quickVoicePalette,
-                  enabled: _voiceReady && !_preparingChat,
+                  enabled: _voiceReady && !_sessionPending,
                 ),
-              ),
-            ),
-          if (_preparingChat)
-            const ColoredBox(
-              color: Color(0x990C0D0F),
-              child: Center(
-                child: WxBusy(label: '正在准备对话…'),
               ),
             ),
         ],
@@ -1470,13 +1538,15 @@ class _SessionRow extends StatelessWidget {
     required this.session,
     required this.selected,
     required this.onOpen,
+    this.closing = false,
     this.onClose,
   });
 
   final ChatSession session;
   final bool selected;
-  final VoidCallback onOpen;
+  final VoidCallback? onOpen;
   final VoidCallback? onClose;
+  final bool closing;
 
   @override
   Widget build(BuildContext context) {
@@ -1513,11 +1583,17 @@ class _SessionRow extends StatelessWidget {
                       ],
                     ),
                   ),
-                  IconButton(
-                    tooltip: '关闭会话',
-                    icon: const Icon(Icons.close, size: 18),
-                    onPressed: onClose,
-                  ),
+                  if (closing)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 8),
+                      child: WxInlineBusy('正在关闭…'),
+                    )
+                  else
+                    IconButton(
+                      tooltip: '关闭会话',
+                      icon: const Icon(Icons.close, size: 18),
+                      onPressed: onClose,
+                    ),
                 ],
               ),
             ),
@@ -1906,6 +1982,11 @@ class _LiveTurn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final waiting = _WorkingNote(
+      phase: phase,
+      activity: activity,
+      holdPollOk: holdPollOk,
+    );
     return _VoiceTurn(
       voice: '问象',
       voiceColor: Wx.text,
@@ -1925,33 +2006,28 @@ class _LiveTurn extends StatelessWidget {
       ),
       child: ValueListenableBuilder<String>(
         valueListenable: text,
-        builder: (context, value, _) {
-          final body = value.isEmpty
-              ? _WorkingNote(phase: phase, activity: activity, holdPollOk: holdPollOk)
-              : _AnswerMarkdown(
-                  api: api,
-                  source: text,
-                  mdStyle: chatMarkdownStyle(Theme.of(context)),
-                  openLink: openAnswerLink,
-                );
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              body,
-              if (value.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: _WorkingNote(
-                    phase: phase,
-                    activity: activity,
-                    holdPollOk: holdPollOk,
-                    hideWhenIdle: true,
-                  ),
-                ),
-            ],
-          );
-        },
+        builder: (context, value, child) => value.isEmpty ? waiting : child!,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _AnswerMarkdown(
+              api: api,
+              source: text,
+              mdStyle: chatMarkdownStyle(Theme.of(context)),
+              openLink: openAnswerLink,
+            ),
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: _WorkingNote(
+                phase: phase,
+                activity: activity,
+                holdPollOk: holdPollOk,
+                hideWhenIdle: true,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2471,7 +2547,7 @@ class _Composer extends StatelessWidget {
     required this.onSend,
     required this.onStop,
     required this.draftBytes,
-    required this.uploadingImages,
+    required this.imageWait,
     required this.onPickImages,
     required this.onRemoveDraft,
   });
@@ -2498,12 +2574,12 @@ class _Composer extends StatelessWidget {
   final Future<void> Function() onSend;
   final VoidCallback onStop;
   final List<Uint8List> draftBytes;
-  final bool uploadingImages;
+  final String? imageWait;
   final Future<void> Function() onPickImages;
   final ValueChanged<int> onRemoveDraft;
 
   bool _canSend(String draft) {
-    if (preparing || uploadingImages) return false;
+    if (preparing || imageWait != null) return false;
     if (voiceInputMode) return draftBytes.isNotEmpty;
     return draft.trim().isNotEmpty || draftBytes.isNotEmpty;
   }
@@ -2527,7 +2603,7 @@ class _Composer extends StatelessWidget {
                 ChatImageStrip(
                   images: const [],
                   draftBytes: draftBytes,
-                  onRemove: uploadingImages ? null : onRemoveDraft,
+                  onRemove: imageWait == null ? onRemoveDraft : null,
                 ),
                 const SizedBox(height: 8),
               ],
@@ -2549,17 +2625,15 @@ class _Composer extends StatelessWidget {
                   ),
                   IconButton(
                     key: const Key('wx-chat-attach'),
-                    tooltip: draftBytes.length >= chatImageMaxCount ? '最多 4 张' : '上传图片',
-                    onPressed: preparing || uploadingImages || holding || sttBusy
-                        ? null
-                        : () => onPickImages(),
-                    icon: uploadingImages
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.image_outlined),
+                    tooltip: imageWait ??
+                        (draftBytes.length >= chatImageMaxCount
+                            ? '最多 4 张'
+                            : '上传图片'),
+                    onPressed:
+                        preparing || imageWait != null || holding || sttBusy
+                            ? null
+                            : () => onPickImages(),
+                    icon: const Icon(Icons.image_outlined),
                   ),
                   Expanded(
                     child: AnimatedSize(
@@ -2634,6 +2708,14 @@ class _Composer extends StatelessWidget {
                   ],
                 ],
               ),
+              if (imageWait != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: WxInlineBusy(
+                    imageWait!,
+                    style: Theme.of(context).textTheme.labelSmall,
+                  ),
+                ),
               if (busy)
                 Padding(
                   padding: const EdgeInsets.only(top: 8),

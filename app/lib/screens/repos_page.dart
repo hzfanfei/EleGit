@@ -60,6 +60,9 @@ class ReposPageState extends State<ReposPage> {
   Object? _cloneError;
   int _cloneAttempt = 0;
   bool _loading = true;
+  int _loadEpoch = 0;
+  String _search = '';
+  Object? _loadError;
   bool _reauth = false;
   Timer? _debounce;
 
@@ -80,7 +83,14 @@ class ReposPageState extends State<ReposPage> {
   }
 
   void _onQueryChanged() {
-    if (mounted) setState(() {});
+    final search = _query.text.trim();
+    if (!mounted || _search == search) return;
+    _loadEpoch += 1;
+    setState(() {
+      _search = search;
+      _loading = true;
+      _loadError = null;
+    });
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 450), () {
       if (mounted) _loadRepos();
@@ -101,9 +111,12 @@ class ReposPageState extends State<ReposPage> {
   }
 
   Future<void> _loadRepos() async {
-    final query = _query.text.trim();
+    _debounce?.cancel();
+    final epoch = ++_loadEpoch;
+    final query = _search;
     setState(() {
       _loading = true;
+      _loadError = null;
     });
     try {
       List<RepoItem> repos;
@@ -113,25 +126,23 @@ class ReposPageState extends State<ReposPage> {
           repos = await widget.api.repos(query);
           localOnly = false;
         } catch (_) {
+          if (!mounted || epoch != _loadEpoch) return;
           repos = await widget.api.localRepos(query);
           localOnly = true;
         }
       } else {
         repos = await widget.api.localRepos(query);
       }
-      if (!mounted) return;
+      if (!mounted || epoch != _loadEpoch) return;
       setState(() {
         _repos = repos;
         _localOnly = localOnly;
       });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _repos = [];
-        _localOnly = true;
-      });
+    } catch (err) {
+      if (!mounted || epoch != _loadEpoch) return;
+      setState(() => _loadError = err);
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted && epoch == _loadEpoch) setState(() => _loading = false);
     }
   }
 
@@ -153,28 +164,24 @@ class ReposPageState extends State<ReposPage> {
 
   Future<void> _open(RepoItem repo) async {
     if (_cloning != null && _cloneError == null) return;
+    final attempt = ++_cloneAttempt;
+    bool isCancelled() => !mounted || attempt != _cloneAttempt;
     HapticFeedback.lightImpact();
     setState(() {
       _cloneError = null;
       _cloning = repo;
       _checkoutPath = _pathFor(repo);
       _cloneMode = WxCloneMode.open;
-      _cloneAttempt += 1;
     });
     try {
       await openRepoWithSync(
         api: widget.api,
         repo: repo,
+        isCancelled: isCancelled,
         onScrim: (mode) {
-          if (!mounted) return;
-          setState(() {
-            _cloning = repo;
-            _cloneMode = mode;
-            _cloneAttempt += 1;
-          });
+          if (mode != _cloneMode) setState(() => _cloneMode = mode);
         },
         onPath: (path) {
-          if (!mounted || path.isEmpty) return;
           setState(() => _checkoutPath = path);
         },
         onReady: () async {
@@ -183,20 +190,19 @@ class ReposPageState extends State<ReposPage> {
           widget.onOpen(repo);
         },
       );
-      if (mounted) {
+      if (!isCancelled()) {
         setState(() {
           _cloning = null;
           _cloneError = null;
         });
       }
     } on OperationCancelled {
-      if (mounted) _dismissClone();
+      if (!isCancelled()) _dismissClone();
     } catch (err) {
-      if (!mounted) return;
+      if (isCancelled()) return;
       setState(() {
         _cloneError = err;
         _cloning ??= repo;
-        _cloneAttempt += 1;
       });
     }
   }
@@ -216,6 +222,7 @@ class ReposPageState extends State<ReposPage> {
 
   void _dismissClone() {
     setState(() {
+      _cloneAttempt += 1;
       _cloning = null;
       _cloneError = null;
     });
@@ -364,9 +371,17 @@ class ReposPageState extends State<ReposPage> {
               ),
             ),
           ),
-          if (_loading)
-            const LinearProgressIndicator(minHeight: 2),
+          if (_loading && _repos.isNotEmpty)
+            const Padding(
+              padding: EdgeInsets.fromLTRB(Wx.inset, 0, Wx.inset, 8),
+              child: WxInlineBusy('正在读取仓库…'),
+            ),
           const WxHairline(),
+          if (_loadError != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(Wx.inset, 12, Wx.inset, 0),
+              child: WxErrorPanel(error: _loadError!, onRetry: _loadRepos),
+            ),
           Expanded(
             child: Stack(
               children: [
@@ -394,6 +409,7 @@ class ReposPageState extends State<ReposPage> {
     if (_loading && _repos.isEmpty) {
       return const WxBusy(label: '正在读取仓库');
     }
+    if (_loadError != null && _repos.isEmpty) return const SizedBox.shrink();
     if (_repos.isEmpty) {
       final query = _query.text.trim();
       return WxEmpty(
@@ -475,6 +491,7 @@ class _NewRepoSheetState extends State<_NewRepoSheet> {
   }
 
   Future<void> _submit() async {
+    if (_busy) return;
     final nameError = _nameError(_name.text);
     final description = _description.text.trim();
     if (nameError != null) {
@@ -553,7 +570,7 @@ class _NewRepoSheetState extends State<_NewRepoSheet> {
           FilledButton(
             key: const Key('wx-new-repo-submit'),
             onPressed: _busy ? null : _submit,
-            child: Text(_busy ? '正在创建' : '创建'),
+            child: _busy ? const WxInlineBusy('正在创建仓库…') : const Text('创建'),
           ),
         ],
       ),

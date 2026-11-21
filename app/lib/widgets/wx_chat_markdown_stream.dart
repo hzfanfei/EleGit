@@ -22,6 +22,9 @@ import 'wx_answer_block.dart';
 class ChatMarkdownBlockParser {
   ChatMarkdownBlockParser();
 
+  static final _detailsOpen =
+      RegExp(r'^<details(?: open)?>', caseSensitive: false);
+  static final _fenceOpen = RegExp(r'^\s*(`{3,}|~{3,})');
   final List<String> completed = <String>[];
   String pending = '';
 
@@ -30,60 +33,48 @@ class ChatMarkdownBlockParser {
     final buf = StringBuffer();
     String? fence;
     var inDetails = false;
+    var tableOnly = true;
+
+    void completeBlock() {
+      completed.add(buf.toString());
+      buf.clear();
+      tableOnly = true;
+    }
 
     var cursor = 0;
     while (cursor < visible.length) {
-      var nl = visible.indexOf('\n', cursor);
+      final nl = visible.indexOf('\n', cursor);
       final lineEnd = nl == -1 ? visible.length : nl;
       var line = visible.substring(cursor, lineEnd);
       // Drop trailing \r so CRLF inputs still parse.
       if (line.endsWith('\r')) line = line.substring(0, line.length - 1);
 
+      final openFence = fence == null && !inDetails
+          ? _fenceOpen.firstMatch(line)?.group(1)
+          : null;
       if (inDetails ||
-          (fence == null &&
-              RegExp(r'^<details(?: open)?>', caseSensitive: false)
-                  .hasMatch(line.trim()))) {
-        if (!inDetails && buf.isNotEmpty) {
-          completed.add(buf.toString());
-          buf.clear();
-        }
+          (fence == null && _detailsOpen.hasMatch(line.trimLeft()))) {
+        if (!inDetails && buf.isNotEmpty) completeBlock();
         buf.writeln(line);
         inDetails = !line.trimRight().toLowerCase().endsWith('</details>');
-        if (!inDetails) {
-          completed.add(buf.toString());
-          buf.clear();
-        }
+        if (!inDetails) completeBlock();
       } else if (fence != null) {
-        buf.write(line);
-        buf.write('\n');
+        buf.writeln(line);
         if (_isFenceClose(line, fence)) {
-          completed.add(buf.toString());
-          buf.clear();
+          completeBlock();
           fence = null;
         }
-      } else if (_fenceOpen(line) != null) {
-        if (buf.isNotEmpty) {
-          completed.add(buf.toString());
-          buf.clear();
-        }
-        buf.write(line);
-        buf.write('\n');
-        fence = _fenceOpen(line);
+      } else if (openFence != null) {
+        if (buf.isNotEmpty) completeBlock();
+        buf.writeln(line);
+        fence = openFence;
       } else if (line.trim().isEmpty) {
-        if (buf.isNotEmpty && !_bufferIsTableOnly(buf.toString())) {
-          completed.add(buf.toString());
-          buf.clear();
-        }
+        if (buf.isNotEmpty && !tableOnly) completeBlock();
       } else {
         final tableLine = isMarkdownTableLine(line);
-        if (buf.isNotEmpty &&
-            !tableLine &&
-            _bufferIsTableOnly(buf.toString())) {
-          completed.add(buf.toString());
-          buf.clear();
-        }
-        buf.write(line);
-        buf.write('\n');
+        if (buf.isNotEmpty && tableOnly && !tableLine) completeBlock();
+        buf.writeln(line);
+        tableOnly = tableOnly && tableLine;
       }
 
       if (nl == -1) break;
@@ -91,15 +82,18 @@ class ChatMarkdownBlockParser {
     }
 
     pending = buf.toString();
-    _splitCompletedByMermaid();
-    _splitPendingByMermaid();
+    if (visible.contains('```')) {
+      _splitCompletedByMermaid();
+      _splitPendingByMermaid();
+    }
   }
 
   void _splitCompletedByMermaid() {
     if (completed.isEmpty) return;
     final expanded = <String>[];
     for (final block in completed) {
-      expanded.addAll(block.trimLeft().toLowerCase().startsWith('<details')
+      expanded.addAll(!block.contains('```') ||
+              block.trimLeft().toLowerCase().startsWith('<details')
           ? [block]
           : expandMarkdownBlockByMermaid(block));
     }
@@ -109,7 +103,7 @@ class ChatMarkdownBlockParser {
   }
 
   void _splitPendingByMermaid() {
-    if (pending.isEmpty ||
+    if (!pending.contains('```') ||
         pending.trimLeft().toLowerCase().startsWith('<details')) {
       return;
     }
@@ -121,23 +115,14 @@ class ChatMarkdownBlockParser {
     pending = markdownSourceForMermaidSegment(segments.last);
   }
 
-  static String? _fenceOpen(String line) =>
-      RegExp(r'^\s*(`{3,}|~{3,})').firstMatch(line)?.group(1);
-
   static bool _isFenceClose(String line, String fence) {
     final stripped = line.trim();
-    return stripped.length >= fence.length &&
-        stripped.split('').every((char) => char == fence[0]);
-  }
-
-  static bool _bufferIsTableOnly(String text) {
-    var any = false;
-    for (final line in text.split('\n')) {
-      if (line.trim().isEmpty) continue;
-      any = true;
-      if (!isMarkdownTableLine(line)) return false;
+    if (!stripped.startsWith(fence)) return false;
+    final marker = fence.codeUnitAt(0);
+    for (var i = fence.length; i < stripped.length; i++) {
+      if (stripped.codeUnitAt(i) != marker) return false;
     }
-    return any;
+    return true;
   }
 }
 
@@ -177,9 +162,10 @@ class WxChatMarkdownStream extends StatefulWidget {
 }
 
 class _WxChatMarkdownStreamState extends State<WxChatMarkdownStream> {
+  static final _listStart = RegExp(r'^\s*(?:[-*+] |\d+\. )');
   final ChatMarkdownBlockParser _parser = ChatMarkdownBlockParser();
+  final _completedViews = <({String source, Widget view})>[];
   String _lastSource = '';
-  List<String> _blocks = const [];
   bool _taskCompleted = false;
   @override
   void initState() {
@@ -191,6 +177,11 @@ class _WxChatMarkdownStreamState extends State<WxChatMarkdownStream> {
   @override
   void didUpdateWidget(covariant WxChatMarkdownStream oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.mdStyle != widget.mdStyle ||
+        oldWidget.api != widget.api ||
+        (oldWidget.onTapLink == null) != (widget.onTapLink == null)) {
+      _completedViews.clear();
+    }
     if (!identical(oldWidget.source, widget.source)) {
       oldWidget.source.removeListener(_onSourceChanged);
       widget.source.addListener(_onSourceChanged);
@@ -213,17 +204,49 @@ class _WxChatMarkdownStreamState extends State<WxChatMarkdownStream> {
       normalizeChatMarkdownTables(completion.text),
     );
     _parser.update(stripped);
-    setState(() {
-      _taskCompleted = completion.completed;
-      _blocks = [
-        ..._parser.completed,
-        if (_parser.pending.isNotEmpty) _parser.pending
-      ];
-    });
+    setState(() => _taskCompleted = completion.completed);
+  }
+
+  void _openLink(String href, String text) =>
+      widget.onTapLink?.call(href, text);
+
+  Widget _block(int index, String source, {bool pending = false}) {
+    final plain = pending &&
+        widget.showCaret &&
+        !looksLikeStructuredMarkdown(source) &&
+        !source.trimLeft().toLowerCase().startsWith('<details');
+    return Padding(
+      // Keep state such as expanded details across updates to the stream.
+      key: ValueKey('answer-block-$index'),
+      padding: EdgeInsets.only(
+        top: index == 0 ? 0 : (_listStart.hasMatch(source) ? 6 : 10),
+      ),
+      child: plain
+          ? _PendingView(text: source)
+          : WxAnswerBlock(
+              source: source,
+              mdStyle: widget.mdStyle,
+              api: widget.api,
+              onTapLink: widget.onTapLink == null ? null : _openLink,
+            ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final completed = _parser.completed;
+    if (_completedViews.length > completed.length) {
+      _completedViews.removeRange(completed.length, _completedViews.length);
+    }
+    for (var i = 0; i < completed.length; i++) {
+      final source = completed[i];
+      if (i == _completedViews.length) {
+        _completedViews.add((source: source, view: _block(i, source)));
+      } else if (_completedViews[i].source != source) {
+        _completedViews[i] = (source: source, view: _block(i, source));
+      }
+    }
+    final pending = _parser.pending;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
@@ -234,24 +257,10 @@ class _WxChatMarkdownStreamState extends State<WxChatMarkdownStream> {
             child:
                 Text('✓ 任务已完成', style: TextStyle(color: Wx.ok, fontSize: 12)),
           ),
-        for (var i = 0; i < _blocks.length; i++)
-          Padding(
-            // Position survives appended text and the pending-to-completed transition.
-            key: ValueKey('answer-block-$i'),
-            padding: EdgeInsets.only(top: i == 0 ? 0 : _blockGap(_blocks[i])),
-            child: widget.showCaret &&
-                    i == _parser.completed.length &&
-                    !looksLikeStructuredMarkdown(_blocks[i]) &&
-                    !_blocks[i].trimLeft().toLowerCase().startsWith('<details')
-                ? _PendingView(text: _blocks[i])
-                : WxAnswerBlock(
-                    source: _blocks[i],
-                    mdStyle: widget.mdStyle,
-                    api: widget.api,
-                    onTapLink: widget.onTapLink,
-                  ),
-          ),
-        if (widget.showCaret && _parser.pending.isNotEmpty)
+        for (final block in _completedViews) block.view,
+        if (pending.isNotEmpty)
+          _block(completed.length, pending, pending: true),
+        if (widget.showCaret && pending.isNotEmpty)
           const Padding(
             padding: EdgeInsets.only(top: 2),
             child:
@@ -260,9 +269,6 @@ class _WxChatMarkdownStreamState extends State<WxChatMarkdownStream> {
       ],
     );
   }
-
-  double _blockGap(String block) =>
-      RegExp(r'^\s*(?:[-*+] |\d+\. )').hasMatch(block) ? 6 : 10;
 }
 
 class _PendingView extends StatelessWidget {

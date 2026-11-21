@@ -13,36 +13,25 @@ Future<void> openRepoWithSync({
   required void Function(WxCloneMode mode)? onScrim,
   required void Function(String path)? onPath,
   required Future<void> Function() onReady,
+  required bool Function() isCancelled,
 }) async {
   onScrim?.call(WxCloneMode.open);
-  CheckoutSyncStatus status;
+  CheckoutSyncStatus? status;
   try {
     status = await api.checkoutStatus(repo.owner, repo.name);
-    if (status.path.isNotEmpty) onPath?.call(status.path);
-  } catch (_) {
-    onScrim?.call(WxCloneMode.clone);
+  } catch (_) {}
+  if (isCancelled()) return;
+
+  if (status != null && status.path.isNotEmpty) onPath?.call(status.path);
+  final ready = status != null &&
+      status.present &&
+      (status.upToDate || _useLocalCheckout(status.syncState));
+  if (!ready) {
+    final needsSync = status != null && status.present && status.behind > 0;
+    onScrim?.call(needsSync ? WxCloneMode.sync : WxCloneMode.clone);
     await api.checkout(repo.owner, repo.name);
-    api.warmChatSession(repo.owner, repo.name).catchError((_) {});
-    await onReady();
-    return;
   }
-
-  if (status.present && (status.upToDate || _useLocalCheckout(status.syncState))) {
-    api.warmChatSession(repo.owner, repo.name).catchError((_) {});
-    await onReady();
-    return;
-  }
-
-  if (status.present && status.behind > 0) {
-    onScrim?.call(WxCloneMode.sync);
-    await api.checkout(repo.owner, repo.name);
-    api.warmChatSession(repo.owner, repo.name).catchError((_) {});
-    await onReady();
-    return;
-  }
-
-  onScrim?.call(WxCloneMode.clone);
-  await api.checkout(repo.owner, repo.name);
+  if (isCancelled()) return;
   api.warmChatSession(repo.owner, repo.name).catchError((_) {});
   await onReady();
 }

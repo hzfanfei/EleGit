@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../api/wenxiang_api.dart';
 import '../copy/ask_engine.dart';
+import 'wx_chrome.dart';
 
 class AgentModelButton extends StatelessWidget {
   const AgentModelButton({super.key, required this.api, required this.scope});
@@ -283,8 +284,8 @@ class _AgentDetailsDialogState extends State<AgentDetailsDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (_loading) const LinearProgressIndicator(),
-          if (_saving) const Text('保存中…'),
+          if (_loading) const WxInlineBusy('正在读取模型和用量…'),
+          if (_saving) const WxInlineBusy('正在保存…'),
           if (_configError != null) Text(_configError!),
           if (_config != null) ...[
             ListTile(
@@ -366,7 +367,8 @@ class _AgentDetailsDialogState extends State<AgentDetailsDialog> {
             onPressed: _testing || _loading || _saving || _config == null
                 ? null
                 : _testSpeed,
-            icon: const Icon(Icons.speed),
+            icon:
+                _testing ? const WxLoading(size: 18) : const Icon(Icons.speed),
             label: Text(_testing ? '正在测速…' : '模型测速'),
           ),
           if (_speed != null)

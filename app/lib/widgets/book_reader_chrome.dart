@@ -53,7 +53,7 @@ class BookReaderChrome extends StatelessWidget {
   final String progressLabel;
   final ReaderPalette palette;
   final VoidCallback onBack;
-  final VoidCallback onOpenToc;
+  final VoidCallback? onOpenToc;
   final VoidCallback onOpenSettings;
   final VoidCallback? onCall;
 
@@ -130,7 +130,10 @@ class BookReaderChrome extends StatelessWidget {
                   IconButton(
                     tooltip: '目录',
                     onPressed: onOpenToc,
-                    icon: Icon(Icons.menu_book_outlined, color: palette.ink),
+                    icon: Icon(
+                      Icons.menu_book_outlined,
+                      color: onOpenToc == null ? palette.muted : palette.ink,
+                    ),
                   ),
                   IconButton(
                     tooltip: '阅读设置',

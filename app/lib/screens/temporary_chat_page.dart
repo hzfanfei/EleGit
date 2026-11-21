@@ -5,6 +5,7 @@ import '../api/wenxiang_api.dart';
 import '../api/temporary_project_api.dart';
 import '../chat/running_sessions.dart';
 import '../models.dart';
+import '../widgets/wx_chrome.dart';
 import '../widgets/wx_speak_answer.dart';
 import 'chat_page.dart';
 
@@ -32,13 +33,16 @@ class _TemporaryChatPageState extends State<TemporaryChatPage> {
     if (_closing) return;
     _closing = true;
     RunningSessions.of(_api).discard();
-    await AnswerSpeech.shared.stop(_api);
-    await _api.closeProject();
+    try {
+      await AnswerSpeech.shared.stop(_api);
+    } finally {
+      await _api.closeProject();
+    }
   }
 
-  Future<void> _back() async {
-    await _close();
-    if (mounted) widget.onBack();
+  void _back() {
+    unawaited(_close());
+    widget.onBack();
   }
 
   @override
@@ -49,41 +53,16 @@ class _TemporaryChatPageState extends State<TemporaryChatPage> {
 
   Future<void> _files() async {
     final id = _api.activeId;
-    if (id == null) return;
-    try {
-      final data = await widget.api.temporaryChatRequest(id);
-      if (!mounted) return;
-      final files = (data['files'] as List? ?? []).whereType<Map>();
-      await showModalBottomSheet<void>(
-          context: context,
-          builder: (context) => SafeArea(
-                  child: ListView(shrinkWrap: true, children: [
-                const ListTile(
-                    title: Text('本次生成文件'),
-                    subtitle: Text('已归档的文件可在静态资源区继续打开。')),
-                if (files.isEmpty) const ListTile(title: Text('暂无生成文件')),
-                for (final file in files)
-                  _fileTile(file, id, '${data['downloadKey']}'),
-              ])));
-    } catch (err) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(err.toString())));
-      }
+    if (id == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('临时会话还没准备好，请先新建会话')),
+      );
+      return;
     }
-  }
-
-  Widget _fileTile(Map file, String id, String downloadKey) {
-    final path = '${file['path']}';
-    final onlineUrl = file['downloadUrl'] as String?;
-    final uri = onlineUrl == null
-        ? widget.api.temporaryFileUri(id, path, downloadKey)
-        : Uri.parse(onlineUrl);
-    return ListTile(
-      leading: const Icon(Icons.download_outlined),
-      title: Text(path),
-      subtitle: onlineUrl == null ? const Text('临时下载，退出前有效') : null,
-      onTap: () => launchUrl(uri, mode: LaunchMode.externalApplication),
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (context) =>
+          _TemporaryFilesSheet(api: widget.api, sessionId: id),
     );
   }
 
@@ -94,4 +73,75 @@ class _TemporaryChatPageState extends State<TemporaryChatPage> {
       temporary: true,
       onBack: _back,
       onOpenFiles: _files);
+}
+
+class _TemporaryFilesSheet extends StatefulWidget {
+  const _TemporaryFilesSheet({required this.api, required this.sessionId});
+
+  final WenxiangApi api;
+  final String sessionId;
+
+  @override
+  State<_TemporaryFilesSheet> createState() => _TemporaryFilesSheetState();
+}
+
+class _TemporaryFilesSheetState extends State<_TemporaryFilesSheet> {
+  late Future<Map<String, dynamic>> _request = _load();
+
+  Future<Map<String, dynamic>> _load() =>
+      widget.api.temporaryChatRequest(widget.sessionId);
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: FutureBuilder<Map<String, dynamic>>(
+        future: _request,
+        builder: (context, snapshot) {
+          final data = snapshot.data;
+          final files =
+              (data?['files'] as List? ?? const []).whereType<Map>().toList();
+          return ListView.builder(
+            shrinkWrap: true,
+            itemCount: 1 + (files.isEmpty ? 1 : files.length),
+            itemBuilder: (context, index) {
+              if (index == 0) {
+                return const ListTile(
+                  title: Text('本次生成文件'),
+                  subtitle: Text('已归档的文件可在静态资源区继续打开。'),
+                );
+              }
+              if (snapshot.connectionState != ConnectionState.done) {
+                return const ListTile(title: WxInlineBusy('正在读取生成文件…'));
+              }
+              if (snapshot.hasError) {
+                return Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: WxErrorPanel(
+                    error: snapshot.error!,
+                    onRetry: () => setState(() => _request = _load()),
+                  ),
+                );
+              }
+              if (files.isEmpty) return const ListTile(title: Text('暂无生成文件'));
+              return _fileTile(files[index - 1], '${data?['downloadKey']}');
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _fileTile(Map file, String downloadKey) {
+    final path = '${file['path']}';
+    final onlineUrl = file['downloadUrl'] as String?;
+    final uri = onlineUrl == null
+        ? widget.api.temporaryFileUri(widget.sessionId, path, downloadKey)
+        : Uri.parse(onlineUrl);
+    return ListTile(
+      leading: const Icon(Icons.download_outlined),
+      title: Text(path),
+      subtitle: onlineUrl == null ? const Text('临时下载，退出前有效') : null,
+      onTap: () => launchUrl(uri, mode: LaunchMode.externalApplication),
+    );
+  }
 }

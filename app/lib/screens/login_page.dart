@@ -42,6 +42,7 @@ class _LoginPageState extends State<LoginPage> {
   Timer? _poll;
   Timer? _staleTimer;
   bool _stale = false;
+  int _attempt = 0;
 
   @override
   void initState() {
@@ -63,10 +64,15 @@ class _LoginPageState extends State<LoginPage> {
       await widget.openUrl!(uri);
       return;
     }
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      throw ApiException('无法打开浏览器，请重试。');
+    }
   }
 
   Future<void> _start() async {
+    if (_phase == _LoginPhase.opening || _phase == _LoginPhase.ready) return;
+    final attempt = ++_attempt;
+    bool isCurrent() => mounted && attempt == _attempt;
     _poll?.cancel();
     _staleTimer?.cancel();
     setState(() {
@@ -76,37 +82,41 @@ class _LoginPageState extends State<LoginPage> {
     });
     try {
       final started = await widget.api.startOAuth();
+      if (!isCurrent()) return;
       final uri = Uri.parse(started.authorizeUrl);
       await _openBrowser(uri);
-      if (!mounted) return;
+      if (!isCurrent()) return;
       setState(() => _phase = _LoginPhase.waiting);
       _staleTimer = Timer(const Duration(seconds: 90), () {
-        if (mounted) setState(() => _stale = true);
+        if (isCurrent()) setState(() => _stale = true);
       });
+      var polling = false;
       _poll = Timer.periodic(const Duration(seconds: 2), (_) async {
+        if (polling || !isCurrent()) return;
+        polling = true;
         try {
           final done = await widget.api.pollOAuth(started.state);
-          if (!done) return;
+          if (!done || !isCurrent()) return;
           _poll?.cancel();
           _staleTimer?.cancel();
-          if (!mounted) return;
           setState(() => _phase = _LoginPhase.ready);
           HapticFeedback.lightImpact();
           await Future<void>.delayed(const Duration(milliseconds: 560));
-          if (mounted) await widget.onReady();
+          if (isCurrent()) await widget.onReady();
         } catch (err) {
+          if (!isCurrent()) return;
           _poll?.cancel();
           _staleTimer?.cancel();
-          if (mounted) {
-            setState(() {
-              _phase = _LoginPhase.error;
-              _error = err;
-            });
-          }
+          setState(() {
+            _phase = _LoginPhase.error;
+            _error = err;
+          });
+        } finally {
+          polling = false;
         }
       });
     } catch (err) {
-      if (mounted) {
+      if (isCurrent()) {
         setState(() {
           _phase = _LoginPhase.error;
           _error = err;
@@ -213,12 +223,6 @@ class _LoginPageState extends State<LoginPage> {
                           active: waiting,
                           done: ready,
                         ),
-                        if (opening || waiting) ...[
-                          const SizedBox(height: 16),
-                          const ClipRRect(
-                            child: LinearProgressIndicator(minHeight: 2),
-                          ),
-                        ],
                         const SizedBox(height: 14),
                         Text(
                           _bodyCopy,
@@ -245,15 +249,16 @@ class _LoginPageState extends State<LoginPage> {
                 const SizedBox(height: 28),
                 SizedBox(
                   width: double.infinity,
-                  child: _phase == _LoginPhase.error || _phase == _LoginPhase.idle
-                      ? FilledButton(
-                          onPressed: _start,
-                          child: const Text('重新打开 GitHub'),
-                        )
-                      : TextButton(
-                          onPressed: ready ? null : _start,
-                          child: const Text('重新打开 GitHub'),
-                        ),
+                  child:
+                      _phase == _LoginPhase.error || _phase == _LoginPhase.idle
+                          ? FilledButton(
+                              onPressed: _start,
+                              child: const Text('重新打开 GitHub'),
+                            )
+                          : TextButton(
+                              onPressed: opening || ready ? null : _start,
+                              child: const Text('重新打开 GitHub'),
+                            ),
                 ),
               ],
             ),
@@ -280,6 +285,10 @@ class _StepLine extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = active || done ? Wx.text : Wx.muted;
+    final labelStyle = Theme.of(context).textTheme.titleMedium?.copyWith(
+          color: color,
+          fontWeight: active ? FontWeight.w600 : FontWeight.w500,
+        );
     return Row(
       children: [
         Container(
@@ -311,12 +320,10 @@ class _StepLine extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 10),
-        Text(
-          label,
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                color: color,
-                fontWeight: active ? FontWeight.w600 : FontWeight.w500,
-              ),
+        Flexible(
+          child: active
+              ? WxInlineBusy(label, style: labelStyle)
+              : Text(label, style: labelStyle),
         ),
       ],
     );

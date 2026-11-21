@@ -10,6 +10,9 @@ class TaskCompletionText {
 /// Control markers may follow progress paragraphs or touch the final answer.
 /// Fenced code and inline examples are ordinary content, not task status.
 TaskCompletionText parseTaskCompletion(String source) {
+  if (!source.contains(taskCompletionMarker)) {
+    return TaskCompletionText(source.trim(), false);
+  }
   String? fence;
   var completed = false;
   final lines = source.split('\n');

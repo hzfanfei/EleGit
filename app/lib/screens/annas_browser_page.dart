@@ -37,8 +37,7 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
   static const _clipboardPollInterval = Duration(milliseconds: 450);
 
   late final WebViewController _controller;
-  int _progress = 0;
-  bool _pageLoading = true;
+  final _pageProgress = ValueNotifier(0);
   int _savedCount = 0;
   String? _capturingLabel;
   BookDownloadProgress? _captureProgress;
@@ -62,25 +61,24 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
         NavigationDelegate(
           onProgress: (p) {
             if (!mounted) return;
-            setState(() => _progress = p);
+            _pageProgress.value = p;
           },
           onPageStarted: (url) {
             if (!mounted) return;
-            setState(() {
-              _pageLoading = true;
-              _currentUrl = url;
-            });
+            _pageProgress.value = 0;
+            if (_currentUrl != url) setState(() => _currentUrl = url);
           },
           onPageFinished: (url) {
             if (!mounted) return;
-            setState(() {
-              _pageLoading = false;
-              _currentUrl = url;
-            });
+            _pageProgress.value = 100;
+            if (_currentUrl != url) setState(() => _currentUrl = url);
           },
           onUrlChange: (change) {
             final url = change.url;
-            if (url != null && url.isNotEmpty && mounted) {
+            if (url != null &&
+                url.isNotEmpty &&
+                mounted &&
+                _currentUrl != url) {
               setState(() => _currentUrl = url);
             }
           },
@@ -96,6 +94,7 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
   @override
   void dispose() {
     _clipboardTimer?.cancel();
+    _pageProgress.dispose();
     super.dispose();
   }
 
@@ -301,18 +300,32 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
               onBack: _close,
               backTooltip: '返回',
               trailing: [
-                IconButton(
-                  tooltip: '刷新',
-                  onPressed: () => _controller.reload(),
-                  icon: const Icon(Icons.refresh, size: 20),
+                ValueListenableBuilder<int>(
+                  valueListenable: _pageProgress,
+                  builder: (context, progress, _) => IconButton(
+                    tooltip: progress < 100 ? '正在加载网页…' : '刷新',
+                    onPressed: () {
+                      _pageProgress.value = 0;
+                      _controller.reload();
+                    },
+                    icon: progress < 100
+                        ? const WxLoading(size: 20)
+                        : const Icon(Icons.refresh, size: 20),
+                  ),
                 ),
               ],
             ),
-            if (_pageLoading || _progress < 100)
-              LinearProgressIndicator(
-                minHeight: 2,
-                value: _pageLoading && _progress == 0 ? null : _progress / 100,
+            SizedBox(
+              height: 2,
+              child: ValueListenableBuilder<int>(
+                valueListenable: _pageProgress,
+                builder: (context, progress, _) =>
+                    progress > 0 && progress < 100
+                        ? LinearProgressIndicator(
+                            minHeight: 2, value: progress / 100)
+                        : const SizedBox.shrink(),
               ),
+            ),
             if (_activeDownloadUrl != null)
               Padding(
                 padding: const EdgeInsets.fromLTRB(Wx.inset, 8, Wx.inset, 0),
@@ -359,15 +372,14 @@ class _AnnasBrowserPageState extends State<AnnasBrowserPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    LinearProgressIndicator(
-                      minHeight: 3,
-                      value: _captureProgressValue(),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      _captureStatusLine(),
-                      style: theme.textTheme.bodySmall,
-                    ),
+                    if (_captureProgressValue() case final progress?) ...[
+                      LinearProgressIndicator(minHeight: 3, value: progress),
+                      const SizedBox(height: 6),
+                      Text(_captureStatusLine(),
+                          style: theme.textTheme.bodySmall),
+                    ] else
+                      WxInlineBusy(_captureStatusLine(),
+                          style: theme.textTheme.bodySmall),
                   ],
                 ),
               ),

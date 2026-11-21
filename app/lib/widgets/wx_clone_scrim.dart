@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
 import '../copy/errors.dart';
@@ -9,7 +7,7 @@ import 'wx_chrome.dart';
 
 enum WxCloneMode { open, clone, sync }
 
-class WxCloneScrim extends StatefulWidget {
+class WxCloneScrim extends StatelessWidget {
   const WxCloneScrim({
     super.key,
     required this.repo,
@@ -30,91 +28,13 @@ class WxCloneScrim extends StatefulWidget {
   final String dismissLabel;
 
   @override
-  State<WxCloneScrim> createState() => _WxCloneScrimState();
-}
-
-class _WxCloneScrimState extends State<WxCloneScrim> {
-  late List<String> _stages;
-  int _stage = 0;
-  Timer? _timer;
-
-  String get _path => widget.path;
-
-  @override
-  void initState() {
-    super.initState();
-    _stages = _stagesFor(widget.mode);
-    _timer = Timer.periodic(const Duration(milliseconds: 900), (timer) {
-      if (!mounted || widget.error != null) return;
-      if (_stage < _stages.length - 1) {
-        setState(() => _stage += 1);
-      }
-    });
-  }
-
-  static List<String> _stagesFor(WxCloneMode mode) {
-    switch (mode) {
-      case WxCloneMode.open:
-        return ['正在打开', '准备对话', '即将进入'];
-      case WxCloneMode.sync:
-        return ['准备', '正在更新', '即将打开'];
-      case WxCloneMode.clone:
-        return ['准备', '正在克隆', '即将打开'];
-    }
-  }
-
-  String get _stageDetail {
-    if (widget.mode == WxCloneMode.open) {
-      switch (_stage) {
-        case 0:
-          return '正在检查 ${widget.repo.fullName} 的本机目录。';
-        case 1:
-          return '正在连接问象服务并预热问答。';
-        default:
-          return '马上进入对话。';
-      }
-    }
-    if (widget.mode == WxCloneMode.sync) {
-      switch (_stage) {
-        case 0:
-          return '本机已有 ${widget.repo.fullName}，先对齐远端。';
-        case 1:
-          return '正在更新 $_path';
-        default:
-          return '马上打开这份仓库。';
-      }
-    }
-    switch (_stage) {
-      case 0:
-        return '先确认 ${widget.repo.fullName}，再落到本机。';
-      case 1:
-        return '正在克隆到 $_path';
-      default:
-        return '马上打开这份仓库。';
-    }
-  }
-
-  @override
-  void didUpdateWidget(covariant WxCloneScrim oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.mode != oldWidget.mode) {
-      _stages = _stagesFor(widget.mode);
-      _stage = 0;
-    }
-    if (widget.error != null) {
-      _timer?.cancel();
-    }
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final failed = widget.error != null;
+    final problem = error;
+    final (action, detail) = switch (mode) {
+      WxCloneMode.open => ('打开', '正在检查 ${repo.fullName} 的本机目录。'),
+      WxCloneMode.sync => ('更新', '正在同步 ${repo.fullName} 的远端变更。'),
+      WxCloneMode.clone => ('克隆', '正在将 ${repo.fullName} 下载到本机。'),
+    };
     return ColoredBox(
       color: const Color(0xCC0C0D0F),
       child: Center(
@@ -132,54 +52,53 @@ class _WxCloneScrimState extends State<WxCloneScrim> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          failed
-                              ? (widget.mode == WxCloneMode.sync
-                                  ? '更新失败'
-                                  : widget.mode == WxCloneMode.open
-                                      ? '打开失败'
-                                      : '克隆失败')
-                              : _stages[_stage],
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleLarge,
+                  Semantics(
+                    liveRegion: true,
+                    child: Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            problem == null ? '正在$action' : '$action失败',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.titleLarge,
+                          ),
                         ),
-                      ),
-                      if (!failed) ...[
-                        const SizedBox(width: 6),
-                        const WxLoading(size: 22),
+                        if (problem == null) ...[
+                          const SizedBox(width: 6),
+                          const ExcludeSemantics(child: WxLoading(size: 22)),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    failed ? humanizeError(widget.error!) : _stageDetail,
-                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.5),
+                    problem == null ? detail : humanizeError(problem),
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodyLarge
+                        ?.copyWith(height: 1.5),
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    _path,
+                    path,
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
-                  if (failed) ...[
+                  if (problem != null) ...[
                     const SizedBox(height: 16),
                     WxErrorPanel(
-                      error: widget.error!,
-                      onRetry: widget.onRetry,
+                      error: problem,
+                      onRetry: onRetry,
                       retryLabel: '再试一次',
                     ),
                   ],
-                  if (widget.onDismiss != null &&
-                      (widget.mode != WxCloneMode.open || failed)) ...[
-                    SizedBox(height: failed ? 4 : 14),
+                  if (onDismiss != null) ...[
+                    SizedBox(height: problem != null ? 4 : 14),
                     Align(
                       alignment: Alignment.centerRight,
                       child: TextButton(
-                        onPressed: widget.onDismiss,
-                        child: Text(widget.dismissLabel),
+                        onPressed: onDismiss,
+                        child: Text(dismissLabel),
                       ),
                     ),
                   ],

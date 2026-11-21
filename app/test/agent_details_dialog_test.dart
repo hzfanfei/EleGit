@@ -44,7 +44,8 @@ void main() {
     await tester.tap(find.byKey(const Key('agent-change-model')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(ValueKey('agent-model-$id')));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
   }
 
   Future<void> open(WidgetTester tester, _Api api,

@@ -6,13 +6,15 @@ import '../api/wenxiang_api.dart';
 import '../theme.dart';
 import '../utils/book_markdown_assets.dart';
 import '../utils/book_markdown_markup.dart';
+import '../utils/image_bytes_cache.dart';
 import '../utils/wx_markdown_styles.dart';
 import 'wx_chrome.dart';
 import 'wx_unified_markdown.dart';
 
-final Map<String, Uint8List> _bookImageBytes = {};
+final _bookImageBytes =
+    ImageBytesCache(maxEntries: 80, maxBytes: 32 * 1024 * 1024);
 
-class BookMarkdownBody extends StatelessWidget {
+class BookMarkdownBody extends StatefulWidget {
   const BookMarkdownBody({
     super.key,
     required this.api,
@@ -45,9 +47,25 @@ class BookMarkdownBody extends StatelessWidget {
   /// (e.g. suppress the chrome-toggle gesture in the book reader).
   final bool launchExternalLinks;
 
-  String _prepared() {
-    final normalized = normalizeBookMarkdown(data);
-    final title = chapterTitle?.trim() ?? '';
+  @override
+  State<BookMarkdownBody> createState() => _BookMarkdownBodyState();
+}
+
+class _BookMarkdownBodyState extends State<BookMarkdownBody> {
+  late String _prepared = _prepare();
+
+  @override
+  void didUpdateWidget(covariant BookMarkdownBody oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.data != widget.data ||
+        oldWidget.chapterTitle != widget.chapterTitle) {
+      _prepared = _prepare();
+    }
+  }
+
+  String _prepare() {
+    final normalized = normalizeBookMarkdown(widget.data);
+    final title = widget.chapterTitle?.trim() ?? '';
     if (title.isEmpty) return normalized;
     return omitLeadingChapterHeading(normalized, title);
   }
@@ -81,20 +99,20 @@ class BookMarkdownBody extends StatelessWidget {
   Widget build(BuildContext context) {
     final messenger = ScaffoldMessenger.maybeOf(context);
     return WxUnifiedMarkdownBody(
-      data: _prepared(),
-      mdStyle: mdStyle,
-      api: api,
+      data: _prepared,
+      mdStyle: widget.mdStyle,
+      api: widget.api,
       softWrapProse: false,
       onTapLink: (text, href, title) {
         final target = (href ?? '').trim();
         if (target.isEmpty) return;
-        onConsumeTap?.call();
+        widget.onConsumeTap?.call();
         if (target.startsWith('wx-footnote:')) {
           _showFootnote(context, target);
-          onTapLink?.call(target, text);
+          widget.onTapLink?.call(target, text);
           return;
         }
-        if (launchExternalLinks) {
+        if (widget.launchExternalLinks) {
           final external = bookMarkdownExternalUri(target);
           if (external != null) {
             () async {
@@ -113,18 +131,18 @@ class BookMarkdownBody extends StatelessWidget {
             }();
           }
         }
-        onTapLink?.call(target, text);
+        widget.onTapLink?.call(target, text);
       },
       sizedImageBuilder: (config) => _BookMarkdownImage(
-        api: api,
-        bookId: bookId,
-        chapterFile: chapterFile,
-        spineHref: spineHref,
+        api: widget.api,
+        bookId: widget.bookId,
+        chapterFile: widget.chapterFile,
+        spineHref: widget.spineHref,
         uri: config.uri,
         alt: config.alt ?? config.title ?? '',
         width: config.width,
         height: config.height,
-        onOpen: onConsumeTap,
+        onOpen: widget.onConsumeTap,
       ),
     );
   }
@@ -169,7 +187,8 @@ class _BookMarkdownImageState extends State<_BookMarkdownImage> {
   @override
   void didUpdateWidget(covariant _BookMarkdownImage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.uri != widget.uri ||
+    if (oldWidget.api != widget.api ||
+        oldWidget.uri != widget.uri ||
         oldWidget.bookId != widget.bookId ||
         oldWidget.chapterFile != widget.chapterFile ||
         oldWidget.spineHref != widget.spineHref) {
@@ -207,15 +226,17 @@ class _BookMarkdownImageState extends State<_BookMarkdownImage> {
           );
     if (candidates.isEmpty) return null;
 
-    final cacheKey = '${widget.bookId}::${candidates.join('|')}';
-    final cached = _bookImageBytes[cacheKey];
+    final cacheKey =
+        '${widget.api.baseUrl}::${widget.bookId}::${candidates.join('|')}';
+    final cached = _bookImageBytes.get(cacheKey);
     if (cached != null) return cached;
 
     try {
       final bytes = raw.startsWith('http://') || raw.startsWith('https://')
           ? await _fetchAbsolute(raw)
-          : await widget.api.fetchBookAssetBytesFromCandidates(widget.bookId, candidates);
-      _remember(cacheKey, bytes);
+          : await widget.api
+              .fetchBookAssetBytesFromCandidates(widget.bookId, candidates);
+      _bookImageBytes.put(cacheKey, bytes);
       return bytes;
     } catch (_) {
       return null;
@@ -224,12 +245,6 @@ class _BookMarkdownImageState extends State<_BookMarkdownImage> {
 
   Future<Uint8List> _fetchAbsolute(String url) {
     return widget.api.fetchUrlBytes(Uri.parse(url));
-  }
-
-  void _remember(String key, Uint8List bytes) {
-    _bookImageBytes[key] = bytes;
-    if (_bookImageBytes.length <= 80) return;
-    _bookImageBytes.remove(_bookImageBytes.keys.first);
   }
 
   @override
@@ -253,7 +268,7 @@ class _BookMarkdownImageState extends State<_BookMarkdownImage> {
                   widget.onOpen?.call();
                   _zoom(context, bytes);
                 },
-                child: _picture(bytes, maxW),
+                child: _picture(context, bytes, maxW),
               ),
             );
           },
@@ -281,7 +296,7 @@ class _BookMarkdownImageState extends State<_BookMarkdownImage> {
     );
   }
 
-  Widget _picture(Uint8List bytes, double maxW) {
+  Widget _picture(BuildContext context, Uint8List bytes, double maxW) {
     final attrW = widget.width;
     final attrH = widget.height;
     double? width;
@@ -296,6 +311,8 @@ class _BookMarkdownImageState extends State<_BookMarkdownImage> {
         constraints: BoxConstraints(maxWidth: maxW),
         child: Image.memory(
           bytes,
+          cacheWidth:
+              ((width ?? maxW) * MediaQuery.devicePixelRatioOf(context)).ceil(),
           width: width,
           height: height,
           fit: BoxFit.contain,

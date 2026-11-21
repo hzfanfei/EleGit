@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models.dart';
 import '../theme.dart';
+import 'wx_chrome.dart';
 
 class AgentDecisionCard extends StatefulWidget {
   const AgentDecisionCard({
@@ -109,8 +110,12 @@ class _AgentDecisionCardState extends State<AgentDecisionCard> {
                   ),
                   const Spacer(),
                   FilledButton(
-                    onPressed: _sending ? null : () => _send(skip: false, accept: true),
-                    child: Text(_sending ? '发送中…' : '按这个做'),
+                    onPressed: _sending
+                        ? null
+                        : () => _send(skip: false, accept: true),
+                    child: _sending
+                        ? const WxInlineBusy('发送中…')
+                        : const Text('按这个做'),
                   ),
                 ],
               ),
@@ -166,7 +171,8 @@ class _AgentDecisionCardState extends State<AgentDecisionCard> {
                           }
                           _send(skip: answers.isEmpty, accept: false, answers: answers);
                         },
-                  child: Text(_sending ? '发送中…' : '确定'),
+                  child:
+                      _sending ? const WxInlineBusy('发送中…') : const Text('确定'),
                 ),
               ],
             ),

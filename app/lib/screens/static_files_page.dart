@@ -25,11 +25,12 @@ class _StaticFilesPageState extends State<StaticFilesPage> {
   StaticLibrary? _library;
   Object? _error;
   bool _loading = true;
+  int _loadEpoch = 0;
   String? _deletingPath;
-  bool _batchDeleting = false;
+  String? _batchProgress;
   final _selected = <String>{};
 
-  bool get _busy => _deletingPath != null || _batchDeleting;
+  bool get _busy => _deletingPath != null || _batchProgress != null;
 
   @override
   void initState() {
@@ -40,23 +41,24 @@ class _StaticFilesPageState extends State<StaticFilesPage> {
   }
 
   Future<void> _load() async {
+    final epoch = ++_loadEpoch;
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
       final library = await widget.api.listStaticFiles();
-      if (!mounted) return;
+      if (!mounted || epoch != _loadEpoch) return;
       final paths = library.files.map((file) => file.path).toSet();
       setState(() {
         _library = library;
         _selected.removeWhere((path) => !paths.contains(path));
       });
     } catch (err) {
-      if (!mounted) return;
+      if (!mounted || epoch != _loadEpoch) return;
       setState(() => _error = err);
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted && epoch == _loadEpoch) setState(() => _loading = false);
     }
   }
 
@@ -86,7 +88,7 @@ class _StaticFilesPageState extends State<StaticFilesPage> {
         ],
       ),
     );
-    if (ok != true || !mounted) return;
+    if (ok != true || !mounted || _busy) return;
     setState(() => _deletingPath = file.path);
     try {
       await widget.api.deleteStaticFile(file.path);
@@ -133,12 +135,13 @@ class _StaticFilesPageState extends State<StaticFilesPage> {
         ],
       ),
     );
-    if (ok != true || !mounted) return;
-    setState(() => _batchDeleting = true);
+    if (ok != true || !mounted || _busy) return;
+    setState(() => _batchProgress = '正在删除 0/${chosen.length}…');
     var failed = 0;
     Object? lastError;
-    for (final file in chosen) {
+    for (var i = 0; i < chosen.length; i++) {
       if (!mounted) return;
+      final file = chosen[i];
       try {
         await widget.api.deleteStaticFile(file.path);
         _selected.remove(file.path);
@@ -146,6 +149,8 @@ class _StaticFilesPageState extends State<StaticFilesPage> {
         failed += 1;
         lastError = err;
       }
+      if (!mounted) return;
+      setState(() => _batchProgress = '正在删除 ${i + 1}/${chosen.length}…');
     }
     if (!mounted) return;
     final removed = chosen.length - failed;
@@ -154,12 +159,12 @@ class _StaticFilesPageState extends State<StaticFilesPage> {
         content: Text(
           failed == 0
               ? '已删除 $removed 个资源'
-              : '已删除 $removed 个，${failed} 个没删掉${lastError == null ? '' : '：$lastError'}',
+              : '已删除 $removed 个，$failed 个没删掉${lastError == null ? '' : '：$lastError'}',
         ),
       ),
     );
-    setState(() => _batchDeleting = false);
     await _load();
+    if (mounted) setState(() => _batchProgress = null);
   }
 
   @override
@@ -176,13 +181,14 @@ class _StaticFilesPageState extends State<StaticFilesPage> {
             backTooltip: '返回问仓',
             trailing: [
               IconButton(
-                tooltip: '刷新',
-                onPressed: _loading ? null : _load,
-                icon: const Icon(Icons.refresh, size: 20),
+                tooltip: _loading ? '正在刷新资源…' : '刷新',
+                onPressed: _loading || _busy ? null : _load,
+                icon: _loading && files.isNotEmpty
+                    ? const WxLoading(size: 20)
+                    : const Icon(Icons.refresh, size: 20),
               ),
             ],
           ),
-          if (_loading) const LinearProgressIndicator(minHeight: 2),
           const WxHairline(),
           if (_error != null)
             Padding(
@@ -199,6 +205,7 @@ class _StaticFilesPageState extends State<StaticFilesPage> {
     if (_loading && files.isEmpty) {
       return const WxBusy(label: '正在读取资源');
     }
+    if (_error != null && files.isEmpty) return const SizedBox.shrink();
     if (files.isEmpty) {
       final dir = _library?.dir ?? '';
       return WxEmpty(
@@ -209,7 +216,7 @@ class _StaticFilesPageState extends State<StaticFilesPage> {
         action: TextButton(onPressed: _load, child: const Text('重新加载')),
       );
     }
-    final allSelected = files.every((file) => _selected.contains(file.path));
+    final allSelected = files.length == _selected.length;
     final someSelected = _selected.isNotEmpty && !allSelected;
     return Column(
       children: [
@@ -228,10 +235,12 @@ class _StaticFilesPageState extends State<StaticFilesPage> {
                 child: const Text('全选'),
               ),
               const Spacer(),
-              if (_batchDeleting)
-                const Padding(
-                  padding: EdgeInsets.only(right: 12),
-                  child: WxLoading(size: 20),
+              if (_batchProgress != null)
+                Flexible(
+                  child: Padding(
+                    padding: const EdgeInsets.only(right: 12),
+                    child: WxInlineBusy(_batchProgress!),
+                  ),
                 )
               else
                 TextButton(
@@ -250,7 +259,9 @@ class _StaticFilesPageState extends State<StaticFilesPage> {
 
   Widget _fileList(List<StaticFileItem> files) {
     return RefreshIndicator(
-      onRefresh: _load,
+      onRefresh: () async {
+        if (!_busy) await _load();
+      },
       child: ListView.separated(
         padding: const EdgeInsets.fromLTRB(Wx.inset, 8, Wx.inset, 24),
         itemCount: files.length,
@@ -287,7 +298,7 @@ class _StaticFilesPageState extends State<StaticFilesPage> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (deleting)
-                  const WxLoading(size: 20)
+                  const WxInlineBusy('正在删除…')
                 else
                   IconButton(
                     tooltip: '删除',

@@ -12,7 +12,6 @@ import '../copy/errors.dart';
 import '../diagnostics/client_error_log.dart';
 import '../models.dart';
 import '../persist/app_memory.dart';
-import '../persist/book_reading_progress.dart';
 import '../theme.dart';
 import '../utils/background_sync.dart';
 import '../utils/notification_center.dart';
@@ -50,7 +49,6 @@ class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
   RepoItem? _repo;
   BookItem? _book;
   bool _bookExpandAsk = false;
-  bool _bookOpening = false;
   RepoItem? _lastRepo;
   Object? _bootError;
   bool _booting = true;
@@ -258,28 +256,12 @@ class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
   }
 
   Future<void> _openBookRead(BookItem book, {bool expandAsk = false}) async {
-    if (_bookOpening) return;
-    if (!mounted) return;
-    setState(() => _bookOpening = true);
-    try {
-      final prefs = _memory?.prefs;
-      if (prefs != null) {
-        await BookReadingProgress(prefs).markOpened(book.id);
-      }
-      if (!mounted) return;
-      setState(() {
-        _book = book;
-        _bookExpandAsk = expandAsk;
-        _step = AppStep.bookRead;
-      });
-    } catch (err) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(err.toString())),
-      );
-    } finally {
-      if (mounted) setState(() => _bookOpening = false);
-    }
+    if (_step != AppStep.books) return;
+    setState(() {
+      _book = book;
+      _bookExpandAsk = expandAsk;
+      _step = AppStep.bookRead;
+    });
   }
 
   void _backFromBookRead() {
@@ -427,7 +409,6 @@ class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
             api: _api,
             onBack: _backFromBooks,
             onRead: _openBookRead,
-            opening: _bookOpening,
             prefs: _memory?.prefs,
           )),
         ),

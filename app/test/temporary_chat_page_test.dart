@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -17,6 +18,7 @@ class TemporaryApi extends FakeWenxiangApi {
   final sent = <Map<String, dynamic>>[];
   final turns = <String, List<Map<String, dynamic>>>{};
   bool offline = false;
+  Future<Map<String, dynamic>>? filesResponse;
   @override
   Future<String> createTemporaryChat() async {
     final id = 'temp-${++created}';
@@ -40,6 +42,9 @@ class TemporaryApi extends FakeWenxiangApi {
       String suffix = '',
       Map<String, dynamic>? body}) async {
     if (offline) throw Exception('offline');
+    if (method == 'GET' && suffix.isEmpty && filesResponse != null) {
+      return filesResponse!;
+    }
     if (suffix == '/options') return {'ok': true};
     if (suffix == '/messages') {
       sent.add(body!);
@@ -69,6 +74,27 @@ Future<void> pumpReady(WidgetTester tester) async {
 
 void main() {
   tearDown(RunningSessions.stopAllForTesting);
+
+  testWidgets('opens the generated files sheet while the data is pending',
+      (tester) async {
+    final response = Completer<Map<String, dynamic>>();
+    final api = TemporaryApi()..filesResponse = response.future;
+    await tester.pumpWidget(MaterialApp(
+      home: TemporaryChatPage(api: api, onBack: () {}),
+    ));
+    await pumpReady(tester);
+    await tester.tap(find.byTooltip('更多'));
+    await pumpReady(tester);
+    await tester.tap(find.text('本次生成文件'));
+    await pumpReady(tester);
+
+    expect(find.text('正在读取生成文件…'), findsOneWidget);
+    response.complete({'files': []});
+    await pumpReady(tester);
+    expect(find.text('正在读取生成文件…'), findsNothing);
+    expect(find.text('暂无生成文件'), findsOneWidget);
+  });
+
   testWidgets('直接复用项目会话页，退出重开清空且不写正式项目', (tester) async {
     await tester.binding.setSurfaceSize(const Size(412, 892));
     addTearDown(() => tester.binding.setSurfaceSize(null));

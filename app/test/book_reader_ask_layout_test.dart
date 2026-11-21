@@ -19,6 +19,19 @@ import 'support/fake_api.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  testWidgets('a failed opening chapter can be retried from the reader',
+      (tester) async {
+    await _pumpBookReader(tester, expandAsk: false, api: _RetryChapterApi());
+    expect(find.text('重试'), findsOneWidget);
+    expect(find.text('正文。'), findsNothing);
+
+    await tester.tap(find.text('重试'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('重试'), findsNothing);
+    expect(find.text('正文。'), findsOneWidget);
+  });
+
   testWidgets('reader ask sheet starts hidden with a bottom peek handle', (tester) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
@@ -565,6 +578,7 @@ Future<void> _pumpBookReader(
   required bool expandAsk,
   double keyboard = 0,
   ReaderThemeMode theme = ReaderThemeMode.dark,
+  FakeWenxiangApi? api,
 }) async {
   tester.view.physicalSize = const Size(390, 844);
   tester.view.devicePixelRatio = 1;
@@ -582,7 +596,7 @@ Future<void> _pumpBookReader(
       home: MediaQuery(
         data: _readerMedia(keyboard: keyboard),
         child: BookReaderPage(
-          api: FakeWenxiangApi(),
+          api: api ?? FakeWenxiangApi(),
           prefs: prefs,
           memory: AppMemory(prefs),
           expandAsk: expandAsk,
@@ -620,5 +634,19 @@ class _SlowManifestApi extends FakeWenxiangApi {
   Future<BookReadingManifest> fetchBookReadingManifest(String bookId) async {
     await Future<void>.delayed(const Duration(milliseconds: 400));
     return super.fetchBookReadingManifest(bookId);
+  }
+}
+
+class _RetryChapterApi extends FakeWenxiangApi {
+  bool _failedOnce = false;
+
+  @override
+  Future<String> fetchBookChapterMarkdown(
+      String bookId, String filename) async {
+    if (!_failedOnce) {
+      _failedOnce = true;
+      throw Exception('章节暂时无法加载');
+    }
+    return super.fetchBookChapterMarkdown(bookId, filename);
   }
 }

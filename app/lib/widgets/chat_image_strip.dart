@@ -6,6 +6,9 @@ import '../api/wenxiang_api.dart';
 import '../chat/chat_image.dart';
 import '../models.dart';
 import '../theme.dart';
+import 'wx_chrome.dart';
+
+const _thumbnailSize = 76.0;
 
 class ChatImageStrip extends StatelessWidget {
   const ChatImageStrip({
@@ -26,7 +29,7 @@ class ChatImageStrip extends StatelessWidget {
     final count = draftBytes?.length ?? images.length;
     if (count == 0) return const SizedBox.shrink();
     return SizedBox(
-      height: 76,
+      height: _thumbnailSize,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: count,
@@ -62,8 +65,8 @@ class _ChatThumb extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 76,
-      height: 76,
+      width: _thumbnailSize,
+      height: _thumbnailSize,
       child: Stack(
         children: [
           Positioned.fill(
@@ -80,6 +83,7 @@ class _ChatThumb extends StatelessWidget {
                   image: image,
                   api: api,
                   fit: BoxFit.cover,
+                  thumbnail: true,
                 ),
               ),
             ),
@@ -128,18 +132,21 @@ class _ChatImagePicture extends StatefulWidget {
     this.image,
     this.api,
     required this.fit,
+    this.thumbnail = false,
   });
 
   final Uint8List? bytes;
   final ChatImageAttachment? image;
   final WenxiangApi? api;
   final BoxFit fit;
+  final bool thumbnail;
 
   @override
   State<_ChatImagePicture> createState() => _ChatImagePictureState();
 }
 
 class _ChatImagePictureState extends State<_ChatImagePicture> {
+  Uint8List? _cached;
   Future<Uint8List?>? _remote;
 
   @override
@@ -151,54 +158,58 @@ class _ChatImagePictureState extends State<_ChatImagePicture> {
   @override
   void didUpdateWidget(covariant _ChatImagePicture oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.image?.id != widget.image?.id || oldWidget.bytes != widget.bytes) {
+    if (oldWidget.image?.id != widget.image?.id ||
+        oldWidget.bytes != widget.bytes ||
+        oldWidget.api != widget.api) {
       _arm();
     }
   }
 
   void _arm() {
-    final inline = widget.bytes;
-    if (inline != null) {
-      _remote = null;
-      return;
-    }
     final image = widget.image;
     final api = widget.api;
-    if (image == null || api == null) {
-      _remote = null;
-      return;
+    _cached = widget.bytes;
+    _remote = null;
+    if (_cached == null && image != null && api != null) {
+      _cached = ChatImageCache.get(image.id);
+      if (_cached == null) _remote = api.fetchChatImage(image.id);
     }
-    final cached = ChatImageCache.get(image.id);
-    if (cached != null) {
-      _remote = Future.value(Uint8List.fromList(cached));
-      return;
+  }
+
+  Widget _picture(BuildContext context, Uint8List bytes) {
+    ImageProvider image = MemoryImage(bytes);
+    if (widget.thumbnail) {
+      final pixels =
+          (_thumbnailSize * MediaQuery.devicePixelRatioOf(context)).ceil();
+      image = ResizeImage(
+        image,
+        width: pixels,
+        height: pixels,
+        policy: ResizeImagePolicy.fit,
+      );
     }
-    _remote = api.fetchChatImage(image.id);
+    return Image(
+      image: image,
+      fit: widget.fit,
+      errorBuilder: (_, __, ___) => const _BrokenImage(),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final inline = widget.bytes;
-    if (inline != null) {
-      return Image.memory(inline, fit: widget.fit, gaplessPlayback: true);
-    }
+    final cached = _cached;
+    if (cached != null) return _picture(context, cached);
     final future = _remote;
     if (future == null) return const _BrokenImage();
     return FutureBuilder<Uint8List?>(
       future: future,
       builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: WxLoading(size: 16));
+        }
         final bytes = snapshot.data;
         if (bytes != null && bytes.isNotEmpty) {
-          return Image.memory(bytes, fit: widget.fit, gaplessPlayback: true);
-        }
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(
-            child: SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-          );
+          return _picture(context, bytes);
         }
         return const _BrokenImage();
       },
