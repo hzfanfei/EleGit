@@ -70,6 +70,7 @@ class FakeWenxiangApi extends WenxiangApi {
   int startOAuthCalls = 0;
   int checkoutCalls = 0;
   int checkoutStatusCalls = 0;
+  bool? checkoutStatusFetchRemote;
   int cancelCheckoutCalls = 0;
   int cancelChatCalls = 0;
   int cancelBookVoiceTurnCalls = 0;
@@ -493,8 +494,13 @@ class FakeWenxiangApi extends WenxiangApi {
   }
 
   @override
-  Future<CheckoutSyncStatus> checkoutStatus(String owner, String repo) async {
+  Future<CheckoutSyncStatus> checkoutStatus(
+    String owner,
+    String repo, {
+    bool fetchRemote = true,
+  }) async {
     checkoutStatusCalls += 1;
+    checkoutStatusFetchRemote = fetchRemote;
     if (checkoutStatusThrows != null) throw checkoutStatusThrows!;
     return checkoutStatusResult ??
         CheckoutSyncStatus(

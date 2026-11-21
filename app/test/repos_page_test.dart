@@ -2,8 +2,10 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wenxiang/api/wenxiang_api.dart';
 import 'package:wenxiang/models.dart';
+import 'package:wenxiang/persist/app_memory.dart';
 import 'package:wenxiang/screens/repos_page.dart';
 import 'package:wenxiang/theme.dart';
 import 'package:wenxiang/widgets/wx_chrome.dart';
@@ -51,8 +53,10 @@ void main() {
     expect(find.text('没有找到仓库'), findsNothing);
   });
 
-  testWidgets('repos list shows owner, privacy and opens after checkout',
+  testWidgets('repos list shows owner, privacy and syncs when enabled',
       (tester) async {
+    SharedPreferences.setMockInitialValues({AppMemory.syncRepoOnOpenKey: true});
+    final memory = AppMemory(await SharedPreferences.getInstance());
     final api = FakeWenxiangApi(
       checkoutDelay: const Duration(milliseconds: 40),
       checkoutStatusResult: CheckoutSyncStatus(
@@ -69,6 +73,7 @@ void main() {
         theme: _theme(),
         home: ReposPage(
           api: api,
+          memory: memory,
           githubLogin: 'octo',
           onOpen: (repo) => opened = repo,
           onAuthorized: () async {},
@@ -96,6 +101,7 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 50));
     await tester.pumpAndSettle();
+    expect(api.checkoutStatusFetchRemote, isTrue);
     expect(api.checkoutCalls, 1);
     expect(opened?.fullName, 'octo/demo');
   });
@@ -214,6 +220,21 @@ void main() {
     expect(find.textContaining('检出'), findsNothing);
   });
 
+  testWidgets('local status failure does not start checkout', (tester) async {
+    final api = FakeWenxiangApi(checkoutStatusThrows: ApiException('网络超时'));
+    await tester.pumpWidget(MaterialApp(
+      theme: _theme(),
+      home: ReposPage(api: api, onOpen: (_) {}, onAuthorized: () async {}),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('demo'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('打开失败'), findsOneWidget);
+    expect(api.checkoutStatusFetchRemote, isFalse);
+    expect(api.checkoutCalls, 0);
+  });
+
   testWidgets('clone can be cancelled without leaving the list', (tester) async {
     final api = FakeWenxiangApi(
       checkoutDelay: const Duration(milliseconds: 80),
@@ -308,6 +329,7 @@ void main() {
     expect(api.createRepoCalls, 1);
     expect(api.lastCreatedName, 'fresh');
     expect(api.lastCreatedPrivate, isTrue);
+    expect(api.checkoutStatusFetchRemote, isFalse);
     expect(api.checkoutCalls, 1);
     expect(opened?.fullName, 'octo/fresh');
   });

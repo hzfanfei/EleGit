@@ -7,6 +7,7 @@ import '../api/wenxiang_api.dart';
 import '../chat/running_sessions.dart';
 import '../copy/time.dart';
 import '../models.dart';
+import '../persist/app_memory.dart';
 import '../theme.dart';
 import '../widgets/wx_chrome.dart';
 import '../widgets/wx_running_more_icon.dart';
@@ -21,6 +22,7 @@ class ReposPage extends StatefulWidget {
     required this.api,
     required this.onOpen,
     required this.onAuthorized,
+    this.memory,
     this.onOpenBooks,
     this.onOpenFiles,
     this.onOpenSettings,
@@ -33,6 +35,7 @@ class ReposPage extends StatefulWidget {
   });
 
   final WenxiangApi api;
+  final AppMemory? memory;
   final void Function(RepoItem repo) onOpen;
   final Future<void> Function() onAuthorized;
   final VoidCallback? onOpenBooks;
@@ -177,6 +180,7 @@ class ReposPageState extends State<ReposPage> {
       await openRepoWithSync(
         api: widget.api,
         repo: repo,
+        syncOnOpen: widget.memory?.syncRepoOnOpen() ?? false,
         isCancelled: isCancelled,
         onScrim: (mode) {
           if (mode != _cloneMode) setState(() => _cloneMode = mode);

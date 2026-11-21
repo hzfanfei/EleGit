@@ -11,7 +11,7 @@ void main() {
     server.listen((request) async {
       expect(request.headers.value('X-Wenxiang-Key'), 'test-key');
       expect(request.headers.value('ngrok-skip-browser-warning'), 'true');
-      received.add(request.uri.path);
+      received.add(request.uri.toString());
       request.response.headers.contentType = ContentType.json;
       request.response.write('{}');
       await request.response.close();
@@ -20,7 +20,15 @@ void main() {
     expect((await api.probeHealth()).ok, isTrue);
     await api.ping();
     await api.status();
-    expect(received, ['/health', '/health', '/v1/status']);
+    await api.checkoutStatus('octo', 'demo', fetchRemote: false);
+    await api.checkoutStatus('octo', 'demo');
+    expect(received, [
+      '/health',
+      '/health',
+      '/v1/status',
+      '/v1/repos/octo/demo/checkout-status?fetch=0',
+      '/v1/repos/octo/demo/checkout-status',
+    ]);
   });
 
   test('HTTP headers include API key and ngrok skip warning', () {

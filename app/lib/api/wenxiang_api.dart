@@ -739,9 +739,19 @@ class WenxiangApi {
     return body['connected'] == true;
   }
 
-  Future<CheckoutSyncStatus> checkoutStatus(String owner, String repo) async {
+  Future<CheckoutSyncStatus> checkoutStatus(
+    String owner,
+    String repo, {
+    bool fetchRemote = true,
+  }) async {
     final res = await http
-        .get(_uri('/v1/repos/$owner/$repo/checkout-status'), headers: _headers)
+        .get(
+          _uri(
+            '/v1/repos/$owner/$repo/checkout-status',
+            fetchRemote ? null : const {'fetch': '0'},
+          ),
+          headers: _headers,
+        )
         .timeout(const Duration(seconds: 45));
     final body = await _json(res, fallback: '读取本机仓库状态失败');
     return CheckoutSyncStatus.fromJson(body);

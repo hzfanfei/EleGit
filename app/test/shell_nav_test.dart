@@ -91,7 +91,15 @@ void main() {
         },
       ),
     );
-    final api = FakeWenxiangApi();
+    final api = FakeWenxiangApi(
+      checkoutStatusResult: CheckoutSyncStatus(
+        present: true,
+        upToDate: false,
+        syncState: 'behind',
+        behind: 2,
+        path: '/home/fei/问象/octo/demo',
+      ),
+    );
 
     await tester.pumpWidget(
       MaterialApp(
@@ -105,9 +113,42 @@ void main() {
     await tester.tap(find.text('demo').first);
     await pumpChat(tester);
 
+    expect(api.checkoutStatusFetchRemote, isFalse);
     expect(api.checkoutCalls, 0);
     expect(find.textContaining('最近在修登录'), findsOneWidget);
     expect(find.text('你问'), findsOneWidget);
+  });
+
+  testWidgets('settings preference applies immediately when reopening a repo',
+      (tester) async {
+    final store = await memory();
+    await store.saveLastRepo(sampleRepo());
+    final api = FakeWenxiangApi();
+    await tester.pumpWidget(MaterialApp(
+      theme: _theme(),
+      home: ShellPage(api: api, memory: store),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('设置'));
+    await tester.pumpAndSettle();
+    final toggle = find.widgetWithText(SwitchListTile, '打开仓库时检查更新');
+    await tester.scrollUntilVisible(toggle, 180);
+    await tester.pumpAndSettle();
+    expect(tester.widget<SwitchListTile>(toggle).value, isFalse);
+
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    expect(tester.widget<SwitchListTile>(toggle).value, isTrue);
+    await store.prefs.reload();
+    expect(store.syncRepoOnOpen(), isTrue);
+
+    await tester.tap(find.byTooltip('返回'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('wx-home-last')));
+    await pumpChat(tester);
+    expect(api.checkoutStatusFetchRemote, isTrue);
+    expect(api.checkoutCalls, 0);
   });
 
   testWidgets('not logged in shows local repos on repo home', (tester) async {

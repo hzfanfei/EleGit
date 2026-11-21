@@ -5,7 +5,7 @@ import '../models.dart';
 import '../theme.dart';
 import 'wx_chrome.dart';
 
-enum WxCloneMode { open, clone, sync }
+enum WxCloneMode { open, checkRemote, clone, sync }
 
 class WxCloneScrim extends StatelessWidget {
   const WxCloneScrim({
@@ -32,6 +32,7 @@ class WxCloneScrim extends StatelessWidget {
     final problem = error;
     final (action, detail) = switch (mode) {
       WxCloneMode.open => ('打开', '正在检查 ${repo.fullName} 的本机目录。'),
+      WxCloneMode.checkRemote => ('打开', '正在检查 ${repo.fullName} 的远端更新。'),
       WxCloneMode.sync => ('更新', '正在同步 ${repo.fullName} 的远端变更。'),
       WxCloneMode.clone => ('克隆', '正在将 ${repo.fullName} 下载到本机。'),
     };

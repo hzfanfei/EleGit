@@ -32,6 +32,7 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   AppMemory? _memory;
+  bool _repoSyncSaving = false;
   late String _voiceId;
   VoiceServiceProfile _voiceProfile = const VoiceServiceProfile();
   bool _saving = false;
@@ -130,6 +131,23 @@ class _SettingsPageState extends State<SettingsPage> {
       });
       unawaited(_loadVoiceProfile());
     } catch (_) {}
+  }
+
+  Future<void> _setRepoSyncOnOpen(bool enabled) async {
+    final memory = _memory;
+    if (memory == null || _repoSyncSaving) return;
+    setState(() => _repoSyncSaving = true);
+    try {
+      await memory.saveSyncRepoOnOpen(enabled);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('仓库更新设置保存失败，请重试。')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _repoSyncSaving = false);
+    }
   }
 
   Future<void> _runProbe() async {
@@ -281,6 +299,25 @@ class _SettingsPageState extends State<SettingsPage> {
                 padding: const EdgeInsets.fromLTRB(Wx.inset, 18, Wx.inset, 32),
                 children: [
                   CodexScopeSettings(api: widget.api),
+                  const SizedBox(height: 28),
+                  Text('仓库', style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 12),
+                  Material(
+                    color: Wx.surface,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(Wx.radius),
+                      side: const BorderSide(color: Wx.hairline),
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: SwitchListTile(
+                      value: _memory?.syncRepoOnOpen() ?? false,
+                      onChanged: _memory == null || _repoSyncSaving
+                          ? null
+                          : _setRepoSyncOnOpen,
+                      title: const Text('打开仓库时检查更新'),
+                      subtitle: const Text('开启后，每次进入仓库前检查并同步 GitHub 更新。'),
+                    ),
+                  ),
                   const SizedBox(height: 28),
                   _SectionLabel(
                     title: '语音',

@@ -16,6 +16,7 @@ class AppMemory {
   final SharedPreferences prefs;
 
   static const lastRepoKey = 'wx.lastRepo';
+  static const syncRepoOnOpenKey = 'wx.syncRepoOnOpen';
   static const githubLoginKey = 'wx.githubLogin';
   static const recentReposKey = 'wx.recentRepos';
   static const voiceHoldTipDismissedKey = 'wx.voiceHoldTipDismissed';
@@ -29,6 +30,19 @@ class AppMemory {
   static String chatsKey(String fullName) => 'wx.chats.$fullName';
   static String bookChatsKey(String bookId) => 'wx.bookChats.$bookId';
   static String agentModeKey(String fullName) => 'wx.agentMode.$fullName';
+
+  bool syncRepoOnOpen() => prefs.getBool(syncRepoOnOpenKey) ?? false;
+
+  Future<void> saveSyncRepoOnOpen(bool enabled) async {
+    try {
+      if (!await prefs.setBool(syncRepoOnOpenKey, enabled)) {
+        throw StateError('无法保存仓库更新偏好');
+      }
+    } catch (_) {
+      await prefs.reload();
+      rethrow;
+    }
+  }
 
   bool agentModeFor(String fullName) => prefs.getBool(agentModeKey(fullName)) ?? false;
 

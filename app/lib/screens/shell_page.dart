@@ -370,6 +370,7 @@ class ShellPageState extends State<ShellPage> with WidgetsBindingObserver {
         child: _fit(ReposPage(
           key: _reposKey,
           api: _api,
+          memory: _memory,
           githubConnected: _githubConnected,
           githubLogin: _githubLogin,
           autoStartOAuth: _oauthAutoStart,
