@@ -20,9 +20,8 @@ String breakLongRuns(String text, {int every = 8}) {
   return buf.toString();
 }
 
-final _chatOrdered = RegExp(r'^\d+\.\s');
 final _chatRule = RegExp(r'^(?:\*{3,}|-{3,}|_{3,})[ \t]*$');
-final _chatParagraphBreak = RegExp(r'\n{2,}');
+final _chatParagraphBreak = RegExp(r'\n(?:[ \t]*\n)+(?![ \t\n])');
 
 /// Chat replies often break lines once where a new paragraph was meant.
 /// Markdown keeps those lines in one block, so the phone shows them stacked.
@@ -47,10 +46,7 @@ bool _chatStructuralLine(String line) {
   if (trimmed.startsWith('>')) return true;
   if (trimmed.startsWith('|')) return true;
   if (trimmed.startsWith('![')) return true;
-  if (trimmed.startsWith('- ') || trimmed.startsWith('* ') || trimmed.startsWith('+ ')) {
-    return true;
-  }
-  if (_chatOrdered.hasMatch(trimmed)) return true;
+  if (isMarkdownListItem(trimmed)) return true;
   if (_chatRule.hasMatch(trimmed)) return true;
   return false;
 }
@@ -73,11 +69,14 @@ String _separateChatBlock(String block) {
   final out = <String>[];
   final structural = <String>[];
   String? prose;
+  var inList = false;
+  var blank = false;
 
   void flushStructural() {
     if (structural.isEmpty) return;
     out.add(_joinChatStructural(structural));
     structural.clear();
+    inList = false;
   }
 
   void flushProse() {
@@ -93,13 +92,28 @@ String _separateChatBlock(String block) {
     }
   }
 
-  for (final line in content) {
+  for (final line in lines) {
+    if (line.trim().isEmpty) {
+      blank = true;
+      continue;
+    }
+    if (blank) {
+      // The Markdown renderer splits at empty lines. A single newline keeps
+      // an indented continuation inside its item and still gives it a new line.
+      if (!inList || !isMarkdownIndented(line)) {
+        flushProse();
+        flushStructural();
+      }
+      blank = false;
+    }
     if (_chatStructuralLine(line)) {
       flushProse();
       structural.add(line.trimRight());
+      inList = isMarkdownListItem(line) ||
+          (inList && isMarkdownIndented(line));
       continue;
     }
-    if (structural.isNotEmpty && (line.startsWith(' ') || line.startsWith('\t'))) {
+    if (structural.isNotEmpty && isMarkdownIndented(line)) {
       structural.add(line.trimRight());
       continue;
     }

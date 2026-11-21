@@ -53,7 +53,7 @@ class ChatMarkdownBlockParser {
           fromStart: _settledOffset == 0,
           preserveEnd: true,
         );
-        _parse(prefix.text);
+        _parse(prefix.text, finishList: true);
         if (pending.isEmpty && completed.length > _settledBlocks) {
           _settledOffset = boundary;
           _settledBlocks = completed.length;
@@ -124,11 +124,17 @@ class ChatMarkdownBlockParser {
       final end = newline == -1 ? source.length : newline;
       final line = source.substring(cursor, end);
       final trimmed = line.trim();
-      if (trimmed.isNotEmpty) boundary = blankEnd;
+      if (trimmed.isNotEmpty) {
+        if (isMarkdownIndented(line)) {
+          blankEnd = boundary;
+        } else {
+          boundary = blankEnd;
+        }
+      }
       if (!literals.consume(line)) {
         if (inDetails || _detailsOpen.hasMatch(trimmed)) {
           inDetails = !_endsDetails(trimmed);
-        } else if (newline != -1 && (line.isEmpty || line == '\r')) {
+        } else if (newline != -1 && trimmed.isEmpty) {
           blankEnd = newline + 1;
         }
       }
@@ -141,16 +147,19 @@ class ChatMarkdownBlockParser {
   static bool _endsDetails(String line) =>
       line.trimRight().toLowerCase().endsWith('</details>');
 
-  void _parse(String visible) {
+  void _parse(String visible, {bool finishList = false}) {
     final buf = StringBuffer();
     final literals = MarkdownLiteralScanner();
     var inDetails = false;
     var tableOnly = true;
+    var inList = false;
+    var blank = false;
 
     void completeBlock() {
       completed.add(buf.toString());
       buf.clear();
       tableOnly = true;
+      inList = false;
     }
 
     var cursor = 0;
@@ -161,6 +170,15 @@ class ChatMarkdownBlockParser {
       // Drop trailing \r so CRLF inputs still parse.
       if (line.endsWith('\r')) line = line.substring(0, line.length - 1);
 
+      final indented = isMarkdownIndented(line);
+      if (blank && line.trim().isNotEmpty) {
+        if (indented) {
+          buf.writeln();
+        } else {
+          completeBlock();
+        }
+        blank = false;
+      }
       final continuingLiteral = literals.isOpen;
       final literal = literals.consume(line);
       if (inDetails || (!literal && _detailsOpen.hasMatch(line.trimLeft()))) {
@@ -173,18 +191,24 @@ class ChatMarkdownBlockParser {
         buf.writeln(line);
         if (!literals.isOpen) completeBlock();
       } else if (line.trim().isEmpty) {
-        if (buf.isNotEmpty && !tableOnly) completeBlock();
+        if (inList) {
+          blank = true;
+        } else if (buf.isNotEmpty && !tableOnly) {
+          completeBlock();
+        }
       } else {
         final tableLine = isMarkdownTableLine(line);
         if (buf.isNotEmpty && tableOnly && !tableLine) completeBlock();
         buf.writeln(line);
         tableOnly = tableOnly && tableLine;
+        inList = isMarkdownListItem(line) || (inList && indented);
       }
 
       if (nl == -1) break;
       cursor = lineEnd + 1;
     }
 
+    if (blank && finishList) completeBlock();
     pending = buf.toString();
   }
 }

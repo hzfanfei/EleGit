@@ -1,6 +1,12 @@
 final _codeOpening = RegExp(r'^(`{3,}|~{3,})(.*)$');
 final _mathEnd = RegExp(r'(?<!\\)\\\]');
 final _dollarEnd = RegExp(r'(?<!\\)\$\$');
+final _listMarker = RegExp(r'^(?:[-*+]|\d+[.)])[ \t]+');
+
+bool isMarkdownListItem(String line) => _listMarker.hasMatch(line.trimLeft());
+
+bool isMarkdownIndented(String line) =>
+    line.startsWith(' ') || line.startsWith('\t');
 
 final markdownProtectedInline = RegExp(
   r'<img\b[^>]*>|!?\[[^\]\n]*\]\([^)\n]*\)'

@@ -121,7 +121,8 @@ class _ChatPageState extends State<ChatPage> {
   /// Hold inbox poll: yellow = last poll ok, red = last poll failed.
   final ValueNotifier<bool> _holdPollOk = ValueNotifier(true);
   Timer? _streamScrollTimer;
-  double _lastFollowExtent = -1;
+  bool _chatDragInProgress = false;
+  final _sessionSheetChanges = ValueNotifier(0);
   String? _sessionId;
   bool _live = false;
   bool _busy = false;
@@ -272,7 +273,8 @@ class _ChatPageState extends State<ChatPage> {
 
   void _onScrollPosition() {
     if (!_scroll.hasClients || !mounted || _autoFollowing || _restoringScroll) return;
-    if (_nearBottom && (_userScrolledAwayFromBottom || _pendingNewBelow)) {
+    if (_scroll.position.pixels <= 0.5 &&
+        (_userScrolledAwayFromBottom || _pendingNewBelow)) {
       setState(() {
         _userScrolledAwayFromBottom = false;
         _pendingNewBelow = false;
@@ -281,9 +283,21 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   bool _onChatScrollNotification(ScrollNotification notification) {
-    if (_autoFollowing || _restoringScroll) return false;
+    if (notification.depth != 0) return false;
+    if (notification is ScrollEndNotification) {
+      _chatDragInProgress = false;
+    } else if ((notification is ScrollStartNotification &&
+            notification.dragDetails != null) ||
+        (notification is ScrollUpdateNotification &&
+            notification.dragDetails != null)) {
+      _chatDragInProgress = true;
+      _cancelStreamScrollFollow();
+    }
+    if (_restoringScroll) return false;
     if (notification is ScrollUpdateNotification && notification.dragDetails != null) {
-      if (!_nearBottom && !_userScrolledAwayFromBottom) {
+      if ((notification.scrollDelta ?? 0) > 0 &&
+          notification.metrics.pixels > 0.5 &&
+          !_userScrolledAwayFromBottom) {
         setState(() => _userScrolledAwayFromBottom = true);
       }
     }
@@ -293,7 +307,6 @@ class _ChatPageState extends State<ChatPage> {
   void _cancelStreamScrollFollow() {
     _streamScrollTimer?.cancel();
     _streamScrollTimer = null;
-    _lastFollowExtent = -1;
   }
 
   /// While typewriter ticks, avoid stacked [animateTo] calls (they jitter short lists).
@@ -303,13 +316,15 @@ class _ChatPageState extends State<ChatPage> {
       if (!_pendingNewBelow) setState(() => _pendingNewBelow = true);
       return;
     }
-    _streamScrollTimer?.cancel();
-    _streamScrollTimer = Timer(const Duration(milliseconds: 48), () {
-      if (!mounted || !_scroll.hasClients || _restoringScroll) return;
+    if (_chatDragInProgress) return;
+    _streamScrollTimer ??= Timer(const Duration(milliseconds: 48), () {
+      _streamScrollTimer = null;
+      if (!mounted || !_scroll.hasClients || _restoringScroll ||
+          _chatDragInProgress || _userScrolledAwayFromBottom || !_nearBottom) {
+        return;
+      }
       final pos = _scroll.position;
       if (pos.pixels <= 0.5) return;
-      if (_lastFollowExtent == 0 && _nearBottom) return;
-      _lastFollowExtent = 0;
       _autoFollowing = true;
       pos.jumpTo(0);
       _autoFollowing = false;
@@ -331,6 +346,10 @@ class _ChatPageState extends State<ChatPage> {
     final epoch = _scrollEpoch;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!_scroll.hasClients || !mounted || epoch != _scrollEpoch) return;
+      if (!force &&
+          (_chatDragInProgress || _userScrolledAwayFromBottom || !_nearBottom)) {
+        return;
+      }
       final pos = _scroll.position;
       if (pos.pixels <= 1) return;
       _autoFollowing = true;
@@ -607,6 +626,7 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _persist() async {
+    _sessionSheetChanges.value++;
     _repoState.activeId = _sessionId;
     await _repoState.persist();
   }
@@ -699,7 +719,10 @@ class _ChatPageState extends State<ChatPage> {
         SnackBar(content: Text(humanizeError(err))),
       );
     } finally {
-      if (mounted) setState(() => _creatingSession = false);
+      if (mounted) {
+        setState(() => _creatingSession = false);
+        _sessionSheetChanges.value++;
+      }
     }
   }
 
@@ -751,6 +774,7 @@ class _ChatPageState extends State<ChatPage> {
     _appearingQuestion = null;
     _shownTurnId = null;
     _cancelStreamScrollFollow();
+    _chatDragInProgress = false;
     _autoFollowing = false;
     _pendingNewBelow = false;
     _userScrolledAwayFromBottom = false;
@@ -796,6 +820,7 @@ class _ChatPageState extends State<ChatPage> {
           active: id == _sessionId,
         ),
       );
+      _sessionSheetChanges.value++;
     }
   }
 
@@ -1189,6 +1214,9 @@ class _ChatPageState extends State<ChatPage> {
       _processingUserIndex = userIndex;
       _decision = decision;
     });
+    if (force || sessionChanged || busy != wasBusy) {
+      _sessionSheetChanges.value++;
+    }
     if (wasBusy && !_busy) {
       unawaited(_refreshCodexUsage());
       unawaited(_refreshCurrentSessionMeta());
@@ -1205,6 +1233,7 @@ class _ChatPageState extends State<ChatPage> {
 
   void _mergeBackfill() {
     _repoState.mergeSaved();
+    _sessionSheetChanges.value++;
     if (mounted) setState(() {});
   }
 
@@ -1246,83 +1275,86 @@ class _ChatPageState extends State<ChatPage> {
         return StatefulBuilder(
           builder: (sheetContext, setSheet) {
             return SafeArea(
-              child: ListView.builder(
-                shrinkWrap: true,
-                padding: const EdgeInsets.fromLTRB(Wx.inset, 8, Wx.inset, 20),
-                itemCount: 1 + _sessions.length,
-                itemBuilder: (context, index) {
-                  if (index > 0) {
-                    final session = _sessions[index - 1];
-                    return _SessionRow(
-                      session: session,
-                      selected: session.id == _sessionId,
-                      closing: closingId == session.id,
-                      onOpen: closingId != null
-                          ? null
-                          : () {
-                              Navigator.pop(context);
-                              _switchSession(session);
-                            },
-                      onClose: _busy || closingId != null
-                          ? null
-                          : () async {
-                              setSheet(() => closingId = session.id);
-                              await _closeSession(session);
-                              if (sheetContext.mounted) {
-                                setSheet(() => closingId = null);
-                              }
-                            },
-                    );
-                  }
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Center(
-                        child: Container(
-                          width: 36,
-                          height: 3,
-                          margin: const EdgeInsets.only(bottom: 16),
-                          decoration: BoxDecoration(
-                            color: Wx.hairline,
-                            borderRadius: BorderRadius.circular(2),
-                          ),
-                        ),
-                      ),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              '历史会话',
-                              key: const Key('wx-session-sheet'),
-                              style: Theme.of(context).textTheme.titleMedium,
+              child: ListenableBuilder(
+                listenable: _sessionSheetChanges,
+                builder: (context, _) => ListView.builder(
+                  shrinkWrap: true,
+                  padding: const EdgeInsets.fromLTRB(Wx.inset, 8, Wx.inset, 20),
+                  itemCount: 1 + _sessions.length,
+                  itemBuilder: (context, index) {
+                    if (index > 0) {
+                      final session = _sessions[index - 1];
+                      return _SessionRow(
+                        session: session,
+                        selected: session.id == _sessionId,
+                        closing: closingId == session.id,
+                        onOpen: closingId != null
+                            ? null
+                            : () {
+                                Navigator.pop(context);
+                                _switchSession(session);
+                              },
+                        onClose: _busy || closingId != null
+                            ? null
+                            : () async {
+                                setSheet(() => closingId = session.id);
+                                await _closeSession(session);
+                                if (sheetContext.mounted) {
+                                  setSheet(() => closingId = null);
+                                }
+                              },
+                      );
+                    }
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Center(
+                          child: Container(
+                            width: 36,
+                            height: 3,
+                            margin: const EdgeInsets.only(bottom: 16),
+                            decoration: BoxDecoration(
+                              color: Wx.hairline,
+                              borderRadius: BorderRadius.circular(2),
                             ),
                           ),
-                          TextButton.icon(
-                            onPressed: _sessionPending || closingId != null
-                                ? null
-                                : () async {
-                                    Navigator.pop(context);
-                                    await _newSession();
-                                  },
-                            icon: const Icon(Icons.add_comment_outlined,
-                                size: 18),
-                            label: const Text('新建'),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      const WxHairline(),
-                      const SizedBox(height: 8),
-                      if (_sessions.isEmpty)
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(0, 8, 0, 16),
-                          child: Text('还没有会话',
-                              style: Theme.of(context).textTheme.bodyMedium),
                         ),
-                    ],
-                  );
-                },
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                '历史会话',
+                                key: const Key('wx-session-sheet'),
+                                style: Theme.of(context).textTheme.titleMedium,
+                              ),
+                            ),
+                            TextButton.icon(
+                              onPressed: _sessionPending || closingId != null
+                                  ? null
+                                  : () async {
+                                      Navigator.pop(context);
+                                      await _newSession();
+                                    },
+                              icon: const Icon(Icons.add_comment_outlined,
+                                  size: 18),
+                              label: const Text('新建'),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        const WxHairline(),
+                        const SizedBox(height: 8),
+                        if (_sessions.isEmpty)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(0, 8, 0, 16),
+                            child: Text('还没有会话',
+                                style: Theme.of(context).textTheme.bodyMedium),
+                          ),
+                      ],
+                    );
+                  },
+                ),
               ),
             );
           },
@@ -1363,6 +1395,7 @@ class _ChatPageState extends State<ChatPage> {
     _micSub?.cancel();
     _media?.dispose();
     _input.dispose();
+    _sessionSheetChanges.dispose();
     _focus.dispose();
     _scroll.removeListener(_onScrollPosition);
     _scroll.dispose();

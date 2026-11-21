@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wenxiang/api/wenxiang_api.dart';
 import 'package:wenxiang/models.dart';
 import 'package:wenxiang/persist/app_memory.dart';
+import 'package:wenxiang/persist/chat_backfill.dart';
 import 'package:wenxiang/screens/chat_page.dart';
 import 'package:wenxiang/theme.dart';
 import 'package:wenxiang/utils/notification_center.dart';
@@ -215,6 +216,48 @@ void main() {
     expect(find.textContaining('```'), findsNothing);
   });
 
+  testWidgets('stream follow yields to a small drag into history', (tester) async {
+    final events = StreamController<ChatStreamEvent>();
+    final api = FakeWenxiangApi(streamOverride: events.stream);
+    await tester.pumpWidget(MaterialApp(
+      theme: wenxiangTheme(),
+      home: ChatPage(api: api, repo: sampleRepo(), onBack: () {}),
+    ));
+    await _pumpUntilChatReady(tester);
+    await tester.tap(find.text('这个仓库最近在做什么？'));
+    await tester.pump();
+    events.add(ChatStreamEvent(
+      type: 'delta',
+      text: List.generate(50, (i) => '回复第 $i 行。').join('\n'),
+    ));
+    for (var i = 0; i < 30; i++) {
+      await tester.pump(const Duration(milliseconds: 32));
+    }
+    final scrollable = _chatScrollState(tester);
+    final position = scrollable.position;
+    expect(position.maxScrollExtent, greaterThan(80));
+    position.jumpTo(10);
+    events.add(ChatStreamEvent(type: 'delta', text: '继续输出'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 16));
+
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byKey(const Key('wx-chat-list'))),
+    );
+    await gesture.moveBy(const Offset(0, 22));
+    await gesture.moveBy(const Offset(0, 14));
+    final readingOffset = position.pixels;
+    expect(readingOffset, greaterThan(10));
+    expect(readingOffset, lessThan(80));
+    await tester.pump(const Duration(milliseconds: 60));
+    expect(position.pixels, readingOffset);
+    await gesture.up();
+    events.add(ChatStreamEvent(type: 'done', engine: 'local-progress'));
+    await events.close();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(position.pixels, greaterThan(0));
+  });
+
   testWidgets('streaming reply appears without a block caret placeholder', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
@@ -277,6 +320,45 @@ void main() {
     await tester.tap(find.byTooltip('关闭会话').first);
     await tester.pump();
     expect(find.byKey(const Key('wx-session-sheet')), findsOneWidget);
+  });
+
+  testWidgets('open session sheet shows sessions added by backfill', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final memory = AppMemory(await SharedPreferences.getInstance());
+    final api = FakeWenxiangApi();
+    await tester.pumpWidget(MaterialApp(
+      theme: wenxiangTheme(),
+      home: ChatPage(api: api, repo: sampleRepo(), memory: memory, onBack: () {}),
+    ));
+    await _pumpUntilChatReady(tester);
+    await tester.tap(find.byTooltip('更多'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.byKey(const Key('wx-chat-history')).hitTestable());
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byKey(const Key('wx-session-sheet')), findsOneWidget);
+
+    await memory.saveChats(
+      sampleRepo().fullName,
+      RepoChatStore(
+        activeId: api.sessions.first.id,
+        sessions: [
+          ...api.sessions,
+          ChatSession(
+            id: 'backfilled',
+            title: '刚同步的会话',
+            createdAt: '',
+            updatedAt: '',
+            active: false,
+          ),
+        ],
+        transcripts: {},
+      ),
+    );
+    chatBackfillTick.value++;
+    await tester.pump();
+    expect(find.text('刚同步的会话'), findsOneWidget);
   });
 
   testWidgets('editing a sent user turn forks from there like AI chat', (tester) async {

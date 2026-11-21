@@ -121,7 +121,8 @@ class WxAnswerBlock extends StatelessWidget {
             .firstMatch(uri.path)
             ?.group(1)
             ?.toUpperCase();
-    if (link != null &&
+    if (!streaming &&
+        link != null &&
         uri != null &&
         uri.host.isNotEmpty &&
         extension != null) {

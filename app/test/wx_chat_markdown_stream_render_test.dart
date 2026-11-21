@@ -35,6 +35,47 @@ Future<void> _pumpWithSource(
 Finder _mdText(String pattern) => find.textContaining(pattern, findRichText: true);
 
 void main() {
+  testWidgets('download card waits until the line is settled', (tester) async {
+    const link = '[下载](https://example.com/file.pdf)';
+    final source = ValueNotifier(link);
+
+    Future<void> show({required bool streaming}) => tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: WxChatMarkdownStream(
+                source: source,
+                mdStyle: chatMarkdownStyle(wenxiangTheme()),
+                streaming: streaming,
+              ),
+            ),
+          ),
+        );
+
+    await show(streaming: true);
+    expect(find.byType(OutlinedButton), findsNothing);
+    source.value = '$link，打开后查看。';
+    await tester.pump();
+    expect(find.byType(OutlinedButton), findsNothing);
+    source.value = '$link\n\n另起一段。';
+    await tester.pump();
+    expect(find.byType(OutlinedButton), findsOneWidget);
+
+    source.value = link;
+    await tester.pump();
+    expect(find.byType(OutlinedButton), findsNothing);
+    await show(streaming: false);
+    expect(find.byType(OutlinedButton), findsOneWidget);
+  });
+
+  testWidgets('a second paragraph stays indented under its list item',
+      (tester) async {
+    await _pumpWithSource(tester,
+        '1. 准备工作\n\n   检查安装目录。\n\n2. 第二步\n\n正文');
+    final continuation = tester.getRect(_mdText('检查安装目录'));
+    final prose = tester.getRect(_mdText('正文'));
+    expect(continuation.left, greaterThan(prose.left));
+  });
+
   group('WxChatMarkdownStream — 之前聊天里常见的样例', () {
     testWidgets('单换行的正文拆成上下两段', (tester) async {
       await _pumpWithSource(tester, '第一句已经说完。\n第二句另外起一段。\n');

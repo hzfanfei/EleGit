@@ -89,6 +89,20 @@ void main() {
       expect(p.pending, '');
     });
 
+    test('does not settle a list while an indented paragraph can follow', () {
+      final parser = ChatMarkdownBlockParser();
+      const source = '1. 第一步\n\n   第一段。\n\n   第二段。\n\n正文';
+      for (var end = 1; end <= source.length; end++) {
+        final raw = source.substring(0, end);
+        final fresh = ChatMarkdownBlockParser()..updateSource(raw);
+        parser.updateSource(raw);
+        expect(parser.completed, fresh.completed, reason: 'offset $end');
+        expect(parser.pending, fresh.pending, reason: 'offset $end');
+      }
+      expect(parser.completed, ['1. 第一步\n   第一段。\n   第二段。\n']);
+      expect(parser.pending, '正文\n');
+    });
+
     test('keeps table rows together across blank lines from the model', () {
       final p = ChatMarkdownBlockParser();
       p.update('| a | b |\n\n| --- | --- |\n\n| c | d |\n\nafter');
