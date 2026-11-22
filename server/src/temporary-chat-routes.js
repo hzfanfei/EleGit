@@ -46,12 +46,40 @@ export function attachTemporaryRoutes(app, registry, { executable, defaultModel,
     res.json({ ok: true });
   });
   route("post", "/speed", async (req, res) => {
-    const chat = new TemporaryChat({ executable, model: req.body?.model || defaultModel });
-    const start = Date.now(); let first; let answer = "";
+    const { model, effort, fast } = req.body || {};
+    const chat = new TemporaryChat({ executable, model: model || defaultModel });
+    const start = performance.now();
+    let first;
+    let last;
+    let answer = "";
+    let outputTokens = null;
     const timeout = setTimeout(() => { void chat.close(); }, 45_000);
     try {
-      await chat.prompt("请从一数到二十，用空格分隔，不要其他文字。", (delta) => { first ??= Date.now(); answer += delta; }, req.body?.model, [], undefined, { effort: req.body?.effort, fast: req.body?.fast });
-      res.json({ firstTokenMs: (first || Date.now()) - start, totalMs: Date.now() - start, characters: answer.length });
+      const prompt = "不要使用工具。请写 20 句描述日常物品的简短句子，每句一行。不要加开头或结尾。";
+      await chat.prompt(prompt, (delta) => {
+        if (!delta) return;
+        last = performance.now();
+        first ??= last;
+        answer += delta;
+      }, model, [], undefined, {
+        effort,
+        fast,
+        onEvent(method, params) {
+          if (method !== "thread/tokenUsage/updated") return;
+          // This isolated thread has one turn, so its total covers the whole benchmark.
+          const tokens = params.tokenUsage?.total?.outputTokens;
+          if (Number.isSafeInteger(tokens) && tokens > 0) outputTokens = tokens;
+        },
+      });
+      if (!answer.trim()) throw new Error("模型未返回测速文字");
+      const generationMs = last - first;
+      res.json({
+        firstTokenMs: first - start,
+        totalMs: performance.now() - start,
+        characters: answer.length,
+        outputTokens,
+        tokensPerSecond: outputTokens != null && generationMs > 0 ? outputTokens / (generationMs / 1000) : null,
+      });
     } finally { clearTimeout(timeout); await chat.close(); }
   });
   route("post", "/voice-turn", async (req, res, conversation) => {
