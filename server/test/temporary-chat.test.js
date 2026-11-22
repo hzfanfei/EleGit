@@ -66,6 +66,7 @@ test("临时图片与进度只传给当前线程", async () => {
     await chat.prompt("看图", () => {}, undefined, [image], (status) => statuses.push(status));
     const turn = fake.requests.find((r) => r.method === "turn/start");
     assert.deepEqual(turn.params.input, [{ type: "text", text: "看图", text_elements: [] }, { type: "image", url: image }]);
+    assert.equal(turn.params.summary, "concise");
     assert.deepEqual(statuses, ["正在思考"]);
   } finally { await chat.close(); }
 });

@@ -156,6 +156,7 @@ export class TemporaryChat {
         threadId: this.threadId, input,
         ...(model ? { model } : this.model ? { model: this.model } : {}),
         ...(options.effort ? { effort: options.effort } : {}),
+        summary: "concise",
         serviceTier: options.fast === true ? "fast" : "default",
         sandboxPolicy: options.agentMode === true
           ? { type: "workspaceWrite", writableRoots: [this.cwd], networkAccess: true, excludeTmpdirEnvVar: true, excludeSlashTmp: true }
