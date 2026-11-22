@@ -1,11 +1,34 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { lstat, mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
+import { CHAT_IMAGE_MIMES } from "./chat-images.js";
 
 const temporaryPrefix = "wenxiang-temporary-project-v1-";
+
+async function questionWithImageFiles(text, images, cwd) {
+  if (!images.length) return text;
+  // Hidden directories are skipped by the automatic artifact publisher.
+  const directory = await mkdtemp(path.join(cwd, ".images-"));
+  const files = [];
+  try {
+    for (const [index, url] of images.entries()) {
+      const comma = url.indexOf(",");
+      const mime = url.slice("data:".length, url.indexOf(";"));
+      const ext = CHAT_IMAGE_MIMES.get(mime);
+      if (!ext) throw new Error("图片格式不正确");
+      const name = `image-${index + 1}.${ext}`;
+      await writeFile(path.join(directory, name), Buffer.from(url.slice(comma + 1), "base64"), { flag: "wx" });
+      files.push(`- \`${path.basename(directory)}/${name}\``);
+    }
+  } catch (err) {
+    await rm(directory, { recursive: true, force: true }).catch(() => {});
+    throw new Error("无法将附图保存到临时工作区，请重试", { cause: err });
+  }
+  return [text, "本轮附图文件（按发送顺序，相对当前工作区）：\n" + files.join("\n")].filter(Boolean).join("\n\n");
+}
 
 // Only remove directories created by an exited companion, never an active
 // process's directory. A grace period avoids PID/startup races after a crash.
@@ -107,7 +130,7 @@ export class TemporaryChat {
         "features.multi_agent_v2": false,
         "features.request_user_input": true,
       },
-      developerInstructions: "You are 问象 in a temporary conversation. Use only this conversation and its dedicated workspace. Never access other repositories, previous conversations, or personal files. Answer in Simplified Chinese unless the user uses another language. Use concise paragraphs for mobile reading. You may create files and run tools inside this workspace when Agent mode is enabled. Put deliverables in outputs and scratch files in .tmp. Wenxiang automatically copies visible files to its static library and appends online links to the reply. Never include credentials or private inputs in deliverable files. Do not write to global static directories. No repository rules, commits or project association apply here." + (history.length ? `\nEarlier turns from THIS temporary conversation only:\n${JSON.stringify(history)}` : ""),
+      developerInstructions: "You are 问象 in a temporary conversation. Use only this conversation and its dedicated workspace. Never access other repositories, previous conversations, or personal files. Answer in Simplified Chinese unless the user uses another language. Use concise paragraphs for mobile reading. You may create files and run tools inside this workspace when Agent mode is enabled. Put deliverables in outputs and scratch files in .tmp. Wenxiang automatically copies visible files to its static library and appends online links to the reply. Use the supplied attachment paths as source files for image edits. Save the edited version in outputs, or copy the uploaded version there if the user asks to save it. Keep credentials and unrelated private inputs out of deliverables. Do not write to global static directories. No repository rules, commits or project association apply here." + (history.length ? `\nEarlier turns from THIS temporary conversation only:\n${JSON.stringify(history)}` : ""),
       ...(this.model ? { model: this.model } : {}),
     });
     if (!result?.thread?.id || result.thread.ephemeral !== true) throw new Error("Codex 未确认临时线程，无法安全启动");
@@ -135,6 +158,9 @@ export class TemporaryChat {
     try {
       this.startPromise ??= this.start();
       await this.startPromise;
+      if (this.closed) throw new Error("临时会话已关闭");
+      if (this.cancelBeforeTurn) throw new Error("已停止");
+      text = await questionWithImageFiles(text, images, this.cwd);
       if (this.closed) throw new Error("临时会话已关闭");
       if (this.cancelBeforeTurn) throw new Error("已停止");
       await this.runTurn(text, onDelta, model, images, onStatus, options);

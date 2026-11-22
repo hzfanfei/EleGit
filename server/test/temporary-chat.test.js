@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
-import { mkdtemp, mkdir, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { cleanupAbandonedTemporaryChats, createTemporaryChats, TemporaryChat } from "../src/temporary-chat.js";
@@ -57,18 +57,30 @@ test("临时线程复用本次上下文且不传其他会话", async () => {
   } finally { await chat.close(); }
 });
 
-test("临时图片与进度只传给当前线程", async () => {
+test("临时图片按发送顺序交付为视觉输入和工作区文件，关闭会话时清理", async () => {
   const fake = fakeCodex();
   const chat = new TemporaryChat({ executable: "fake", spawnImpl: () => fake.child });
+  let files;
   try {
     const statuses = [];
-    const image = "data:image/png;base64,aGVsbG8=";
-    await chat.prompt("看图", () => {}, undefined, [image], (status) => statuses.push(status));
+    const images = ["data:image/png;base64,aGVsbG8=", "data:image/jpeg;base64,d29ybGQ="];
+    await chat.prompt("看图", () => {}, undefined, images, (status) => statuses.push(status));
     const turn = fake.requests.find((r) => r.method === "turn/start");
-    assert.deepEqual(turn.params.input, [{ type: "text", text: "看图", text_elements: [] }, { type: "image", url: image }]);
+    const [prompt, ...visualInputs] = turn.params.input;
+    assert.match(prompt.text, /^看图\n\n本轮附图文件/);
+    const paths = [...prompt.text.matchAll(/^- `(.+)`$/gm)].map((match) => match[1]);
+    assert.equal(paths.length, 2);
+    assert.match(paths[0], /^\.images-\w+\/image-1\.png$/);
+    assert.match(paths[1], /^\.images-\w+\/image-2\.jpg$/);
+    assert.deepEqual(visualInputs, images.map((url) => ({ type: "image", url })));
     assert.equal(turn.params.summary, "concise");
     assert.deepEqual(statuses, ["正在思考"]);
+
+    await chat.prompt("修之前的图", () => {}, undefined, [], undefined, { agentMode: true });
+    files = paths.map((relative) => path.join(chat.cwd, relative));
+    assert.deepEqual(await Promise.all(files.map((file) => readFile(file, "utf8"))), ["hello", "world"]);
   } finally { await chat.close(); }
+  await assert.rejects(stat(files[0]), { code: "ENOENT" });
 });
 
 test("停止回答会中断当前线程", async () => {

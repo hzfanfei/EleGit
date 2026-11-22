@@ -136,7 +136,7 @@ test('plans require confirmation, input choices return actual wire result', asyn
   } finally { await c.close(); }
 });
 
-test('images remain in memory and are excluded from polling snapshots', async () => {
+test('image bytes are excluded from polling snapshots', async () => {
   const c = new TemporaryConversation(fakeChat());
   try {
     c.submit({ message: '看图', images: ['data:image/png;base64,YQ=='] });
@@ -177,6 +177,8 @@ test('generated files get stable online links and stay in the static library aft
     await writeFile(path.join(chat.cwd, relative), 'first');
     await writeFile(path.join(chat.cwd, '说明.txt'), 'notes');
     await writeFile(path.join(chat.cwd, '.env'), 'private');
+    await mkdir(path.join(chat.cwd, '.images-test'));
+    await writeFile(path.join(chat.cwd, '.images-test', 'image-1.jpg'), 'uploaded photo');
     const answer = await conversation.fileLinksReply();
     const svg = conversation.files.find(file => file.path === relative);
     assert.match(svg.downloadUrl, /%28.*%25%29\.svg\?token=static-token$/);
