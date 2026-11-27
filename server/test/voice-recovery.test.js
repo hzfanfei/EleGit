@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { it } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
+import { configureServerLogs, listErrorLogs } from "../src/server-logs.js";
 import { createVoiceSession } from "../src/voice-session.js";
 import { EventEmitter } from "node:events";
 import { createOpenAiAsr } from "../src/voice-openai.js";
@@ -73,6 +78,50 @@ it("quiet speech with a 40ms echo-canceller hole still interrupts, isolated taps
   await tick();
   assert.deepEqual(asked, ["请介绍一下", "等等"]);
   session.hangup();
+});
+
+it("logs a book reply stopped by microphone level before a transcript arrives", { timeout: 3000 }, async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "wx-voice-interrupt-"));
+  configureServerLogs(root);
+  const states = [];
+  const session = createVoiceSession({
+    config: { ready: true },
+    send: (event) => { if (event.type === "state") states.push(event); },
+    sendAudio() {},
+    asr: { async start() {}, push() {} },
+    prepareContext: async () => ({ book: {}, materialized: {} }),
+    ask: async function* () { yield { type: "done", answer: "这一章介绍勇气的含义。" }; },
+    tts: async () => Buffer.alloc(48000),
+  });
+  t.after(async () => {
+    session.hangup();
+    configureServerLogs("");
+    await rm(root, { recursive: true, force: true });
+  });
+  await session.start({ bookId: "book" });
+  session.onTranscript("请介绍一下", { final: true });
+  await tick();
+  const quiet = Buffer.alloc(640);
+  for (let i = 0; i < 50; i++) session.onPcm(quiet);
+  assert.equal(session.state, "speaking");
+  assert.deepEqual(await listErrorLogs(root), []);
+
+  const echo = Buffer.alloc(640);
+  for (let i = 0; i < echo.length; i += 2) echo.writeInt16LE(250, i);
+  for (let i = 0; i < 13; i++) session.onPcm(echo);
+  assert.deepEqual(states.slice(-2), [
+    { type: "state", state: "barge", reason: "speech" },
+    { type: "state", state: "listening" },
+  ]);
+  let rows = await listErrorLogs(root);
+  while (!rows.length) {
+    await delay(10, undefined, { signal: t.signal });
+    rows = await listErrorLogs(root);
+  }
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].kind, "voice-turn");
+  assert.equal(rows[0].summary, "问书电话提前停播 · 麦克风音量触发");
+  assert.match(rows[0].message, /触发时尚未确认有人说话.*RMS 250，门槛 100，超阈值音频约 260 毫秒/);
 });
 
 it("reports OpenAI recognition disconnects without treating intentional stop as failure", async () => {

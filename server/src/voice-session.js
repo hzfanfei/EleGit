@@ -314,19 +314,25 @@ export function createVoiceSession({
     asr?.push?.(buffered);
   }
 
-  function flushPlaybackSpeechToAsr() {
+  function flushPlaybackSpeechToAsr(rms, threshold) {
     if (!bargeChunks.length) return;
     const chunks = bargeChunks;
+    const aboveThresholdMs = Math.round((bargeHardStreakBytes / (16000 * 2)) * 1000);
     bargeChunks = [];
     bargeSpeechBytes = 0;
     bargeHardBytes = 0;
     bargeHardStreakBytes = 0;
     playbackUserSpeech = true;
     pushPlaybackSpeech(chunks);
-    // Endpoint ASR waits for silence before a final; stop playback as
-    // soon as the mic proves real speech over the speaker, then answer on the final.
-    const busy = machine.state === "speaking" || machine.state === "thinking";
-    if (playbackOpen && busy) bargeIn("speech");
+    // The playback gate can interrupt before ASR has a final transcript.
+    if (!playbackOpen || !bargeIn("speech")) return;
+    if (bookMode) {
+      noteServerLog({
+        kind: "voice-turn",
+        summary: "问书电话提前停播 · 麦克风音量触发",
+        message: `触发时尚未确认有人说话。若当时没有说话，可能是扬声器回声。触发帧 RMS ${Math.round(rms)}，门槛 ${Math.round(threshold)}，超阈值音频约 ${aboveThresholdMs} 毫秒。`,
+      });
+    }
   }
 
   function playbackBargeRms() {
@@ -366,7 +372,7 @@ export function createVoiceSession({
       bargeHardStreakBytes += bytes.length;
       bargeChunks.push(bytes);
       if (bargeHardStreakBytes < playbackBargeMinBytes()) return;
-      flushPlaybackSpeechToAsr();
+      flushPlaybackSpeechToAsr(rms, bar);
       return;
     }
     // Preserve a voiced run across a brief AEC hole, but not isolated keyboard taps.
@@ -676,7 +682,7 @@ export function createVoiceSession({
         // answer on that repeat makes the call stutter a few seconds in.
         if (interrupting || now - lastFinalAt < 1200) return;
       }
-      // Only a final transcript stops the answer; VAD or loud PCM alone does not.
+      // Partial transcripts never interrupt the answer.
       if (interrupting && !final) return;
       if (interrupting && playbackOpen && !playbackUserSpeech) return;
       if (interrupting && !playbackUserSpeech && !interruptHasSpeech()) return;
