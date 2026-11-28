@@ -4,6 +4,64 @@ import 'package:wenxiang/persist/app_memory.dart';
 import 'package:wenxiang/persist/chat_backfill.dart';
 
 void main() {
+  test('stream and inbox paragraph variants share one reply, including on restore', () {
+    const link = '[手机查看九宫格](https://example.com/icons)';
+    const formatted = '我会画九款图标。\n\n等你选定后再替换。\n\n$link\n\n'
+        '每款都有编号。选好后回复 **01–09**。';
+    const compact = '我会画九款图标。等你选定后再替换。 $link'
+        '每款都有编号。选好后回复 **01–09**。';
+    for (final pair in [
+      [compact, formatted],
+      [formatted, compact],
+    ]) {
+      final messages = [
+        ChatMessage(role: 'user', content: '设计九款图标', turnId: 't1'),
+        ChatMessage(role: 'assistant', content: pair.first),
+      ];
+      final store = RepoChatStore(
+        sessions: const [],
+        activeId: 's',
+        transcripts: {'s': messages},
+      );
+      final next = appendRepoTranscript(store, sessionId: 's', turnId: 't1',
+          answer: pair.last);
+      final merged = (next ?? store).transcripts['s']!;
+      expect(merged.map((m) => m.content), ['设计九款图标', formatted]);
+      expect(appendRepoTranscript(next ?? store, sessionId: 's', turnId: 't1',
+          answer: compact), isNull);
+
+      final legacy = RepoChatStore(sessions: const [], activeId: 's', transcripts: {
+        's': [
+          messages.first,
+          ChatMessage(role: 'assistant', content: pair.first),
+          ChatMessage(role: 'assistant', content: pair.last, taskCompleted: true),
+          ChatMessage(role: 'user', content: '再看一次', turnId: 't2'),
+          ChatMessage(role: 'assistant', content: compact),
+        ],
+      });
+      final restored = RepoChatStore.fromJson(legacy.toJson()).transcripts['s']!;
+      expect(restored.map((m) => m.content),
+          ['设计九款图标', formatted, '再看一次', compact]);
+      expect(restored[1].taskCompleted, isTrue);
+    }
+  });
+
+  test('paragraph matching preserves distinct links, words and code lines', () {
+    for (final pair in [
+      ['查看。\n\n[九宫格](https://example.com/a)', '查看。[九宫格](https://example.com/b)'],
+      ['已检查。\n\nNew York', '已检查。NewYork'],
+      ['已检查。New\nYork', '已检查。NewYork'],
+      ['示例\n```text\na\nb\n```', '示例\n```text\nab\n```'],
+    ]) {
+      final messages = [
+        ChatMessage(role: 'user', content: '查看'),
+        ChatMessage(role: 'assistant', content: pair.first),
+      ];
+      insertTurnAnswer(messages, 0, pair.last);
+      expect(messages.skip(1).map((m) => m.content), pair);
+    }
+  });
+
   test('completion from a notice survives merging, copying and restoring history', () {
     final first = RepoChatStore(
       sessions: const [],

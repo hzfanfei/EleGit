@@ -30,6 +30,46 @@ bool _isReplyFragment(String fragment, String full) {
       full.split('\n').any((line) => line.trimLeft().startsWith(fragment));
 }
 
+final _paragraphGap = RegExp(r'[ \r\n]+');
+final _wordCharacter = RegExp(r'\w');
+// Line breaks in code, lists, tables and other Markdown blocks carry meaning.
+final _structuredText = RegExp(
+  r'`|^([ \t]|#{1,6} |>|\||~~~|[-+*] |\d+[.)] |\$\$|\\\[)',
+  multiLine: true,
+);
+
+bool _sameProseWithDifferentBreaks(String a, String b) {
+  if (!a.contains('\n') && !b.contains('\n')) return false;
+  if (_structuredText.hasMatch(a) || _structuredText.hasMatch(b)) return false;
+  var i = 0;
+  var j = 0;
+  while (i < a.length && j < b.length) {
+    if (a.codeUnitAt(i) == b.codeUnitAt(j)) {
+      i++;
+      j++;
+      continue;
+    }
+    final left = _paragraphGap.matchAsPrefix(a, i);
+    final right = _paragraphGap.matchAsPrefix(b, j);
+    if (!(left?[0]?.contains('\n') ?? false) &&
+        !(right?[0]?.contains('\n') ?? false)) {
+      return false;
+    }
+    // Removing a break between Latin words could turn "New York" into "NewYork".
+    if (left == null || right == null) {
+      final joined = left == null ? a : b;
+      final at = left == null ? i : j;
+      if (at > 0 && _wordCharacter.hasMatch(joined[at - 1]) &&
+          _wordCharacter.hasMatch(joined[at])) {
+        return false;
+      }
+    }
+    i = left?.end ?? i;
+    j = right?.end ?? j;
+  }
+  return i == a.length && j == b.length;
+}
+
 /// Merge snapshots of one answer without crossing the next user message.
 /// Keep distinct assistant messages and the longest version of each snapshot.
 bool insertTurnAnswer(
@@ -51,7 +91,9 @@ bool insertTurnAnswer(
     final saved = parsed.text;
     final full = reply == null ? clean : stripTaskMarker(reply.content);
     if (message.role == 'assistant' &&
-        (_isReplyFragment(saved, full) || _isReplyFragment(full, saved))) {
+        (_isReplyFragment(saved, full) ||
+            _isReplyFragment(full, saved) ||
+            _sameProseWithDifferentBreaks(saved, full))) {
       if (reply == null) {
         reply = message;
         final longest = clean.length > saved.length ? clean : saved;
